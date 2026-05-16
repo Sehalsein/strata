@@ -1,0 +1,451 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,200..900,0..100,0..1&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+ * Cinemathèque — editorial archival cinema theme
+ * Warm ink black, parchment cream, cinema red.
+ * Display: Fraunces (variable). Body: IBM Plex Sans. Mono: JetBrains Mono.
+ * -------------------------------------------------------------------------*/
+
+@property --strata-c1 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #2a1a10;
+}
+@property --strata-c2 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #0c0a08;
+}
+@property --strata-c3 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e8b341;
+}
+@property --strata-c1-soft {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: rgba(232, 179, 65, 0.14);
+}
+@property --strata-c2-soft {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: rgba(232, 51, 31, 0.08);
+}
+
+:root {
+  transition:
+    --strata-c1 1100ms cubic-bezier(0.4, 0, 0.2, 1),
+    --strata-c2 1100ms cubic-bezier(0.4, 0, 0.2, 1),
+    --strata-c3 1100ms cubic-bezier(0.4, 0, 0.2, 1),
+    --strata-c1-soft 1100ms cubic-bezier(0.4, 0, 0.2, 1),
+    --strata-c2-soft 1100ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    transition: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@theme {
+  /* Cinemathèque palette */
+  --color-strata-bg: #0c0a08;
+  --color-strata-bg-2: #1a1611;
+  --color-strata-paper: #f3e9d3;
+  --color-strata-text: #f3e9d3;
+  --color-strata-accent: #e8331f;
+  --color-strata-accent-2: #e8b341;
+  --color-strata-success: #6aa37a;
+  --color-strata-danger: #e8331f;
+  --color-strata-warn: #e8b341;
+
+  /* Type system */
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-display: "Fraunces", "Times New Roman", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Tailwind compat */
+  --color-background: var(--color-strata-bg);
+  --color-foreground: var(--color-strata-text);
+  --color-card: #15110c;
+  --color-card-foreground: var(--color-strata-text);
+  --color-muted: #1a1611;
+  --color-muted-foreground: rgb(243 233 211 / 0.55);
+  --color-border: rgb(243 233 211 / 0.12);
+  --color-input: rgb(243 233 211 / 0.12);
+  --color-ring: var(--color-strata-accent);
+  --color-primary: var(--color-strata-paper);
+  --color-primary-foreground: var(--color-strata-bg);
+  --color-secondary: rgb(243 233 211 / 0.08);
+  --color-secondary-foreground: var(--color-strata-text);
+  --color-accent: var(--color-strata-accent);
+  --color-accent-foreground: var(--color-strata-paper);
+  --color-destructive: var(--color-strata-danger);
+  --color-destructive-foreground: var(--color-strata-paper);
+
+  --radius: 0.25rem;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-strata-bg);
+  color: var(--color-strata-text);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "ss02", "cv01";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  letter-spacing: -0.005em;
+}
+
+.strata,
+.strata * {
+  box-sizing: border-box;
+}
+
+/* Display utility — Fraunces with strong opsz at large sizes */
+.font-display {
+  font-family: var(--font-display);
+  font-variation-settings:
+    "opsz" 144,
+    "SOFT" 50,
+    "WONK" 1;
+  letter-spacing: -0.025em;
+  font-feature-settings: "ss01", "ss02", "ss03";
+}
+
+.font-display-tight {
+  font-family: var(--font-display);
+  font-variation-settings:
+    "opsz" 144,
+    "SOFT" 30,
+    "WONK" 0;
+  letter-spacing: -0.04em;
+}
+
+.font-editorial {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 14, "SOFT" 100;
+  font-style: italic;
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Keyboard focus ring */
+:where(a, button, [role="link"], [tabindex]):focus-visible {
+  outline: 2px solid var(--color-strata-accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* ----------------------------- animations ----------------------------- */
+@keyframes strata-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes strata-pulse-dot {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+}
+@keyframes strata-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@keyframes strata-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@keyframes strata-blink {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  61%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.anim-fade-in {
+  animation: strata-fade-in 0.5s cubic-bezier(0.2, 0.6, 0.2, 1) both;
+}
+.anim-pulse-dot {
+  animation: strata-pulse-dot 1.6s ease-in-out infinite;
+}
+.anim-marquee {
+  animation: strata-marquee 60s linear infinite;
+}
+.anim-blink {
+  animation: strata-blink 1.4s steps(2, end) infinite;
+}
+
+/* ----------------------------- scrollbars ----------------------------- */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.strata-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.strata-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.strata-scrollbar::-webkit-scrollbar-thumb {
+  background: rgb(243 233 211 / 0.1);
+  border-radius: 0;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.strata-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgb(243 233 211 / 0.2);
+  background-clip: padding-box;
+}
+
+::selection {
+  background: var(--color-strata-accent);
+  color: var(--color-strata-paper);
+}
+
+/* ----------------------------- noise / grain ----------------------------- */
+.noise-overlay {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence baseFrequency='0.9' numOctaves='2'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 0.92  0 0 0 0 0.83  0 0 0 0.09 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+.noise-overlay-soft {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'><filter id='n'><feTurbulence baseFrequency='1.1' numOctaves='1' type='fractalNoise'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 0.92  0 0 0 0 0.83  0 0 0 0.07 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+.grain-paper {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence baseFrequency='0.65' numOctaves='3' type='fractalNoise' seed='3'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 0.92  0 0 0 0 0.83  0 0 0 0.15 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  pointer-events: none;
+}
+
+/* ----------------------------- skeleton ----------------------------- */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgb(243 233 211 / 0.04) 0%,
+    rgb(243 233 211 / 0.08) 50%,
+    rgb(243 233 211 / 0.04) 100%
+  );
+  background-size: 200% 100%;
+  animation: strata-shimmer 1.6s linear infinite;
+}
+
+/* ----------------------------- row mask ----------------------------- */
+.row-mask {
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 32px,
+    #000 calc(100% - 64px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 32px,
+    #000 calc(100% - 64px),
+    transparent 100%
+  );
+}
+
+/* ----------------------------- editorial rules ----------------------------- */
+.rule-thin {
+  border-color: rgb(243 233 211 / 0.12);
+}
+.rule-heavy {
+  border-color: rgb(243 233 211 / 0.3);
+}
+
+/* ----------------------------- components ----------------------------- */
+@layer components {
+  /* Primary CTA — paper on ink, sharp corners, all caps, mono */
+  .btn-play {
+    @apply inline-flex items-center gap-2.5 px-6 py-3 text-[11px] font-semibold uppercase no-underline cursor-pointer border-none;
+    background-color: var(--color-strata-paper);
+    color: var(--color-strata-bg);
+    border-radius: 2px;
+    letter-spacing: 0.18em;
+    font-family: var(--font-mono);
+    transition:
+      transform 0.18s ease,
+      background-color 0.18s ease,
+      box-shadow 0.18s ease;
+    box-shadow: 0 0 0 0 var(--color-strata-accent);
+  }
+  .btn-play:hover {
+    background-color: var(--color-strata-accent);
+    color: var(--color-strata-paper);
+    box-shadow: 0 0 0 1px var(--color-strata-accent);
+  }
+  .btn-play:active {
+    transform: scale(0.97);
+  }
+
+  /* Secondary — outlined cream */
+  .btn-glass {
+    @apply inline-flex items-center gap-2 px-6 py-3 text-[11px] font-semibold uppercase no-underline cursor-pointer;
+    background: transparent;
+    color: var(--color-strata-paper);
+    border: 1px solid rgb(243 233 211 / 0.35);
+    border-radius: 2px;
+    letter-spacing: 0.18em;
+    font-family: var(--font-mono);
+    transition:
+      transform 0.18s ease,
+      background-color 0.18s ease,
+      border-color 0.18s ease;
+  }
+  .btn-glass:hover {
+    background: rgb(243 233 211 / 0.06);
+    border-color: rgb(243 233 211 / 0.7);
+  }
+  .btn-glass:active {
+    transform: scale(0.97);
+  }
+
+  /* Used in PrimaryBtn primitive */
+  .strata-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 text-[11px] font-semibold uppercase no-underline cursor-pointer border-none;
+    background-color: var(--color-strata-paper);
+    color: var(--color-strata-bg);
+    border-radius: 2px;
+    letter-spacing: 0.18em;
+    font-family: var(--font-mono);
+    transition:
+      transform 0.18s ease,
+      background-color 0.18s ease;
+  }
+  .strata-btn-primary:hover {
+    background-color: var(--color-strata-accent);
+    color: var(--color-strata-paper);
+  }
+  .strata-btn-primary:active {
+    transform: scale(0.97);
+  }
+  .strata-btn-primary:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .strata-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 text-[11px] font-semibold uppercase no-underline cursor-pointer;
+    background: transparent;
+    color: var(--color-strata-paper);
+    border: 1px solid rgb(243 233 211 / 0.3);
+    border-radius: 2px;
+    letter-spacing: 0.18em;
+    font-family: var(--font-mono);
+    transition:
+      background-color 0.18s ease,
+      border-color 0.18s ease;
+  }
+  .strata-btn-secondary:hover {
+    background: rgb(243 233 211 / 0.06);
+    border-color: rgb(243 233 211 / 0.65);
+  }
+
+  /* Editorial spec line — used everywhere for mono metadata */
+  .spec {
+    @apply inline-flex items-center gap-1 font-mono text-[10px] uppercase;
+    letter-spacing: 0.18em;
+    color: rgb(243 233 211 / 0.62);
+  }
+
+  /* Glass panel — repurposed as paper card */
+  .glass {
+    background: rgb(243 233 211 / 0.03);
+    border: 1px solid rgb(243 233 211 / 0.1);
+  }
+  .glass-strong {
+    background: rgb(243 233 211 / 0.045);
+    border: 1px solid rgb(243 233 211 / 0.14);
+  }
+
+  /* Chip — bracketed editorial label */
+  .chip {
+    @apply inline-flex items-center gap-1 px-2.5 py-1 text-[10px] uppercase font-medium;
+    font-family: var(--font-mono);
+    letter-spacing: 0.16em;
+    border-radius: 2px;
+    border: 1px solid rgb(243 233 211 / 0.18);
+    background: transparent;
+    color: rgb(243 233 211 / 0.7);
+  }
+  .chip-default {
+    background: rgb(243 233 211 / 0.05);
+    color: var(--color-strata-paper);
+  }
+  .chip-outline {
+    background: transparent;
+  }
+  .chip-solid {
+    background: var(--color-strata-accent);
+    color: var(--color-strata-paper);
+    border-color: var(--color-strata-accent);
+  }
+  .chip-ghost {
+    border-color: transparent;
+    color: rgb(243 233 211 / 0.5);
+  }
+  .chip-success {
+    border-color: rgb(106 163 122 / 0.4);
+    background: rgb(106 163 122 / 0.1);
+    color: #b3d4bd;
+  }
+  .chip-danger {
+    border-color: rgb(232 51 31 / 0.5);
+    background: rgb(232 51 31 / 0.12);
+    color: #f7a99c;
+  }
+}
+
+/* Editorial helper — title fraction "№ XX" */
+.no-mark::before {
+  content: "№";
+  font-family: var(--font-display);
+  font-style: italic;
+  font-variation-settings: "opsz" 14, "SOFT" 100;
+  margin-right: 0.18em;
+}

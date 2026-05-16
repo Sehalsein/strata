@@ -1,0 +1,25 @@
+node_modules
+.cache
+dist
+.vite
+.turbo
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+.env.*.local
+
+# editor
+.DS_Store
+.vscode/
+.idea/
+
+# drizzle
+drizzle/
+
+# logs
+*.log
+
+# jellyfin runtime
+jellyfin/

@@ -1,0 +1,22 @@
+{
+  "name": "hbo",
+  "private": true,
+  "type": "module",
+  "workspaces": ["apps/*"],
+  "packageManager": "bun@1.2.20",
+  "scripts": {
+    "dev": "docker compose up -d && turbo run dev",
+    "build": "turbo run build",
+    "start": "docker compose up -d && bun --cwd apps/web run preview",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "jellyfin:up": "docker compose up -d",
+    "jellyfin:down": "docker compose down",
+    "jellyfin:logs": "docker compose logs -f jellyfin"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2",
+    "@types/bun": "^1.2.0"
+  }
+}
