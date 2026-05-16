@@ -65,6 +65,20 @@ export const formatTime = (totalSeconds: number): string => {
   return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 };
 
+/**
+ * Bits/sec → human-readable, e.g. `8 Mbps`, `750 kbps`. Returns null when
+ * the input is missing or non-finite so callers can short-circuit rendering.
+ */
+export const formatBitrate = (bps: number | null | undefined): string | null => {
+  if (!bps || !Number.isFinite(bps)) return null;
+  if (bps >= 1_000_000) {
+    const mbps = bps / 1_000_000;
+    return mbps >= 10 ? `${mbps.toFixed(0)} Mbps` : `${mbps.toFixed(1)} Mbps`;
+  }
+  if (bps >= 1_000) return `${Math.round(bps / 1_000)} kbps`;
+  return `${Math.round(bps)} bps`;
+};
+
 export const yearFrom = (item: {
   ProductionYear?: number | null;
   PremiereDate?: string | null;

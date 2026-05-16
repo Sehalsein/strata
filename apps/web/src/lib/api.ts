@@ -231,7 +231,33 @@ export type StreamPlan = {
   hlsUrl: string;
   playSessionId: string;
   mediaSourceId: string;
+  preferHls: boolean;
+  /** Source media bitrate in bits/sec, or null when not reported. */
+  bitrate: number | null;
 };
+
+type MediaSource = NonNullable<BaseItemDto["MediaSources"]>[number];
+type MediaStream = NonNullable<MediaSource["MediaStreams"]>[number];
+
+const BROWSER_SAFE_CONTAINERS = new Set(["mp4", "m4v", "mov"]);
+const BROWSER_SAFE_AUDIO_CODECS = new Set(["aac", "mp3"]);
+
+const pickStream = (
+  source: MediaSource,
+  type: "Video" | "Audio",
+  index?: number,
+): MediaStream | undefined => {
+  const streams = source.MediaStreams ?? [];
+  if (index !== undefined)
+    return streams.find((s) => s.Type === type && s.Index === index);
+  return (
+    streams.find((s) => s.Type === type && s.IsDefault) ??
+    streams.find((s) => s.Type === type)
+  );
+};
+
+const codecOf = (stream: MediaStream | undefined): string =>
+  (stream?.Codec ?? "").toLowerCase();
 
 export const buildStreamPlan = async (
   itemId: string,
@@ -261,6 +287,17 @@ export const buildStreamPlan = async (
   const playSessionId = res.data.PlaySessionId ?? "";
   const token = api.accessToken ?? "";
 
+  const container = (source.Container ?? "").toLowerCase().split(",")[0];
+  const audioStream = pickStream(source, "Audio", opts.audioStreamIndex);
+  const audioOk = BROWSER_SAFE_AUDIO_CODECS.has(codecOf(audioStream));
+  const containerOk = BROWSER_SAFE_CONTAINERS.has(container);
+  const videoStream = pickStream(source, "Video");
+  // Source video bitrate caps the transcode target — preserves quality
+  // when Jellyfin re-encodes. Falls back to a generous 20 Mbps if the
+  // source doesn't report a bitrate.
+  const sourceVideoBitrate =
+    videoStream?.BitRate ?? source.Bitrate ?? 20_000_000;
+
   const directQs = new URLSearchParams({
     Static: "true",
     MediaSourceId: source.Id,
@@ -269,19 +306,30 @@ export const buildStreamPlan = async (
   });
   const directUrl = `${SERVER_URL}/Videos/${itemId}/stream?${directQs.toString()}`;
 
+  // HLS targeting h264 high@5.1 + AAC. When the source already matches
+  // (most h264 content), Jellyfin uses -c:v copy and quality is the
+  // source bitstream untouched. When it doesn't (HEVC, Hi10P, etc.) it
+  // re-encodes at the source's own bitrate so quality stays close to
+  // the original. VideoStreamIndex pins the primary video track —
+  // MKVs frequently carry a secondary cover-art video stream that
+  // would otherwise leak into the output and break MSE demuxing.
   const hlsQs = new URLSearchParams({
     MediaSourceId: source.Id,
     PlaySessionId: playSessionId,
     api_key: token,
     VideoCodec: "h264",
     AudioCodec: "aac",
-    TranscodingMaxAudioChannels: "2",
+    TranscodingMaxAudioChannels: "6",
     SegmentContainer: "mp4",
     MinSegments: "1",
-    BreakOnNonKeyFrames: "True",
+    BreakOnNonKeyFrames: "false",
     "h264-level": "51",
     "h264-profile": "high",
+    VideoBitrate: String(sourceVideoBitrate),
   });
+  if (videoStream?.Index !== undefined) {
+    hlsQs.set("VideoStreamIndex", String(videoStream.Index));
+  }
   if (opts.audioStreamIndex !== undefined) {
     hlsQs.set("AudioStreamIndex", String(opts.audioStreamIndex));
   }
@@ -295,6 +343,8 @@ export const buildStreamPlan = async (
     hlsUrl,
     playSessionId,
     mediaSourceId: source.Id,
+    preferHls: !(containerOk && audioOk),
+    bitrate: videoStream?.BitRate ?? source.Bitrate ?? null,
   };
 };
 
