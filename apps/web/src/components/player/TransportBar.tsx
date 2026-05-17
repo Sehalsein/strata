@@ -19,6 +19,7 @@ import { AudioButton } from "./AudioButton";
 import { SpeedButton } from "./SpeedButton";
 import { StreamDetailsButton } from "./StreamDetailsButton";
 import { RailToggleButton } from "./RailToggleButton";
+import { AirplayButton } from "./AirplayButton";
 import type { PlayerApi, Stream } from "./types";
 import type { VideoState } from "./hooks/useVideoState";
 
@@ -217,6 +218,8 @@ export const TransportBar = ({
       {railHasContent && (
         <RailToggleButton open={railVisible} onToggle={api.toggleRail} />
       )}
+
+      <AirplayButton videoRef={videoRef} />
 
       <IconBtn
         ariaLabel={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}

@@ -86,6 +86,13 @@ export const Player = ({ item, resumeAt }: Props) => {
   const videoState = useVideoState(videoRef);
   usePersistentVolume(videoRef);
 
+  // Safari requires this non-standard attribute before it will let JS
+  // invoke the AirPlay target picker on a <video>. Set via DOM so we
+  // don't have to teach the JSX type system about it.
+  useEffect(() => {
+    videoRef.current?.setAttribute("x-webkit-airplay", "allow");
+  }, []);
+
   // Live scene preview as a fallback when there's no trickplay manifest.
   // Only mount when the source is direct-playable (HLS sources would
   // trigger fresh transcode segments on every seek).
@@ -440,6 +447,14 @@ export const Player = ({ item, resumeAt }: Props) => {
 
   const mediaSource = item.MediaSources?.[0] ?? null;
 
+  const transcoding = useMemo(
+    () => ({
+      kind: usingHls ? ("hls" as const) : ("direct" as const),
+      bitrate: plan?.bitrate ?? null,
+    }),
+    [usingHls, plan?.bitrate],
+  );
+
   return (
     <div
       ref={rootRef}
@@ -479,10 +494,7 @@ export const Player = ({ item, resumeAt }: Props) => {
           <PlayerHeader
             visible={autoHide.visible || !videoState.playing}
             breadcrumb={breadcrumb}
-            transcoding={{
-              kind: usingHls ? "hls" : "direct",
-              bitrate: plan?.bitrate ?? null,
-            }}
+            transcoding={transcoding}
             onBack={handleBack}
           />
 

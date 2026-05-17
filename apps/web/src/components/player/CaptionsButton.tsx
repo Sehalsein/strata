@@ -1,4 +1,5 @@
 import { Captions, CaptionsOff } from "lucide-react";
+import { memo } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,7 +26,12 @@ type Props = {
   onToggle: () => void;
 };
 
-export const CaptionsButton = ({ tracks, current, onChange, onToggle }: Props) => {
+export const CaptionsButton = memo(function CaptionsButton({
+  tracks,
+  current,
+  onChange,
+  onToggle,
+}: Props) {
   if (tracks.length === 0) return null;
   const on = current !== "off";
   const active = on ? tracks.find((t) => t.Index === current) : null;
@@ -67,4 +73,4 @@ export const CaptionsButton = ({ tracks, current, onChange, onToggle }: Props) =
       </DropdownMenuContent>
     </DropdownMenu>
   );
-};
+});

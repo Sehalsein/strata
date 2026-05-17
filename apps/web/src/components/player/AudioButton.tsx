@@ -1,4 +1,5 @@
 import { AudioLines } from "lucide-react";
+import { memo } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,7 +30,11 @@ type Props = {
   onChange: (index: number) => void;
 };
 
-export const AudioButton = ({ tracks, current, onChange }: Props) => {
+export const AudioButton = memo(function AudioButton({
+  tracks,
+  current,
+  onChange,
+}: Props) {
   if (tracks.length === 0) return null;
   const active = tracks.find((t) => t.Index === current);
 
@@ -77,4 +82,4 @@ export const AudioButton = ({ tracks, current, onChange }: Props) => {
       </DropdownMenuContent>
     </DropdownMenu>
   );
-};
+});

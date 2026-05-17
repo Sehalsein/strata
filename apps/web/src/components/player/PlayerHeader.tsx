@@ -1,4 +1,5 @@
 import { ArrowLeft } from "lucide-react";
+import { memo } from "react";
 import { cn, formatBitrate } from "@/lib/utils";
 
 type Breadcrumb = {
@@ -20,12 +21,12 @@ type Props = {
   onBack: () => void;
 };
 
-export const PlayerHeader = ({
+export const PlayerHeader = memo(function PlayerHeader({
   visible,
   breadcrumb,
   transcoding,
   onBack,
-}: Props) => {
+}: Props) {
   const mbps = formatBitrate(transcoding.bitrate);
   const isEpisode =
     breadcrumb.show !== null &&
@@ -101,4 +102,4 @@ export const PlayerHeader = ({
       </div>
     </div>
   );
-};
+});

@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const PREVIEW_W = 192;
 const PREVIEW_H = 108;
+// Wait this long after the last `requestPreview` call before actually
+// firing the seek — keeps a fast scrub from issuing one fetch per pixel.
+const SEEK_DEBOUNCE_MS = 80;
 
 export type ScenePreview = {
   previewUrl: string | null;
@@ -9,32 +12,53 @@ export type ScenePreview = {
 };
 
 /**
- * Live scene-preview generator. Mounts a hidden mirror `<video>` for the
- * given source URL and renders the frame at any requested time to a JPEG
- * data URL via a `<canvas>`. Used as a fallback when the Jellyfin item
- * has no trickplay manifest.
+ * Live scene-preview generator. Lazily mounts a hidden mirror `<video>`
+ * the *first* time the user requests a preview — until then no second
+ * connection to the Jellyfin source exists. Subsequent requests reuse
+ * the same mirror (no remount churn on hover toggle). The mirror is
+ * torn down when the source URL changes or the consumer unmounts.
  *
- * Pass `null` for the source URL to disable — no mirror is mounted and
- * `requestPreview` becomes a no-op. Callers should gate the source on
- * conditions where seeking is cheap (i.e. direct-playable mp4/m4v/mov,
- * NOT HLS where each seek triggers a transcode segment).
+ * Seek requests are debounced ~80 ms so a fast scrub doesn't fire a
+ * stream of range requests at the server.
+ *
+ * Pass `null` for the source to disable.
  */
 export const useScenePreview = (sourceUrl: string | null): ScenePreview => {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pendingTimeRef = useRef<number | null>(null);
-  const disabledRef = useRef<boolean>(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
+  // Latest source URL — read inside the lazy-init path.
+  const sourceUrlRef = useRef<string | null>(sourceUrl);
+  sourceUrlRef.current = sourceUrl;
+
+  // Seek setter for the currently-mounted mirror, or null when not mounted.
+  const seekRef = useRef<((sec: number) => void) | null>(null);
+  const teardownRef = useRef<(() => void) | null>(null);
+
+  const debounceTimerRef = useRef<number | null>(null);
+  const pendingTimeRef = useRef<number | null>(null);
+
+  // Tear down whenever the source URL changes or the consumer unmounts.
   useEffect(() => {
-    if (!sourceUrl) {
+    return () => {
+      if (debounceTimerRef.current !== null) {
+        window.clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+      pendingTimeRef.current = null;
+      teardownRef.current?.();
+      teardownRef.current = null;
+      seekRef.current = null;
       setPreviewUrl(null);
-      return;
-    }
-    disabledRef.current = false;
+    };
+  }, [sourceUrl]);
+
+  const ensureMounted = useCallback(() => {
+    if (seekRef.current) return;
+    const url = sourceUrlRef.current;
+    if (!url) return;
 
     const video = document.createElement("video");
-    video.src = sourceUrl;
+    video.src = url;
     video.crossOrigin = "anonymous";
     video.preload = "metadata";
     video.muted = true;
@@ -46,15 +70,15 @@ export const useScenePreview = (sourceUrl: string | null): ScenePreview => {
     video.style.opacity = "0";
     video.style.pointerEvents = "none";
     document.body.appendChild(video);
-    videoRef.current = video;
 
     const canvas = document.createElement("canvas");
     canvas.width = PREVIEW_W;
     canvas.height = PREVIEW_H;
-    canvasRef.current = canvas;
     const ctx = canvas.getContext("2d");
 
-    const drainPending = () => {
+    let disabled = false;
+
+    const applyPending = () => {
       const pending = pendingTimeRef.current;
       if (pending === null) return;
       if (Math.abs(video.currentTime - pending) < 0.5) {
@@ -70,26 +94,35 @@ export const useScenePreview = (sourceUrl: string | null): ScenePreview => {
     };
 
     const onSeeked = () => {
-      if (!ctx || disabledRef.current) {
-        drainPending();
+      if (!ctx || disabled) {
+        applyPending();
         return;
       }
       try {
         ctx.drawImage(video, 0, 0, PREVIEW_W, PREVIEW_H);
-        const url = canvas.toDataURL("image/jpeg", 0.6);
-        setPreviewUrl(url);
+        setPreviewUrl(canvas.toDataURL("image/jpeg", 0.6));
       } catch (err) {
-        // Canvas tainted (CORS misconfig) — disable the fallback so the
-        // tooltip degrades to timestamp-only instead of throwing forever.
-        disabledRef.current = true;
+        disabled = true;
         console.warn("[scene-preview] disabled — canvas tainted", err);
       }
-      drainPending();
+      applyPending();
     };
 
     video.addEventListener("seeked", onSeeked);
 
-    return () => {
+    seekRef.current = (sec: number) => {
+      if (video.seeking) {
+        pendingTimeRef.current = sec;
+        return;
+      }
+      try {
+        video.currentTime = sec;
+      } catch {
+        pendingTimeRef.current = sec;
+      }
+    };
+
+    teardownRef.current = () => {
       video.removeEventListener("seeked", onSeeked);
       video.removeAttribute("src");
       try {
@@ -98,29 +131,27 @@ export const useScenePreview = (sourceUrl: string | null): ScenePreview => {
         /* noop */
       }
       video.remove();
-      videoRef.current = null;
-      canvasRef.current = null;
-      pendingTimeRef.current = null;
-      setPreviewUrl(null);
     };
-  }, [sourceUrl]);
-
-  const requestPreview = useCallback((sec: number) => {
-    const video = videoRef.current;
-    if (!video || disabledRef.current) return;
-    if (!Number.isFinite(sec) || sec < 0) return;
-    // Coalesce: while a seek is in flight, remember the latest target and
-    // apply it on the next `seeked` event.
-    if (video.seeking) {
-      pendingTimeRef.current = sec;
-      return;
-    }
-    try {
-      video.currentTime = sec;
-    } catch {
-      pendingTimeRef.current = sec;
-    }
   }, []);
+
+  const requestPreview = useCallback(
+    (sec: number) => {
+      if (!Number.isFinite(sec) || sec < 0) return;
+      if (!sourceUrlRef.current) return;
+
+      pendingTimeRef.current = sec;
+      if (debounceTimerRef.current !== null) return;
+      debounceTimerRef.current = window.setTimeout(() => {
+        debounceTimerRef.current = null;
+        const target = pendingTimeRef.current;
+        if (target === null) return;
+        pendingTimeRef.current = null;
+        ensureMounted();
+        seekRef.current?.(target);
+      }, SEEK_DEBOUNCE_MS);
+    },
+    [ensureMounted],
+  );
 
   return { previewUrl, requestPreview };
 };

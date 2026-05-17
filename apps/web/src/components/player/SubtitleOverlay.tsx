@@ -45,13 +45,12 @@ export const SubtitleOverlay = ({ videoRef }: Props) => {
       setText((prev) => (prev === next ? prev : next));
     };
 
-    video.addEventListener("timeupdate", tick);
-    video.addEventListener("seeked", tick);
+    // 250 ms is below the perception threshold for subtitle timing and
+    // covers the paused-with-subs-enabled case (where `timeupdate` and
+    // `seeked` would never fire).
     const interval = window.setInterval(tick, 250);
 
     return () => {
-      video.removeEventListener("timeupdate", tick);
-      video.removeEventListener("seeked", tick);
       window.clearInterval(interval);
       setText("");
     };

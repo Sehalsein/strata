@@ -1,4 +1,5 @@
 import { Gauge } from "lucide-react";
+import { memo } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,7 +22,12 @@ type Props = {
   onCycle: () => void;
 };
 
-export const SpeedButton = ({ rate, onChange, onCycle }: Props) => (
+export const SpeedButton = memo(function SpeedButton({
+  rate,
+  onChange,
+  onCycle,
+}: Props) {
+  return (
   <DropdownMenu>
     <ControlButton
       icon={<Gauge className="h-4 w-4" />}
@@ -71,4 +77,5 @@ export const SpeedButton = ({ rate, onChange, onCycle }: Props) => (
       ))}
     </DropdownMenuContent>
   </DropdownMenu>
-);
+  );
+});

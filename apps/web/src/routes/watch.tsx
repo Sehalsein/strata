@@ -8,18 +8,21 @@ import { Player } from "@/components/player/Player";
 export const WatchPage = () => {
   const { id } = useParams({ strict: false }) as { id: string };
   const { data: session, isPending } = useSession();
-  if (isPending) return null;
-  if (!session) return <Navigate to="/login" />;
-
+  // Hooks must be called unconditionally — gate the fetch with
+  // `enabled` instead of early-returning, otherwise React errors out
+  // with a hook-count mismatch as auth state resolves.
   const detail = useQuery({
     queryKey: ["item", id],
     queryFn: () => getItem(id),
+    enabled: Boolean(session?.user),
   });
 
-  if (detail.isLoading) {
+  if (isPending) return null;
+  if (!session) return <Navigate to="/login" />;
+  if (detail.isLoading || !detail.data) {
     return <Shell message="Loading metadata…" />;
   }
-  if (detail.isError || !detail.data) {
+  if (detail.isError) {
     return <Shell message="Couldn't load this title." tone="error" />;
   }
 

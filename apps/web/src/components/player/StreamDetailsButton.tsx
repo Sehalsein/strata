@@ -1,5 +1,5 @@
 import { Info } from "lucide-react";
-import { forwardRef, useState } from "react";
+import { forwardRef, memo, useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,7 +52,7 @@ const Trigger = forwardRef<
 ));
 Trigger.displayName = "StreamDetailsTrigger";
 
-export const StreamDetailsButton = ({
+export const StreamDetailsButton = memo(function StreamDetailsButton({
   mediaSource,
   plan,
   usingHls,
@@ -60,7 +60,7 @@ export const StreamDetailsButton = ({
   currentSubIndex,
   videoRef,
   hlsRef,
-}: Props) => {
+}: Props) {
   const [open, setOpen] = useState(false);
   const stats = useHlsStats(videoRef, hlsRef, open && usingHls);
   const v = videoRef.current;
@@ -84,4 +84,4 @@ export const StreamDetailsButton = ({
       </DropdownMenuContent>
     </DropdownMenu>
   );
-};
+});
