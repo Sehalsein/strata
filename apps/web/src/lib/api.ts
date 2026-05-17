@@ -308,11 +308,20 @@ export const buildStreamPlan = async (
 
   // HLS targeting h264 high@5.1 + AAC. When the source already matches
   // (most h264 content), Jellyfin uses -c:v copy and quality is the
-  // source bitstream untouched. When it doesn't (HEVC, Hi10P, etc.) it
-  // re-encodes at the source's own bitrate so quality stays close to
-  // the original. VideoStreamIndex pins the primary video track —
-  // MKVs frequently carry a secondary cover-art video stream that
-  // would otherwise leak into the output and break MSE demuxing.
+  // source bitstream untouched — no CPU spent re-encoding video. When
+  // it can't (HEVC, Hi10P, etc.) it re-encodes at the source's own
+  // bitrate so quality stays close to the original.
+  //
+  // TS segments + BreakOnNonKeyFrames=true is the canonical recipe for
+  // stream-copy HLS: TS is self-contained (carries SPS/PPS in every
+  // segment, so MSE can re-init after a seek), and allowing non-IDR
+  // segment boundaries means Jellyfin doesn't have to re-encode just
+  // to insert keyframes when the source GOP doesn't align with the
+  // target segment duration.
+  //
+  // VideoStreamIndex pins the primary video — MKVs often carry a
+  // secondary cover-art video stream that would otherwise leak into
+  // the output and break MSE demuxing (`Got unexpected video track`).
   const hlsQs = new URLSearchParams({
     MediaSourceId: source.Id,
     PlaySessionId: playSessionId,
@@ -320,9 +329,9 @@ export const buildStreamPlan = async (
     VideoCodec: "h264",
     AudioCodec: "aac",
     TranscodingMaxAudioChannels: "6",
-    SegmentContainer: "mp4",
+    SegmentContainer: "ts",
     MinSegments: "1",
-    BreakOnNonKeyFrames: "false",
+    BreakOnNonKeyFrames: "true",
     "h264-level": "51",
     "h264-profile": "high",
     VideoBitrate: String(sourceVideoBitrate),
@@ -346,6 +355,19 @@ export const buildStreamPlan = async (
     preferHls: !(containerOk && audioOk),
     bitrate: videoStream?.BitRate ?? source.Bitrate ?? null,
   };
+};
+
+// Jellyfin can serve any text subtitle as WebVTT on demand. Attaching
+// this URL to a <track> element lets us render subs on top of any
+// playback path (direct or HLS) without forcing a video re-encode.
+export const subtitleVttUrl = (
+  itemId: string,
+  mediaSourceId: string,
+  streamIndex: number,
+): string => {
+  const token = api.accessToken ?? "";
+  const qs = new URLSearchParams({ api_key: token });
+  return `${SERVER_URL}/Videos/${itemId}/${mediaSourceId}/Subtitles/${streamIndex}/0/Stream.vtt?${qs.toString()}`;
 };
 
 export const reportPlaybackStart = async (

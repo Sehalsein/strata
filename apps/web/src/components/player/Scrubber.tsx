@@ -9,6 +9,9 @@ type Props = {
   buffered: number;
   chapters: Chapter[];
   trickplay: TrickplaySource | null;
+  scenePreviewUrl: string | null;
+  requestScenePreview: (sec: number) => void;
+  seeking: boolean;
   onSeek: (sec: number) => void;
 };
 
@@ -34,16 +37,30 @@ export const Scrubber = ({
   buffered,
   chapters,
   trickplay,
+  scenePreviewUrl,
+  requestScenePreview,
+  seeking,
   onSeek,
 }: Props) => {
   const trackRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Optimistic seek target — drives the visible fill instantly on click,
+  // before the underlying <video> has actually moved its currentTime.
+  // Cleared once playback catches up (within ~0.5s).
+  const [pendingSeek, setPendingSeek] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (pendingSeek === null) return;
+    if (Math.abs(currentTime - pendingSeek) < 0.5) setPendingSeek(null);
+  }, [currentTime, pendingSeek]);
 
   const dur = duration > 0 ? duration : 0;
-  const progressPct = dur > 0 ? Math.min(100, (currentTime / dur) * 100) : 0;
+  const displayTime = pendingSeek ?? currentTime;
+  const progressPct = dur > 0 ? Math.min(100, (displayTime / dur) * 100) : 0;
   const bufferedPct = dur > 0 ? Math.min(100, (buffered / dur) * 100) : 0;
+  const loading = seeking || pendingSeek !== null;
 
   const computeHover = useCallback(
     (clientX: number): Hover | null => {
@@ -63,9 +80,12 @@ export const Scrubber = ({
   const onPointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const next = computeHover(e.clientX);
-      if (next) setHover(next);
+      if (next) {
+        setHover(next);
+        requestScenePreview(next.seconds);
+      }
     },
-    [computeHover],
+    [computeHover, requestScenePreview],
   );
 
   const onPointerLeave = useCallback(() => {
@@ -80,6 +100,7 @@ export const Scrubber = ({
       const next = computeHover(e.clientX);
       if (next) {
         setHover(next);
+        setPendingSeek(next.seconds);
         onSeek(next.seconds);
       }
     },
@@ -90,7 +111,10 @@ export const Scrubber = ({
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (!dragging) return;
       const next = computeHover(e.clientX);
-      if (next) onSeek(next.seconds);
+      if (next) {
+        setPendingSeek(next.seconds);
+        onSeek(next.seconds);
+      }
       try {
         e.currentTarget.releasePointerCapture(e.pointerId);
       } catch {
@@ -108,6 +132,7 @@ export const Scrubber = ({
       const next = computeHover(e.clientX);
       if (next) {
         setHover(next);
+        setPendingSeek(next.seconds);
         onSeek(next.seconds);
       }
     };
@@ -116,8 +141,12 @@ export const Scrubber = ({
   }, [computeHover, dragging, onSeek]);
 
   const tile = hover && trickplay ? trickplay.tileForTime(hover.seconds) : null;
-  const TOOLTIP_W = tile ? tile.thumb.w : 160;
-  const TOOLTIP_H = tile ? tile.thumb.h : 0;
+  // Live scene preview kicks in when there's no trickplay sprite.
+  const useScene = !tile && hover && scenePreviewUrl;
+  const SCENE_W = 192;
+  const SCENE_H = 108;
+  const TOOLTIP_W = tile ? tile.thumb.w : useScene ? SCENE_W : 160;
+  const TOOLTIP_H = tile ? tile.thumb.h : useScene ? SCENE_H : 0;
 
   // Clamp tooltip x so it stays within the track.
   const tooltipLeft = (() => {
@@ -155,6 +184,19 @@ export const Scrubber = ({
                 backgroundColor: "#000",
               }}
             />
+          )}
+          {useScene && (
+            <div
+              className="overflow-hidden rounded-sm border border-strata-paper/20 bg-black shadow-2xl"
+              style={{ width: SCENE_W, height: SCENE_H }}
+            >
+              <img
+                src={scenePreviewUrl!}
+                alt=""
+                draggable={false}
+                className="block h-full w-full object-cover"
+              />
+            </div>
           )}
           <div className="mt-2 flex items-center gap-2 rounded-sm bg-strata-bg/80 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-strata-paper backdrop-blur">
             <span className="tabular-nums">{formatTime(hover.seconds)}</span>
@@ -217,11 +259,22 @@ export const Scrubber = ({
         {/* knob */}
         <div
           className={cn(
-            "pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-strata-accent shadow-[0_0_0_4px_rgba(232,51,31,0.18)] transition-opacity",
-            hover || dragging ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+            "pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 transition-opacity",
+            hover || dragging || loading
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100",
           )}
           style={{ left: `${progressPct}%` }}
-        />
+        >
+          {loading ? (
+            <div className="relative h-3 w-3" aria-label="Seeking">
+              <span className="absolute inset-0 animate-ping rounded-full bg-strata-accent opacity-75" />
+              <span className="absolute inset-0 rounded-full bg-strata-accent shadow-[0_0_0_4px_rgba(232,51,31,0.18)]" />
+            </div>
+          ) : (
+            <div className="h-3 w-3 rounded-full bg-strata-accent shadow-[0_0_0_4px_rgba(232,51,31,0.18)]" />
+          )}
+        </div>
       </div>
     </div>
   );

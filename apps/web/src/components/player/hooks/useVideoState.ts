@@ -8,6 +8,8 @@ export type VideoState = {
   muted: boolean;
   rate: number;
   buffered: number;
+  /** True between `seeking` and `seeked`/`playing` — used to drive a loader. */
+  seeking: boolean;
 };
 
 const empty: VideoState = {
@@ -18,6 +20,7 @@ const empty: VideoState = {
   muted: false,
   rate: 1,
   buffered: 0,
+  seeking: false,
 };
 
 /**
@@ -70,11 +73,12 @@ export const useVideoState = (
       muted: video.muted,
       rate: video.playbackRate,
       buffered: bufferedEnd(),
+      seeking: video.seeking,
     });
 
     const onTimeUpdate = () =>
       schedule({ currentTime: video.currentTime, buffered: bufferedEnd() });
-    const onPlay = () => schedule({ playing: true });
+    const onPlay = () => schedule({ playing: true, seeking: false });
     const onPause = () => schedule({ playing: false });
     const onEnded = () => schedule({ playing: false });
     const onDuration = () =>
@@ -85,6 +89,9 @@ export const useVideoState = (
       schedule({ volume: video.volume, muted: video.muted });
     const onRate = () => schedule({ rate: video.playbackRate });
     const onProgress = () => schedule({ buffered: bufferedEnd() });
+    const onSeeking = () => schedule({ seeking: true });
+    const onSeeked = () => schedule({ seeking: false });
+    const onCanPlay = () => schedule({ seeking: false });
 
     schedule(snapshot());
 
@@ -98,6 +105,9 @@ export const useVideoState = (
     video.addEventListener("volumechange", onVolume);
     video.addEventListener("ratechange", onRate);
     video.addEventListener("progress", onProgress);
+    video.addEventListener("seeking", onSeeking);
+    video.addEventListener("seeked", onSeeked);
+    video.addEventListener("canplay", onCanPlay);
 
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
@@ -112,6 +122,9 @@ export const useVideoState = (
       video.removeEventListener("volumechange", onVolume);
       video.removeEventListener("ratechange", onRate);
       video.removeEventListener("progress", onProgress);
+      video.removeEventListener("seeking", onSeeking);
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("canplay", onCanPlay);
     };
   }, [videoRef]);
 

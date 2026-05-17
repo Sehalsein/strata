@@ -6,6 +6,7 @@ import {
   reportPlaybackStart,
   reportPlaybackProgress,
   reportPlaybackStopped,
+  subtitleVttUrl,
   type BaseItemDto,
   type StreamPlan,
 } from "@/lib/api";
@@ -23,6 +24,7 @@ import { usePersistedFlag } from "./hooks/usePersistedFlag";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useTrickplay } from "./hooks/useTrickplay";
 import { useNextEpisode } from "./hooks/useNextEpisode";
+import { useScenePreview } from "./hooks/useScenePreview";
 import {
   collectAudioStreams,
   collectChapters,
@@ -83,6 +85,13 @@ export const Player = ({ item, resumeAt }: Props) => {
   const trickplay = useTrickplay(itemId, item.Trickplay);
   const videoState = useVideoState(videoRef);
   usePersistentVolume(videoRef);
+
+  // Live scene preview as a fallback when there's no trickplay manifest.
+  // Only mount when the source is direct-playable (HLS sources would
+  // trigger fresh transcode segments on every seek).
+  const scenePreviewSrc =
+    !trickplay && plan && !usingHls ? plan.directUrl : null;
+  const scenePreview = useScenePreview(scenePreviewSrc);
 
   const hasChapters = chapters.length > 0;
   const railHasContent = hasChapters || Boolean(nextEpisode);
@@ -208,7 +217,9 @@ export const Player = ({ item, resumeAt }: Props) => {
       try {
         localPlan = await buildStreamPlan(itemId, {
           audioStreamIndex: currentAudio,
-          subtitleStreamIndex: currentSub === "off" ? undefined : currentSub,
+          // Subtitles are loaded as a separate WebVTT <track> element
+          // (see the effect below) so changing them doesn't restart the
+          // transcode session and they work on every playback path.
         });
         if (cancelled) return;
         setPlan(localPlan);
@@ -260,7 +271,48 @@ export const Player = ({ item, resumeAt }: Props) => {
       video.load();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [itemId, currentAudio, currentSub]);
+  }, [itemId, currentAudio]);
+
+  // Manages the WebVTT <track> element on the video. Decoupled from the
+  // streaming effect so toggling subtitles is instant and doesn't reset
+  // the transcode session.
+  useEffect(() => {
+    const video = videoRef.current;
+    const mediaSourceId = plan?.mediaSourceId;
+    if (!video || !mediaSourceId || currentSub === "off") return;
+
+    const trackEl = document.createElement("track");
+    trackEl.kind = "subtitles";
+    trackEl.label = "Subtitles";
+    trackEl.srclang = "und";
+    trackEl.src = subtitleVttUrl(itemId, mediaSourceId, currentSub);
+    video.appendChild(trackEl);
+
+    // Browsers default new tracks to "disabled" which prevents cue
+    // loading. Force "hidden" so cues load and become activeCues
+    // (SubtitleOverlay polls activeCues to render).
+    const enable = () => {
+      if (trackEl.track) trackEl.track.mode = "hidden";
+    };
+    enable();
+    trackEl.addEventListener("load", enable);
+
+    const onError = (e: Event) => {
+      console.error(
+        "[player] subtitle track failed",
+        e,
+        trackEl.src,
+        trackEl.readyState,
+      );
+    };
+    trackEl.addEventListener("error", onError);
+
+    return () => {
+      trackEl.removeEventListener("load", enable);
+      trackEl.removeEventListener("error", onError);
+      trackEl.remove();
+    };
+  }, [itemId, plan?.mediaSourceId, currentSub]);
 
   // Progress heartbeat every 10s.
   useEffect(() => {
@@ -449,6 +501,9 @@ export const Player = ({ item, resumeAt }: Props) => {
                 buffered={videoState.buffered}
                 chapters={chapters}
                 trickplay={trickplay}
+                scenePreviewUrl={scenePreview.previewUrl}
+                requestScenePreview={scenePreview.requestPreview}
+                seeking={videoState.seeking}
                 onSeek={api.seek}
               />
               <TransportBar
@@ -516,6 +571,7 @@ export const Player = ({ item, resumeAt }: Props) => {
             onSeek={api.seek}
             nextEpisode={nextEpisode}
             currentItem={item}
+            trickplay={trickplay}
             onPlayNext={
               nextEpisode?.Id ? () => playByItemId(nextEpisode.Id!) : undefined
             }

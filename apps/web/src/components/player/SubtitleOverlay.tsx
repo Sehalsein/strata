@@ -6,9 +6,12 @@ type Props = {
 
 /**
  * Renders the current subtitle cue in a styled pill above the transport.
- * When Jellyfin bakes subs into the stream (HLS transcode path) there are
- * no text tracks at all — the component renders nothing, and the burned
- * subtitles remain visible from the video itself.
+ *
+ * Polls activeCues on `timeupdate` (and a short interval as a fallback
+ * for when the video is paused or `timeupdate` is throttled). We poll
+ * instead of subscribing to `cuechange` because browsers fire it
+ * inconsistently when a track's mode is "hidden" — Chrome in
+ * particular often drops the event entirely.
  */
 export const SubtitleOverlay = ({ videoRef }: Props) => {
   const [text, setText] = useState<string>("");
@@ -17,44 +20,39 @@ export const SubtitleOverlay = ({ videoRef }: Props) => {
     const video = videoRef.current;
     if (!video) return;
 
-    const cleanups: Array<() => void> = [];
-
-    const bind = (track: TextTrack) => {
-      // Hide native rendering so our pill is the only thing on screen.
-      if (track.mode === "disabled") return;
-      track.mode = "hidden";
-      const onChange = () => {
-        const cues = track.activeCues;
-        if (!cues || cues.length === 0) {
-          setText("");
-          return;
-        }
+    const tick = () => {
+      const tracks = video.textTracks;
+      let next = "";
+      for (let i = 0; i < tracks.length; i++) {
+        const t = tracks[i];
+        if (!t) continue;
+        if (t.kind !== "subtitles" && t.kind !== "captions") continue;
+        // Ensure cues actually load; "disabled" suppresses loading
+        // entirely and would leave activeCues null forever.
+        if (t.mode === "disabled") t.mode = "hidden";
+        const cues = t.activeCues;
+        if (!cues || cues.length === 0) continue;
         const parts: string[] = [];
-        for (let i = 0; i < cues.length; i++) {
-          const cue = cues[i] as VTTCue;
+        for (let j = 0; j < cues.length; j++) {
+          const cue = cues[j] as VTTCue;
           if (cue?.text) parts.push(cue.text);
         }
-        setText(parts.join("\n").replace(/<[^>]+>/g, ""));
-      };
-      track.addEventListener("cuechange", onChange);
-      cleanups.push(() => track.removeEventListener("cuechange", onChange));
-    };
-
-    const scan = () => {
-      const list = video.textTracks;
-      for (let i = 0; i < list.length; i++) {
-        const t = list[i];
-        if (t) bind(t);
+        if (parts.length > 0) {
+          next = parts.join("\n").replace(/<[^>]+>/g, "");
+          break;
+        }
       }
+      setText((prev) => (prev === next ? prev : next));
     };
 
-    scan();
-    const onAdd = () => scan();
-    video.textTracks.addEventListener("addtrack", onAdd);
-    cleanups.push(() => video.textTracks.removeEventListener("addtrack", onAdd));
+    video.addEventListener("timeupdate", tick);
+    video.addEventListener("seeked", tick);
+    const interval = window.setInterval(tick, 250);
 
     return () => {
-      for (const fn of cleanups) fn();
+      video.removeEventListener("timeupdate", tick);
+      video.removeEventListener("seeked", tick);
+      window.clearInterval(interval);
       setText("");
     };
   }, [videoRef]);

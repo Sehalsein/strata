@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { cn, formatTime } from "@/lib/utils";
 import type { BaseItemDto } from "@/lib/api";
 import type { Chapter } from "./types";
 import { UpNextCard } from "./UpNextCard";
+import type { TrickplaySource } from "./hooks/useTrickplay";
 
 type Tab = "chapters" | "cast" | "notes";
 
@@ -14,7 +15,10 @@ type Props = {
   nextEpisode: BaseItemDto | null;
   currentItem: BaseItemDto;
   onPlayNext?: () => void;
+  trickplay: TrickplaySource | null;
 };
+
+type Hover = { idx: number; top: number };
 
 const findActive = (chapters: Chapter[], time: number): number => {
   if (chapters.length === 0) return -1;
@@ -34,9 +38,13 @@ export const ChaptersRail = ({
   nextEpisode,
   currentItem,
   onPlayNext,
+  trickplay,
 }: Props) => {
   const hasChapters = chapters.length > 0;
   const [tab, setTab] = useState<Tab>(hasChapters ? "chapters" : "cast");
+  const railRef = useRef<HTMLElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<Hover | null>(null);
 
   const activeIdx = useMemo(
     () => findActive(chapters, currentTime),
@@ -47,8 +55,27 @@ export const ChaptersRail = ({
     (p) => p.Type === "Actor",
   );
 
+  const handleRowEnter = useCallback(
+    (idx: number, e: React.MouseEvent<HTMLButtonElement>) => {
+      const rail = railRef.current;
+      if (!rail) return;
+      const btn = e.currentTarget.getBoundingClientRect();
+      const railBox = rail.getBoundingClientRect();
+      setHover({ idx, top: btn.top + btn.height / 2 - railBox.top });
+    },
+    [],
+  );
+  const handleRowLeave = useCallback(() => setHover(null), []);
+
+  const hoveredChapter =
+    hover && trickplay && chapters[hover.idx] ? chapters[hover.idx]! : null;
+  const tile = hoveredChapter
+    ? trickplay!.tileForTime(hoveredChapter.startSeconds)
+    : null;
+
   return (
     <aside
+      ref={railRef}
       className={cn(
         "relative hidden h-full flex-col border-l border-strata-paper/10 bg-strata-bg/95 backdrop-blur transition-opacity duration-300 lg:flex",
         visible ? "opacity-100" : "opacity-0",
@@ -74,7 +101,11 @@ export const ChaptersRail = ({
         </TabButton>
       </div>
 
-      <div className="strata-scrollbar flex-1 overflow-y-auto px-2 py-3">
+      <div
+        ref={scrollRef}
+        onScroll={handleRowLeave}
+        className="strata-scrollbar flex-1 overflow-y-auto px-2 py-3"
+      >
         {tab === "chapters" && hasChapters && (
           <ul className="space-y-px">
             {chapters.map((c, i) => (
@@ -82,6 +113,8 @@ export const ChaptersRail = ({
                 <button
                   type="button"
                   onClick={() => onSeek(c.startSeconds)}
+                  onMouseEnter={(e) => handleRowEnter(i, e)}
+                  onMouseLeave={handleRowLeave}
                   className={cn(
                     "group flex w-full items-center justify-between gap-3 rounded-sm border-l-2 px-3 py-2 text-left transition",
                     i === activeIdx
@@ -153,6 +186,34 @@ export const ChaptersRail = ({
       {nextEpisode && (
         <div className="border-t border-strata-paper/10 px-3 py-3">
           <UpNextCard episode={nextEpisode} onPlay={onPlayNext} />
+        </div>
+      )}
+
+      {hover && tile && hoveredChapter && (
+        <div
+          className="pointer-events-none absolute right-full z-20 mr-3 flex -translate-y-1/2 flex-col items-end"
+          style={{ top: hover.top }}
+        >
+          <div
+            className="overflow-hidden rounded-sm border border-strata-paper/20 bg-black shadow-2xl"
+            style={{
+              width: tile.thumb.w,
+              height: tile.thumb.h,
+              backgroundImage: `url(${tile.url})`,
+              backgroundSize: `${tile.size.w}px ${tile.size.h}px`,
+              backgroundPosition: `${tile.bgPos.x}px ${tile.bgPos.y}px`,
+              backgroundRepeat: "no-repeat",
+            }}
+          />
+          <div className="mt-2 flex max-w-full items-center gap-2 rounded-sm bg-strata-bg/85 px-2 py-1 backdrop-blur">
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] tabular-nums text-strata-paper">
+              {formatTime(hoveredChapter.startSeconds)}
+            </span>
+            <span className="text-strata-paper/40">·</span>
+            <span className="truncate text-[11px] text-strata-paper/85">
+              {hoveredChapter.name}
+            </span>
+          </div>
         </div>
       )}
     </aside>
