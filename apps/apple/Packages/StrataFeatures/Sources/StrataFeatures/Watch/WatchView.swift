@@ -21,6 +21,9 @@ public struct WatchView: View {
     @State private var pinchBaselineGravity: AVLayerVideoGravity = .resizeAspect
     @State private var showGravityIndicator = false
     @State private var gravityIndicatorTask: Task<Void, Never>?
+    #if os(tvOS)
+    @FocusState private var chromeFocused: Bool
+    #endif
 
     public init(request: WatchRequest) {
         self.request = request
@@ -77,6 +80,10 @@ public struct WatchView: View {
                         onShowDetails: { withAnimation { showStreamDetails.toggle() } },
                         onTogglePiP: { pip.toggle() }
                     )
+                    #if os(tvOS)
+                    .focused($chromeFocused)
+                    .focusSection()
+                    #endif
                     .transition(.opacity)
                 }
             }
@@ -138,7 +145,27 @@ public struct WatchView: View {
             }
         }
         .contentShape(Rectangle())
-        #if !os(tvOS)
+        #if os(tvOS)
+        .onPlayPauseCommand {
+            services.engine.togglePlay()
+            wakeChrome()
+        }
+        .onMoveCommand { _ in wakeChrome() }
+        .onExitCommand {
+            if !hideChrome {
+                withAnimation(.easeOut(duration: 0.25)) { hideChrome = true }
+            } else {
+                dismiss()
+            }
+        }
+        .onChange(of: chromeFocused) { _, focused in
+            if focused {
+                hideTimer?.cancel()
+            } else {
+                scheduleAutoHide()
+            }
+        }
+        #else
         .onTapGesture {
             withAnimation(.easeOut(duration: 0.25)) { hideChrome.toggle() }
             scheduleAutoHide()
@@ -247,13 +274,25 @@ public struct WatchView: View {
     private func scheduleAutoHide() {
         hideTimer?.cancel()
         hideTimer = Task {
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
             if Task.isCancelled { return }
             await MainActor.run {
+                #if os(tvOS)
+                if chromeFocused { return }
+                #endif
                 withAnimation(.easeOut(duration: 0.35)) { hideChrome = true }
             }
         }
     }
+
+    #if os(tvOS)
+    private func wakeChrome() {
+        if hideChrome {
+            withAnimation(.easeOut(duration: 0.25)) { hideChrome = false }
+        }
+        scheduleAutoHide()
+    }
+    #endif
 
     private func flashGravityIndicator() {
         gravityIndicatorTask?.cancel()

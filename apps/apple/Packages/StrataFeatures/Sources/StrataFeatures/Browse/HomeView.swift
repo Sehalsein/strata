@@ -67,7 +67,7 @@ public struct HomeView: View {
     #if os(tvOS)
     private var tvBody: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 56) {
+            VStack(alignment: .leading, spacing: 80) {
                 if let feature = featuredItem {
                     HeroBillboard(item: feature, images: services.images) {
                         services.coordinator.requestWatch(feature.id, start: feature.resumePositionSeconds)
@@ -85,9 +85,12 @@ public struct HomeView: View {
                 .padding(.horizontal, 60)
                 Spacer(minLength: 60)
             }
-            .padding(.top, 32)
             .padding(.bottom, 40)
         }
+        // Bleed the hero past tvOS's overscan safe area so the cover image
+        // fills the screen edge-to-edge and extends behind the top tab bar,
+        // matching the iPad billboard. Shelves keep their inner .padding(60).
+        .ignoresSafeArea()
     }
 
     private var featuredItem: BaseItem? {
@@ -146,30 +149,25 @@ public struct HomeView: View {
 
 #if os(tvOS)
 
-/// Editorial hero billboard for tvOS Home. Anchors the page with a backdrop
-/// image, programme overline, big Fraunces title, and PLAY / MORE INFO CTAs.
+/// Editorial hero billboard for tvOS Home. Mirrors the web's "Tonight in
+/// Repertory" layout: red-dot overline, oversize Fraunces title, metadata
+/// row, italic tagline, and the editorial BEGIN / PROGRAMME CTAs.
 private struct HeroBillboard: View {
     let item: BaseItem
     let images: ImageURLBuilder?
     let onPlay: () -> Void
     let onInfo: () -> Void
 
-    private static let dateLine: String = {
-        let f = DateFormatter()
-        f.dateFormat = "MMM yyyy"
-        return f.string(from: Date()).uppercased()
-    }()
-
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             backdrop
             scrim
             content
-                .padding(.leading, 80)
-                .padding(.trailing, 60)
-                .padding(.bottom, 56)
+                .padding(.leading, 100)
+                .padding(.trailing, 100)
+                .padding(.bottom, 180)
         }
-        .frame(height: 640)
+        .frame(height: 880)
         .frame(maxWidth: .infinity)
         .clipped()
     }
@@ -200,15 +198,18 @@ private struct HeroBillboard: View {
 
     private var scrim: some View {
         ZStack {
+            // Heavier bottom-to-top ink wash so the title/metadata always
+            // reads on top of bright backdrops.
             LinearGradient(
                 colors: [Strata.Tokens.bg.opacity(0.0),
-                         Strata.Tokens.bg.opacity(0.55),
+                         Strata.Tokens.bg.opacity(0.25),
+                         Strata.Tokens.bg.opacity(0.85),
                          Strata.Tokens.bg],
                 startPoint: .top, endPoint: .bottom
             )
             LinearGradient(
-                colors: [Strata.Tokens.bg.opacity(0.8),
-                         Strata.Tokens.bg.opacity(0.3),
+                colors: [Strata.Tokens.bg.opacity(0.85),
+                         Strata.Tokens.bg.opacity(0.35),
                          .clear],
                 startPoint: .leading, endPoint: .trailing
             )
@@ -216,53 +217,102 @@ private struct HeroBillboard: View {
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 22) {
             overline
             Text(item.displayTitle)
-                .font(.fraunces(74, opticalSize: 144, soft: 40, wonk: 1))
+                .font(.fraunces(96, opticalSize: 144, soft: 40, wonk: 1))
                 .foregroundStyle(Strata.Tokens.paper)
                 .lineLimit(2)
-                .minimumScaleFactor(0.5)
-                .frame(maxWidth: 980, alignment: .leading)
+                .minimumScaleFactor(0.45)
+                .frame(maxWidth: 1100, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+            metadata
             if let blurb = blurb {
                 Text(blurb)
-                    .font(.fraunces(20, opticalSize: 36, soft: 100))
+                    .font(.fraunces(22, opticalSize: 36, soft: 100))
                     .italic()
                     .foregroundStyle(Strata.Tokens.paperDim)
                     .lineLimit(2)
-                    .frame(maxWidth: 820, alignment: .leading)
+                    .frame(maxWidth: 860, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 18) {
+            HStack(spacing: 20) {
                 PrimaryButton(playLabel, systemImage: "play.fill", action: onPlay)
-                SecondaryButton("More info", systemImage: "info.circle", action: onInfo)
+                SecondaryButton("Programme", systemImage: "info.circle", action: onInfo)
             }
-            .padding(.top, 8)
+            .padding(.top, 12)
         }
     }
 
     private var overline: some View {
         HStack(spacing: 14) {
-            Text("TONIGHT'S PROGRAMME")
-                .font(.mono(13, weight: .semibold))
-                .tracking(3.2)
-                .foregroundStyle(Strata.Tokens.paperDim)
-            Rectangle().fill(Strata.Tokens.paperHair).frame(width: 40, height: 1)
-            Text("N° \(StrataTheme.opus(for: item.id))")
-                .font(.mono(13))
-                .tracking(2.0)
-                .foregroundStyle(Strata.Tokens.paperDim)
-            Rectangle().fill(Strata.Tokens.paperHair).frame(width: 40, height: 1)
-            Text(Self.dateLine)
-                .font(.mono(13))
-                .tracking(2.0)
-                .foregroundStyle(Strata.Tokens.paperDim)
+            Circle()
+                .fill(Strata.Tokens.accent)
+                .frame(width: 10, height: 10)
+            Text("TONIGHT IN REPERTORY")
+                .font(.mono(14, weight: .semibold))
+                .tracking(3.4)
+                .foregroundStyle(Strata.Tokens.paper)
+        }
+    }
+
+    private var metadata: some View {
+        HStack(spacing: 14) {
+            ForEach(Array(metadataParts.enumerated()), id: \.offset) { idx, part in
+                if idx > 0 {
+                    Circle()
+                        .fill(Strata.Tokens.paperFaint)
+                        .frame(width: 4, height: 4)
+                }
+                part
+            }
+        }
+        .font(.mono(13))
+        .tracking(2.0)
+        .foregroundStyle(Strata.Tokens.paperDim)
+    }
+
+    /// Builds the bullet-separated row: year · runtime · type · rating.
+    private var metadataParts: [AnyView] {
+        var parts: [AnyView] = []
+        if let year = item.productionYear {
+            parts.append(AnyView(Text(String(year))))
+        }
+        if let runtime = runtimeLabel {
+            parts.append(AnyView(Text(runtime)))
+        }
+        parts.append(AnyView(
+            Text(kindLabel)
+                .italic()
+                .font(.fraunces(14, opticalSize: 24, soft: 100))
+        ))
+        if let rating = item.officialRating, !rating.isEmpty {
+            parts.append(AnyView(Text(rating)))
+        }
+        return parts
+    }
+
+    private var runtimeLabel: String? {
+        guard let secs = item.runtimeSeconds, secs > 0 else { return nil }
+        let total = Int(secs)
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        if hours > 0 {
+            return minutes > 0 ? "\(hours)H \(minutes)M" : "\(hours)H"
+        }
+        return "\(minutes)M"
+    }
+
+    private var kindLabel: String {
+        switch item.type {
+        case .series, .season, .episode: return "a series"
+        default: return "a motion picture"
         }
     }
 
     private var playLabel: String {
-        item.resumePositionSeconds == nil ? "Play" : "Resume"
+        item.resumePositionSeconds == nil ? "Begin" : "Resume"
     }
 
     private var blurb: String? {

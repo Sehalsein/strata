@@ -3,8 +3,9 @@ import SwiftUI
 import StrataDesign
 
 /// tvOS shell. Uses TabView with the focus-driven top tab bar that's
-/// idiomatic on Apple TV, and pushes detail / watch screens onto a
-/// NavigationStack inside the active tab.
+/// idiomatic on Apple TV. Detail screens push onto a NavigationStack inside
+/// the active tab; playback is presented as a fullScreenCover so the tab
+/// bar disappears while watching.
 struct TVShell: View {
     @Environment(AppServices.self) private var services
     @State private var section: AppSection = .home
@@ -12,6 +13,7 @@ struct TVShell: View {
     @State private var moviesPath: [Route] = []
     @State private var showsPath: [Route] = []
     @State private var searchPath: [Route] = []
+    @State private var watchRequest: WatchRequest?
 
     var body: some View {
         TabView(selection: $section) {
@@ -25,6 +27,9 @@ struct TVShell: View {
                 .tabItem { Label(sec.title, systemImage: sec.systemImage) }
                 .tag(sec)
             }
+        }
+        .fullScreenCover(item: $watchRequest) { request in
+            WatchView(request: request)
         }
         .onChange(of: services.coordinator.pendingRoute) { _, new in
             applyPending(new)
@@ -42,13 +47,18 @@ struct TVShell: View {
 
     private func applyPending(_ route: Route?) {
         guard let route else { return }
-        // tvOS doesn't have fullScreenCover; push WatchView onto the active
-        // stack instead. The Siri Remote's Menu button pops it.
-        switch section {
-        case .home: homePath.append(route)
-        case .movies: moviesPath.append(route)
-        case .shows: showsPath.append(route)
-        case .search: searchPath.append(route)
+        // Watch goes to a fullScreenCover so the tab bar disappears. Everything
+        // else pushes onto the active tab's NavigationStack.
+        switch route {
+        case .watch(let req):
+            watchRequest = req
+        default:
+            switch section {
+            case .home: homePath.append(route)
+            case .movies: moviesPath.append(route)
+            case .shows: showsPath.append(route)
+            case .search: searchPath.append(route)
+            }
         }
         services.coordinator.pendingRoute = nil
     }

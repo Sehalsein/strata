@@ -9,6 +9,8 @@ public struct MovieDetailView: View {
     public let id: String
 
     @State private var item: BaseItem?
+    @State private var similar: [BaseItem] = []
+    @State private var isFavorite: Bool = false
     @State private var isLoading = true
 
     public init(id: String, path: Binding<[Route]>) {
@@ -30,7 +32,14 @@ public struct MovieDetailView: View {
     }
 
     private func detail(item: BaseItem) -> some View {
-        ScrollView {
+        #if os(tvOS)
+        let heroHeight: CGFloat = 620
+        let textGutter: CGFloat = 80
+        #else
+        let heroHeight: CGFloat = 460
+        let textGutter: CGFloat = 20
+        #endif
+        return ScrollView {
             GeometryReader { geo in
                 ZStack(alignment: .bottomLeading) {
                     if let url = services.images?.backdrop(itemId: id) {
@@ -38,7 +47,7 @@ public struct MovieDetailView: View {
                             switch phase {
                             case .success(let img):
                                 img.resizable().scaledToFill()
-                                    .frame(width: geo.size.width, height: 460)
+                                    .frame(width: geo.size.width, height: heroHeight)
                                     .clipped()
                                     .overlay(
                                         LinearGradient(
@@ -48,10 +57,10 @@ public struct MovieDetailView: View {
                                     )
                             default:
                                 Rectangle().fill(Strata.Tokens.bg2)
-                                    .frame(width: geo.size.width, height: 460)
+                                    .frame(width: geo.size.width, height: heroHeight)
                             }
                         }
-                        .frame(width: geo.size.width, height: 460)
+                        .frame(width: geo.size.width, height: heroHeight)
                         .clipped()
                     }
                     VStack(alignment: .leading, spacing: 12) {
@@ -63,13 +72,7 @@ public struct MovieDetailView: View {
                             .minimumScaleFactor(0.5)
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
-                        HStack(spacing: 8) {
-                            if let year = item.productionYear { Chip(String(year)) }
-                            if let rating = item.officialRating { Chip(rating) }
-                            if let minutes = item.runtimeSeconds.map({ Int($0/60) }) {
-                                Chip("\(minutes) MIN")
-                            }
-                        }
+                        MetadataRow(item: item)
                         if let tag = item.taglines?.first {
                             Text(tag)
                                 .font(.fraunces(20, opticalSize: 36, soft: 100))
@@ -80,25 +83,28 @@ public struct MovieDetailView: View {
                                 .minimumScaleFactor(0.7)
                         }
                     }
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, textGutter)
                     .padding(.bottom, 20)
                     .padding(.top, 28)
                     .frame(width: geo.size.width, alignment: .leading)
                 }
-                .frame(width: geo.size.width, height: 460)
+                .frame(width: geo.size.width, height: heroHeight)
             }
-            .frame(height: 460)
+            .frame(height: heroHeight)
 
-            VStack(alignment: .leading, spacing: 20) {
-                HStack(spacing: 12) {
-                    PrimaryButton(playLabel(item), systemImage: "play.fill") {
-                        services.coordinator.requestWatch(id, start: item.resumePositionSeconds)
-                    }
-                    if let resume = item.resumePositionSeconds {
-                        SecondaryButton("Restart", systemImage: "arrow.counterclockwise") {
-                            services.coordinator.requestWatch(id, start: 0)
+            VStack(alignment: .leading, spacing: sectionSpacing) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        PrimaryButton(playLabel(item), systemImage: "play.fill") {
+                            services.coordinator.requestWatch(id, start: item.resumePositionSeconds)
                         }
-                        Text("RESUME \(format(resume))").strataSpec()
+                        if let resume = item.resumePositionSeconds {
+                            SecondaryButton("Restart", systemImage: "arrow.counterclockwise") {
+                                services.coordinator.requestWatch(id, start: 0)
+                            }
+                            Text("RESUME \(format(resume))").strataSpec()
+                        }
+                        WatchlistButton(itemId: id, isFavorite: $isFavorite, client: services.client)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -118,13 +124,30 @@ public struct MovieDetailView: View {
                         }
                     }
                 }
+                if let people = item.people, !people.isEmpty {
+                    CastShelf(people: people, images: services.images)
+                }
+                if !similar.isEmpty {
+                    SimilarShelf(items: similar, images: services.images) { picked in
+                        path.append(.unified(id: picked.id))
+                    }
+                }
+                MovieInfoSection(item: item)
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, textGutter)
             .padding(.top, 12)
             .padding(.bottom, 60)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .ignoresSafeArea(edges: .top)
+        .ignoresSafeArea()
+    }
+
+    private var sectionSpacing: CGFloat {
+        #if os(tvOS)
+        40
+        #else
+        24
+        #endif
     }
 
     private func playLabel(_ item: BaseItem) -> String {
@@ -158,12 +181,17 @@ public struct MovieDetailView: View {
         Log.detail.info("MovieDetailView.load enter \(id, privacy: .public)")
         isLoading = true
         defer { isLoading = false }
-        do {
-            let fetched = try await client.getItem(id)
-            Log.detail.info("MovieDetailView.load ok \(id, privacy: .public) type=\(fetched.type?.rawValue ?? "?", privacy: .public)")
+        async let itemTask: BaseItem? = try? await client.getItem(id)
+        async let similarTask: [BaseItem] = (try? await client.getSimilarItems(itemId: id, limit: 12)) ?? []
+        let fetched = await itemTask
+        let fetchedSimilar = await similarTask
+        if let fetched {
+            Log.detail.info("MovieDetailView.load ok \(id, privacy: .public) type=\(fetched.type?.rawValue ?? "?", privacy: .public) similar=\(fetchedSimilar.count, privacy: .public)")
             item = fetched
-        } catch {
-            Log.detail.error("MovieDetailView.load fail \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+            isFavorite = fetched.userData?.isFavorite ?? false
+        } else {
+            Log.detail.error("MovieDetailView.load fail \(id, privacy: .public)")
         }
+        similar = fetchedSimilar
     }
 }

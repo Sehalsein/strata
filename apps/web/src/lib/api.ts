@@ -6,6 +6,7 @@ import { getTvShowsApi } from "@jellyfin/sdk/lib/utils/api/tv-shows-api";
 import { getMediaInfoApi } from "@jellyfin/sdk/lib/utils/api/media-info-api";
 import { getPlaystateApi } from "@jellyfin/sdk/lib/utils/api/playstate-api";
 import { getUserApi } from "@jellyfin/sdk/lib/utils/api/user-api";
+import { getLibraryApi } from "@jellyfin/sdk/lib/utils/api/library-api";
 import {
   BaseItemKind,
   ImageType,
@@ -175,6 +176,32 @@ export const getSeasons = async (seriesId: string): Promise<BaseItemDto[]> => {
     seriesId,
   });
   return res.data.Items ?? [];
+};
+
+export const getSimilarItems = async (
+  itemId: string,
+  limit = 12,
+): Promise<BaseItemDto[]> => {
+  const res = await getLibraryApi(api).getSimilarItems({
+    itemId,
+    userId: requireUserId(),
+    limit,
+    fields: [ItemFields.Overview, ItemFields.Genres],
+  });
+  return res.data.Items ?? [];
+};
+
+export const setFavorite = async (
+  itemId: string,
+  isFavorite: boolean,
+): Promise<void> => {
+  const userId = requireUserId();
+  const lib = getUserLibraryApi(api);
+  if (isFavorite) {
+    await lib.markFavoriteItem({ userId, itemId });
+  } else {
+    await lib.unmarkFavoriteItem({ userId, itemId });
+  }
 };
 
 export const getEpisodes = async (

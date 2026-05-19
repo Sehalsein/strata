@@ -4,7 +4,7 @@ import { Link, Navigate, useParams } from "@tanstack/react-router";
 import { motion, useReducedMotion, useScroll, useTransform } from "motion/react";
 import {
   getItem,
-  listMovies,
+  getSimilarItems,
   ticksToMinutes,
   type BaseItemDto,
 } from "@/lib/api";
@@ -12,8 +12,11 @@ import { useSession } from "@/lib/auth-client";
 import { posterUrl, backdropUrl, formatRuntime } from "@/lib/utils";
 import { opusFor, paletteFor, volumeFor } from "@/strata/theme";
 import { Skeleton } from "@/strata/primitives";
-import { Poster, DetailMotif } from "@/strata/Poster";
-import { usePageAmbient, useHoverAmbient } from "@/strata/ambient";
+import { DetailMotif } from "@/strata/Poster";
+import { usePageAmbient } from "@/strata/ambient";
+import { CreditsRow } from "@/strata/CreditsRow";
+import { WatchlistToggle } from "@/strata/WatchlistToggle";
+import { SimilarShelf as SimilarShelfRow } from "@/strata/SimilarShelf";
 
 const yearOf = (m: BaseItemDto): string | null => {
   if (m.ProductionYear) return String(m.ProductionYear);
@@ -34,9 +37,9 @@ const MovieDetailInner = ({ id }: { id: string }) => {
     queryKey: ["movie", id],
     queryFn: () => getItem(id),
   });
-  const all = useQuery({
-    queryKey: ["movies-list"],
-    queryFn: listMovies,
+  const similarQ = useQuery({
+    queryKey: ["similar", id],
+    queryFn: () => getSimilarItems(id, 12),
   });
 
   usePageAmbient(id, 0.95);
@@ -48,7 +51,9 @@ const MovieDetailInner = ({ id }: { id: string }) => {
   const year = yearOf(m);
   const score = m.CommunityRating ? Math.round(m.CommunityRating * 10) : null;
   const runtime = ticksToMinutes(m.RunTimeTicks);
-  const similar = (all.data ?? []).filter((x) => x.Id !== id).slice(0, 8);
+  const similar = (similarQ.data ?? []).slice(0, 8);
+  const cast = m.People ?? [];
+  const isFav = Boolean(m.UserData?.IsFavorite);
 
   const audioStreams = (m.MediaSources?.[0]?.MediaStreams ?? []).filter(
     (s) => s.Type === "Audio",
@@ -73,6 +78,7 @@ const MovieDetailInner = ({ id }: { id: string }) => {
         tagline={m.Taglines?.[0] ?? null}
         score={score}
         playTo={`/watch/${id}`}
+        isFav={isFav}
       />
 
       <div className="relative z-10 mx-auto grid max-w-[1680px] grid-cols-1 gap-x-12 gap-y-14 px-8 pb-20 pt-16 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-12">
@@ -83,8 +89,22 @@ const MovieDetailInner = ({ id }: { id: string }) => {
             genres={m.Genres ?? []}
           />
 
+          {cast.length > 0 && (
+            <section className="flex flex-col gap-7">
+              <SectionMark chapter="II" label="Players" sub={`${cast.filter((p) => p.Type === "Actor").length || cast.length} on screen`} />
+              <CreditsRow people={cast} />
+            </section>
+          )}
+
           {similar.length > 0 && (
-            <SimilarShelf items={similar} />
+            <section className="flex flex-col gap-8">
+              <SectionMark
+                chapter={cast.length > 0 ? "III" : "II"}
+                label="In the Same Spirit"
+                sub={`${similar.length} adjacent titles`}
+              />
+              <SimilarShelfRow items={similar} />
+            </section>
           )}
         </article>
 
@@ -120,6 +140,7 @@ const DetailHero = ({
   tagline,
   score,
   playTo,
+  isFav,
 }: {
   id: string;
   title: string;
@@ -129,6 +150,7 @@ const DetailHero = ({
   tagline: string | null;
   score: number | null;
   playTo: string;
+  isFav: boolean;
 }) => {
   const reduce = useReducedMotion();
   const { scrollY } = useScroll();
@@ -259,10 +281,7 @@ const DetailHero = ({
                 Begin
               </Link>
             </motion.div>
-            <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }} className="btn-glass">
-              <PlusIcon className="h-3.5 w-3.5" />
-              Watchlist
-            </motion.button>
+            <WatchlistToggle itemId={id} initialIsFavorite={isFav} />
             <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }} className="btn-glass">
               <DotsIcon className="h-3.5 w-3.5" />
               More
@@ -451,84 +470,6 @@ const dropCap = (text: string) => {
 };
 
 /* ───────────── Similar shelf ───────────── */
-
-const SimilarShelf = ({ items }: { items: BaseItemDto[] }) => (
-  <section className="flex flex-col gap-8">
-    <SectionMark chapter="II" label="In the Same Spirit" sub={`${items.length} adjacent titles`} />
-    <div
-      className="row-mask no-scrollbar -mx-3 flex gap-6 overflow-x-auto px-3 pb-3"
-      style={{ scrollSnapType: "x proximity" }}
-    >
-      {items.map((s, idx) => (
-        <SimilarItem
-          key={s.Id!}
-          id={s.Id!}
-          title={s.Name ?? "Untitled"}
-          year={yearOf(s)}
-          to={`/movies/${s.Id}`}
-          idx={idx + 1}
-        />
-      ))}
-    </div>
-  </section>
-);
-
-const SimilarItem = ({
-  id,
-  title,
-  year,
-  to,
-  idx,
-}: {
-  id: string;
-  title: string;
-  year: string | null;
-  to: string;
-  idx: number;
-}) => {
-  const ambient = useHoverAmbient(id);
-  return (
-    <motion.div
-      whileHover={{ y: -5 }}
-      transition={{ type: "spring", stiffness: 300, damping: 22 }}
-      onPointerEnter={ambient.onPointerEnter}
-      onPointerLeave={ambient.onPointerLeave}
-      style={{ scrollSnapAlign: "start" }}
-    >
-      <Link to={to as never} className="block w-[170px] shrink-0 no-underline">
-        <Poster
-          id={id}
-          title={title}
-          year={year}
-          imageUrl={posterUrl(id, "w342")}
-          width={170}
-          radius={2}
-          showBadges={false}
-          showTitle={false}
-        />
-        <div className="mt-3 flex items-baseline justify-between gap-2">
-          <span className="font-mono text-[9px] uppercase tracking-[0.22em] text-strata-text/35">
-            № {String(idx).padStart(2, "0")}
-          </span>
-          {year && (
-            <span className="font-mono text-[9px] uppercase tracking-[0.22em] text-strata-text/45">
-              {year}
-            </span>
-          )}
-        </div>
-        <div
-          className="mt-1 truncate font-display text-[15px] leading-tight text-strata-paper"
-          style={{
-            fontVariationSettings: '"opsz" 30, "SOFT" 50',
-            letterSpacing: "-0.02em",
-          }}
-        >
-          {title}
-        </div>
-      </Link>
-    </motion.div>
-  );
-};
 
 /* ───────────── Sidebar cards ───────────── */
 

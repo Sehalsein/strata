@@ -65,7 +65,34 @@ public struct JellyfinClient: Sendable {
     public func getItem(_ itemId: String) async throws -> BaseItem {
         let userId = try requireUserId()
         let path = "/Users/\(userId)/Items/\(itemId)"
-        return try await get(path: path, query: [])
+        let q: [URLQueryItem] = [
+            .init(name: "fields", value: Self.detailFields.joined(separator: ","))
+        ]
+        return try await get(path: path, query: q)
+    }
+
+    public func getSimilarItems(itemId: String, limit: Int = 12) async throws -> [BaseItem] {
+        let userId = try requireUserId()
+        let q: [URLQueryItem] = [
+            .init(name: "userId", value: userId),
+            .init(name: "limit", value: String(limit)),
+            .init(name: "fields", value: "Overview,Genres,ProductionYear")
+        ]
+        let env: ItemsEnvelope<BaseItem> = try await get(path: "/Items/\(itemId)/Similar", query: q)
+        return env.items ?? []
+    }
+
+    public func setFavorite(itemId: String, isFavorite: Bool) async throws {
+        let userId = try requireUserId()
+        let path = "/Users/\(userId)/FavoriteItems/\(itemId)"
+        let method = isFavorite ? "POST" : "DELETE"
+        var req = try makeRequest(method: method, path: path)
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (_, response) = try await urlSession.data(for: req)
+        guard let http = response as? HTTPURLResponse else { return }
+        guard (200..<300).contains(http.statusCode) else {
+            throw RequestError.http(status: http.statusCode, body: nil)
+        }
     }
 
     public func getSeasons(seriesId: String) async throws -> [BaseItem] {
@@ -183,6 +210,10 @@ public struct JellyfinClient: Sendable {
     // MARK: - Helpers
 
     private static let movieFields = ["Overview", "Genres", "MediaSources", "MediaStreams", "OriginalTitle", "Taglines"]
+    private static let detailFields = [
+        "Overview", "Genres", "MediaSources", "MediaStreams",
+        "OriginalTitle", "Taglines", "People", "ProductionYear", "PremiereDate"
+    ]
 
     private func getItems(
         includeItemTypes: [String],

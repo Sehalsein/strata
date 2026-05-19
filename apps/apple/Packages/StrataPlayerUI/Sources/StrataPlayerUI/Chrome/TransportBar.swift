@@ -30,7 +30,7 @@ public struct TransportBar: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: containerSpacing) {
             titleRow
             Scrubber(
                 position: engine.position,
@@ -51,9 +51,9 @@ public struct TransportBar: View {
                 regularControls
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, horizontalPadding)
         .padding(.top, 16)
-        .padding(.bottom, 20)
+        .padding(.bottom, bottomPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             LinearGradient(
@@ -61,6 +61,28 @@ public struct TransportBar: View {
                 startPoint: .top, endPoint: .bottom
             )
         )
+    }
+
+    private var containerSpacing: CGFloat {
+        #if os(tvOS)
+        24
+        #else
+        12
+        #endif
+    }
+    private var horizontalPadding: CGFloat {
+        #if os(tvOS)
+        60
+        #else
+        16
+        #endif
+    }
+    private var bottomPadding: CGFloat {
+        #if os(tvOS)
+        48
+        #else
+        20
+        #endif
     }
 
     private var titleRow: some View {
@@ -98,6 +120,14 @@ public struct TransportBar: View {
     }
 
     private var playPauseButton: some View {
+        #if os(tvOS)
+        Button(action: engine.togglePlay) {
+            Image(systemName: engine.status == .playing ? "pause.fill" : "play.fill")
+                .font(.system(size: 36, weight: .semibold))
+                .frame(width: 96, height: 96)
+        }
+        .buttonStyle(StrataTransportButtonStyle(isPrimary: true))
+        #else
         Button(action: engine.togglePlay) {
             Image(systemName: engine.status == .playing ? "pause.fill" : "play.fill")
                 .font(.system(size: isCompact ? 20 : 22, weight: .semibold))
@@ -107,6 +137,7 @@ public struct TransportBar: View {
                 .clipShape(RoundedRectangle(cornerRadius: Strata.cornerRadius))
         }
         .buttonStyle(.plain)
+        #endif
     }
 
     private var compactControls: some View {
@@ -134,6 +165,21 @@ public struct TransportBar: View {
     }
 
     private var regularControls: some View {
+        #if os(tvOS)
+        HStack(spacing: 22) {
+            ControlButton(systemImage: "gobackward.10") { Task { await engine.skip(-10) } }
+            playPauseButton
+            ControlButton(systemImage: "goforward.10") { Task { await engine.skip(10) } }
+            Spacer()
+            SpeedMenu(engine: engine)
+            AudioMenu(engine: engine)
+            SubtitleMenu(engine: engine)
+            ControlButton(systemImage: engine.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill") {
+                engine.toggleMute()
+            }
+        }
+        .padding(.vertical, 8)
+        #else
         HStack(spacing: 14) {
             ControlButton(systemImage: "gobackward.10") { Task { await engine.skip(-10) } }
             playPauseButton
@@ -148,6 +194,7 @@ public struct TransportBar: View {
                 engine.toggleMute()
             }
         }
+        #endif
     }
 
     private func format(_ t: TimeInterval) -> String {
@@ -168,6 +215,14 @@ public struct ControlButton: View {
     }
 
     public var body: some View {
+        #if os(tvOS)
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 26, weight: .semibold))
+                .frame(width: 78, height: 78)
+        }
+        .buttonStyle(StrataTransportButtonStyle())
+        #else
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 18, weight: .semibold))
@@ -177,6 +232,7 @@ public struct ControlButton: View {
                 .clipShape(RoundedRectangle(cornerRadius: Strata.cornerRadius))
         }
         .buttonStyle(.plain)
+        #endif
     }
 }
 
@@ -188,6 +244,14 @@ struct CompactControlButton: View {
     var isCircle: Bool = false
 
     var body: some View {
+        #if os(tvOS)
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 22, weight: .semibold))
+                .frame(width: 64, height: 64)
+        }
+        .buttonStyle(StrataTransportButtonStyle())
+        #else
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 15, weight: .semibold))
@@ -201,5 +265,6 @@ struct CompactControlButton: View {
                 )
         }
         .buttonStyle(.plain)
+        #endif
     }
 }

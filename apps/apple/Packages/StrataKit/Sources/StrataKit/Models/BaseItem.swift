@@ -25,6 +25,7 @@ public struct BaseItem: Codable, Identifiable, Hashable, Sendable {
     public let mediaSources: [MediaSource]?
     public let mediaStreams: [MediaStream]?
     public let chapters: [Chapter]?
+    public let people: [Person]?
 
     public enum CodingKeys: String, CodingKey {
         case id = "Id"
@@ -51,6 +52,23 @@ public struct BaseItem: Codable, Identifiable, Hashable, Sendable {
         case mediaSources = "MediaSources"
         case mediaStreams = "MediaStreams"
         case chapters = "Chapters"
+        case people = "People"
+    }
+}
+
+public struct Person: Codable, Hashable, Identifiable, Sendable {
+    public let id: String
+    public let name: String?
+    public let role: String?
+    public let type: String?
+    public let primaryImageTag: String?
+
+    public enum CodingKeys: String, CodingKey {
+        case id = "Id"
+        case name = "Name"
+        case role = "Role"
+        case type = "Type"
+        case primaryImageTag = "PrimaryImageTag"
     }
 }
 

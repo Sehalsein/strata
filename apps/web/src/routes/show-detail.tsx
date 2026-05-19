@@ -6,6 +6,7 @@ import {
   getItem,
   getSeasons,
   getEpisodes,
+  getSimilarItems,
   ticksToMinutes,
   type BaseItemDto,
 } from "@/lib/api";
@@ -15,6 +16,9 @@ import { opusFor, paletteFor, volumeFor } from "@/strata/theme";
 import { ProgressBar, Skeleton } from "@/strata/primitives";
 import { DetailMotif } from "@/strata/Poster";
 import { usePageAmbient } from "@/strata/ambient";
+import { CreditsRow } from "@/strata/CreditsRow";
+import { WatchlistToggle } from "@/strata/WatchlistToggle";
+import { SimilarShelf as SimilarShelfRow } from "@/strata/SimilarShelf";
 import { SidebarHeader } from "./movie-detail";
 
 const yearOf = (s: BaseItemDto): string | null => {
@@ -44,6 +48,10 @@ const ShowDetailInner = ({ id }: { id: string }) => {
     queryKey: ["episodes", id],
     queryFn: () => getEpisodes(id),
   });
+  const similarQ = useQuery({
+    queryKey: ["similar", id],
+    queryFn: () => getSimilarItems(id, 12),
+  });
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
 
   usePageAmbient(id, 0.95);
@@ -55,6 +63,9 @@ const ShowDetailInner = ({ id }: { id: string }) => {
   const s = show.data;
   const seasons = seasonsQ.data ?? [];
   const episodes = episodesQ.data ?? [];
+  const similar = (similarQ.data ?? []).slice(0, 8);
+  const cast = s.People ?? [];
+  const isFav = Boolean(s.UserData?.IsFavorite);
   const year = yearOf(s);
   const score = s.CommunityRating ? Math.round(s.CommunityRating * 10) : null;
   const activeSeason = selectedSeason ?? seasons[0]?.IndexNumber ?? 1;
@@ -63,6 +74,12 @@ const ShowDetailInner = ({ id }: { id: string }) => {
   );
   const totalEpisodes = episodes.length;
   const seasonsCount = seasons.length;
+  const firstEpisode = episodes
+    .slice()
+    .sort((a, b) =>
+      (a.ParentIndexNumber ?? 0) - (b.ParentIndexNumber ?? 0) ||
+      (a.IndexNumber ?? 0) - (b.IndexNumber ?? 0),
+    )[0];
 
   return (
     <motion.div
@@ -80,6 +97,8 @@ const ShowDetailInner = ({ id }: { id: string }) => {
         episodesCount={totalEpisodes}
         score={score}
         tagline={s.Taglines?.[0] ?? null}
+        firstEpisode={firstEpisode ?? null}
+        isFav={isFav}
       />
 
       <div className="relative z-10 mx-auto grid max-w-[1680px] grid-cols-1 gap-x-12 gap-y-14 px-8 pb-20 pt-16 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-12">
@@ -96,6 +115,28 @@ const ShowDetailInner = ({ id }: { id: string }) => {
             onSelect={setSelectedSeason}
             showId={s.Id!}
           />
+
+          {cast.length > 0 && (
+            <section className="flex flex-col gap-7">
+              <SectionMark
+                chapter="III"
+                label="Players"
+                sub={`${cast.filter((p) => p.Type === "Actor").length || cast.length} on screen`}
+              />
+              <CreditsRow people={cast} />
+            </section>
+          )}
+
+          {similar.length > 0 && (
+            <section className="flex flex-col gap-8">
+              <SectionMark
+                chapter={cast.length > 0 ? "IV" : "III"}
+                label="In the Same Spirit"
+                sub={`${similar.length} adjacent titles`}
+              />
+              <SimilarShelfRow items={similar} />
+            </section>
+          )}
         </article>
 
         <aside className="flex flex-col gap-10">
@@ -123,6 +164,8 @@ const DetailHero = ({
   episodesCount,
   score,
   tagline,
+  firstEpisode,
+  isFav,
 }: {
   id: string;
   title: string;
@@ -132,6 +175,8 @@ const DetailHero = ({
   episodesCount: number;
   score: number | null;
   tagline: string | null;
+  firstEpisode: BaseItemDto | null;
+  isFav: boolean;
 }) => {
   const reduce = useReducedMotion();
   const { scrollY } = useScroll();
@@ -252,14 +297,25 @@ const DetailHero = ({
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-3">
-            <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }} className="btn-play">
-              <PlayIcon className="h-3.5 w-3.5" />
-              Begin S01·E01
-            </motion.button>
-            <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }} className="btn-glass">
-              <PlusIcon className="h-3.5 w-3.5" />
-              Watchlist
-            </motion.button>
+            {firstEpisode?.Id ? (
+              <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}>
+                <Link to={`/watch/${firstEpisode.Id}` as never} className="btn-play">
+                  <PlayIcon className="h-3.5 w-3.5" />
+                  Begin S{String(firstEpisode.ParentIndexNumber ?? 1).padStart(2, "0")}·E{String(firstEpisode.IndexNumber ?? 1).padStart(2, "0")}
+                </Link>
+              </motion.div>
+            ) : (
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.96 }}
+                className="btn-play opacity-50"
+                disabled
+              >
+                <PlayIcon className="h-3.5 w-3.5" />
+                Begin
+              </motion.button>
+            )}
+            <WatchlistToggle itemId={id} initialIsFavorite={isFav} />
           </div>
         </motion.div>
       </motion.div>

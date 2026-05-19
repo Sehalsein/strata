@@ -71,6 +71,66 @@ private struct StrataSecondaryButtonBody: View {
     }
 }
 
+/// Transport icon button — for player controls. Fills with paper on focus
+/// and reverses the icon color so each control reads clearly against the
+/// gradient scrim. Scales 1.10 on focus.
+public struct StrataTransportButtonStyle: ButtonStyle {
+    public let isPrimary: Bool
+    public init(isPrimary: Bool = false) { self.isPrimary = isPrimary }
+    public func makeBody(configuration: Configuration) -> some View {
+        StrataTransportButtonBody(configuration: configuration, isPrimary: isPrimary)
+    }
+}
+
+private struct StrataTransportButtonBody: View {
+    let configuration: ButtonStyle.Configuration
+    let isPrimary: Bool
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+        configuration.label
+            .foregroundStyle(foreground)
+            .background(background)
+            .clipShape(RoundedRectangle(cornerRadius: Strata.cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Strata.cornerRadius, style: .continuous)
+                    .stroke(isFocused ? .clear : Strata.Tokens.paperHairStrong,
+                            lineWidth: isFocused ? 0 : 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.96 : (isFocused ? 1.10 : 1.0))
+            .shadow(color: isFocused ? .black.opacity(0.45) : .clear,
+                    radius: isFocused ? 18 : 0, x: 0, y: isFocused ? 8 : 0)
+            .animation(.easeOut(duration: 0.18), value: isFocused)
+            .animation(.easeOut(duration: 0.10), value: configuration.isPressed)
+    }
+
+    private var foreground: Color {
+        if isPrimary {
+            return Strata.Tokens.bg
+        }
+        return isFocused ? Strata.Tokens.bg : Strata.Tokens.paper
+    }
+
+    private var background: Color {
+        if isPrimary {
+            return Strata.Tokens.paper
+        }
+        return isFocused ? Strata.Tokens.paper : Strata.Tokens.paper.opacity(0.12)
+    }
+}
+
+/// Plain focus-scaler — no border overlay. The label is responsible for its
+/// own focus indicator (e.g. a circular ring around a circular avatar).
+/// Reads `@Environment(\.isFocused)` from inside the label to draw it.
+public struct StrataPlainCardButtonStyle: ButtonStyle {
+    public init() {}
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(.easeOut(duration: 0.18), value: configuration.isPressed)
+    }
+}
+
 /// Poster / card wrapper. The label keeps its own visual identity; focus
 /// is communicated with a single paper hairline and a 1.06 scale. No
 /// floating shadow, no parallax — keeps the editorial flatness.

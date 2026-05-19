@@ -12,6 +12,8 @@ public struct ShowDetailView: View {
     @State private var seasons: [BaseItem] = []
     @State private var selectedSeason: BaseItem?
     @State private var episodes: [BaseItem] = []
+    @State private var similar: [BaseItem] = []
+    @State private var isFavorite: Bool = false
 
     public init(id: String, path: Binding<[Route]>) {
         self.id = id
@@ -26,12 +28,22 @@ public struct ShowDetailView: View {
                     VStack(alignment: .leading, spacing: 28) {
                         hero(item: item)
                             .handoffForViewing(item: item)
+                        actionRow
                         if !seasons.isEmpty {
                             seasonStrip
                         }
                         if !episodes.isEmpty {
                             episodeList
                         }
+                        if let people = item.people, !people.isEmpty {
+                            CastShelf(people: people, images: services.images)
+                        }
+                        if !similar.isEmpty {
+                            SimilarShelf(items: similar, images: services.images) { picked in
+                                path.append(.unified(id: picked.id))
+                            }
+                        }
+                        MovieInfoSection(item: item)
                         Spacer(minLength: 60)
                     }
                     .padding(.horizontal, 20)
@@ -59,13 +71,7 @@ public struct ShowDetailView: View {
                 .minimumScaleFactor(0.5)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    if let year = item.productionYear { Chip(String(year)) }
-                    if let rating = item.officialRating { Chip(rating) }
-                    Chip("\(seasons.count) Seasons", variant: .outline)
-                }
-            }
+            MetadataRow(item: item, extraChips: seasons.isEmpty ? [] : ["\(seasons.count) SEASONS"])
             if let overview = item.overview {
                 Text(overview)
                     .font(.plex(15))
@@ -79,6 +85,25 @@ public struct ShowDetailView: View {
 
     private func heroTitleSize(for text: String) -> CGFloat {
         text.count > 18 ? 36 : 44
+    }
+
+    private var actionRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                if let firstEpisode = episodes.first {
+                    PrimaryButton(playLabel(firstEpisode), systemImage: "play.fill") {
+                        services.coordinator.requestWatch(firstEpisode.id, start: firstEpisode.resumePositionSeconds)
+                    }
+                }
+                WatchlistButton(itemId: id, isFavorite: $isFavorite, client: services.client)
+            }
+        }
+    }
+
+    private func playLabel(_ episode: BaseItem) -> String {
+        let season = episode.parentIndexNumber ?? 1
+        let epNum = episode.indexNumber ?? 1
+        return String(format: "Play S%02d·E%02d", season, epNum)
     }
 
     private var seasonStrip: some View {
@@ -166,11 +191,15 @@ public struct ShowDetailView: View {
         Log.detail.info("ShowDetailView.load enter \(id, privacy: .public)")
         async let i = try? await client.getItem(id)
         async let s = try? await client.getSeasons(seriesId: id)
+        async let sim = (try? await client.getSimilarItems(itemId: id, limit: 12)) ?? []
         let fetchedItem = await i
         let fetchedSeasons = await s ?? []
-        Log.detail.info("ShowDetailView.load ok \(id, privacy: .public) seasons=\(fetchedSeasons.count, privacy: .public)")
+        let fetchedSimilar = await sim
+        Log.detail.info("ShowDetailView.load ok \(id, privacy: .public) seasons=\(fetchedSeasons.count, privacy: .public) similar=\(fetchedSimilar.count, privacy: .public)")
         item = fetchedItem
         seasons = fetchedSeasons
+        similar = fetchedSimilar
+        isFavorite = fetchedItem?.userData?.isFavorite ?? false
         if let first = seasons.first {
             selectedSeason = first
             await loadEpisodes(seasonId: first.id)
