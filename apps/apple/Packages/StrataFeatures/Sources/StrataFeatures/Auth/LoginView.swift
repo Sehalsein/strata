@@ -240,6 +240,27 @@ public struct LoginView: View {
     }
 
     private var signInButton: some View {
+        #if os(tvOS)
+        // tvOS: the editorial focus style owns the chrome. Bare label only.
+        Button(action: submit) {
+            HStack(spacing: 12) {
+                Text(services.auth.isAuthenticating ? "SIGNING IN" : "SIGN IN")
+                    .font(.mono(13, weight: .semibold))
+                    .tracking(2.5)
+                Spacer(minLength: 12)
+                if services.auth.isAuthenticating {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(StrataPrimaryButtonStyle())
+        .disabled(!canSubmit || services.auth.isAuthenticating)
+        .opacity(canSubmit ? 1.0 : 0.5)
+        #else
         Button(action: submit) {
             HStack(spacing: 12) {
                 Text(services.auth.isAuthenticating ? "SIGNING IN" : "SIGN IN")
@@ -264,6 +285,7 @@ public struct LoginView: View {
         }
         .buttonStyle(.plain)
         .disabled(!canSubmit || services.auth.isAuthenticating)
+        #endif
     }
 
     // MARK: - Footer

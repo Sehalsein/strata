@@ -55,9 +55,9 @@ struct DestinationView: View {
     let route: Route
     var body: some View {
         switch route {
-        case .movie(let id):    MovieDetailView(id: id, path: $path)
-        case .show(let id):     ShowDetailView(id: id, path: $path)
-        case .unified(let id):  UnifiedDetailView(id: id, path: $path)
+        case .movie(let id):    MovieDetailView(id: id, path: $path).editorialDetailChrome()
+        case .show(let id):     ShowDetailView(id: id, path: $path).editorialDetailChrome()
+        case .unified(let id):  UnifiedDetailView(id: id, path: $path).editorialDetailChrome()
         case .season:           EmptyView()
         case .watch(let req):   WatchView(request: req)
         }

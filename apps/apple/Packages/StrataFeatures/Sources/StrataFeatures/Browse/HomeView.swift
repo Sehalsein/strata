@@ -18,41 +18,33 @@ public struct HomeView: View {
     public var body: some View {
         ZStack {
             AmbientBackdrop(key: heroKey, intensity: 0.85)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 32) {
-                    header
-                    if !resume.isEmpty {
-                        Shelf(title: "Continue Watching", items: resume, images: services.images) { item in
-                            path.append(.watch(.init(itemId: item.id, startSeconds: item.resumePositionSeconds)))
-                        }
-                    }
-                    if !movies.isEmpty {
-                        Shelf(title: "Recent Films", items: movies, images: services.images) { item in
-                            path.append(.movie(id: item.id))
-                        }
-                    }
-                    if !shows.isEmpty {
-                        Shelf(title: "Recent Series", items: shows, images: services.images) { item in
-                            path.append(.show(id: item.id))
-                        }
-                    }
-                    if isLoading {
-                        VStack(spacing: 16) {
-                            SkeletonBlock(height: 120)
-                            SkeletonBlock(height: 220)
-                        }
-                    }
-                    Spacer(minLength: 60)
-                }
-                .padding(.horizontal, 28)
-                .padding(.top, 32)
-            }
+            #if os(tvOS)
+            tvBody
+            #else
+            standardBody
+            #endif
         }
         .task { await load() }
     }
 
-    private var heroKey: String? {
-        resume.first?.id ?? movies.first?.id ?? shows.first?.id
+    // MARK: - Standard (iOS / iPadOS / macOS)
+
+    private var standardBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 32) {
+                header
+                shelves
+                if isLoading {
+                    VStack(spacing: 16) {
+                        SkeletonBlock(height: 120)
+                        SkeletonBlock(height: 220)
+                    }
+                }
+                Spacer(minLength: 60)
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 32)
+        }
     }
 
     private var header: some View {
@@ -68,6 +60,71 @@ public struct HomeView: View {
                 Chip(name, variant: .outline)
             }
         }
+    }
+
+    // MARK: - tvOS billboard
+
+    #if os(tvOS)
+    private var tvBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 56) {
+                if let feature = featuredItem {
+                    HeroBillboard(item: feature, images: services.images) {
+                        services.coordinator.requestWatch(feature.id, start: feature.resumePositionSeconds)
+                    } onInfo: {
+                        appendRoute(for: feature)
+                    }
+                } else if isLoading {
+                    SkeletonBlock(height: 540)
+                        .padding(.horizontal, 60)
+                }
+
+                VStack(alignment: .leading, spacing: 48) {
+                    shelves
+                }
+                .padding(.horizontal, 60)
+                Spacer(minLength: 60)
+            }
+            .padding(.top, 32)
+            .padding(.bottom, 40)
+        }
+    }
+
+    private var featuredItem: BaseItem? {
+        resume.first ?? movies.first ?? shows.first
+    }
+
+    private func appendRoute(for item: BaseItem) {
+        switch item.type {
+        case .episode, .series: path.append(.show(id: item.id))
+        default: path.append(.movie(id: item.id))
+        }
+    }
+    #endif
+
+    // MARK: - Shelves (shared)
+
+    @ViewBuilder
+    private var shelves: some View {
+        if !resume.isEmpty {
+            Shelf(title: "Continue Watching", items: resume, images: services.images) { item in
+                path.append(.watch(.init(itemId: item.id, startSeconds: item.resumePositionSeconds)))
+            }
+        }
+        if !movies.isEmpty {
+            Shelf(title: "Recent Films", items: movies, images: services.images) { item in
+                path.append(.movie(id: item.id))
+            }
+        }
+        if !shows.isEmpty {
+            Shelf(title: "Recent Series", items: shows, images: services.images) { item in
+                path.append(.show(id: item.id))
+            }
+        }
+    }
+
+    private var heroKey: String? {
+        resume.first?.id ?? movies.first?.id ?? shows.first?.id
     }
 
     private func load() async {
@@ -86,3 +143,133 @@ public struct HomeView: View {
         Spotlight.index(items: movies + shows, images: services.images)
     }
 }
+
+#if os(tvOS)
+
+/// Editorial hero billboard for tvOS Home. Anchors the page with a backdrop
+/// image, programme overline, big Fraunces title, and PLAY / MORE INFO CTAs.
+private struct HeroBillboard: View {
+    let item: BaseItem
+    let images: ImageURLBuilder?
+    let onPlay: () -> Void
+    let onInfo: () -> Void
+
+    private static let dateLine: String = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM yyyy"
+        return f.string(from: Date()).uppercased()
+    }()
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            backdrop
+            scrim
+            content
+                .padding(.leading, 80)
+                .padding(.trailing, 60)
+                .padding(.bottom, 56)
+        }
+        .frame(height: 640)
+        .frame(maxWidth: .infinity)
+        .clipped()
+    }
+
+    private var backdrop: some View {
+        ZStack {
+            // Procedural motif so the slot is filled before — and after — the
+            // network image resolves.
+            Motif(
+                key: StrataTheme.motif(for: item.id),
+                palette: StrataTheme.palette(for: item.id)
+            )
+            if let url = images?.backdrop(itemId: item.id, maxWidth: 2400) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable().scaledToFill()
+                            .transition(.opacity.animation(.easeInOut(duration: 0.6)))
+                    default:
+                        EmptyView()
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+    }
+
+    private var scrim: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Strata.Tokens.bg.opacity(0.0),
+                         Strata.Tokens.bg.opacity(0.55),
+                         Strata.Tokens.bg],
+                startPoint: .top, endPoint: .bottom
+            )
+            LinearGradient(
+                colors: [Strata.Tokens.bg.opacity(0.8),
+                         Strata.Tokens.bg.opacity(0.3),
+                         .clear],
+                startPoint: .leading, endPoint: .trailing
+            )
+        }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            overline
+            Text(item.displayTitle)
+                .font(.fraunces(74, opticalSize: 144, soft: 40, wonk: 1))
+                .foregroundStyle(Strata.Tokens.paper)
+                .lineLimit(2)
+                .minimumScaleFactor(0.5)
+                .frame(maxWidth: 980, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            if let blurb = blurb {
+                Text(blurb)
+                    .font(.fraunces(20, opticalSize: 36, soft: 100))
+                    .italic()
+                    .foregroundStyle(Strata.Tokens.paperDim)
+                    .lineLimit(2)
+                    .frame(maxWidth: 820, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 18) {
+                PrimaryButton(playLabel, systemImage: "play.fill", action: onPlay)
+                SecondaryButton("More info", systemImage: "info.circle", action: onInfo)
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    private var overline: some View {
+        HStack(spacing: 14) {
+            Text("TONIGHT'S PROGRAMME")
+                .font(.mono(13, weight: .semibold))
+                .tracking(3.2)
+                .foregroundStyle(Strata.Tokens.paperDim)
+            Rectangle().fill(Strata.Tokens.paperHair).frame(width: 40, height: 1)
+            Text("N° \(StrataTheme.opus(for: item.id))")
+                .font(.mono(13))
+                .tracking(2.0)
+                .foregroundStyle(Strata.Tokens.paperDim)
+            Rectangle().fill(Strata.Tokens.paperHair).frame(width: 40, height: 1)
+            Text(Self.dateLine)
+                .font(.mono(13))
+                .tracking(2.0)
+                .foregroundStyle(Strata.Tokens.paperDim)
+        }
+    }
+
+    private var playLabel: String {
+        item.resumePositionSeconds == nil ? "Play" : "Resume"
+    }
+
+    private var blurb: String? {
+        if let line = item.taglines?.first, !line.isEmpty { return line }
+        if let overview = item.overview, !overview.isEmpty { return overview }
+        return nil
+    }
+}
+
+#endif

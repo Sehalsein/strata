@@ -15,6 +15,20 @@ public struct PrimaryButton: View {
     }
 
     public var body: some View {
+        #if os(tvOS)
+        // tvOS: bare label + StrataPrimaryButtonStyle owns the chrome so the
+        // focus engine drives the visual instead of layering on top of it.
+        Button(action: action) {
+            HStack(spacing: 10) {
+                if let systemImage { Image(systemName: systemImage) }
+                Text(title)
+                    .font(.mono(13, weight: .semibold))
+                    .tracking(2)
+                    .textCase(.uppercase)
+            }
+        }
+        .buttonStyle(StrataPrimaryButtonStyle())
+        #else
         Button(action: action) {
             HStack(spacing: 10) {
                 if let systemImage { Image(systemName: systemImage) }
@@ -30,7 +44,6 @@ public struct PrimaryButton: View {
             .clipShape(RoundedRectangle(cornerRadius: Strata.cornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
-        #if !os(tvOS)
         .onHover { isHovering = $0 }
         #endif
     }
@@ -49,6 +62,18 @@ public struct SecondaryButton: View {
     }
 
     public var body: some View {
+        #if os(tvOS)
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if let systemImage { Image(systemName: systemImage) }
+                Text(title)
+                    .font(.mono(13, weight: .semibold))
+                    .tracking(2)
+                    .textCase(.uppercase)
+            }
+        }
+        .buttonStyle(StrataSecondaryButtonStyle())
+        #else
         Button(action: action) {
             HStack(spacing: 8) {
                 if let systemImage { Image(systemName: systemImage) }
@@ -68,7 +93,6 @@ public struct SecondaryButton: View {
             .clipShape(RoundedRectangle(cornerRadius: Strata.cornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
-        #if !os(tvOS)
         .onHover { isHovering = $0 }
         #endif
     }

@@ -99,7 +99,11 @@ public struct ShowDetailView: View {
                                 .background(isActive ? Strata.Tokens.paper : Strata.Tokens.paper.opacity(0.06))
                                 .clipShape(RoundedRectangle(cornerRadius: Strata.cornerRadius))
                         }
+                        #if os(tvOS)
+                        .buttonStyle(StrataCardButtonStyle())
+                        #else
                         .buttonStyle(.plain)
+                        #endif
                     }
                 }
             }
@@ -144,7 +148,11 @@ public struct ShowDetailView: View {
                     }
                     .padding(.vertical, 8)
                 }
+                #if os(tvOS)
+                .buttonStyle(StrataCardButtonStyle())
+                #else
                 .buttonStyle(.plain)
+                #endif
                 Rectangle().fill(Strata.Tokens.paperHair).frame(height: 1)
             }
         }
