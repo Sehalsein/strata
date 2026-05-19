@@ -28,6 +28,7 @@ public enum Route: Hashable {
     case unified(id: String)
     case season(seriesId: String, seasonId: String, seriesName: String)
     case watch(WatchRequest)
+    case search(query: String?)
 }
 
 public struct WatchRequest: Hashable, Codable, Sendable {

@@ -57,7 +57,17 @@ public struct HomeView: View {
             }
             Spacer()
             if let name = services.auth.session?.userName {
-                Chip(name, variant: .outline)
+                Menu {
+                    Button(role: .destructive) {
+                        services.auth.signOut()
+                        services.refreshSessionDependentServices()
+                    } label: {
+                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                } label: {
+                    Chip(name, variant: .outline)
+                }
+                .menuIndicator(.hidden)
             }
         }
     }
@@ -83,6 +93,11 @@ public struct HomeView: View {
                     shelves
                 }
                 .padding(.horizontal, 60)
+
+                if let name = services.auth.session?.userName {
+                    tvAccountSection(name: name)
+                }
+
                 Spacer(minLength: 60)
             }
             .padding(.bottom, 40)
@@ -102,6 +117,29 @@ public struct HomeView: View {
         case .episode, .series: path.append(.show(id: item.id))
         default: path.append(.movie(id: item.id))
         }
+    }
+
+    private func tvAccountSection(name: String) -> some View {
+        HStack(alignment: .center, spacing: 24) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("ACCOUNT")
+                    .font(.mono(18, weight: .semibold)).tracking(3.2)
+                    .foregroundStyle(Strata.Tokens.paperDim)
+                Text("Signed in as \(name)")
+                    .font(.plex(22))
+                    .foregroundStyle(Strata.Tokens.paper)
+            }
+            Spacer()
+            Button {
+                services.auth.signOut()
+                services.refreshSessionDependentServices()
+            } label: {
+                Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                    .font(.plex(20, weight: .semibold))
+            }
+        }
+        .padding(.horizontal, 60)
+        .padding(.top, 32)
     }
     #endif
 

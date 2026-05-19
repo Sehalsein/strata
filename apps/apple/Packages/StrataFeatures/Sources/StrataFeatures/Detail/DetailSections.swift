@@ -74,10 +74,12 @@ public struct WatchlistButton: View {
 public struct CastShelf: View {
     public let people: [Person]
     public let images: ImageURLBuilder?
+    public let onSelect: ((Person) -> Void)?
 
-    public init(people: [Person], images: ImageURLBuilder?) {
+    public init(people: [Person], images: ImageURLBuilder?, onSelect: ((Person) -> Void)? = nil) {
         self.people = people
         self.images = images
+        self.onSelect = onSelect
     }
 
     public var body: some View {
@@ -97,16 +99,7 @@ public struct CastShelf: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: itemSpacing) {
                     ForEach(cast.prefix(20)) { person in
-                        #if os(tvOS)
-                        Button(action: {}) {
-                            CastChip(person: person, images: images)
-                                .frame(width: chipWidth)
-                        }
-                        .buttonStyle(StrataPlainCardButtonStyle())
-                        #else
-                        CastChip(person: person, images: images)
-                            .frame(width: chipWidth)
-                        #endif
+                        castEntry(for: person)
                     }
                 }
                 #if os(tvOS)
@@ -116,6 +109,34 @@ public struct CastShelf: View {
                 .padding(.vertical, 4)
                 #endif
             }
+        }
+    }
+
+    @ViewBuilder
+    private func castEntry(for person: Person) -> some View {
+        if let onSelect {
+            Button {
+                onSelect(person)
+            } label: {
+                CastChip(person: person, images: images)
+                    .frame(width: chipWidth)
+            }
+            #if os(tvOS)
+            .buttonStyle(StrataPlainCardButtonStyle())
+            #else
+            .buttonStyle(.plain)
+            #endif
+        } else {
+            #if os(tvOS)
+            Button(action: {}) {
+                CastChip(person: person, images: images)
+                    .frame(width: chipWidth)
+            }
+            .buttonStyle(StrataPlainCardButtonStyle())
+            #else
+            CastChip(person: person, images: images)
+                .frame(width: chipWidth)
+            #endif
         }
     }
 

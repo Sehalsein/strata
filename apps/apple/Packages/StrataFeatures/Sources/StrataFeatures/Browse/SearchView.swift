@@ -5,13 +5,15 @@ import StrataDesign
 public struct SearchView: View {
     @Environment(AppServices.self) private var services
     @Binding var path: [Route]
+    let initialQuery: String?
     @State private var term: String = ""
     @State private var movies: [BaseItem] = []
     @State private var shows: [BaseItem] = []
     @State private var searchTask: Task<Void, Never>?
 
-    public init(path: Binding<[Route]>) {
+    public init(path: Binding<[Route]>, initialQuery: String? = nil) {
         self._path = path
+        self.initialQuery = initialQuery
     }
 
     public var body: some View {
@@ -48,6 +50,11 @@ public struct SearchView: View {
                 }
                 .padding(.horizontal, 28)
                 .padding(.top, 32)
+            }
+        }
+        .onAppear {
+            if term.isEmpty, let q = initialQuery, !q.isEmpty {
+                term = q
             }
         }
     }

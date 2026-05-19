@@ -60,6 +60,7 @@ struct DestinationView: View {
         case .unified(let id):  UnifiedDetailView(id: id, path: $path).editorialDetailChrome()
         case .season:           EmptyView()
         case .watch(let req):   WatchView(request: req)
+        case .search(let q):    SearchView(path: $path, initialQuery: q)
         }
     }
 }

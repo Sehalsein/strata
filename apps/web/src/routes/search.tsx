@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, Navigate } from "@tanstack/react-router";
+import { Link, Navigate, useSearch } from "@tanstack/react-router";
 import { motion } from "motion/react";
 import { search, type BaseItemDto } from "@/lib/api";
 import { useSession } from "@/lib/auth-client";
@@ -25,7 +25,8 @@ export const SearchPage = () => {
 };
 
 const SearchInner = () => {
-  const [q, setQ] = useState("");
+  const { q: initialQ } = useSearch({ from: "/search" });
+  const [q, setQ] = useState(initialQ ?? "");
   const [filters, setFilters] = useState<Filter[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 

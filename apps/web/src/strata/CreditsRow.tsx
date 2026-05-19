@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { motion } from "motion/react";
 import { posterUrl } from "@/lib/utils";
 import type { BaseItemDto } from "@/lib/api";
@@ -29,7 +30,7 @@ const CastChip = ({ person }: { person: Person }) => {
     .map((s) => s[0])
     .join("")
     .toUpperCase();
-  return (
+  const chip = (
     <motion.div
       whileHover={{ y: -3 }}
       transition={{ type: "spring", stiffness: 300, damping: 22 }}
@@ -73,4 +74,12 @@ const CastChip = ({ person }: { person: Person }) => {
       </div>
     </motion.div>
   );
+  if (person.Name && person.Name.length > 0) {
+    return (
+      <Link to="/search" search={{ q: person.Name }} className="no-underline">
+        {chip}
+      </Link>
+    );
+  }
+  return chip;
 };

@@ -36,7 +36,11 @@ public struct ShowDetailView: View {
                             episodeList
                         }
                         if let people = item.people, !people.isEmpty {
-                            CastShelf(people: people, images: services.images)
+                            CastShelf(people: people, images: services.images) { person in
+                                if let name = person.name, !name.isEmpty {
+                                    path.append(.search(query: name))
+                                }
+                            }
                         }
                         if !similar.isEmpty {
                             SimilarShelf(items: similar, images: services.images) { picked in
