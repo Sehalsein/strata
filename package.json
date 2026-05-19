@@ -5,14 +5,11 @@
   "workspaces": ["apps/*"],
   "packageManager": "bun@1.2.20",
   "scripts": {
-    "dev": "docker compose up -d && turbo run dev",
+    "dev": "turbo run dev",
     "build": "turbo run build",
-    "start": "docker compose up -d && bun --cwd apps/web run preview",
+    "start": "bun --cwd apps/web run preview",
     "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
-    "jellyfin:up": "docker compose up -d",
-    "jellyfin:down": "docker compose down",
-    "jellyfin:logs": "docker compose logs -f jellyfin"
+    "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
     "turbo": "^2.3.3",

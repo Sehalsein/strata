@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Strata core palette (mirrors apps/web/src/index.css CSS vars). -->
+    <color name="strata_bg">#0C0A08</color>
+    <color name="strata_paper">#F3E9D3</color>
+    <color name="strata_accent">#E8331F</color>
+    <color name="strata_ink">#1A1410</color>
+    <color name="strata_dim">#776A5A</color>
+</resources>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 320x180 Android TV launcher banner. Drawn programmatically as a
+     dark gradient with "Strata" wordmark; ship a real PNG later. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="135"
+                android:startColor="@color/strata_bg"
+                android:centerColor="#1A1410"
+                android:endColor="#2A1810"
+                android:type="linear" />
+        </shape>
+    </item>
+    <item
+        android:gravity="center"
+        android:width="280dp"
+        android:height="60dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent" />
+            <stroke android:width="2dp" android:color="@color/strata_accent" />
+        </shape>
+    </item>
+</layer-list>
