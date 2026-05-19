@@ -1,0 +1,135 @@
+name: Strata
+options:
+  bundleIdPrefix: com.strata
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+    tvOS: "17.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+
+packages:
+  StrataKit:
+    path: Packages/StrataKit
+  StrataDesign:
+    path: Packages/StrataDesign
+  StrataPlayerUI:
+    path: Packages/StrataPlayerUI
+  StrataFeatures:
+    path: Packages/StrataFeatures
+
+targets:
+  Strata:
+    type: application
+    supportedDestinations: [iOS, macOS, tvOS]
+    sources:
+      - App
+    resources:
+      - Resources/Fonts
+      - Resources/Assets.xcassets
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Strata
+        UILaunchScreen:
+          UIColorName: StrataBackground
+        UIBackgroundModes: [audio]
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        LSApplicationCategoryType: public.app-category.entertainment
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSUserActivityTypes:
+          - com.strata.viewing
+          - com.strata.watching
+        NSSupportsLiveActivities: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.strata.client
+            CFBundleURLSchemes: [strata]
+        UIAppFonts:
+          - Fraunces[opsz,wght,SOFT,WONK].ttf
+          - IBMPlexSans-Regular.ttf
+          - IBMPlexSans-Medium.ttf
+          - IBMPlexSans-SemiBold.ttf
+          - IBMPlexSans-Bold.ttf
+          - JetBrainsMono-Regular.ttf
+          - JetBrainsMono-Medium.ttf
+          - JetBrainsMono-SemiBold.ttf
+        ATSApplicationFontsPath: Fonts
+    dependencies:
+      - package: StrataKit
+        product: StrataKit
+      - package: StrataDesign
+        product: StrataDesign
+      - package: StrataPlayerUI
+        product: StrataPlayerUI
+      - package: StrataFeatures
+        product: StrataFeatures
+      - target: StrataWidgets
+        embed: true
+        platformFilter: iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.strata.client
+        TARGETED_DEVICE_FAMILY: "1,2,3"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: App/Strata-iOS.entitlements
+          CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: App/Strata-iOS.entitlements
+          CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: App/Strata.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: App/Strata-iOS.entitlements
+          CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: App/Strata-iOS.entitlements
+          CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: App/Strata.entitlements
+
+  StrataWidgets:
+    type: app-extension
+    supportedDestinations: [iOS]
+    sources:
+      - StrataWidgets
+    info:
+      path: StrataWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: Strata
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        NSSupportsLiveActivities: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.strata.client.widgets
+        SKIP_INSTALL: YES
+        SWIFT_VERSION: "5.10"
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+
+schemes:
+  Strata:
+    build:
+      targets:
+        Strata: all
+        StrataWidgets: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    archive:
+      config: Release

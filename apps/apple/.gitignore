@@ -1,0 +1,25 @@
+## XcodeGen output — regenerable
+Strata.xcodeproj/
+Strata.xcworkspace/
+
+## Xcode user state
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+build-*/
+.swiftpm/
+
+## SPM build artifacts (per-package)
+Packages/*/.build/
+Packages/*/Package.resolved
+
+## Widget target derived outputs
+StrataWidgets/.build/
+
+## Fonts (not committed — bundle locally before building)
+Resources/Fonts/*.ttf
+Resources/Fonts/*.otf
+
+## macOS noise
+.DS_Store
