@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Build and run the Strata web image from this checkout — no GHCR pull,
+# no GitHub Actions needed. Thin wrapper around
+# `docker compose -f docker-compose.dev.yml`.
+#
+#   ./run-from-source                    # up --build (foreground; Ctrl-C to stop)
+#   ./run-from-source up --build -d      # detached
+#   ./run-from-source logs -f web        # tail logs
+#   ./run-from-source down               # stop and remove
+#   ./run-from-source ps                 # list running containers
+#
+# Any args are forwarded verbatim to `docker compose`. With no args, the
+# default is `up --build` so a fresh `./run-from-source` always reflects
+# your current source tree.
+#
+# For HMR / fast SPA iteration, use `bun --cwd apps/web run dev` instead —
+# this script rebuilds the *production* image (nginx + static dist) every
+# time, which is not what you want for hot reload.
+
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "run-from-source: 'docker' not found in PATH." >&2
+  echo "  Install Docker Desktop, OrbStack, or Colima first." >&2
+  exit 127
+fi
+
+# `docker compose` (v2 plugin) vs. legacy `docker-compose`. The v2 plugin
+# is what ships with Docker Desktop / OrbStack and what the rest of this
+# repo's docs assume.
+if ! docker compose version >/dev/null 2>&1; then
+  echo "run-from-source: 'docker compose' (v2) is not available." >&2
+  echo "  Upgrade Docker Desktop / OrbStack, or install the compose plugin." >&2
+  exit 127
+fi
+
+COMPOSE=(docker compose -f docker-compose.dev.yml)
+
+if [ "$#" -eq 0 ]; then
+  exec "${COMPOSE[@]}" up --build
+fi
+
+exec "${COMPOSE[@]}" "$@"
