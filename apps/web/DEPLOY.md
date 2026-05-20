@@ -99,9 +99,26 @@ start it with the profile and point the proxy at the service name:
 JELLYFIN_URL=http://jellyfin:8096 docker compose --profile jellyfin up -d
 ```
 
+## Running from source locally (no registry, no GHA)
+
+Build the production image from this checkout and run it through Docker
+exactly as it'd run on the Mac mini:
+
+```sh
+docker compose -f docker-compose.dev.yml up --build
+```
+
+That tags the image as `strata-web:dev` and runs it as `strata-web-dev`
+on `${STRATA_WEB_PORT:-8080}`. Useful for testing the prod build (nginx
+config, cache headers, /jf proxy, service worker) before pushing.
+
+For *fast* iteration on the SPA itself (HMR, source maps, etc.), keep
+using `bun --cwd apps/web run dev` natively — the dev compose still
+builds a fresh static bundle on every `--build`.
+
 ## Manual build from the dev Mac (no GHA)
 
-Same image, locally built and pushed:
+Same image, locally built and pushed straight to GHCR:
 
 ```sh
 docker login ghcr.io -u sehalsein

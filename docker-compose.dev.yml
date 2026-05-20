@@ -1,0 +1,37 @@
+# Source-build variant. Builds the web image from this checkout and runs
+# it — no registry round-trip, no GHCR auth. Useful for trying the prod
+# image locally before pushing, or for iterating on the Dockerfile /
+# nginx config.
+#
+#   docker compose -f docker-compose.dev.yml up --build
+#   docker compose -f docker-compose.dev.yml up -d --build      # detached
+#   docker compose -f docker-compose.dev.yml down
+#
+# Tags the built image as `strata-web:dev` so it doesn't shadow the
+# GHCR image in `docker images` / `docker ps`. Uses a different container
+# name (`strata-web-dev`) for the same reason, so it can run alongside a
+# pulled production container if you want to A/B them (different host
+# ports required — see STRATA_WEB_PORT).
+#
+# For fast iteration on the SPA itself (HMR / live reload), keep using
+# `bun --cwd apps/web run dev` natively — this compose builds the *prod*
+# image (nginx + static dist) and rebuilds from scratch on each `--build`.
+
+services:
+  web:
+    image: strata-web:dev
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Build-time API base. /jf is same-origin and gets reverse-proxied
+        # to JELLYFIN_URL at runtime by nginx.
+        VITE_JELLYFIN_URL: /jf
+    container_name: strata-web-dev
+    restart: unless-stopped
+    ports:
+      - "${STRATA_WEB_PORT:-8080}:80"
+    environment:
+      JELLYFIN_URL: ${JELLYFIN_URL:-http://host.docker.internal:8096}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
