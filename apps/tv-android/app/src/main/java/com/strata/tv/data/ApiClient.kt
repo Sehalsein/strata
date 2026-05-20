@@ -10,8 +10,8 @@ import org.jellyfin.sdk.model.DeviceInfo
 /**
  * Builds the Jellyfin SDK client once at app start. Mirrors
  * `apps/web/src/lib/api.ts:63-74`. The Jellyfin SDK 1.6 makes the
- * api's `accessToken` a `val`, so to rotate the token after sign-in
- * we recreate the api via `jellyfin.createApi(...)` and expose it
+ * api's `accessToken` and `baseUrl` `val`s, so we rotate the api
+ * whenever either changes via `jellyfin.createApi(...)` and expose it
  * behind a read-only property.
  *
  * The Android variant of the SDK requires an application Context so
@@ -20,7 +20,6 @@ import org.jellyfin.sdk.model.DeviceInfo
  */
 class ApiClient(
     appContext: Context,
-    val serverUrl: String,
     private val authStore: AuthStore,
 ) {
     private val jellyfin: Jellyfin = createJellyfin {
@@ -29,12 +28,15 @@ class ApiClient(
         deviceInfo = DeviceInfo(id = authStore.deviceId(), name = "Strata TV")
     }
 
+    /** Always reads from AuthStore so subsequent calls follow the user's choice. */
+    val serverUrl: String get() = authStore.serverUrl()
+
     @Volatile
     var api: JellyfinApi = build()
         private set
 
-    /** Call after AuthStore.persistAuth / clear so subsequent SDK
-     *  calls use the new token. */
+    /** Call after AuthStore.persistAuth / persistServerUrl / clear so subsequent
+     *  SDK calls use the new token and base URL. */
     @Synchronized
     fun syncToken() {
         api = build()

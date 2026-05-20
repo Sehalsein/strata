@@ -24,6 +24,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,7 +39,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -56,6 +56,7 @@ import com.strata.tv.ui.components.loadable
 import com.strata.tv.ui.nav.Routes
 import com.strata.tv.ui.theme.LocalStrataPalette
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataType
 import com.strata.tv.ui.theme.opusFor
 import com.strata.tv.ui.theme.paletteFor
 import org.jellyfin.sdk.model.api.BaseItemDto
@@ -86,8 +87,13 @@ private data class HomeData(
 
 @Composable
 private fun HomeContent(nav: NavController, data: HomeData) {
-    val featured = data.movies.firstOrNull()
+    // Matches Apple's `HomeView.swift:112`: resume → recent movie → recent show.
+    // A returning user lands on what they were watching, not a random new title.
+    val featured = data.continueWatching.firstOrNull()
+        ?: data.movies.firstOrNull()
+        ?: data.shows.firstOrNull()
     val firstFocus = remember { FocusRequester() }
+    val session by ServiceLocator.authStore.session.collectAsState()
 
     LaunchedEffect(featured) {
         if (featured != null) runCatching { firstFocus.requestFocus() }
@@ -97,13 +103,15 @@ private fun HomeContent(nav: NavController, data: HomeData) {
     // when focus moves to BEGIN. Below it, the rows scroll on Down.
     Column(modifier = Modifier.fillMaxSize()) {
         if (featured != null) {
+            val resumeSeconds = (featured.userData?.playbackPositionTicks ?: 0L) / 10_000_000.0
             Hero(
                 item = featured,
                 totalFilms = data.movies.size,
                 totalShows = data.shows.size,
                 onBegin = { nav.navigate(Routes.watch(featured.id.toString())) },
-                onProgramme = { nav.navigate(Routes.movieDetail(featured.id.toString())) },
+                onProgramme = { navigateTo(nav, featured) },
                 beginFocus = firstFocus,
+                hasResume = resumeSeconds > 0,
             )
         }
         TvLazyColumn(
@@ -119,7 +127,89 @@ private fun HomeContent(nav: NavController, data: HomeData) {
             item { PadRow { PosterRow(items = data.movies, onSelect = { navigateTo(nav, it) }) } }
             item { SectionLabel("Recent series", num = "▸ 03") }
             item { PadRow { PosterRow(items = data.shows, onSelect = { navigateTo(nav, it) }) } }
+            session?.let { s ->
+                item { AccountSection(name = s.userName) }
+            }
         }
+    }
+}
+
+@Composable
+private fun AccountSection(name: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 48.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(StrataColors.Paper.copy(alpha = 0.08f)),
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = "ACCOUNT",
+            color = StrataColors.Paper.copy(alpha = 0.55f),
+            style = TextStyle(
+                fontFamily = StrataType.Mono,
+                fontSize = 11.sp,
+                letterSpacing = 3.2.sp,
+                fontWeight = FontWeight.SemiBold,
+            ),
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            Text(
+                text = "Signed in as ${name.ifBlank { "guest" }}",
+                color = StrataColors.Paper,
+                style = TextStyle(
+                    fontFamily = StrataType.Plex,
+                    fontSize = 20.sp,
+                ),
+            )
+            Spacer(Modifier.weight(1f))
+            SignOutButton(
+                onClick = {
+                    ServiceLocator.repository.signOut()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SignOutButton(onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.04f else 1f, label = "signout-scale")
+    val interaction = remember { MutableInteractionSource() }
+    Box(
+        modifier = Modifier
+            .scale(scale)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
+            .border(
+                width = 1.dp,
+                color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.4f),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
+            )
+            .background(if (focused) StrataColors.Paper.copy(alpha = 0.08f) else Color.Transparent)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 12.dp),
+    ) {
+        Text(
+            text = "SIGN OUT",
+            color = StrataColors.Paper,
+            style = TextStyle(
+                fontFamily = StrataType.Mono,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 3.sp,
+            ),
+        )
     }
 }
 
@@ -138,7 +228,7 @@ private fun SectionLabel(text: String, num: String) {
             text = num,
             color = StrataColors.Paper.copy(alpha = 0.4f),
             style = TextStyle(
-                fontFamily = FontFamily.Monospace,
+                fontFamily = StrataType.Mono,
                 fontSize = 11.sp,
                 letterSpacing = 2.sp,
             ),
@@ -148,7 +238,7 @@ private fun SectionLabel(text: String, num: String) {
             text = text,
             color = StrataColors.Paper,
             style = TextStyle(
-                fontFamily = FontFamily.Serif,
+                fontFamily = StrataType.Fraunces,
                 fontSize = 26.sp,
                 fontStyle = FontStyle.Italic,
                 fontWeight = FontWeight.Medium,
@@ -166,6 +256,7 @@ private fun Hero(
     onBegin: () -> Unit,
     onProgramme: () -> Unit,
     beginFocus: FocusRequester,
+    hasResume: Boolean = false,
 ) {
     val palette = paletteFor(item.id.toString())
     val opus = opusFor(item.id.toString())
@@ -237,7 +328,7 @@ private fun Hero(
                         text = "presented in",
                         color = StrataColors.Paper.copy(alpha = 0.55f),
                         style = TextStyle(
-                            fontFamily = FontFamily.Serif,
+                            fontFamily = StrataType.Fraunces,
                             fontSize = 14.sp,
                             fontStyle = FontStyle.Italic,
                         ),
@@ -276,7 +367,7 @@ private fun Hero(
                         color = StrataColors.Paper,
                         maxLines = 2,
                         style = TextStyle(
-                            fontFamily = FontFamily.Serif,
+                            fontFamily = StrataType.Fraunces,
                             fontSize = 84.sp,
                             fontWeight = FontWeight.Medium,
                             lineHeight = 80.sp,
@@ -290,11 +381,15 @@ private fun Hero(
                     ) {
                         BeginButton(
                             modifier = Modifier.focusRequester(beginFocus),
+                            label = if (hasResume) "RESUME" else "BEGIN",
                             onClick = onBegin,
                         )
                         ProgrammeButton(onClick = onProgramme)
                         Spacer(Modifier.width(8.dp))
-                        MonoText("Press OK to begin", alpha = 0.4f)
+                        MonoText(
+                            if (hasResume) "Press OK to resume" else "Press OK to begin",
+                            alpha = 0.4f,
+                        )
                     }
                 }
             }
@@ -349,7 +444,7 @@ private fun MetaRow(item: BaseItemDto) {
             text = "a motion picture",
             color = StrataColors.Paper.copy(alpha = 0.85f),
             style = TextStyle(
-                fontFamily = FontFamily.Serif,
+                fontFamily = StrataType.Fraunces,
                 fontStyle = FontStyle.Italic,
                 fontSize = 14.sp,
             ),
@@ -361,7 +456,7 @@ private fun MetaRow(item: BaseItemDto) {
                 text = "★ $score/100",
                 color = StrataColors.Accent2,
                 style = TextStyle(
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = StrataType.Mono,
                     fontSize = 11.sp,
                     letterSpacing = 2.sp,
                 ),
@@ -375,7 +470,7 @@ private fun Dot() {
     Text(
         text = "·",
         color = StrataColors.Paper.copy(alpha = 0.3f),
-        style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+        style = TextStyle(fontFamily = StrataType.Mono, fontSize = 11.sp),
     )
 }
 
@@ -389,7 +484,7 @@ private fun MonoText(
         text = text.uppercase(),
         color = StrataColors.Paper.copy(alpha = alpha),
         style = TextStyle(
-            fontFamily = FontFamily.Monospace,
+            fontFamily = StrataType.Mono,
             fontSize = 11.sp,
             letterSpacing = tracking,
         ),
@@ -397,7 +492,7 @@ private fun MonoText(
 }
 
 @Composable
-private fun BeginButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun BeginButton(modifier: Modifier = Modifier, label: String = "BEGIN", onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.04f else 1f, label = "begin-scale")
     val interaction = remember { MutableInteractionSource() }
@@ -422,10 +517,10 @@ private fun BeginButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
             )
             Spacer(Modifier.width(10.dp))
             Text(
-                text = "BEGIN",
+                text = label,
                 color = StrataColors.Ink,
                 style = TextStyle(
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = StrataType.Mono,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 3.sp,
@@ -469,7 +564,7 @@ private fun ProgrammeButton(onClick: () -> Unit) {
                 text = "PROGRAMME",
                 color = StrataColors.Paper,
                 style = TextStyle(
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = StrataType.Mono,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 3.sp,

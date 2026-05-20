@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,11 +28,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -39,9 +42,11 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.tv.material3.Text
+import com.strata.tv.di.ServiceLocator
 import com.strata.tv.ui.nav.Routes
 import com.strata.tv.ui.theme.LocalStrataPalette
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataType
 import com.strata.tv.ui.theme.titleAmbience
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -105,7 +110,7 @@ private fun SpecText(text: String, alpha: Float = 0.55f) {
         text = text.uppercase(),
         color = StrataColors.Paper.copy(alpha = alpha),
         style = TextStyle(
-            fontFamily = FontFamily.Monospace,
+            fontFamily = StrataType.Mono,
             fontSize = 11.sp,
             letterSpacing = 2.4.sp,
         ),
@@ -119,7 +124,7 @@ private fun SpecDot() {
         text = "·",
         color = StrataColors.Paper.copy(alpha = 0.3f),
         style = TextStyle(
-            fontFamily = FontFamily.Monospace,
+            fontFamily = StrataType.Mono,
             fontSize = 11.sp,
         ),
     )
@@ -152,7 +157,7 @@ private fun Masthead(nav: NavController) {
                 text = "Strata",
                 color = StrataColors.Paper,
                 style = TextStyle(
-                    fontFamily = FontFamily.Serif,
+                    fontFamily = StrataType.Fraunces,
                     fontSize = 36.sp,
                     fontWeight = FontWeight.Medium,
                     letterSpacing = (-1.2).sp,
@@ -164,7 +169,7 @@ private fun Masthead(nav: NavController) {
                 color = StrataColors.Paper.copy(alpha = 0.4f),
                 modifier = Modifier.padding(bottom = 8.dp),
                 style = TextStyle(
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = StrataType.Mono,
                     fontSize = 10.sp,
                     letterSpacing = 2.4.sp,
                 ),
@@ -218,7 +223,7 @@ private fun NavTab(spec: NavTabSpec, isActive: Boolean, onClick: () -> Unit) {
                 color = numColor,
                 modifier = Modifier.padding(end = 8.dp, bottom = 4.dp),
                 style = TextStyle(
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = StrataType.Mono,
                     fontSize = 10.sp,
                     letterSpacing = 1.8.sp,
                 ),
@@ -227,7 +232,7 @@ private fun NavTab(spec: NavTabSpec, isActive: Boolean, onClick: () -> Unit) {
                 text = spec.label,
                 color = color,
                 style = TextStyle(
-                    fontFamily = FontFamily.Serif,
+                    fontFamily = StrataType.Fraunces,
                     fontSize = 19.sp,
                     fontStyle = if (isActive) FontStyle.Italic else FontStyle.Normal,
                 ),
@@ -245,35 +250,117 @@ private fun NavTab(spec: NavTabSpec, isActive: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun UserBadge() {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
+    val session by ServiceLocator.authStore.session.collectAsState()
+    val displayName = session?.userName?.takeIf { it.isNotBlank() } ?: "Guest"
+    val initial = displayName.first().uppercaseChar().toString()
+
+    var focused by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    val interaction = remember { MutableInteractionSource() }
+
+    Box {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .size(30.dp)
-                .background(StrataColors.Accent),
-            contentAlignment = Alignment.Center,
+                .onFocusChanged { focused = it.isFocused }
+                .clickable(
+                    interactionSource = interaction,
+                    indication = null,
+                    onClick = { menuOpen = true },
+                )
+                .padding(horizontal = 4.dp, vertical = 4.dp),
         ) {
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .background(StrataColors.Accent),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = initial,
+                    color = StrataColors.Paper,
+                    style = TextStyle(
+                        fontFamily = StrataType.Fraunces,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                    ),
+                )
+            }
+            Spacer(Modifier.width(10.dp))
             Text(
-                text = "S",
-                color = StrataColors.Paper,
+                text = displayName.uppercase(),
+                color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.55f),
+                maxLines = 1,
+                softWrap = false,
                 style = TextStyle(
-                    fontFamily = FontFamily.Serif,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontFamily = StrataType.Mono,
+                    fontSize = 11.sp,
+                    letterSpacing = 1.8.sp,
                 ),
             )
         }
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = "SEHAL",
-            color = StrataColors.Paper.copy(alpha = 0.55f),
-            maxLines = 1,
-            softWrap = false,
-            style = TextStyle(
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-                letterSpacing = 1.8.sp,
-            ),
-        )
+
+        if (menuOpen) {
+            UserMenu(
+                onDismiss = { menuOpen = false },
+                onSignOut = {
+                    menuOpen = false
+                    ServiceLocator.repository.signOut()
+                },
+            )
+        }
+    }
+}
+
+/**
+ * Tiny popover anchored under the masthead user badge. Uses `Popup` instead
+ * of `DropdownMenu` so we get TV focus traversal: OK opens, Back closes,
+ * D-pad navigates within. `DropdownMenu` from `androidx.tv.material3` is
+ * still incubating and doesn't auto-focus the first item on launch.
+ */
+@Composable
+private fun UserMenu(onDismiss: () -> Unit, onSignOut: () -> Unit) {
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+
+    androidx.compose.ui.window.Popup(
+        alignment = Alignment.TopEnd,
+        offset = androidx.compose.ui.unit.IntOffset(0, 40),
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.PopupProperties(focusable = true),
+    ) {
+        Column(
+            modifier = Modifier
+                .background(StrataColors.Bg2)
+                .padding(horizontal = 4.dp, vertical = 6.dp),
+        ) {
+            var focused by remember { mutableStateOf(false) }
+            val interaction = remember { MutableInteractionSource() }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .focusRequester(focusRequester)
+                    .onFocusChanged { focused = it.isFocused }
+                    .clickable(
+                        interactionSource = interaction,
+                        indication = null,
+                        onClick = onSignOut,
+                    )
+                    .background(if (focused) StrataColors.Paper.copy(alpha = 0.1f) else Color.Transparent)
+                    .padding(horizontal = 18.dp, vertical = 10.dp),
+            ) {
+                Text(
+                    text = "SIGN OUT",
+                    color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.75f),
+                    style = TextStyle(
+                        fontFamily = StrataType.Mono,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 2.8.sp,
+                    ),
+                )
+            }
+        }
     }
 }
 

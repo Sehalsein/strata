@@ -24,6 +24,35 @@ class ImageUrls(private val serverUrl: String, private val authStore: AuthStore)
     fun backdrop(itemId: UUID?): String? = image(itemId, ImageType.BACKDROP, maxWidth = 1920)
     fun thumb(itemId: UUID?): String? = image(itemId, ImageType.THUMB, maxWidth = 640)
 
+    /**
+     * Cast / crew portrait. BaseItemPerson.id is also a Jellyfin item id, so
+     * the same `/Items/{id}/Images/Primary` endpoint applies.
+     */
+    fun person(personId: UUID?, maxWidth: Int = 320): String? =
+        image(personId, ImageType.PRIMARY, maxWidth = maxWidth)
+
+    /** Chapter thumbnail rendered above each scene marker. */
+    fun chapter(itemId: UUID, index: Int, maxWidth: Int = 480): String {
+        val params = buildList {
+            add("maxWidth=$maxWidth")
+            authStore.accessToken()?.let { add("api_key=${enc(it)}") }
+        }
+        return "$serverUrl/Items/$itemId/Images/Chapter/$index?" + params.joinToString("&")
+    }
+
+    /**
+     * Trickplay tile (Jellyfin ≥ 10.9). Each tile is a grid of thumbnails
+     * (tileWidth × tileHeight) covering `interval` ms each, so position p ms
+     * maps to: thumbIndex = p / interval; tileIndex = thumbIndex /
+     * (tileWidth * tileHeight); thumbnailWithinTile = thumbIndex % (tileWidth
+     * * tileHeight). The caller crops to the right cell.
+     */
+    fun trickplayTile(itemId: UUID, width: Int, tileIndex: Int): String {
+        val token = authStore.accessToken().orEmpty()
+        return "$serverUrl/Videos/$itemId/Trickplay/$width/$tileIndex.jpg" +
+            "?api_key=${enc(token)}"
+    }
+
     fun subtitleVtt(itemId: UUID, mediaSourceId: String, streamIndex: Int): String {
         val token = authStore.accessToken().orEmpty()
         return "$serverUrl/Videos/$itemId/$mediaSourceId/Subtitles/$streamIndex/0/Stream.vtt" +

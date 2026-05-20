@@ -12,11 +12,11 @@ import java.util.UUID
 /**
  * Mirrors `apps/web/src/lib/api.ts:55-99` (`getOrCreateDeviceId`,
  * `persistAuth`, `clearAuth`, `getUserId/Name/AccessToken`). Token +
- * user id live in an EncryptedSharedPreferences file; device id lives
- * in a plain SharedPreferences file because losing it just rotates the
- * Jellyfin device identifier — not a secret.
+ * user id live in an EncryptedSharedPreferences file; device id and
+ * server URL live in plain SharedPreferences — neither is a secret, and
+ * the user enters the server URL fresh on every install anyway.
  */
-class AuthStore(context: Context) {
+class AuthStore(context: Context, private val defaultServerUrl: String) {
     private val secure: SharedPreferences = EncryptedSharedPreferences.create(
         context,
         SECURE_FILE,
@@ -35,6 +35,13 @@ class AuthStore(context: Context) {
         val id = UUID.randomUUID().toString()
         plain.edit().putString(KEY_DEVICE_ID, id).apply()
         return id
+    }
+
+    /** Currently-targeted Jellyfin server. Defaults to the build-time URL. */
+    fun serverUrl(): String = plain.getString(KEY_SERVER_URL, null) ?: defaultServerUrl
+
+    fun persistServerUrl(url: String) {
+        plain.edit().putString(KEY_SERVER_URL, url).apply()
     }
 
     fun accessToken(): String? = secure.getString(KEY_TOKEN, null)
@@ -69,6 +76,7 @@ class AuthStore(context: Context) {
         private const val SECURE_FILE = "strata-secure"
         private const val PLAIN_FILE = "strata-prefs"
         private const val KEY_DEVICE_ID = "device_id"
+        private const val KEY_SERVER_URL = "server_url"
         private const val KEY_TOKEN = "access_token"
         private const val KEY_USER_ID = "user_id"
         private const val KEY_USER_NAME = "user_name"

@@ -3,6 +3,7 @@ package com.strata.tv.data
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jellyfin.sdk.api.client.extensions.itemsApi
+import org.jellyfin.sdk.api.client.extensions.libraryApi
 import org.jellyfin.sdk.api.client.extensions.tvShowsApi
 import org.jellyfin.sdk.api.client.extensions.userApi
 import org.jellyfin.sdk.api.client.extensions.userLibraryApi
@@ -11,6 +12,7 @@ import org.jellyfin.sdk.api.operations.QuickConnectApi
 import org.jellyfin.sdk.model.api.AuthenticateUserByName
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
+import org.jellyfin.sdk.model.api.BaseItemPerson
 import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemSortBy
 import org.jellyfin.sdk.model.api.QuickConnectDto
@@ -41,7 +43,21 @@ class Repository(
     // Auth
     // ---------------------------------------------------------------------
 
-    suspend fun signInWithPassword(username: String, password: String) = io {
+    /**
+     * Sign in. The server URL is treated like a credential here — we
+     * persist it before authenticating so the SDK uses the new base URL
+     * on the very next call. Mirrors Apple's `AuthStore.signIn(serverURL,
+     * username, password)` ordering.
+     */
+    suspend fun signInWithPassword(
+        serverUrl: String,
+        username: String,
+        password: String,
+    ) = io {
+        if (serverUrl.isNotBlank() && serverUrl != authStore.serverUrl()) {
+            authStore.persistServerUrl(serverUrl)
+            client.syncToken()
+        }
         val res = client.api.userApi.authenticateUserByName(
             data = AuthenticateUserByName(username = username, pw = password),
         ).content
@@ -164,6 +180,51 @@ class Repository(
     suspend fun featured(): List<BaseItemDto> = io {
         client.api.userViewsApi.getUserViews(userId = userId()).content.items.orEmpty()
     }
+
+    /**
+     * Items similar to the given movie/show. Used by the detail screen to
+     * surface a "More like this" shelf (mirrors Apple's `SimilarShelf`).
+     */
+    suspend fun getSimilarItems(itemId: UUID, limit: Int = 12): List<BaseItemDto> = io {
+        runCatching {
+            client.api.libraryApi.getSimilarItems(
+                itemId = itemId,
+                userId = userId(),
+                limit = limit,
+                fields = listOf(ItemFields.OVERVIEW),
+            ).content.items.orEmpty()
+        }.getOrElse { emptyList() }
+    }
+
+    /**
+     * Episode that should auto-play after the given one. Used by the
+     * player's up-next card. Returns null on the last episode of the series.
+     */
+    suspend fun getNextUp(seriesId: UUID): BaseItemDto? = io {
+        runCatching {
+            client.api.tvShowsApi.getNextUp(
+                userId = userId(),
+                seriesId = seriesId,
+                limit = 1,
+                fields = listOf(ItemFields.OVERVIEW),
+            ).content.items.orEmpty().firstOrNull()
+        }.getOrNull()
+    }
+
+    /**
+     * Watchlist toggle. Optimistic UI lives in the caller; we just push
+     * the new state to the server and let the next `getItem` confirm it.
+     */
+    suspend fun setFavorite(itemId: UUID, isFavorite: Boolean): Unit = io {
+        if (isFavorite) {
+            client.api.userLibraryApi.markFavoriteItem(userId = userId(), itemId = itemId)
+        } else {
+            client.api.userLibraryApi.unmarkFavoriteItem(userId = userId(), itemId = itemId)
+        }
+    }
+
+    /** Cast / crew already arrives on `BaseItemDto.people`; this is a typed sugar. */
+    fun castOf(item: BaseItemDto): List<BaseItemPerson> = item.people.orEmpty()
 
     private fun userId(): UUID = UUID.fromString(
         requireNotNull(authStore.userId()) { "Not signed in" },

@@ -242,6 +242,10 @@ public struct LoginView: View {
     private var signInButton: some View {
         #if os(tvOS)
         // tvOS: the editorial focus style owns the chrome. Bare label only.
+        // NOTE: do *not* `.disabled(!canSubmit)` here — on tvOS, disabled
+        // controls are unfocusable, which means the user couldn't Down-arrow
+        // onto the button from the password field if any field was empty.
+        // We keep the button focusable always and gate the action in submit().
         Button(action: submit) {
             HStack(spacing: 12) {
                 Text(services.auth.isAuthenticating ? "SIGNING IN" : "SIGN IN")
@@ -258,7 +262,7 @@ public struct LoginView: View {
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(StrataPrimaryButtonStyle())
-        .disabled(!canSubmit || services.auth.isAuthenticating)
+        .disabled(services.auth.isAuthenticating)
         .opacity(canSubmit ? 1.0 : 0.5)
         #else
         Button(action: submit) {
@@ -356,7 +360,10 @@ public struct LoginView: View {
     }
 
     private func submit() {
-        guard let url = URL(string: serverURL) else { return }
+        // Now that the tvOS button stays focusable when canSubmit is false,
+        // re-gate the action here so a Click on an incomplete form is a
+        // harmless no-op instead of a malformed network call.
+        guard canSubmit, let url = URL(string: serverURL) else { return }
         focus = nil
         Task {
             await services.auth.signIn(serverURL: url, username: username, password: password)

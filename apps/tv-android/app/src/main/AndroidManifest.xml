@@ -36,6 +36,18 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- strata:// scheme matches Apple's URL scheme so external links
+                 (Assistant, Recommendations Channel, browser intents) reach
+                 the right surface without going through the launcher. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="strata" android:host="movie" />
+                <data android:scheme="strata" android:host="show" />
+                <data android:scheme="strata" android:host="watch" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

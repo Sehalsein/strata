@@ -4,7 +4,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -15,15 +14,15 @@ import androidx.tv.material3.Typography
 import androidx.tv.material3.darkColorScheme
 
 /**
- * Strata TV theme — Material3 (TV) color scheme + Typography. Type
- * scale is bumped ~1.4× from the web for 10-ft legibility. Fonts are
- * left as system defaults for now (`FontFamily.Default` / `Serif` /
- * `Monospace`); ship Fraunces/IBM Plex Sans/JetBrains Mono in
- * `res/font/` and wire them here when ready.
+ * Strata TV theme — Material3 (TV) color scheme + Typography. Type scale
+ * is bumped ~1.4× from the web for 10-ft legibility. The three editorial
+ * families (Fraunces / IBM Plex Sans / JetBrains Mono) come from
+ * `StrataType` — see `ui/theme/Type.kt` and `app/FONTS.md` for drop-in
+ * instructions.
  */
-private val display = FontFamily.Serif    // placeholder for Fraunces
-private val body = FontFamily.SansSerif   // placeholder for IBM Plex Sans
-private val mono = FontFamily.Monospace   // placeholder for JetBrains Mono
+private val display = StrataType.Fraunces
+private val body = StrataType.Plex
+private val mono = StrataType.Mono
 
 private val strataTypography = Typography(
     displayLarge = TextStyle(fontFamily = display, fontWeight = FontWeight.Medium, fontSize = 80.sp),

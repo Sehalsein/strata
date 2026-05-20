@@ -4,6 +4,7 @@ import android.content.Context
 import com.strata.tv.BuildConfig
 import com.strata.tv.data.ApiClient
 import com.strata.tv.data.AuthStore
+import com.strata.tv.data.DeepLinkBus
 import com.strata.tv.data.Repository
 
 object ServiceLocator {
@@ -13,15 +14,12 @@ object ServiceLocator {
         private set
     lateinit var repository: Repository
         private set
+    val deepLinks = DeepLinkBus()
 
     fun init(appContext: Context) {
         val ctx = appContext.applicationContext
-        authStore = AuthStore(ctx)
-        apiClient = ApiClient(
-            appContext = ctx,
-            serverUrl = BuildConfig.JELLYFIN_URL,
-            authStore = authStore,
-        )
+        authStore = AuthStore(ctx, defaultServerUrl = BuildConfig.JELLYFIN_URL)
+        apiClient = ApiClient(appContext = ctx, authStore = authStore)
         repository = Repository(apiClient, authStore)
     }
 }
