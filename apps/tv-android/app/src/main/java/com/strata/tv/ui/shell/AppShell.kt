@@ -27,9 +27,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
@@ -59,8 +61,22 @@ fun AppShell(nav: NavController, content: @Composable () -> Unit) {
     Box(modifier = Modifier.fillMaxSize().titleAmbience(palette)) {
         Column(modifier = Modifier.fillMaxSize()) {
             SpecStrip()
-            Masthead(nav)
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) { content() }
+            // Masthead is its own focus group so D-pad Right/Left stays on
+            // tabs without escaping into the user badge popover, and Down
+            // exits cleanly into the content area instead of jumping
+            // sideways onto an off-screen poster.
+            Box(modifier = Modifier.focusGroup()) { Masthead(nav) }
+            // `focusRestorer` remembers which child held focus when we leave
+            // (e.g. push to a detail screen) so the back button returns us
+            // to that same poster instead of dumping focus at the top.
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .focusRestorer(),
+            ) {
+                content()
+            }
             Colophon()
         }
     }

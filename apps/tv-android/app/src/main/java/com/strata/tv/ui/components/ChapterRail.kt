@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -59,8 +60,11 @@ fun ChapterRail(
         SectionHeading(title = "Chapters", num = "·")
         Spacer(Modifier.height(16.dp))
         TvLazyRow(
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.1f),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.padding(horizontal = 48.dp),
+            modifier = Modifier
+                .padding(horizontal = 48.dp)
+                .focusRestorer(),
         ) {
             itemsIndexed(chapters) { index, chapter ->
                 ChapterCard(itemId = itemId, index = index, chapter = chapter) {

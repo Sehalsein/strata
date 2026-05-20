@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { Toaster } from "sonner";
 import { router } from "./router";
+import { registerStrataServiceWorker } from "./pwa";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -27,3 +28,7 @@ createRoot(rootEl).render(
     </QueryClientProvider>
   </StrictMode>,
 );
+
+// Register the PWA service worker after React boots so the toast container
+// is mounted by the time `onNeedRefresh` / `onOfflineReady` fire.
+registerStrataServiceWorker();

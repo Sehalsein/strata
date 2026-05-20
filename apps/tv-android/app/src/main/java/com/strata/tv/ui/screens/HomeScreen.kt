@@ -99,37 +99,50 @@ private fun HomeContent(nav: NavController, data: HomeData) {
         if (featured != null) runCatching { firstFocus.requestFocus() }
     }
 
-    // Hero is pinned above the lazy column so it never scrolls out of view
-    // when focus moves to BEGIN. Below it, the rows scroll on Down.
-    Column(modifier = Modifier.fillMaxSize()) {
+    // Single scrolling column so D-pad Down moves cleanly from the hero
+    // BEGIN/PROGRAMME buttons into the first poster row and onward — the
+    // earlier split (Hero outside / TvLazyColumn inside) broke focus
+    // traversal because the lazy column had no laid-out height in some
+    // configurations, so the row items weren't reachable.
+    TvLazyColumn(
+        // PivotOffset 0.15 keeps the focused row near the top-third while
+        // scrolling rather than pegged at the very top — feels like Apple
+        // TV's "row stays in eye-line as you walk down".
+        pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.15f),
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(36.dp),
+        contentPadding = PaddingValues(top = 0.dp, bottom = 48.dp),
+    ) {
         if (featured != null) {
             val resumeSeconds = (featured.userData?.playbackPositionTicks ?: 0L) / 10_000_000.0
-            Hero(
-                item = featured,
-                totalFilms = data.movies.size,
-                totalShows = data.shows.size,
-                onBegin = { nav.navigate(Routes.watch(featured.id.toString())) },
-                onProgramme = { navigateTo(nav, featured) },
-                beginFocus = firstFocus,
-                hasResume = resumeSeconds > 0,
-            )
+            item(key = "hero") {
+                Hero(
+                    item = featured,
+                    totalFilms = data.movies.size,
+                    totalShows = data.shows.size,
+                    onBegin = { nav.navigate(Routes.watch(featured.id.toString())) },
+                    onProgramme = { navigateTo(nav, featured) },
+                    beginFocus = firstFocus,
+                    hasResume = resumeSeconds > 0,
+                )
+            }
         }
-        TvLazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(36.dp),
-            contentPadding = PaddingValues(top = 24.dp, bottom = 48.dp),
-        ) {
-            if (data.continueWatching.isNotEmpty()) {
-                item { SectionLabel("Continue watching", num = "↻ 01") }
-                item { PadRow { PosterRow(items = data.continueWatching, onSelect = { navigateTo(nav, it) }) } }
+        if (data.continueWatching.isNotEmpty()) {
+            item(key = "label-continue") { SectionLabel("Continue watching", num = "↻ 01") }
+            item(key = "row-continue") {
+                PadRow { PosterRow(items = data.continueWatching, onSelect = { navigateTo(nav, it) }) }
             }
-            item { SectionLabel("Recent films", num = "▸ 02") }
-            item { PadRow { PosterRow(items = data.movies, onSelect = { navigateTo(nav, it) }) } }
-            item { SectionLabel("Recent series", num = "▸ 03") }
-            item { PadRow { PosterRow(items = data.shows, onSelect = { navigateTo(nav, it) }) } }
-            session?.let { s ->
-                item { AccountSection(name = s.userName) }
-            }
+        }
+        item(key = "label-films") { SectionLabel("Recent films", num = "▸ 02") }
+        item(key = "row-films") {
+            PadRow { PosterRow(items = data.movies, onSelect = { navigateTo(nav, it) }) }
+        }
+        item(key = "label-series") { SectionLabel("Recent series", num = "▸ 03") }
+        item(key = "row-series") {
+            PadRow { PosterRow(items = data.shows, onSelect = { navigateTo(nav, it) }) }
+        }
+        session?.let { s ->
+            item(key = "account") { AccountSection(name = s.userName) }
         }
     }
 }

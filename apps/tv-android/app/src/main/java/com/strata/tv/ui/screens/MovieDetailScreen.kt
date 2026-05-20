@@ -97,6 +97,7 @@ private fun DetailContent(nav: NavController, bundle: DetailBundle) {
 
     CompositionLocalProvider(LocalStrataPalette provides palette) {
         TvLazyColumn(
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.15f),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 48.dp),
             verticalArrangement = Arrangement.spacedBy(48.dp),

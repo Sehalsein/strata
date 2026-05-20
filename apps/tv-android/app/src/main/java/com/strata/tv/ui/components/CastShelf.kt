@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -60,8 +61,11 @@ fun CastShelf(
         SectionHeading(title = title, num = "·")
         Spacer(Modifier.height(16.dp))
         TvLazyRow(
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.1f),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
-            modifier = Modifier.padding(horizontal = 48.dp),
+            modifier = Modifier
+                .padding(horizontal = 48.dp)
+                .focusRestorer(),
         ) {
             items(people, key = { it.id?.toString() ?: it.name.orEmpty() }) { person ->
                 CastCard(person = person, onClick = { onSelect?.invoke(person) })
