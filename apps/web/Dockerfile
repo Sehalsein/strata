@@ -22,11 +22,15 @@ RUN bun install --frozen-lockfile
 COPY apps/web apps/web
 
 # Bake `/jf` as the API base so the prod bundle hits same-origin and the
-# nginx reverse proxy can swap Jellyfin upstreams without a rebuild. The
-# `npm_lifecycle_event` skip is so `turbo` boundaries don't kick in.
+# nginx reverse proxy can swap Jellyfin upstreams without a rebuild.
 ARG VITE_JELLYFIN_URL=/jf
 ENV VITE_JELLYFIN_URL=$VITE_JELLYFIN_URL
-RUN bun --cwd apps/web run build
+
+# `cd` rather than `bun --cwd apps/web run build` — the latter parsed as
+# bare `bun run` in CI and printed the script listing instead of running
+# `build`, leaving /repo/apps/web/dist empty.
+WORKDIR /repo/apps/web
+RUN bun run build
 
 
 FROM nginx:1.27-alpine AS runtime
