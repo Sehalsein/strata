@@ -9,7 +9,11 @@
     "build": "turbo run build",
     "start": "bun --cwd apps/web run preview",
     "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "deploy:ios": "make -C tools/deploy ios",
+    "deploy:android": "make -C tools/deploy android",
+    "deploy:all": "make -C tools/deploy all",
+    "deploy:serve": "make -C tools/deploy serve"
   },
   "devDependencies": {
     "turbo": "^2.3.3",
