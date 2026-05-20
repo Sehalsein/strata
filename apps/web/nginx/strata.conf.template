@@ -30,7 +30,11 @@ server {
     # Same-origin proxy to Jellyfin. Matches the dev-server proxy in
     # vite.config.ts so VITE_JELLYFIN_URL=/jf works the same in prod.
     location /jf/ {
-        proxy_pass $jellyfin_upstream/;
+        # nginx can't auto-strip /jf/ when proxy_pass uses a $variable,
+        # so do it explicitly — without this every request lands at
+        # Jellyfin's `/` and gets 302'd to its built-in /web/ client.
+        rewrite ^/jf/(.*)$ /$1 break;
+        proxy_pass $jellyfin_upstream;
         proxy_http_version 1.1;
         proxy_set_header Host              $proxy_host;
         proxy_set_header X-Real-IP         $remote_addr;
