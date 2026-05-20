@@ -1,0 +1,83 @@
+server {
+    listen       80 default_server;
+    listen  [::]:80 default_server;
+    server_name  _;
+
+    root   /usr/share/nginx/html;
+    index  index.html;
+
+    # Resolve the Jellyfin upstream at request time so the proxy keeps
+    # working if DNS for host.docker.internal / the jellyfin service
+    # flaps during a restart.
+    resolver 127.0.0.11 ipv6=off valid=30s;
+    set $jellyfin_upstream "${JELLYFIN_URL}";
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_proxied any;
+    gzip_types
+        text/plain
+        text/css
+        text/javascript
+        application/javascript
+        application/json
+        application/manifest+json
+        application/wasm
+        application/xml
+        image/svg+xml;
+
+    # Same-origin proxy to Jellyfin. Matches the dev-server proxy in
+    # vite.config.ts so VITE_JELLYFIN_URL=/jf works the same in prod.
+    location /jf/ {
+        proxy_pass $jellyfin_upstream/;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $proxy_host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        $http_connection;
+
+        # Jellyfin streams large files / HLS segments; keep the socket
+        # open and let the client drive read pacing.
+        proxy_buffering         off;
+        proxy_request_buffering off;
+        proxy_read_timeout      1h;
+        proxy_send_timeout      1h;
+        client_max_body_size    0;
+    }
+
+    # Hashed assets from Vite's build — cache hard.
+    location /assets/ {
+        access_log off;
+        expires 1y;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
+    # The service worker must be revalidated every load so a redeploy
+    # actually reaches installed PWAs on the next launch.
+    location = /sw.js {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        try_files $uri =404;
+    }
+    location = /registerSW.js {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        try_files $uri =404;
+    }
+    location = /manifest.webmanifest {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        types { } default_type "application/manifest+json";
+        try_files $uri =404;
+    }
+
+    # SPA fallback. `try_files` lets real files (favicons, og-image,
+    # /assets/*) win before we hand control back to the router.
+    location / {
+        # index.html itself must not be cached — it's the bootloader
+        # that points at the hashed asset bundles.
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        try_files $uri $uri/ /index.html;
+    }
+}

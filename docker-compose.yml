@@ -1,0 +1,54 @@
+# Host the Strata web app (and optionally Jellyfin) locally.
+#
+#   docker compose up -d --build              # just the web app
+#   docker compose --profile jellyfin up -d   # web + Jellyfin
+#
+# The web container proxies /jf -> $JELLYFIN_URL, which by default points at
+# the host (whichever process is already serving Jellyfin on :8096). Override
+# in a .env file or inline:
+#
+#   JELLYFIN_URL=http://jellyfin:8096 docker compose --profile jellyfin up -d
+
+services:
+  web:
+    # Published image. On the dev Mac, `docker compose up --build` rebuilds
+    # locally and tags this image. On the Mac mini, `docker compose pull`
+    # fetches it from GHCR — no source tree needed. Pin a SHA via IMAGE_TAG
+    # in .env to roll back.
+    image: ghcr.io/sehalsein/strata-web:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Build-time API base. /jf is same-origin and gets reverse-proxied
+        # to JELLYFIN_URL at runtime by nginx.
+        VITE_JELLYFIN_URL: /jf
+    container_name: strata-web
+    restart: unless-stopped
+    ports:
+      # Host port (deliberately not "WEB_PORT" — that's Vite's dev port in .env).
+      - "${STRATA_WEB_PORT:-8080}:80"
+    environment:
+      # Where nginx should forward /jf/* to. host.docker.internal hits the
+      # host's Jellyfin install on Docker Desktop; on Linux the extra_hosts
+      # mapping below makes it resolve to the host gateway.
+      JELLYFIN_URL: ${JELLYFIN_URL:-http://host.docker.internal:8096}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # Opt-in: run Jellyfin alongside the web app.
+  #   docker compose --profile jellyfin up -d
+  # Reuses your existing ./jellyfin/{config,cache} so library + users persist.
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: strata-jellyfin
+    profiles: ["jellyfin"]
+    restart: unless-stopped
+    ports:
+      - "${JELLYFIN_PORT:-8096}:8096"
+    volumes:
+      - ./jellyfin/config:/config
+      - ./jellyfin/cache:/cache
+      - ./media:/media:ro
+    environment:
+      JELLYFIN_PublishedServerUrl: ${JELLYFIN_PUBLISHED_URL:-http://localhost:8096}
