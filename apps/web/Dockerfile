@@ -2,8 +2,14 @@
 
 # Build the SPA with Bun against the workspace at the repo root, then serve
 # the static `dist/` output through nginx.
+#
+# Multi-arch note: the build stage is pinned to $BUILDPLATFORM so Bun runs
+# natively on the runner architecture instead of under QEMU emulation —
+# Bun + Alpine + QEMU is a known fragility and was producing empty
+# `dist/` directories on arm64 cross-builds. The SPA output is platform-
+# agnostic HTML/JS/CSS, so a single native build feeds both target arches.
 
-FROM oven/bun:1.2.20-alpine AS build
+FROM --platform=$BUILDPLATFORM oven/bun:1.2.20-alpine AS build
 WORKDIR /repo
 
 # Manifests first so the install layer caches across source-only edits.
