@@ -42,7 +42,7 @@ const SimilarItem = ({
   to: string;
   idx: number;
 }) => {
-  const ambient = useHoverAmbient(id);
+  const ambient = useHoverAmbient(id, posterUrl(id, "w342"));
   return (
     <motion.div
       whileHover={{ y: -5 }}

@@ -53,7 +53,7 @@ const MoviesInner = () => {
     <div className="anim-fade-in mx-auto max-w-[1680px] px-8 pb-20 pt-10 lg:px-12">
       <CollectionMasthead
         chapter="I"
-        title="Films"
+        title="Movies"
         sub="The Catalog of Motion Pictures"
         count={list.length}
       />
@@ -282,7 +282,7 @@ const FilmCard = ({
   to: string;
   idx: number;
 }) => {
-  const ambient = useHoverAmbient(id);
+  const ambient = useHoverAmbient(id, posterUrl(id, "w342"));
   return (
     <motion.div
       whileHover={{ y: -4 }}
@@ -361,9 +361,9 @@ const FilmRow = ({
   to: string;
   idx: number;
 }) => {
-  const ambient = useHoverAmbient(id);
-  const palette = paletteFor(id);
   const thumb = posterUrl(id, "w342");
+  const ambient = useHoverAmbient(id, thumb);
+  const palette = paletteFor(id);
   return (
     <Link
       to={to as never}
@@ -438,7 +438,7 @@ const EmptyCard = () => (
         letterSpacing: "-0.03em",
       }}
     >
-      No films filed.
+      No movies filed.
     </div>
     <p className="mx-auto mt-3 max-w-md font-editorial text-[16px] text-strata-text/55">
       Add a movies library in the Jellyfin admin panel to begin populating your motion-picture archive.

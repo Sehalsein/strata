@@ -10,10 +10,11 @@ import {
 } from "@/lib/api";
 import { useSession } from "@/lib/auth-client";
 import { posterUrl, backdropUrl, formatRuntime } from "@/lib/utils";
-import { opusFor, paletteFor, volumeFor } from "@/strata/theme";
-import { Skeleton } from "@/strata/primitives";
+import { opusFor, paletteFor, volumeFor, type Palette } from "@/strata/theme";
+import { CountUp, Skeleton } from "@/strata/primitives";
 import { DetailMotif } from "@/strata/Poster";
 import { usePageAmbient } from "@/strata/ambient";
+import { useImagePalette } from "@/strata/useImagePalette";
 import { CreditsRow } from "@/strata/CreditsRow";
 import { WatchlistToggle } from "@/strata/WatchlistToggle";
 import { SimilarShelf as SimilarShelfRow } from "@/strata/SimilarShelf";
@@ -42,7 +43,10 @@ const MovieDetailInner = ({ id }: { id: string }) => {
     queryFn: () => getSimilarItems(id, 12),
   });
 
-  usePageAmbient(id, 0.95);
+  const backdropImg = backdropUrl(id) ?? posterUrl(id, "original");
+  const imgPalette = useImagePalette(backdropImg);
+  const activePalette = imgPalette ?? paletteFor(id);
+  usePageAmbient(id, 0.95, imgPalette);
 
   if (q.isLoading) return <DetailSkeleton />;
   if (!q.data) return <NotFound />;
@@ -79,6 +83,8 @@ const MovieDetailInner = ({ id }: { id: string }) => {
         score={score}
         playTo={`/watch/${id}`}
         isFav={isFav}
+        palette={activePalette}
+        backdropImg={backdropImg}
       />
 
       <div className="relative z-10 mx-auto grid max-w-[1680px] grid-cols-1 gap-x-12 gap-y-14 px-8 pb-20 pt-16 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-12">
@@ -141,6 +147,8 @@ const DetailHero = ({
   score,
   playTo,
   isFav,
+  palette,
+  backdropImg,
 }: {
   id: string;
   title: string;
@@ -151,6 +159,8 @@ const DetailHero = ({
   score: number | null;
   playTo: string;
   isFav: boolean;
+  palette: Palette;
+  backdropImg: string | null;
 }) => {
   const reduce = useReducedMotion();
   const { scrollY } = useScroll();
@@ -158,8 +168,6 @@ const DetailHero = ({
   const bgScale = useTransform(scrollY, [0, 600], reduce ? [1, 1] : [1.03, 1.14]);
   const contentOp = useTransform(scrollY, [0, 500], [1, 0.25]);
 
-  const palette = paletteFor(id);
-  const backdropImg = backdropUrl(id) ?? posterUrl(id, "original");
   const opus = opusFor(id);
   const volume = volumeFor(id);
   const heroStyle = {
@@ -177,7 +185,8 @@ const DetailHero = ({
       <div
         className="absolute inset-0"
         style={{
-          background: `linear-gradient(135deg, ${palette[1]} 0%, ${palette[0]} 100%)`,
+          background:
+            "linear-gradient(135deg, var(--strata-c2) 0%, var(--strata-c1) 100%)",
         }}
       />
 
@@ -197,7 +206,7 @@ const DetailHero = ({
 
       {/* Inky left vignette + bottom dissolve */}
       <div className="absolute inset-0 [background:linear-gradient(95deg,rgb(12_10_8/0.96)_0%,rgb(12_10_8/0.85)_28%,rgb(12_10_8/0.4)_55%,transparent_85%)]" />
-      <div className="absolute inset-x-0 bottom-0 h-[55%] [background:linear-gradient(180deg,transparent_0%,var(--color-strata-bg)_92%)]" />
+      <div className="absolute inset-x-0 bottom-0 h-[55%] [background:linear-gradient(180deg,transparent_0%,var(--strata-c2)_92%)]" />
       <div className="grain-paper absolute inset-0 opacity-[0.6] mix-blend-overlay" />
 
       {/* Right rail — editorial spec column */}
@@ -322,7 +331,7 @@ const Breadcrumb = ({ genre }: { genre: string | null }) => (
       className="group flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.28em] text-strata-paper/55 no-underline hover:text-strata-paper"
     >
       <span className="transition-transform group-hover:-translate-x-0.5">←</span>
-      <span>Films</span>
+      <span>Movies</span>
     </Link>
     <span className="h-px w-8 bg-strata-paper/25" />
     <span className="font-mono text-[10px] uppercase tracking-[0.32em] text-strata-paper/85">
@@ -339,51 +348,51 @@ const Breadcrumb = ({ genre }: { genre: string | null }) => (
   </div>
 );
 
-const ScoreBadge = ({ score }: { score: number }) => {
-  const circumference = Math.PI * 24;
-  return (
-    <div className="flex items-center gap-3">
-      <div className="text-right">
-        <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-strata-paper/55">
-          Critics
-        </div>
-        <div
-          className="font-display text-[28px] leading-none text-strata-paper"
-          style={{
-            fontVariationSettings: '"opsz" 48, "SOFT" 30',
-            letterSpacing: "-0.03em",
-          }}
-        >
-          {score}
-          <span className="font-mono text-[11px] tracking-normal text-strata-paper/45"> / 100</span>
-        </div>
+const ScoreBadge = ({ score }: { score: number }) => (
+  <div className="flex items-center gap-3">
+    <div className="text-right">
+      <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-strata-paper/55">
+        Critics
       </div>
-      <div className="relative h-9 w-9">
-        <svg width="36" height="36" viewBox="0 0 28 28">
-          <circle
-            cx="14"
-            cy="14"
-            r="12"
-            fill="none"
-            stroke="rgb(243 233 211 / 0.18)"
-            strokeWidth="2"
-          />
-          <circle
-            cx="14"
-            cy="14"
-            r="12"
-            fill="none"
-            stroke="var(--color-strata-accent)"
-            strokeWidth="2"
-            strokeDasharray={`${(circumference * score) / 100} ${circumference}`}
-            strokeLinecap="butt"
-            transform="rotate(-90 14 14)"
-          />
-        </svg>
+      <div
+        className="font-display text-[28px] leading-none text-strata-paper"
+        style={{
+          fontVariationSettings: '"opsz" 48, "SOFT" 30',
+          letterSpacing: "-0.03em",
+        }}
+      >
+        <CountUp value={score} duration={1.2} />
+        <span className="font-mono text-[11px] tracking-normal text-strata-paper/45"> / 100</span>
       </div>
     </div>
-  );
-};
+    <div className="relative h-9 w-9">
+      <svg width="36" height="36" viewBox="0 0 28 28">
+        <circle
+          cx="14"
+          cy="14"
+          r="12"
+          fill="none"
+          stroke="rgb(243 233 211 / 0.18)"
+          strokeWidth="2"
+        />
+        <motion.circle
+          cx="14"
+          cy="14"
+          r="12"
+          fill="none"
+          stroke="var(--color-strata-accent)"
+          strokeWidth="2"
+          strokeLinecap="butt"
+          transform="rotate(-90 14 14)"
+          initial={{ pathLength: 0 }}
+          whileInView={{ pathLength: score / 100 }}
+          viewport={{ once: true, amount: 0.4 }}
+          transition={{ duration: 1.2, ease: [0.2, 0.6, 0.2, 1] }}
+        />
+      </svg>
+    </div>
+  </div>
+);
 
 const Dot = () => <span className="text-strata-paper/25">·</span>;
 
@@ -646,12 +655,29 @@ const SectionMark = ({
   label: string;
   sub?: string;
 }) => (
-  <div className="flex flex-col gap-4">
+  <motion.div
+    className="flex flex-col gap-4"
+    initial="hidden"
+    whileInView="show"
+    viewport={{ once: true, amount: 0.4 }}
+  >
     <div className="flex items-baseline gap-5">
-      <span className="font-mono text-[10px] uppercase tracking-[0.32em] text-strata-text/40">
+      <motion.span
+        variants={{
+          hidden: { opacity: 0, x: -6 },
+          show: { opacity: 1, x: 0 },
+        }}
+        transition={{ duration: 0.5, ease: [0.2, 0.6, 0.2, 1] }}
+        className="font-mono text-[10px] uppercase tracking-[0.32em] text-strata-text/40"
+      >
         Ch. {chapter}
-      </span>
-      <h2
+      </motion.span>
+      <motion.h2
+        variants={{
+          hidden: { opacity: 0, y: 8 },
+          show: { opacity: 1, y: 0 },
+        }}
+        transition={{ duration: 0.7, ease: [0.2, 0.6, 0.2, 1], delay: 0.08 }}
         className="font-display font-normal leading-none text-strata-paper"
         style={{
           fontSize: "clamp(28px, 3vw, 44px)",
@@ -660,17 +686,31 @@ const SectionMark = ({
         }}
       >
         {label}
-      </h2>
+      </motion.h2>
     </div>
     <div className="flex items-center gap-4">
-      <div className="h-px flex-1 bg-strata-text/15" />
+      <motion.div
+        variants={{
+          hidden: { scaleX: 0 },
+          show: { scaleX: 1 },
+        }}
+        transition={{ duration: 0.9, ease: [0.2, 0.6, 0.2, 1], delay: 0.16 }}
+        className="h-px flex-1 origin-left bg-strata-text/15"
+      />
       {sub && (
-        <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-strata-text/45">
+        <motion.span
+          variants={{
+            hidden: { opacity: 0 },
+            show: { opacity: 1 },
+          }}
+          transition={{ duration: 0.4, delay: 0.45 }}
+          className="font-mono text-[10px] uppercase tracking-[0.22em] text-strata-text/45"
+        >
           {sub}
-        </span>
+        </motion.span>
       )}
     </div>
-  </div>
+  </motion.div>
 );
 
 /* ───────────── Icons ───────────── */
@@ -714,7 +754,7 @@ const NotFound = () => (
         We searched the vault and came up empty.
       </p>
       <Link to="/movies" className="btn-glass mt-7 inline-flex">
-        Back to films
+        Back to movies
       </Link>
     </div>
   </div>

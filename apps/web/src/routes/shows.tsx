@@ -44,7 +44,7 @@ const ShowsInner = () => {
     <div className="anim-fade-in mx-auto max-w-[1680px] px-8 pb-20 pt-10 lg:px-12">
       <CollectionMasthead
         chapter="II"
-        title="Series"
+        title="Shows"
         sub="The Catalog of Episodic Programmes"
         count={list.length}
       />
@@ -104,7 +104,7 @@ const ShowsInner = () => {
       ) : list.length === 0 ? (
         <div className="border-y rule-heavy py-20 text-center">
           <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-strata-text/45">
-            No series yet
+            No shows yet
           </div>
           <div className="mx-auto my-3 h-px w-10 bg-strata-accent" />
           <div
@@ -154,7 +154,7 @@ const ShowCard = ({
   to: string;
   idx: number;
 }) => {
-  const ambient = useHoverAmbient(id);
+  const ambient = useHoverAmbient(id, posterUrl(id, "w342"));
   return (
     <motion.div
       whileHover={{ y: -4 }}

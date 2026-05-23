@@ -8,7 +8,7 @@ import { cn, posterUrl } from "@/lib/utils";
 import { useHoverAmbient } from "@/strata/ambient";
 import { Poster } from "@/strata/Poster";
 
-const FILTER_CHIPS = ["Films", "Series", "4K", "HDR", "Subtitled"] as const;
+const FILTER_CHIPS = ["Movies", "Shows", "4K", "HDR", "Subtitled"] as const;
 type Filter = (typeof FILTER_CHIPS)[number];
 
 const yearOf = (item: BaseItemDto): string | null => {
@@ -45,8 +45,8 @@ const SearchInner = () => {
       prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f],
     );
 
-  const showMovies = !filters.includes("Series");
-  const showShows = !filters.includes("Films");
+  const showMovies = !filters.includes("Shows");
+  const showShows = !filters.includes("Movies");
   const movies = showMovies ? results.data?.movies ?? [] : [];
   const shows = showShows ? results.data?.shows ?? [] : [];
 
@@ -161,7 +161,7 @@ const SearchInner = () => {
       )}
 
       {movies.length > 0 && (
-        <Section title="Films" count={movies.length}>
+        <Section title="Movies" count={movies.length}>
           {movies.map((m, idx) => (
             <SearchCard
               key={m.Id!}
@@ -175,7 +175,7 @@ const SearchInner = () => {
         </Section>
       )}
       {shows.length > 0 && (
-        <Section title="Series" count={shows.length}>
+        <Section title="Shows" count={shows.length}>
           {shows.map((s, idx) => (
             <SearchCard
               key={s.Id!}
@@ -266,7 +266,7 @@ const SearchCard = ({
   to: string;
   idx: number;
 }) => {
-  const ambient = useHoverAmbient(id);
+  const ambient = useHoverAmbient(id, posterUrl(id, "w342"));
   return (
     <motion.div
       whileHover={{ y: -4 }}

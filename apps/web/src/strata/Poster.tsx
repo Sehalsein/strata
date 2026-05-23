@@ -1,6 +1,13 @@
 import { useState, type CSSProperties, type ReactElement } from "react";
 import { Link } from "@tanstack/react-router";
-import { AnimatePresence, motion } from "motion/react";
+import {
+  AnimatePresence,
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useSpring,
+  useTransform,
+} from "motion/react";
 import {
   hexA,
   motifFor,
@@ -256,13 +263,43 @@ export const Poster = ({
 }: PosterProps) => {
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgErrored, setImgErrored] = useState(false);
-  const ambient = useHoverAmbient(ambientId ?? null);
+  const imgUrl = imageUrl ?? null;
+  const ambient = useHoverAmbient(ambientId ?? null, imgUrl);
   const h = aspect === "landscape" ? Math.round((width * 9) / 16) : Math.round((width * 3) / 2);
   const palette = paletteFor(id);
   const [c1, c2, c3] = palette;
   const motif = motifFor(id);
   const motifFn = POSTER_MOTIFS[motif];
-  const imgUrl = imageUrl ?? null;
+
+  // Magnetic 3D tilt — cursor offset drives rotateX/rotateY through a soft
+  // spring. Pure-touch pointers skip the effect (it feels wrong under a finger).
+  const reduce = useReducedMotion();
+  const px = useMotionValue(0);
+  const py = useMotionValue(0);
+  const springCfg = { stiffness: 220, damping: 22, mass: 0.4 };
+  const sx = useSpring(px, springCfg);
+  const sy = useSpring(py, springCfg);
+  const rotateY = useTransform(sx, [-0.5, 0.5], reduce ? [0, 0] : [-8, 8]);
+  const rotateX = useTransform(sy, [-0.5, 0.5], reduce ? [0, 0] : [6, -6]);
+  const tiltShine = useTransform(sx, [-0.5, 0.5], [0, 1]);
+  const shineX = useTransform(tiltShine, (v) => `${30 + v * 40}%`);
+  const shineBg = useTransform(
+    shineX,
+    (v) =>
+      `linear-gradient(115deg, transparent 0%, rgba(255,255,255,0.18) ${v}, transparent calc(${v} + 18%))`,
+  );
+  const shineOp = useTransform(sx, [-0.5, -0.05, 0.05, 0.5], [0.9, 0, 0, 0.9]);
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (reduce || e.pointerType === "touch") return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    px.set((e.clientX - rect.left) / rect.width - 0.5);
+    py.set((e.clientY - rect.top) / rect.height - 0.5);
+  };
+  const handlePointerLeave = () => {
+    px.set(0);
+    py.set(0);
+  };
 
   const cssVars = {
     "--c1": c1,
@@ -274,16 +311,18 @@ export const Poster = ({
   } as CSSProperties;
 
   const content = (
-    <div
-      onMouseEnter={() => {
+    <motion.div
+      onPointerEnter={() => {
         onHover?.();
         if (ambientId) ambient.onPointerEnter();
       }}
-      onMouseLeave={() => {
+      onPointerMove={handlePointerMove}
+      onPointerLeave={() => {
+        handlePointerLeave();
         if (ambientId) ambient.onPointerLeave();
       }}
       className={cn(
-        "relative shrink-0 overflow-hidden transition-[transform,box-shadow] duration-200",
+        "relative shrink-0 overflow-hidden transition-[box-shadow] duration-200 [transform-style:preserve-3d] [will-change:transform]",
         active && "-translate-y-0.5",
         onClick || to ? "cursor-pointer" : "",
         className,
@@ -297,6 +336,9 @@ export const Poster = ({
         boxShadow: active
           ? `0 0 0 2px ${aurora.accent}, 0 16px 40px rgb(0 0 0 / 0.55), 0 12px 32px rgb(232 51 31 / 0.35)`
           : "0 8px 28px rgb(0 0 0 / 0.45), inset 0 0 0 1px rgb(255 255 255 / 0.06)",
+        rotateX,
+        rotateY,
+        transformPerspective: 900,
       }}
     >
       <svg
@@ -368,7 +410,15 @@ export const Poster = ({
       )}
 
       <div className="noise-overlay-soft absolute inset-0 opacity-45" />
-    </div>
+
+      {/* Tilt-following shine — a soft diagonal sheen that tracks the cursor.
+       * Disabled for reduced-motion via px/py staying at 0. */}
+      <motion.div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 mix-blend-soft-light"
+        style={{ background: shineBg, opacity: shineOp }}
+      />
+    </motion.div>
   );
 
   if (to)
@@ -390,7 +440,7 @@ type PosterCardProps = PosterProps & { subtitle?: string };
 
 export const PosterCard = ({ subtitle, ...rest }: PosterCardProps) => {
   const width = rest.width ?? 148;
-  const ambient = useHoverAmbient(rest.ambientId ?? null);
+  const ambient = useHoverAmbient(rest.ambientId ?? null, rest.imageUrl ?? null);
   return (
     <motion.div
       onMouseEnter={() => {
@@ -432,9 +482,11 @@ export const PosterCard = ({ subtitle, ...rest }: PosterCardProps) => {
 
 export const TitleBackdrop = ({
   paletteKey,
+  paletteOverride,
   theme: t = aurora,
 }: {
   paletteKey: string | null;
+  paletteOverride?: Palette | null;
   theme?: Theme;
 }) => (
   <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -457,19 +509,29 @@ export const TitleBackdrop = ({
           transition={{ duration: 0.9, ease: "easeOut" }}
           className="absolute inset-0"
         >
-          <BackdropArt paletteKey={paletteKey} />
+          <BackdropArt paletteKey={paletteKey} paletteOverride={paletteOverride ?? null} />
         </motion.div>
       )}
     </AnimatePresence>
   </div>
 );
 
-const BackdropArt = ({ paletteKey }: { paletteKey: string }) => {
-  const palette = paletteFor(paletteKey);
-  const [c1, c2] = palette;
+const BackdropArt = ({
+  paletteKey,
+  paletteOverride,
+}: {
+  paletteKey: string;
+  paletteOverride: Palette | null;
+}) => {
   const motif = motifFor(paletteKey);
   const motifFn = POSTER_MOTIFS[motif];
   const safeId = paletteKey.replace(/[^a-z0-9]/gi, "");
+  // The two color stops read directly from the page-level CSS variables so
+  // they ride the @property transition (1.1s) on --strata-c1/c2/c3. Motif
+  // shapes still receive the resolved palette tuple for any fills they author
+  // directly — those won't transition smoothly, but they're behind blur and
+  // serve as decorative shape rather than primary color.
+  const palette = paletteOverride ?? paletteFor(paletteKey);
   return (
     <>
       <div className="absolute -top-[20%] -right-[20%] h-[120%] w-[90%] origin-top-right scale-110 opacity-55 [filter:blur(80px)_saturate(140%)]">
@@ -480,8 +542,8 @@ const BackdropArt = ({ paletteKey }: { paletteKey: string }) => {
         >
           <defs>
             <linearGradient id={`bd1-${safeId}`} x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor={c1} />
-              <stop offset="100%" stopColor={c2} />
+              <stop offset="0%" stopColor="var(--strata-c1)" />
+              <stop offset="100%" stopColor="var(--strata-c2)" />
             </linearGradient>
           </defs>
           <rect width="100" height="150" fill={`url(#bd1-${safeId})`} />
@@ -491,7 +553,8 @@ const BackdropArt = ({ paletteKey }: { paletteKey: string }) => {
       <div
         className="absolute -bottom-[30%] -left-[20%] h-full w-[70%] opacity-45 [filter:blur(60px)]"
         style={{
-          background: `radial-gradient(50% 50% at 50% 50%, ${c2} 0%, transparent 70%)`,
+          background:
+            "radial-gradient(50% 50% at 50% 50%, var(--strata-c2) 0%, transparent 70%)",
         }}
       />
     </>

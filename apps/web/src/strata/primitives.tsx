@@ -1,6 +1,42 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
+import { animate, useInView, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
+
+/**
+ * Counts up from 0 to `value` once the element scrolls into view. Honors
+ * reduced-motion by rendering the target value immediately.
+ */
+export const CountUp = ({
+  value,
+  duration = 1.4,
+  className,
+}: {
+  value: number;
+  duration?: number;
+  className?: string;
+}) => {
+  const ref = useRef<HTMLSpanElement>(null);
+  const inView = useInView(ref, { once: true, amount: 0.4 });
+  const reduce = useReducedMotion();
+  const [n, setN] = useState(reduce ? value : 0);
+
+  useEffect(() => {
+    if (!inView || reduce) return;
+    const ctrl = animate(0, value, {
+      duration,
+      ease: [0.2, 0.6, 0.2, 1],
+      onUpdate: (v) => setN(Math.round(v)),
+    });
+    return () => ctrl.stop();
+  }, [inView, value, duration, reduce]);
+
+  return (
+    <span ref={ref} className={className}>
+      {n}
+    </span>
+  );
+};
 
 type ChipVariant = "default" | "outline" | "solid" | "ghost" | "success" | "danger";
 

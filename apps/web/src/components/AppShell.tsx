@@ -1,10 +1,13 @@
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import {
+  animate,
   motion,
   LayoutGroup,
-  useScroll,
+  useMotionValue,
   useMotionValueEvent,
+  useScroll,
+  useTransform,
 } from "motion/react";
 import { useState } from "react";
 import { useSession, signOut } from "@/lib/auth-client";
@@ -17,8 +20,8 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { to: "/", label: "Index", match: "home", num: "00" },
-  { to: "/movies", label: "Films", match: "movies", num: "01" },
-  { to: "/shows", label: "Series", match: "shows", num: "02" },
+  { to: "/movies", label: "Movies", match: "movies", num: "01" },
+  { to: "/shows", label: "Shows", match: "shows", num: "02" },
   { to: "/search", label: "Search", match: "search", num: "03" },
 ] as const;
 
@@ -64,11 +67,12 @@ export const AppShell = () => {
 const Shell = () => {
   const { data: session } = useSession();
   const { location } = useRouterState();
-  const { paletteKey, intensity } = useAmbient();
+  const { paletteKey, paletteOverride, intensity } = useAmbient();
   const active = activeIdFor(location.pathname);
 
   useEffect(() => {
-    const p = paletteKey ? paletteFor(paletteKey) : null;
+    const p =
+      paletteOverride ?? (paletteKey ? paletteFor(paletteKey) : null);
     const root = document.documentElement.style;
     if (p) {
       root.setProperty("--strata-c1", p[0]);
@@ -83,7 +87,7 @@ const Shell = () => {
       root.setProperty("--strata-c1-soft", "rgba(232,179,65,0.14)");
       root.setProperty("--strata-c2-soft", "rgba(232,51,31,0.08)");
     }
-  }, [paletteKey, intensity]);
+  }, [paletteKey, paletteOverride, intensity]);
 
   if (active === "watch") return <Outlet />;
 
@@ -93,7 +97,7 @@ const Shell = () => {
     <div className="strata relative min-h-screen text-strata-text">
       {/* Persistent ambient bloom — soft warm wash behind everything */}
       <div className="pointer-events-none fixed inset-0 z-0">
-        <TitleBackdrop paletteKey={paletteKey} />
+        <TitleBackdrop paletteKey={paletteKey} paletteOverride={paletteOverride} />
       </div>
       {/* Persistent grain so the entire page feels printed */}
       <div className="grain-paper pointer-events-none fixed inset-0 z-[1] opacity-[0.5] mix-blend-overlay" />
@@ -152,21 +156,7 @@ const Masthead = ({
       </div>
 
       <div className="mx-auto flex h-[72px] max-w-[1680px] items-center gap-10 px-8 lg:px-12">
-        {/* Wordmark */}
-        <Link to="/" className="group flex items-baseline gap-3 no-underline">
-          <span
-            className="font-display text-[34px] leading-none text-strata-paper"
-            style={{
-              fontVariationSettings: '"opsz" 144, "SOFT" 30, "WONK" 1',
-              letterSpacing: "-0.04em",
-            }}
-          >
-            Strata
-          </span>
-          <span className="font-mono text-[9px] uppercase tracking-[0.28em] text-strata-text/40">
-            № 00.01
-          </span>
-        </Link>
+        <Wordmark />
 
         <span className="hidden h-6 w-px bg-strata-text/15 lg:inline-block" />
 
@@ -268,6 +258,56 @@ const UserMenu = ({ name }: { name: string }) => (
     </span>
   </motion.button>
 );
+
+/**
+ * Wordmark — the "Strata" logotype + opus number. On hover, the variable-font
+ * SOFT and WONK axes flex outward (rounder, more idiosyncratic) and snap back
+ * on leave. Uses motion values so the axes interpolate smoothly across the
+ * intermediate integer values the font actually supports.
+ */
+const Wordmark = () => {
+  const [hovered, setHovered] = useState(false);
+  const soft = useMotionValue(30);
+  const wonk = useMotionValue(1);
+  const ctrlRef = useRef<{ stop: () => void }[]>([]);
+
+  useEffect(() => {
+    ctrlRef.current.forEach((c) => c.stop());
+    ctrlRef.current = [
+      animate(soft, hovered ? 100 : 30, { duration: 0.55, ease: "easeOut" }),
+      animate(wonk, hovered ? 0 : 1, { duration: 0.55, ease: "easeOut" }),
+    ];
+    return () => ctrlRef.current.forEach((c) => c.stop());
+  }, [hovered, soft, wonk]);
+
+  const fvs = useTransform(
+    [soft, wonk],
+    ([s, w]: number[]) =>
+      `"opsz" 144, "SOFT" ${(s as number).toFixed(0)}, "WONK" ${(w as number).toFixed(2)}`,
+  );
+
+  return (
+    <Link
+      to="/"
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      className="group flex items-baseline gap-3 no-underline"
+    >
+      <motion.span
+        className="font-display text-[34px] leading-none text-strata-paper"
+        style={{
+          fontVariationSettings: fvs,
+          letterSpacing: "-0.04em",
+        }}
+      >
+        Strata
+      </motion.span>
+      <span className="font-mono text-[9px] uppercase tracking-[0.28em] text-strata-text/40">
+        № 00.01
+      </span>
+    </Link>
+  );
+};
 
 const Colophon = () => (
   <footer className="relative z-10 mt-24 border-t rule-thin px-8 py-10 lg:px-12">

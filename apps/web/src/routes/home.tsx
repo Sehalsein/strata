@@ -1,7 +1,8 @@
-import { useMemo, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, useNavigate } from "@tanstack/react-router";
 import {
+  AnimatePresence,
   motion,
   useScroll,
   useTransform,
@@ -22,9 +23,11 @@ import { posterUrl, backdropUrl, cn } from "@/lib/utils";
 import { Skeleton } from "@/strata/primitives";
 import { Poster } from "@/strata/Poster";
 import { usePageAmbient, useHoverAmbient } from "@/strata/ambient";
+import { getImagePalette, useImagePalette } from "@/strata/useImagePalette";
 
 type Featured = {
   id: string;
+  kind: "movie" | "series";
   title: string;
   backdrop: string | null;
   year: string | null;
@@ -32,6 +35,7 @@ type Featured = {
   score: number | null;
   to: string;
   detailTo: string;
+  dateCreated: string | null;
 };
 
 const fmtRuntime = (m: number | null): string => {
@@ -67,24 +71,42 @@ const HomeInner = () => {
   const showList = shows.data ?? [];
   const continueList = cont.data ?? [];
 
-  const featuredSource = movieList[0] ?? null;
-  const featured: Featured | null = featuredSource?.Id
-    ? {
-        id: featuredSource.Id,
-        title: featuredSource.Name ?? "Untitled",
-        backdrop:
-          backdropUrl(featuredSource.Id) ?? posterUrl(featuredSource.Id, "original"),
-        year: yearFor(featuredSource),
-        runtime: ticksToMinutes(featuredSource.RunTimeTicks),
-        score: featuredSource.CommunityRating
-          ? Math.round(featuredSource.CommunityRating * 10)
-          : null,
-        to: `/watch/${featuredSource.Id}`,
-        detailTo: `/movies/${featuredSource.Id}`,
-      }
-    : null;
-
-  usePageAmbient(featured?.id ?? null, 0.9);
+  const featuredList: Featured[] = useMemo(() => {
+    const merged: Featured[] = [];
+    for (const m of movieList) {
+      if (!m.Id) continue;
+      merged.push({
+        id: m.Id,
+        kind: "movie",
+        title: m.Name ?? "Untitled",
+        backdrop: backdropUrl(m.Id) ?? posterUrl(m.Id, "original"),
+        year: yearFor(m),
+        runtime: ticksToMinutes(m.RunTimeTicks),
+        score: m.CommunityRating ? Math.round(m.CommunityRating * 10) : null,
+        to: `/watch/${m.Id}`,
+        detailTo: `/movies/${m.Id}`,
+        dateCreated: m.DateCreated ?? null,
+      });
+    }
+    for (const s of showList) {
+      if (!s.Id) continue;
+      merged.push({
+        id: s.Id,
+        kind: "series",
+        title: s.Name ?? "Untitled",
+        backdrop: backdropUrl(s.Id) ?? posterUrl(s.Id, "original"),
+        year: yearFor(s),
+        runtime: null,
+        score: s.CommunityRating ? Math.round(s.CommunityRating * 10) : null,
+        to: `/shows/${s.Id}`,
+        detailTo: `/shows/${s.Id}`,
+        dateCreated: s.DateCreated ?? null,
+      });
+    }
+    return merged
+      .sort((a, b) => (b.dateCreated ?? "").localeCompare(a.dateCreated ?? ""))
+      .slice(0, 10);
+  }, [movieList, showList]);
 
   const continueItems = useMemo(
     () =>
@@ -121,9 +143,9 @@ const HomeInner = () => {
 
   return (
     <div className="-mt-[112px]">
-      {featured && (
+      {featuredList.length > 0 && (
         <Hero
-          featured={featured}
+          items={featuredList}
           totalFilms={movieList.length}
           totalShows={showList.length}
         />
@@ -141,7 +163,7 @@ const HomeInner = () => {
         {recentMovies.length > 0 && (
           <PosterShelf
             chapter="I"
-            label="Films, Recently Filed"
+            label="Movies"
             sub={`${movieList.length} titles on the shelf`}
             items={recentMovies.map((m) => ({
               id: m.Id!,
@@ -154,7 +176,7 @@ const HomeInner = () => {
             }))}
             cta={
               movieList.length > recentMovies.length
-                ? { label: "Browse all films", to: "/movies" }
+                ? { label: "Browse all movies", to: "/movies" }
                 : undefined
             }
           />
@@ -162,7 +184,7 @@ const HomeInner = () => {
         {recentShows.length > 0 && (
           <PosterShelf
             chapter="II"
-            label="Series & Serials"
+            label="Shows"
             sub={`${showList.length} ongoing or complete`}
             items={recentShows.map((s) => ({
               id: s.Id!,
@@ -173,7 +195,7 @@ const HomeInner = () => {
             }))}
             cta={
               showList.length > recentShows.length
-                ? { label: "Browse all series", to: "/shows" }
+                ? { label: "Browse all shows", to: "/shows" }
                 : undefined
             }
           />
@@ -191,12 +213,14 @@ const yearFor = (item: BaseItemDto): string | null => {
 
 /* ────────────────────────── Hero ────────────────────────── */
 
+const HERO_ROTATE_MS = 6500;
+
 const Hero = ({
-  featured,
+  items,
   totalFilms,
   totalShows,
 }: {
-  featured: Featured;
+  items: Featured[];
   totalFilms: number;
   totalShows: number;
 }) => {
@@ -207,9 +231,44 @@ const Hero = ({
   const contentY = useTransform(scrollY, [0, 400], reduce ? [0, 0] : [0, -30]);
   const contentOp = useTransform(scrollY, [0, 500], [1, 0.2]);
 
-  const palette = paletteFor(featured.id);
-  const opus = opusFor(featured.id);
-  const volume = volumeFor(featured.id);
+  // Rotation state — autoplays unless the user is hovering the hero, the tab
+  // is hidden, or the user prefers reduced motion.
+  const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const current = items[Math.min(index, items.length - 1)] ?? items[0];
+
+  useEffect(() => {
+    if (reduce || paused || items.length < 2) return;
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") setPaused(true);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    const t = window.setInterval(() => {
+      setIndex((i) => (i + 1) % items.length);
+    }, HERO_ROTATE_MS);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [paused, items.length, reduce]);
+
+  // Warm the palette cache for every featured backdrop so the page wash
+  // doesn't briefly fall back to the hash palette as the hero rotates.
+  useEffect(() => {
+    items.forEach((it) => {
+      if (it.backdrop) getImagePalette(it.backdrop);
+    });
+  }, [items]);
+
+  // Drive the page ambient wash from whichever item is currently on screen.
+  const imgPalette = useImagePalette(current?.backdrop ?? null);
+  usePageAmbient(current?.id ?? null, 0.9, imgPalette);
+
+  if (!current) return null;
+
+  const palette = paletteFor(current.id);
+  const opus = opusFor(current.id);
+  const volume = volumeFor(current.id);
 
   const heroStyle = {
     "--c1": palette[0],
@@ -221,29 +280,45 @@ const Hero = ({
     <section
       className="relative w-full overflow-hidden"
       style={{ ...heroStyle, height: "100vh", minHeight: 760 }}
+      onPointerEnter={() => setPaused(true)}
+      onPointerLeave={() => setPaused(false)}
     >
+      {/* Palette base — rides the @property color transition */}
       <div
         className="absolute inset-0"
         style={{
-          background: `linear-gradient(135deg, ${palette[1]} 0%, ${palette[0]} 100%)`,
+          background:
+            "linear-gradient(135deg, var(--strata-c2) 0%, var(--strata-c1) 100%)",
         }}
       />
 
-      <motion.div style={{ y: bgY, scale: bgScale }} className="absolute inset-0">
-        {featured.backdrop && (
-          <img
-            src={featured.backdrop}
-            alt=""
-            className="h-full w-full object-cover"
-            style={{ objectPosition: "65% center" }}
-          />
-        )}
+      {/* Cross-faded backdrop layer */}
+      <motion.div
+        style={{ y: bgY, scale: bgScale }}
+        className="absolute inset-0"
+      >
+        <AnimatePresence mode="sync">
+          {current.backdrop && (
+            <motion.img
+              key={current.id}
+              src={current.backdrop}
+              alt=""
+              initial={{ opacity: 0, scale: 1.06 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 1.4, ease: [0.2, 0.6, 0.2, 1] }}
+              className="absolute inset-0 h-full w-full object-cover"
+              style={{ objectPosition: "65% center" }}
+            />
+          )}
+        </AnimatePresence>
       </motion.div>
 
       <div className="absolute inset-0 [background:linear-gradient(95deg,rgb(12_10_8/0.96)_0%,rgb(12_10_8/0.85)_28%,rgb(12_10_8/0.35)_55%,transparent_85%)]" />
-      <div className="absolute inset-x-0 bottom-0 h-[55%] [background:linear-gradient(180deg,transparent_0%,var(--color-strata-bg)_92%)]" />
+      <div className="absolute inset-x-0 bottom-0 h-[55%] [background:linear-gradient(180deg,transparent_0%,var(--strata-c2)_92%)]" />
       <div className="grain-paper absolute inset-0 opacity-[0.6] mix-blend-overlay" />
 
+      {/* Right rail — also crossfades because opus/volume are id-derived */}
       <motion.div
         style={{ opacity: contentOp }}
         className="absolute right-8 top-[152px] hidden flex-col items-end gap-3 text-right lg:flex lg:right-12"
@@ -251,11 +326,20 @@ const Hero = ({
         <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-strata-paper/65">
           Feature Presentation
         </div>
-        <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.22em] text-strata-paper/45">
-          <span>Vol. {volume}</span>
-          <span className="text-strata-paper/25">·</span>
-          <span>Opus № {opus}</span>
-        </div>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={current.id}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.5, ease: [0.2, 0.6, 0.2, 1] }}
+            className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.22em] text-strata-paper/45"
+          >
+            <span>Vol. {volume}</span>
+            <span className="text-strata-paper/25">·</span>
+            <span>Opus № {opus}</span>
+          </motion.div>
+        </AnimatePresence>
         <div className="mt-4 h-px w-12 bg-strata-paper/30" />
         <div className="font-editorial text-[14px] text-strata-paper/55">
           presented in
@@ -265,91 +349,104 @@ const Hero = ({
         </div>
       </motion.div>
 
+      {/* Main editorial block — crossfades on rotation */}
       <motion.div
         style={{ y: contentY, opacity: contentOp }}
         className="absolute inset-x-0 bottom-0 px-8 pb-28 lg:px-12 lg:pb-32"
       >
-        <motion.div
-          initial={reduce ? false : "hidden"}
-          animate="show"
-          variants={heroStagger}
-          className="flex max-w-[920px] flex-col gap-7"
-        >
+        <AnimatePresence mode="wait">
           <motion.div
-            variants={heroItem}
-            className="flex items-center gap-4"
+            key={current.id}
+            initial={reduce ? false : "hidden"}
+            animate="show"
+            exit={reduce ? undefined : "exit"}
+            variants={heroStagger}
+            className="flex max-w-[920px] flex-col gap-7"
           >
-            <span className="h-px w-10 bg-strata-accent" />
-            <span className="font-mono text-[10px] uppercase tracking-[0.32em] text-strata-paper/85">
-              Tonight in Repertory
-            </span>
-            <span className="anim-pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-strata-accent" />
-          </motion.div>
-
-          <motion.h1
-            variants={heroItem}
-            className="font-display text-strata-paper"
-            style={{
-              fontSize: "clamp(64px, 9vw, 148px)",
-              lineHeight: "0.92",
-              fontVariationSettings: '"opsz" 144, "SOFT" 30, "WONK" 1',
-              letterSpacing: "-0.045em",
-              marginTop: "-0.05em",
-              marginBottom: "-0.05em",
-            }}
-          >
-            {featured.title}
-          </motion.h1>
-
-          <motion.div
-            variants={heroItem}
-            className="flex flex-wrap items-center gap-x-4 gap-y-2 font-mono text-[11px] uppercase tracking-[0.22em] text-strata-paper/70"
-          >
-            {featured.year && <span>Anno {featured.year}</span>}
-            {featured.year && featured.runtime && <Dot />}
-            {featured.runtime && <span>{fmtRuntime(featured.runtime)}</span>}
-            <Dot />
-            <span className="font-editorial normal-case tracking-normal text-[14px] text-strata-paper/85">
-              a motion picture
-            </span>
-            {featured.score !== null && (
-              <>
-                <Dot />
-                <span className="text-strata-accent-2">★ {featured.score}/100</span>
-              </>
-            )}
-          </motion.div>
-
-          <motion.div
-            variants={heroItem}
-            className="mt-2 flex flex-wrap items-center gap-3"
-          >
-            <motion.div
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.96 }}
-              transition={{ type: "spring", stiffness: 380, damping: 18 }}
-            >
-              <Link to={featured.to as never} className="btn-play">
-                <PlayIcon className="h-3.5 w-3.5" />
-                Begin
-              </Link>
+            <motion.div variants={heroItem} className="flex items-center gap-4">
+              <span className="h-px w-10 bg-strata-accent" />
+              <span className="font-mono text-[10px] uppercase tracking-[0.32em] text-strata-paper/85">
+                {current.kind === "series" ? "On the Marquee · Show" : "Tonight in Repertory"}
+              </span>
+              <span className="anim-pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-strata-accent" />
             </motion.div>
-            <motion.div
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.96 }}
-              transition={{ type: "spring", stiffness: 380, damping: 18 }}
+
+            <motion.h1
+              variants={heroItem}
+              className="font-display text-strata-paper"
+              style={{
+                fontSize: "clamp(64px, 9vw, 148px)",
+                lineHeight: "0.92",
+                fontVariationSettings: '"opsz" 144, "SOFT" 30, "WONK" 1',
+                letterSpacing: "-0.045em",
+                marginTop: "-0.05em",
+                marginBottom: "-0.05em",
+              }}
             >
-              <Link to={featured.detailTo as never} className="btn-glass">
-                <InfoIcon className="h-3.5 w-3.5" />
-                Programme
-              </Link>
+              {current.title}
+            </motion.h1>
+
+            <motion.div
+              variants={heroItem}
+              className="flex flex-wrap items-center gap-x-4 gap-y-2 font-mono text-[11px] uppercase tracking-[0.22em] text-strata-paper/70"
+            >
+              {current.year && <span>Anno {current.year}</span>}
+              {current.year && current.runtime && <Dot />}
+              {current.runtime && <span>{fmtRuntime(current.runtime)}</span>}
+              <Dot />
+              <span className="font-editorial normal-case tracking-normal text-[14px] text-strata-paper/85">
+                {current.kind === "series" ? "an episodic work" : "a motion picture"}
+              </span>
+              {current.score !== null && (
+                <>
+                  <Dot />
+                  <span className="text-strata-accent-2">★ {current.score}/100</span>
+                </>
+              )}
             </motion.div>
-            <span className="ml-2 hidden font-mono text-[10px] uppercase tracking-[0.22em] text-strata-paper/40 sm:inline">
-              Press <kbd className="rounded-sm border border-strata-paper/20 bg-strata-paper/5 px-1 py-0.5 text-[9px]">↵</kbd> to begin
-            </span>
+
+            <motion.div
+              variants={heroItem}
+              className="mt-2 flex flex-wrap items-center gap-3"
+            >
+              <motion.div
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.96 }}
+                transition={{ type: "spring", stiffness: 380, damping: 18 }}
+              >
+                <Link to={current.to as never} className="btn-play">
+                  <PlayIcon className="h-3.5 w-3.5" />
+                  Begin
+                </Link>
+              </motion.div>
+              <motion.div
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.96 }}
+                transition={{ type: "spring", stiffness: 380, damping: 18 }}
+              >
+                <Link to={current.detailTo as never} className="btn-glass">
+                  <InfoIcon className="h-3.5 w-3.5" />
+                  Programme
+                </Link>
+              </motion.div>
+              <span className="ml-2 hidden font-mono text-[10px] uppercase tracking-[0.22em] text-strata-paper/40 sm:inline">
+                Press <kbd className="rounded-sm border border-strata-paper/20 bg-strata-paper/5 px-1 py-0.5 text-[9px]">↵</kbd> to begin
+              </span>
+            </motion.div>
           </motion.div>
-        </motion.div>
+        </AnimatePresence>
       </motion.div>
+
+      {/* Rotation indicator — click to jump, with a thin progress fill that
+       * drains while autoplay is running. */}
+      {items.length > 1 && (
+        <HeroIndicators
+          count={items.length}
+          index={index}
+          paused={paused || Boolean(reduce)}
+          onSelect={setIndex}
+        />
+      )}
 
       <motion.div
         style={{ opacity: contentOp }}
@@ -360,11 +457,11 @@ const Hero = ({
             <span className="text-strata-paper/30">In Your Catalog</span>
             <span className="text-strata-paper/30">/</span>
             <span className="text-strata-paper">
-              {String(totalFilms).padStart(3, "0")} Films
+              {String(totalFilms).padStart(3, "0")} Movies
             </span>
             <span className="text-strata-paper/30">·</span>
             <span className="text-strata-paper">
-              {String(totalShows).padStart(3, "0")} Series
+              {String(totalShows).padStart(3, "0")} Shows
             </span>
           </span>
           <span className="hidden text-strata-paper/30 md:inline">
@@ -376,9 +473,51 @@ const Hero = ({
   );
 };
 
+const HeroIndicators = ({
+  count,
+  index,
+  paused,
+  onSelect,
+}: {
+  count: number;
+  index: number;
+  paused: boolean;
+  onSelect: (i: number) => void;
+}) => (
+  <div className="absolute bottom-[88px] right-8 z-20 hidden items-center gap-2 lg:flex lg:right-12">
+    {Array.from({ length: count }).map((_, i) => {
+      const isActive = i === index;
+      return (
+        <button
+          key={i}
+          type="button"
+          aria-label={`Show featured item ${i + 1}`}
+          onClick={() => onSelect(i)}
+          className="group relative h-[18px] w-[34px] cursor-pointer border-none bg-transparent p-0"
+        >
+          <span className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-strata-paper/20" />
+          {isActive && (
+            <motion.span
+              key={`${i}-${paused ? "p" : "r"}-${index}`}
+              className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 origin-left bg-strata-paper"
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: 1 }}
+              transition={{
+                duration: paused ? 0 : HERO_ROTATE_MS / 1000,
+                ease: "linear",
+              }}
+            />
+          )}
+        </button>
+      );
+    })}
+  </div>
+);
+
 const heroStagger: Variants = {
   hidden: {},
   show: { transition: { staggerChildren: 0.09, delayChildren: 0.18 } },
+  exit: { transition: { staggerChildren: 0.04, staggerDirection: -1 } },
 };
 const heroItem: Variants = {
   hidden: { opacity: 0, y: 22 },
@@ -386,6 +525,11 @@ const heroItem: Variants = {
     opacity: 1,
     y: 0,
     transition: { type: "spring", stiffness: 220, damping: 26 },
+  },
+  exit: {
+    opacity: 0,
+    y: -14,
+    transition: { duration: 0.35, ease: [0.4, 0, 0.6, 0.2] },
   },
 };
 
@@ -423,9 +567,9 @@ const CatalogMarquee = ({
 }) => {
   const tokens = useMemo(
     () => [
-      `№ ${String(films).padStart(3, "0")} Films`,
+      `№ ${String(films).padStart(3, "0")} Movies`,
       "·",
-      `№ ${String(shows).padStart(3, "0")} Series`,
+      `№ ${String(shows).padStart(3, "0")} Shows`,
       "·",
       `${watching} in progress`,
       "·",
@@ -609,7 +753,10 @@ const ContinueCard = ({
   idx: number;
 }) => {
   const navigate = useNavigate();
-  const ambient = useHoverAmbient(id);
+  const ambient = useHoverAmbient(
+    id,
+    backdropUrl(id) ?? posterUrl(id, "w780"),
+  );
   const minLeft = Math.max(1, Math.round(secondsLeft / 60));
   return (
     <motion.div
@@ -709,7 +856,7 @@ const PosterItem = ({
   };
   idx: number;
 }) => {
-  const ambient = useHoverAmbient(item.id);
+  const ambient = useHoverAmbient(item.id, posterUrl(item.id, "w342"));
   return (
     <motion.div
       whileHover={{ y: -6 }}
