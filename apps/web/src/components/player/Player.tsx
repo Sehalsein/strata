@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { PlayerHeader } from "./PlayerHeader";
+import { LockOverlay } from "./LockOverlay";
 import { Scrubber } from "./Scrubber";
 import { TransportBar } from "./TransportBar";
 import { CenterPlayButton } from "./CenterPlayButton";
@@ -27,6 +28,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useTrickplay } from "./hooks/useTrickplay";
 import { useNextEpisode } from "./hooks/useNextEpisode";
 import { useScenePreview } from "./hooks/useScenePreview";
+import { useWakeLock } from "./hooks/useWakeLock";
 import {
   collectAudioStreams,
   collectChapters,
@@ -75,6 +77,14 @@ export const Player = ({ item, resumeAt }: Props) => {
   });
   const [plan, setPlan] = useState<StreamPlan | null>(null);
   const [usingHls, setUsingHls] = useState<boolean>(false);
+  const [stalled, setStalled] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
+  const [locked, setLocked] = useState(false);
+  const retry = useCallback(() => {
+    setStalled(false);
+    setState({ kind: "loading", message: "Reconnecting…" });
+    setRetryNonce((n) => n + 1);
+  }, []);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -87,6 +97,7 @@ export const Player = ({ item, resumeAt }: Props) => {
   const trickplay = useTrickplay(itemId, item.Trickplay);
   const videoState = useVideoState(videoRef);
   usePersistentVolume(videoRef);
+  useWakeLock(videoState.playing);
 
   // Safari requires this non-standard attribute before it will let JS
   // invoke the AirPlay target picker on a <video>. Set via DOM so we
@@ -280,7 +291,40 @@ export const Player = ({ item, resumeAt }: Props) => {
       video.load();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [itemId, currentAudio]);
+  }, [itemId, currentAudio, retryNonce]);
+
+  // Buffering watchdog. If the video stalls for >15s without recovering,
+  // surface a Retry affordance on top of the player. The retry handler
+  // bumps `retryNonce`, which re-runs the streaming pipeline above.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    let timer: number | null = null;
+    const armWatchdog = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => setStalled(true), 15_000);
+    };
+    const clearWatchdog = () => {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+      setStalled(false);
+    };
+    video.addEventListener("waiting", armWatchdog);
+    video.addEventListener("stalled", armWatchdog);
+    video.addEventListener("playing", clearWatchdog);
+    video.addEventListener("canplay", clearWatchdog);
+    video.addEventListener("seeked", clearWatchdog);
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      video.removeEventListener("waiting", armWatchdog);
+      video.removeEventListener("stalled", armWatchdog);
+      video.removeEventListener("playing", clearWatchdog);
+      video.removeEventListener("canplay", clearWatchdog);
+      video.removeEventListener("seeked", clearWatchdog);
+    };
+  }, []);
 
   // Manages the WebVTT <track> element on the video. Decoupled from the
   // streaming effect so toggling subtitles is instant and doesn't reset
@@ -442,7 +486,7 @@ export const Player = ({ item, resumeAt }: Props) => {
     ],
   );
 
-  useKeyboardShortcuts(api, videoRef);
+  useKeyboardShortcuts(api, videoRef, locked);
 
   // ----- Auto-hide -----
   const autoHide = useAutoHide(videoState.playing);
@@ -550,7 +594,7 @@ export const Player = ({ item, resumeAt }: Props) => {
         if (videoState.playing) autoHide.hideNow();
       }}
       className={cn(
-        "fixed inset-0 z-50 bg-strata-bg text-strata-paper",
+        "fixed inset-0 z-50 overscroll-none bg-strata-bg text-strata-paper",
         !autoHide.visible && videoState.playing && "cursor-none",
       )}
     >
@@ -567,14 +611,16 @@ export const Player = ({ item, resumeAt }: Props) => {
             ref={videoRef}
             playsInline
             controls={false}
-            className="absolute inset-0 h-full w-full bg-black"
+            onContextMenu={(e) => e.preventDefault()}
+            className="absolute inset-0 h-full w-full select-none bg-black [-webkit-touch-callout:none]"
           />
           {/* Touch tap-capture layer. Sits above the <video> and below
               all interactive controls (z-10 < z-20/z-30) so taps on the
               transport, header, or center button never reach this. */}
           <div
-            className="absolute inset-0 z-10"
+            className="absolute inset-0 z-10 select-none touch-none [-webkit-touch-callout:none]"
             onPointerUp={handleCanvasTap}
+            onContextMenu={(e) => e.preventDefault()}
           />
           <SubtitleOverlay videoRef={videoRef} />
 
@@ -605,22 +651,23 @@ export const Player = ({ item, resumeAt }: Props) => {
 
           <CenterPlayButton
             playing={videoState.playing}
-            visible={!videoState.playing || autoHide.visible}
+            visible={!locked && (!videoState.playing || autoHide.visible)}
             onClick={api.toggle}
             loading={state.kind === "loading"}
           />
 
           <PlayerHeader
-            visible={autoHide.visible || !videoState.playing}
+            visible={!locked && (autoHide.visible || !videoState.playing)}
             breadcrumb={breadcrumb}
             transcoding={transcoding}
             onBack={handleBack}
+            onLock={() => setLocked(true)}
           />
 
           <div
             className={cn(
               "pointer-events-none absolute inset-x-0 bottom-0 z-30 transition-opacity duration-300",
-              autoHide.visible || !videoState.playing
+              !locked && (autoHide.visible || !videoState.playing)
                 ? "opacity-100"
                 : "opacity-0",
             )}
@@ -628,7 +675,7 @@ export const Player = ({ item, resumeAt }: Props) => {
             <div
               className={cn(
                 "bg-gradient-to-t from-strata-bg/95 via-strata-bg/70 to-transparent pt-16",
-                autoHide.visible || !videoState.playing
+                !locked && (autoHide.visible || !videoState.playing)
                   ? "pointer-events-auto"
                   : "pointer-events-none",
               )}
@@ -694,13 +741,28 @@ export const Player = ({ item, resumeAt }: Props) => {
                   </div>
                 )}
                 <div className="flex justify-center gap-2">
-                  <button
-                    onClick={() => window.location.reload()}
-                    className="strata-btn-primary"
-                  >
+                  <button onClick={retry} className="strata-btn-primary">
                     Try again
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+          <LockOverlay locked={locked} onUnlock={() => setLocked(false)} />
+          {stalled && state.kind !== "error" && (
+            <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center">
+              <div className="pointer-events-auto flex items-center gap-3 rounded-md border border-strata-paper/15 bg-strata-bg/85 px-4 py-3 backdrop-blur">
+                <span className="anim-pulse-dot inline-block h-2 w-2 rounded-full bg-strata-accent" />
+                <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-strata-paper/80">
+                  Connection seems slow
+                </span>
+                <button
+                  type="button"
+                  onClick={retry}
+                  className="rounded-sm border border-strata-paper/25 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em] text-strata-paper transition hover:bg-strata-paper/10"
+                >
+                  Retry
+                </button>
               </div>
             </div>
           )}

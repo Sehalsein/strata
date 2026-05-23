@@ -39,7 +39,7 @@ const Shell = ({
   message: string;
   tone?: "loading" | "error";
 }) => (
-  <div className="fixed inset-0 z-50 flex flex-col bg-strata-bg text-strata-paper">
+  <div className="fixed inset-0 z-50 flex flex-col overscroll-none bg-strata-bg text-strata-paper">
     <div className="flex items-center px-6 py-5">
       <button
         type="button"

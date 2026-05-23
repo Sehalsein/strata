@@ -20,6 +20,7 @@ import { SpeedButton } from "./SpeedButton";
 import { StreamDetailsButton } from "./StreamDetailsButton";
 import { RailToggleButton } from "./RailToggleButton";
 import { AirplayButton } from "./AirplayButton";
+import { PipButton } from "./PipButton";
 import type { PlayerApi, Stream } from "./types";
 import type { VideoState } from "./hooks/useVideoState";
 
@@ -225,6 +226,8 @@ export const TransportBar = ({
         {railHasContent && (
           <RailToggleButton open={railVisible} onToggle={api.toggleRail} />
         )}
+
+        <PipButton videoRef={videoRef} />
 
         <AirplayButton videoRef={videoRef} />
       </div>

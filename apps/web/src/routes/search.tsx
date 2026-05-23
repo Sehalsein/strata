@@ -103,7 +103,11 @@ const SearchInner = () => {
           </button>
         )}
         <span className="ml-2 hidden font-mono text-[10px] uppercase tracking-[0.22em] text-strata-text/35 sm:inline">
-          {q.length < 2 ? "Awaiting input" : `${movies.length + shows.length} results`}
+          {q.length < 2
+            ? "Awaiting input"
+            : results.isFetching
+              ? "Searching…"
+              : `${movies.length + shows.length} results`}
         </span>
       </div>
 
@@ -146,6 +150,14 @@ const SearchInner = () => {
             Two characters opens the index. Try a title, an actor, a half-remembered scene.
           </p>
         </div>
+      )}
+
+      {q.length >= 2 && results.isLoading && (
+        <Section title="Searching" count={0}>
+          {Array.from({ length: 8 }).map((_, i) => (
+            <SearchSkeleton key={i} />
+          ))}
+        </Section>
       )}
 
       {movies.length > 0 && (
@@ -231,6 +243,14 @@ const Section = ({
       {children}
     </div>
   </section>
+);
+
+const SearchSkeleton = () => (
+  <div className="w-[170px]">
+    <div className="skeleton aspect-[2/3] w-full" />
+    <div className="skeleton mt-2.5 h-3 w-3/4" />
+    <div className="skeleton mt-1.5 h-2.5 w-1/2" />
+  </div>
 );
 
 const SearchCard = ({

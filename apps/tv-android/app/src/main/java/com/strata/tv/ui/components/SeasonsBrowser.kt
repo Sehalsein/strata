@@ -174,7 +174,7 @@ private fun EpisodeCard(episode: BaseItemDto, onClick: () -> Unit) {
                 ),
         ) {
             AsyncImage(
-                model = repo.imageUrls.thumb(episode.id) ?: repo.imageUrls.image(episode.id, maxWidth = 640),
+                model = repo.imageUrls.episodeStill(episode),
                 contentDescription = episode.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),

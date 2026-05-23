@@ -1,4 +1,4 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Lock } from "lucide-react";
 import { memo } from "react";
 import { cn, formatBitrate } from "@/lib/utils";
 
@@ -19,6 +19,7 @@ type Props = {
   breadcrumb: Breadcrumb;
   transcoding: Transcoding;
   onBack: () => void;
+  onLock?: () => void;
 };
 
 
@@ -28,6 +29,7 @@ export const PlayerHeader = memo(function PlayerHeader({
   breadcrumb,
   transcoding,
   onBack,
+  onLock,
 }: Props) {
   const mbps = formatBitrate(transcoding.bitrate);
   const isEpisode =
@@ -89,10 +91,10 @@ export const PlayerHeader = memo(function PlayerHeader({
             </div>
           </div>
 
-          <div className="hidden items-center gap-2 sm:flex">
+          <div className="flex items-center gap-2">
             <span
               className={cn(
-                "chip font-mono",
+                "chip font-mono hidden sm:inline-flex",
                 transcoding.kind === "direct"
                   ? "border-strata-success/40 text-strata-success/90"
                   : "border-strata-accent-2/40 text-strata-accent-2",
@@ -109,6 +111,16 @@ export const PlayerHeader = memo(function PlayerHeader({
               {transcoding.kind === "direct" ? "Direct play" : "Transcode"}
               {mbps ? ` · ${mbps}` : null}
             </span>
+            {onLock && (
+              <button
+                type="button"
+                onClick={onLock}
+                aria-label="Lock screen"
+                className="flex h-11 w-11 flex-none items-center justify-center rounded-full border border-strata-paper/20 bg-strata-bg/40 text-strata-paper transition hover:bg-strata-paper/10 sm:h-10 sm:w-10"
+              >
+                <Lock className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
       </div>

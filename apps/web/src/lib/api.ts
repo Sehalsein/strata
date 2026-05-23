@@ -99,6 +99,26 @@ export const clearAuth = () => {
   writeStorage(STORAGE_USER_NAME, null);
 };
 
+// Auth-expiry interceptor: if Jellyfin replies 401 to any request,
+// drop the stored token and dispatch a storage-style event so the
+// session hook resolves to null and route guards send the user to
+// /login. Avoids leaving the app stuck on a stale-token screen.
+api.axiosInstance.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status: number | undefined = error?.response?.status;
+    if (status === 401 && getAccessToken()) {
+      clearAuth();
+      try {
+        window.dispatchEvent(new StorageEvent("storage"));
+      } catch {
+        /* SSR / older browser */
+      }
+    }
+    return Promise.reject(error);
+  },
+);
+
 const requireUserId = (): string => {
   const id = getUserId();
   if (!id) throw new Error("Not signed in");

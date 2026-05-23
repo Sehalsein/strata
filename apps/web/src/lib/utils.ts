@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { ImageType } from "@jellyfin/sdk/lib/generated-client/models";
+import { ImageType, type BaseItemDto } from "@jellyfin/sdk/lib/generated-client/models";
 import { getServerUrl, getAccessToken } from "./api";
 
 export const cn = (...inputs: ClassValue[]): string => twMerge(clsx(inputs));
@@ -49,6 +49,20 @@ export const thumbUrl = (
   size: keyof typeof SIZE_TO_MAX_WIDTH = "w500",
   tag?: string | null,
 ): string | null => buildImageUrl(itemId, ImageType.Thumb, size, tag);
+
+// Jellyfin stores the episode still frame under the `Primary` image tag.
+// `Thumb` is rarely populated for episodes — checking ImageTags lets us skip
+// the request entirely when neither exists.
+export const episodeStillUrl = (
+  ep: Pick<BaseItemDto, "Id" | "ImageTags">,
+  size: keyof typeof SIZE_TO_MAX_WIDTH = "w500",
+): string | null => {
+  if (!ep.Id) return null;
+  const tags = ep.ImageTags ?? {};
+  if (tags.Primary) return posterUrl(ep.Id, size, tags.Primary);
+  if (tags.Thumb) return thumbUrl(ep.Id, size, tags.Thumb);
+  return null;
+};
 
 export const formatRuntime = (mins: number | null | undefined): string => {
   if (!mins) return "";

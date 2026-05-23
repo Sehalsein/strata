@@ -1,5 +1,6 @@
 package com.strata.tv.data
 
+import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.ImageType
 import java.net.URLEncoder
 import java.util.UUID
@@ -23,6 +24,18 @@ class ImageUrls(private val serverUrl: String, private val authStore: AuthStore)
 
     fun backdrop(itemId: UUID?): String? = image(itemId, ImageType.BACKDROP, maxWidth = 1920)
     fun thumb(itemId: UUID?): String? = image(itemId, ImageType.THUMB, maxWidth = 640)
+
+    // Jellyfin stores the episode still frame under the `Primary` image tag.
+    // `Thumb` is rarely populated for episodes — checking imageTags lets us skip
+    // the request entirely when neither exists.
+    fun episodeStill(episode: BaseItemDto, maxWidth: Int = 640): String? {
+        val tags = episode.imageTags ?: emptyMap()
+        return when {
+            tags["Primary"] != null -> image(episode.id, ImageType.PRIMARY, maxWidth)
+            tags["Thumb"] != null   -> image(episode.id, ImageType.THUMB, maxWidth)
+            else -> null
+        }
+    }
 
     /**
      * Cast / crew portrait. BaseItemPerson.id is also a Jellyfin item id, so

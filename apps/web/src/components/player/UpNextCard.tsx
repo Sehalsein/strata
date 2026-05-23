@@ -1,5 +1,5 @@
 import { Play } from "lucide-react";
-import { thumbUrl, posterUrl, formatRuntime, cn } from "@/lib/utils";
+import { episodeStillUrl, formatRuntime, cn } from "@/lib/utils";
 import type { BaseItemDto } from "@/lib/api";
 import { ticksToMinutes } from "@/lib/api";
 
@@ -9,10 +9,14 @@ type Props = {
 };
 
 export const UpNextCard = ({ episode, onPlay }: Props) => {
-  const img = thumbUrl(episode.Id, "w500") ?? posterUrl(episode.Id, "w500");
+  const img = episodeStillUrl(episode, "w500");
   const runtime = formatRuntime(ticksToMinutes(episode.RunTimeTicks));
   const season = episode.ParentIndexNumber;
   const ep = episode.IndexNumber;
+  const watched = episode.UserData?.Played;
+  const progressPct = !watched
+    ? Math.max(0, Math.min(100, episode.UserData?.PlayedPercentage ?? 0))
+    : 0;
   const epLabel =
     season !== undefined && ep !== undefined
       ? `S${season} · E${ep}`
@@ -27,7 +31,8 @@ export const UpNextCard = ({ episode, onPlay }: Props) => {
       disabled={!onPlay}
       className={cn(
         "group block w-full overflow-hidden rounded-sm border border-strata-paper/12 bg-strata-paper/[0.03] text-left transition",
-        onPlay && "hover:border-strata-paper/30 hover:bg-strata-paper/[0.06]",
+        onPlay &&
+          "hover:border-strata-paper/30 hover:bg-strata-paper/[0.06] active:scale-[0.99] active:border-strata-paper/40",
         !onPlay && "opacity-70",
       )}
     >
@@ -48,6 +53,17 @@ export const UpNextCard = ({ episode, onPlay }: Props) => {
         {onPlay && (
           <div className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-strata-paper/15 text-strata-paper opacity-0 backdrop-blur transition group-hover:opacity-100">
             <Play className="h-3.5 w-3.5 translate-x-px" />
+          </div>
+        )}
+        {progressPct > 0 && (
+          <div
+            className="absolute inset-x-0 bottom-0 h-[3px] bg-strata-paper/15"
+            aria-hidden
+          >
+            <div
+              className="h-full bg-strata-accent"
+              style={{ width: `${progressPct}%` }}
+            />
           </div>
         )}
       </div>

@@ -16,7 +16,7 @@ export const PosterCard = ({ to, title, imageUrl, subtitle }: Props) => {
   return (
     <Link
       to={to as any}
-      className="group block w-[180px] shrink-0 transition-transform hover:-translate-y-1"
+      className="group block w-[180px] shrink-0 transition-transform duration-150 hover:-translate-y-1 active:scale-[0.97]"
     >
       <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted">
         {imageUrl ? (

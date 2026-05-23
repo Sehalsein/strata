@@ -147,7 +147,7 @@ public struct ShowDetailView: View {
                     services.coordinator.requestWatch(ep.id, start: ep.resumePositionSeconds)
                 } label: {
                     HStack(alignment: .top, spacing: 14) {
-                        if let url = services.images?.thumb(itemId: ep.id) {
+                        if let url = services.images?.episodeStill(itemId: ep.id, imageTags: ep.imageTags) {
                             AsyncImage(url: url) { phase in
                                 switch phase {
                                 case .success(let img):

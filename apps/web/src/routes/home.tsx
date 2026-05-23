@@ -152,6 +152,11 @@ const HomeInner = () => {
                 : null,
               to: `/movies/${m.Id}`,
             }))}
+            cta={
+              movieList.length > recentMovies.length
+                ? { label: "Browse all films", to: "/movies" }
+                : undefined
+            }
           />
         )}
         {recentShows.length > 0 && (
@@ -166,6 +171,11 @@ const HomeInner = () => {
               meta: null,
               to: `/shows/${s.Id}`,
             }))}
+            cta={
+              showList.length > recentShows.length
+                ? { label: "Browse all series", to: "/shows" }
+                : undefined
+            }
           />
         )}
       </div>
@@ -649,6 +659,7 @@ const PosterShelf = ({
   label,
   sub,
   items,
+  cta,
 }: {
   chapter?: string;
   label: string;
@@ -660,6 +671,7 @@ const PosterShelf = ({
     meta: string | null;
     to: string;
   }>;
+  cta?: { label: string; to: string };
 }) => (
   <motion.section
     initial="hidden"
@@ -669,7 +681,7 @@ const PosterShelf = ({
     className="flex flex-col gap-8"
   >
     <motion.div variants={shelfItem}>
-      <SectionHeader chapter={chapter} label={label} sub={sub} />
+      <SectionHeader chapter={chapter} label={label} sub={sub} cta={cta} />
     </motion.div>
     <div
       className="row-mask no-scrollbar -mx-3 flex gap-6 overflow-x-auto px-3 pb-3"

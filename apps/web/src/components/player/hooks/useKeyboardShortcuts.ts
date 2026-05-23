@@ -20,11 +20,13 @@ const stepSpeed = (current: number, dir: 1 | -1): number => {
 export const useKeyboardShortcuts = (
   api: PlayerApi,
   videoRef: React.RefObject<HTMLVideoElement | null>,
+  disabled = false,
 ) => {
   const apiRef = useRef(api);
   apiRef.current = api;
 
   useEffect(() => {
+    if (disabled) return;
     const onKey = (e: KeyboardEvent) => {
       if (isEditable(e.target)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -104,5 +106,5 @@ export const useKeyboardShortcuts = (
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [videoRef]);
+  }, [videoRef, disabled]);
 };

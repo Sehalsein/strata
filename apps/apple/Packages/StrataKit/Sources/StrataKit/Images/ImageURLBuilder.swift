@@ -25,6 +25,16 @@ public struct ImageURLBuilder: Sendable {
         image(itemId: itemId, type: "Thumb", maxWidth: maxWidth)
     }
 
+    // Jellyfin stores the episode still frame under the `Primary` image tag.
+    // `Thumb` is rarely populated for episodes — checking imageTags lets us skip
+    // the request entirely when neither exists.
+    public func episodeStill(itemId: String, imageTags: [String: String]?, maxWidth: Int? = 640) -> URL? {
+        let tags = imageTags ?? [:]
+        if tags["Primary"] != nil { return primary(itemId: itemId, maxWidth: maxWidth) }
+        if tags["Thumb"] != nil   { return thumb(itemId: itemId, maxWidth: maxWidth) }
+        return nil
+    }
+
     public func image(itemId: String, type: String, maxWidth: Int? = nil) -> URL? {
         guard var comps = URLComponents(
             url: serverURL.appendingPathComponent("/Items/\(itemId)/Images/\(type)"),

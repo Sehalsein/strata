@@ -11,7 +11,7 @@ import {
   type BaseItemDto,
 } from "@/lib/api";
 import { useSession } from "@/lib/auth-client";
-import { cn, posterUrl, backdropUrl, thumbUrl } from "@/lib/utils";
+import { cn, posterUrl, backdropUrl, episodeStillUrl } from "@/lib/utils";
 import { opusFor, paletteFor, volumeFor } from "@/strata/theme";
 import { ProgressBar, Skeleton } from "@/strata/primitives";
 import { DetailMotif } from "@/strata/Poster";
@@ -68,7 +68,14 @@ const ShowDetailInner = ({ id }: { id: string }) => {
   const isFav = Boolean(s.UserData?.IsFavorite);
   const year = yearOf(s);
   const score = s.CommunityRating ? Math.round(s.CommunityRating * 10) : null;
-  const activeSeason = selectedSeason ?? seasons[0]?.IndexNumber ?? 1;
+  // Prefer the first season that actually has episodes — Jellyfin
+  // commonly lists a "Specials" pseudo-season first with no entries,
+  // which would otherwise leave the page looking empty.
+  const firstSeasonWithEps = seasons.find((s) =>
+    episodes.some((e) => e.ParentIndexNumber === s.IndexNumber),
+  )?.IndexNumber;
+  const activeSeason =
+    selectedSeason ?? firstSeasonWithEps ?? seasons[0]?.IndexNumber ?? 1;
   const visibleEpisodes = episodes.filter(
     (e) => e.ParentIndexNumber === activeSeason,
   );
@@ -488,20 +495,31 @@ const EpisodeRow = ({
   showId: string;
   isLast: boolean;
 }) => {
-  const stillImg = thumbUrl(ep.Id, "w500") ?? posterUrl(ep.Id, "w500");
+  const stillImg = episodeStillUrl(ep, "w500");
   const playable = Boolean(ep.Id);
   const runtime = ticksToMinutes(ep.RunTimeTicks);
   const palette = paletteFor(showId);
   const watched = ep.UserData?.Played;
+  // Jellyfin clears PlayedPercentage on full watch; only show the bar
+  // for in-progress episodes.
+  const progressPct = !watched
+    ? Math.max(0, Math.min(100, ep.UserData?.PlayedPercentage ?? 0))
+    : 0;
+  // Use `||` so an empty Name/Overview falls back too — `??` only
+  // catches null/undefined and Jellyfin sometimes emits "".
+  const title = ep.Name?.trim() || `Episode ${ep.IndexNumber ?? "?"}`;
+  const overview = ep.Overview?.trim() || "No synopsis on file.";
+  const epNum = String(ep.IndexNumber ?? 0).padStart(2, "0");
 
   return (
     <div
       className={cn(
-        "group grid grid-cols-[64px_minmax(200px,260px)_minmax(0,1fr)_auto] items-center gap-6 border-t rule-thin py-5 transition-colors hover:bg-strata-paper/[0.02]",
+        "group flex flex-col gap-4 border-t rule-thin py-5 transition-colors sm:grid sm:grid-cols-[48px_minmax(160px,220px)_minmax(0,1fr)_auto] sm:items-center sm:gap-6 sm:hover:bg-strata-paper/[0.02]",
         isLast && "border-b",
       )}
     >
-      <div className="flex flex-col items-center gap-1.5">
+      {/* EP number — inline on mobile (alongside title), own column on sm+ */}
+      <div className="hidden flex-col items-center gap-1.5 sm:flex">
         <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-strata-text/35">
           EP
         </span>
@@ -512,19 +530,22 @@ const EpisodeRow = ({
             letterSpacing: "-0.04em",
           }}
         >
-          {String(ep.IndexNumber ?? 0).padStart(2, "0")}
+          {epNum}
         </span>
       </div>
 
+      {/* Still image */}
       <div className="relative aspect-[16/9] w-full overflow-hidden ring-1 ring-strata-text/10">
         <div
           className="absolute inset-0"
           style={{ background: `linear-gradient(135deg, ${palette[0]}, ${palette[1]})` }}
         />
         {stillImg && (
-          <div
-            className="absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: `url(${stillImg})` }}
+          <img
+            src={stillImg}
+            alt=""
+            loading="lazy"
+            className="absolute inset-0 h-full w-full object-cover"
           />
         )}
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,transparent_50%,rgb(0_0_0/0.5)_100%)]" />
@@ -534,20 +555,37 @@ const EpisodeRow = ({
             Seen
           </div>
         )}
+        {progressPct > 0 && (
+          <div
+            className="absolute inset-x-0 bottom-0 h-[3px] bg-strata-paper/15"
+            aria-hidden
+          >
+            <div
+              className="h-full bg-strata-accent"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        )}
       </div>
 
+      {/* Title + overview + meta */}
       <div className="flex min-w-0 flex-col gap-1.5">
-        <h3
-          className="truncate font-display text-[22px] leading-tight text-strata-paper"
-          style={{
-            fontVariationSettings: '"opsz" 36, "SOFT" 50',
-            letterSpacing: "-0.025em",
-          }}
-        >
-          {ep.Name ?? `Episode ${ep.IndexNumber}`}
-        </h3>
-        <p className="line-clamp-2 max-w-[640px] text-[13px] leading-[1.55] text-strata-text/55">
-          {ep.Overview ?? "No synopsis on file."}
+        <div className="flex items-baseline gap-3">
+          <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-strata-text/40 sm:hidden">
+            EP {epNum}
+          </span>
+          <h3
+            className="min-w-0 flex-1 font-display text-[20px] leading-tight text-strata-paper sm:truncate sm:text-[22px]"
+            style={{
+              fontVariationSettings: '"opsz" 36, "SOFT" 50',
+              letterSpacing: "-0.025em",
+            }}
+          >
+            {title}
+          </h3>
+        </div>
+        <p className="line-clamp-3 max-w-[640px] text-[13px] leading-[1.55] text-strata-text/65 sm:line-clamp-2">
+          {overview}
         </p>
         <div className="mt-1 flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.22em] text-strata-text/40">
           {runtime && <span>{runtime}m</span>}
@@ -560,6 +598,7 @@ const EpisodeRow = ({
         </div>
       </div>
 
+      {/* Play button */}
       <div className="flex items-center">
         {playable ? (
           <Link

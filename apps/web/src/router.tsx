@@ -4,6 +4,7 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 import { AppShell } from "./components/AppShell";
+import { RouteError } from "./components/RouteError";
 import { LoginPage } from "./routes/login";
 import { HomePage } from "./routes/home";
 import { MoviesPage } from "./routes/movies";
@@ -13,7 +14,10 @@ import { ShowDetailPage } from "./routes/show-detail";
 import { WatchPage } from "./routes/watch";
 import { SearchPage } from "./routes/search";
 
-const rootRoute = createRootRoute({ component: AppShell });
+const rootRoute = createRootRoute({
+  component: AppShell,
+  errorComponent: RouteError,
+});
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -77,4 +81,7 @@ const routeTree = rootRoute.addChildren([
   searchRoute,
 ]);
 
-export const router = createRouter({ routeTree });
+export const router = createRouter({
+  routeTree,
+  defaultErrorComponent: RouteError,
+});
