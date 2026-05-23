@@ -41,7 +41,7 @@ export const ControlButton = forwardRef<HTMLDivElement, PrimaryProps>(
         onClick={onClick}
         disabled={disabled}
         className={cn(
-          "inline-flex h-9 items-center gap-2 px-3 text-strata-paper transition",
+          "inline-flex h-11 min-w-11 items-center justify-center gap-2 px-3 text-strata-paper transition sm:h-9 sm:min-w-0",
           !disabled && "hover:bg-strata-paper/[0.05]",
           disabled && "cursor-not-allowed",
         )}
@@ -55,12 +55,12 @@ export const ControlButton = forwardRef<HTMLDivElement, PrimaryProps>(
           {icon}
         </span>
         {label && (
-          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-strata-paper/65">
+          <span className="hidden font-mono text-[10px] uppercase tracking-[0.18em] text-strata-paper/65 sm:inline">
             {label}
           </span>
         )}
         {value && (
-          <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-strata-paper">
+          <span className="hidden font-mono text-[11px] uppercase tracking-[0.12em] text-strata-paper sm:inline">
             {value}
           </span>
         )}
@@ -82,7 +82,7 @@ export const ControlMenuTrigger = forwardRef<
     aria-label={ariaLabel}
     {...props}
     className={cn(
-      "inline-flex h-9 w-7 items-center justify-center border-l border-strata-paper/15 text-strata-paper/55 transition hover:bg-strata-paper/[0.06] hover:text-strata-paper disabled:cursor-not-allowed",
+      "inline-flex h-11 w-9 items-center justify-center border-l border-strata-paper/15 text-strata-paper/55 transition hover:bg-strata-paper/[0.06] hover:text-strata-paper disabled:cursor-not-allowed sm:h-9 sm:w-7",
       className,
     )}
   >

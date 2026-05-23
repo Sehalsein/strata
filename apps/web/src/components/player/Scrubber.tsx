@@ -3,6 +3,24 @@ import { cn, formatTime } from "@/lib/utils";
 import type { Chapter } from "./types";
 import type { TrickplaySource } from "./hooks/useTrickplay";
 
+// True when the primary input has no hover capability — i.e. touch.
+// Used to expose the playhead knob without requiring a hover event and
+// to raise the scrub tooltip clear of the user's thumb.
+const useHoverNone = (): boolean => {
+  const [touch, setTouch] = useState<boolean>(() =>
+    typeof window !== "undefined"
+      ? window.matchMedia("(hover: none)").matches
+      : false,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(hover: none)");
+    const onChange = (e: MediaQueryListEvent) => setTouch(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return touch;
+};
+
 type Props = {
   duration: number;
   currentTime: number;
@@ -46,6 +64,7 @@ export const Scrubber = ({
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   const [dragging, setDragging] = useState(false);
+  const touch = useHoverNone();
   // Optimistic seek target — drives the visible fill instantly on click,
   // before the underlying <video> has actually moved its currentTime.
   // Cleared once playback catches up (within ~0.5s).
@@ -168,7 +187,11 @@ export const Scrubber = ({
           className="pointer-events-none absolute z-10 flex -translate-x-1/2 flex-col items-center"
           style={{
             left: tooltipLeft,
-            bottom: tile ? TOOLTIP_H + 28 : 24,
+            // On touch, raise the tooltip well above the playhead so the
+            // user's thumb doesn't sit over it while scrubbing.
+            bottom: tile
+              ? TOOLTIP_H + (touch ? 56 : 28)
+              : touch ? 56 : 24,
           }}
         >
           {tile && (
@@ -220,19 +243,32 @@ export const Scrubber = ({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         className={cn(
-          "group relative h-6 w-full cursor-pointer touch-none",
+          "group relative w-full cursor-pointer touch-none",
+          // Bigger hit area on touch so a thumb can grab the track.
+          touch ? "h-11" : "h-6",
         )}
       >
         {/* base track */}
-        <div className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-strata-paper/15 transition-all group-hover:h-[5px]" />
+        <div
+          className={cn(
+            "absolute inset-x-0 top-1/2 -translate-y-1/2 rounded-full bg-strata-paper/15 transition-all",
+            touch ? "h-[5px]" : "h-[3px] group-hover:h-[5px]",
+          )}
+        />
         {/* buffered */}
         <div
-          className="absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-strata-paper/25 transition-all group-hover:h-[5px]"
+          className={cn(
+            "absolute left-0 top-1/2 -translate-y-1/2 rounded-full bg-strata-paper/25 transition-all",
+            touch ? "h-[5px]" : "h-[3px] group-hover:h-[5px]",
+          )}
           style={{ width: `${bufferedPct}%` }}
         />
         {/* progress */}
         <div
-          className="absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-strata-accent transition-all group-hover:h-[5px]"
+          className={cn(
+            "absolute left-0 top-1/2 -translate-y-1/2 rounded-full bg-strata-accent transition-all",
+            touch ? "h-[5px]" : "h-[3px] group-hover:h-[5px]",
+          )}
           style={{ width: `${progressPct}%` }}
         />
         {/* hover marker */}
@@ -256,23 +292,36 @@ export const Scrubber = ({
             />
           );
         })}
-        {/* knob */}
+        {/* knob — always visible on touch, hover-reveal on desktop */}
         <div
           className={cn(
             "pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 transition-opacity",
-            hover || dragging || loading
+            touch
               ? "opacity-100"
-              : "opacity-0 group-hover:opacity-100",
+              : hover || dragging || loading
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100",
           )}
           style={{ left: `${progressPct}%` }}
         >
           {loading ? (
-            <div className="relative h-3 w-3" aria-label="Seeking">
+            <div
+              className={cn(
+                "relative",
+                touch ? "h-4 w-4" : "h-3 w-3",
+              )}
+              aria-label="Seeking"
+            >
               <span className="absolute inset-0 animate-ping rounded-full bg-strata-accent opacity-75" />
               <span className="absolute inset-0 rounded-full bg-strata-accent shadow-[0_0_0_4px_rgba(232,51,31,0.18)]" />
             </div>
           ) : (
-            <div className="h-3 w-3 rounded-full bg-strata-accent shadow-[0_0_0_4px_rgba(232,51,31,0.18)]" />
+            <div
+              className={cn(
+                "rounded-full bg-strata-accent shadow-[0_0_0_4px_rgba(232,51,31,0.18)]",
+                touch ? "h-4 w-4" : "h-3 w-3",
+              )}
+            />
           )}
         </div>
       </div>

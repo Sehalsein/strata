@@ -64,7 +64,7 @@ const IconBtn = ({
     disabled={disabled}
     aria-label={ariaLabel}
     className={cn(
-      "inline-flex h-9 w-9 items-center justify-center rounded-full text-strata-paper transition hover:bg-strata-paper/10 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent",
+      "inline-flex h-11 w-11 items-center justify-center rounded-full text-strata-paper transition hover:bg-strata-paper/10 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent sm:h-9 sm:w-9",
       className,
     )}
   >
@@ -105,8 +105,8 @@ export const TransportBar = ({
   const muted = state.muted || state.volume === 0;
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-y-2 gap-x-2">
-      <div className="flex items-center gap-1">
+    <div className="mt-3 flex flex-nowrap items-center gap-1 sm:flex-wrap sm:gap-y-2 sm:gap-x-2">
+      <div className="hidden items-center sm:flex sm:gap-1">
         <IconBtn
           ariaLabel="Previous episode"
           onClick={api.prevEpisode ?? undefined}
@@ -114,6 +114,9 @@ export const TransportBar = ({
         >
           <SkipBack className="h-4 w-4" />
         </IconBtn>
+      </div>
+
+      <div className="flex items-center gap-1">
         <IconBtn
           ariaLabel="Back 10 seconds"
           onClick={() => api.seekBy(-10)}
@@ -139,6 +142,9 @@ export const TransportBar = ({
         >
           <RotateCw className="h-4 w-4" />
         </IconBtn>
+      </div>
+
+      <div className="hidden items-center sm:flex">
         <IconBtn
           ariaLabel="Next episode"
           onClick={api.nextEpisode ?? undefined}
@@ -148,7 +154,7 @@ export const TransportBar = ({
         </IconBtn>
       </div>
 
-      <div className="ml-3 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-strata-paper/70 tabular-nums">
+      <div className="ml-2 flex shrink items-center gap-1.5 overflow-hidden font-mono text-[10px] uppercase tracking-[0.1em] text-strata-paper/70 tabular-nums sm:ml-3 sm:gap-2 sm:text-[11px] sm:tracking-[0.14em]">
         <span>{formatTime(state.currentTime)}</span>
         <span className="text-strata-paper/30">/</span>
         <span className="text-strata-paper/50">
@@ -158,7 +164,7 @@ export const TransportBar = ({
 
       <div className="flex-1" />
 
-      <div className="group flex items-center gap-1">
+      <div className="group hidden items-center gap-1 sm:flex">
         <IconBtn
           ariaLabel={muted ? "Unmute" : "Mute"}
           onClick={api.toggleMute}
@@ -205,21 +211,23 @@ export const TransportBar = ({
         onCycle={api.cycleSpeed}
       />
 
-      <StreamDetailsButton
-        mediaSource={mediaSource}
-        plan={plan}
-        usingHls={usingHls}
-        currentAudioIndex={currentAudio}
-        currentSubIndex={currentSub}
-        videoRef={videoRef}
-        hlsRef={hlsRef}
-      />
+      <div className="hidden sm:contents">
+        <StreamDetailsButton
+          mediaSource={mediaSource}
+          plan={plan}
+          usingHls={usingHls}
+          currentAudioIndex={currentAudio}
+          currentSubIndex={currentSub}
+          videoRef={videoRef}
+          hlsRef={hlsRef}
+        />
 
-      {railHasContent && (
-        <RailToggleButton open={railVisible} onToggle={api.toggleRail} />
-      )}
+        {railHasContent && (
+          <RailToggleButton open={railVisible} onToggle={api.toggleRail} />
+        )}
 
-      <AirplayButton videoRef={videoRef} />
+        <AirplayButton videoRef={videoRef} />
+      </div>
 
       <IconBtn
         ariaLabel={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}

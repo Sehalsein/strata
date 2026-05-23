@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { AnimatePresence, motion } from "motion/react";
+import { RotateCcw, RotateCw } from "lucide-react";
 import Hls from "hls.js";
 import {
   buildStreamPlan,
@@ -407,6 +409,21 @@ export const Player = ({ item, resumeAt }: Props) => {
         v.muted = !v.muted;
       },
       toggleFullscreen: () => {
+        // iPhone Safari: document.fullscreen* is unsupported; the
+        // <video> exposes webkitEnterFullscreen which hands off to the
+        // native iOS player UI. That's the right behavior on phones,
+        // where faking fullscreen still leaves PWA chrome around.
+        const video = videoRef.current as
+          | (HTMLVideoElement & { webkitEnterFullscreen?: () => void })
+          | null;
+        if (
+          video &&
+          typeof video.webkitEnterFullscreen === "function" &&
+          !document.fullscreenEnabled
+        ) {
+          video.webkitEnterFullscreen();
+          return;
+        }
         const el = rootRef.current;
         if (!el) return;
         if (document.fullscreenElement) void document.exitFullscreen();
@@ -429,6 +446,76 @@ export const Player = ({ item, resumeAt }: Props) => {
 
   // ----- Auto-hide -----
   const autoHide = useAutoHide(videoState.playing);
+
+  // ----- Touch tap gestures (mobile) -----
+  // Single tap on the canvas: show controls; if already visible, also
+  // toggle play/pause. Double-tap left/right half: seek ∓10s with a
+  // brief ripple. Mouse pointer events are ignored — desktop already
+  // has hover/move-driven controls.
+  const tapStateRef = useRef<{
+    time: number;
+    side: "left" | "right";
+    timer: number | null;
+  } | null>(null);
+  const [seekRipple, setSeekRipple] = useState<{
+    side: "left" | "right";
+    seq: number;
+  } | null>(null);
+
+  const fireSeekRipple = useCallback((side: "left" | "right") => {
+    setSeekRipple((prev) => ({ side, seq: (prev?.seq ?? 0) + 1 }));
+    window.setTimeout(() => {
+      setSeekRipple((prev) =>
+        prev && prev.side === side ? null : prev,
+      );
+    }, 650);
+  }, []);
+
+  const handleCanvasTap = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      // Mouse already has a richer hover-driven UX. Only handle touch
+      // and pen here.
+      if (e.pointerType === "mouse") return;
+
+      const rect = e.currentTarget.getBoundingClientRect();
+      const side: "left" | "right" =
+        e.clientX - rect.left < rect.width / 2 ? "left" : "right";
+      const now = Date.now();
+      const prev = tapStateRef.current;
+
+      if (prev && now - prev.time < 280 && prev.side === side) {
+        if (prev.timer !== null) window.clearTimeout(prev.timer);
+        tapStateRef.current = null;
+        api.seekBy(side === "left" ? -10 : 10);
+        fireSeekRipple(side);
+        autoHide.bump();
+        return;
+      }
+
+      // Capture visibility at tap time so the queued single-tap action
+      // reflects what the user actually saw.
+      const wasVisible = autoHide.visible;
+      if (prev?.timer !== null && prev?.timer !== undefined) {
+        window.clearTimeout(prev.timer);
+      }
+      const timer = window.setTimeout(() => {
+        tapStateRef.current = null;
+        if (wasVisible) api.toggle();
+        autoHide.bump();
+      }, 250);
+      tapStateRef.current = { time: now, side, timer };
+    },
+    [api, autoHide, fireSeekRipple],
+  );
+
+  useEffect(
+    () => () => {
+      if (tapStateRef.current?.timer !== undefined && tapStateRef.current?.timer !== null) {
+        window.clearTimeout(tapStateRef.current.timer);
+      }
+    },
+    [],
+  );
 
   const handleBack = useCallback(() => {
     if (window.history.length > 1) window.history.back();
@@ -482,7 +569,39 @@ export const Player = ({ item, resumeAt }: Props) => {
             controls={false}
             className="absolute inset-0 h-full w-full bg-black"
           />
+          {/* Touch tap-capture layer. Sits above the <video> and below
+              all interactive controls (z-10 < z-20/z-30) so taps on the
+              transport, header, or center button never reach this. */}
+          <div
+            className="absolute inset-0 z-10"
+            onPointerUp={handleCanvasTap}
+          />
           <SubtitleOverlay videoRef={videoRef} />
+
+          <AnimatePresence>
+            {seekRipple && (
+              <motion.div
+                key={`${seekRipple.side}-${seekRipple.seq}`}
+                initial={{ opacity: 0, scale: 0.85 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ duration: 0.18, ease: [0.2, 0.6, 0.2, 1] }}
+                className={cn(
+                  "pointer-events-none absolute top-1/2 z-20 flex h-20 w-20 -translate-y-1/2 items-center justify-center rounded-full bg-strata-bg/55 text-strata-paper backdrop-blur-md",
+                  seekRipple.side === "left"
+                    ? "left-[16%] -translate-x-1/2"
+                    : "right-[16%] translate-x-1/2",
+                )}
+                aria-hidden
+              >
+                {seekRipple.side === "left" ? (
+                  <RotateCcw className="h-7 w-7" />
+                ) : (
+                  <RotateCw className="h-7 w-7" />
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <CenterPlayButton
             playing={videoState.playing}
@@ -506,7 +625,19 @@ export const Player = ({ item, resumeAt }: Props) => {
                 : "opacity-0",
             )}
           >
-            <div className="pointer-events-auto bg-gradient-to-t from-strata-bg/95 via-strata-bg/70 to-transparent px-6 pb-5 pt-16">
+            <div
+              className={cn(
+                "bg-gradient-to-t from-strata-bg/95 via-strata-bg/70 to-transparent pt-16",
+                autoHide.visible || !videoState.playing
+                  ? "pointer-events-auto"
+                  : "pointer-events-none",
+              )}
+              style={{
+                paddingLeft: "max(1.5rem, env(safe-area-inset-left))",
+                paddingRight: "max(1.5rem, env(safe-area-inset-right))",
+                paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))",
+              }}
+            >
               <Scrubber
                 duration={videoState.duration}
                 currentTime={videoState.currentTime}

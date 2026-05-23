@@ -21,6 +21,8 @@ type Props = {
   onBack: () => void;
 };
 
+
+
 export const PlayerHeader = memo(function PlayerHeader({
   visible,
   breadcrumb,
@@ -39,26 +41,36 @@ export const PlayerHeader = memo(function PlayerHeader({
         visible ? "opacity-100" : "opacity-0",
       )}
     >
-      <div className="pointer-events-auto bg-gradient-to-b from-strata-bg/85 via-strata-bg/40 to-transparent px-6 pb-12 pt-5">
-        <div className="flex items-start justify-between gap-6">
-          <div className="flex items-start gap-4">
+      <div
+        className={cn(
+          "bg-gradient-to-b from-strata-bg/85 via-strata-bg/40 to-transparent pb-12",
+          visible ? "pointer-events-auto" : "pointer-events-none",
+        )}
+        style={{
+          paddingTop: "max(1.25rem, env(safe-area-inset-top))",
+          paddingLeft: "max(1.5rem, env(safe-area-inset-left))",
+          paddingRight: "max(1.5rem, env(safe-area-inset-right))",
+        }}
+      >
+        <div className="flex items-start justify-between gap-3 sm:gap-6">
+          <div className="flex min-w-0 items-start gap-3 sm:gap-4">
             <button
               type="button"
               onClick={onBack}
               aria-label="Back"
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-strata-paper/20 bg-strata-bg/40 text-strata-paper transition hover:bg-strata-paper/10"
+              className="flex h-11 w-11 flex-none items-center justify-center rounded-full border border-strata-paper/20 bg-strata-bg/40 text-strata-paper transition hover:bg-strata-paper/10 sm:h-10 sm:w-10"
             >
               <ArrowLeft className="h-4 w-4" />
             </button>
-            <div className="leading-tight">
+            <div className="min-w-0 leading-tight">
               {isEpisode && (
-                <div className="spec text-strata-paper/55">
+                <div className="spec truncate text-strata-paper/55">
                   {breadcrumb.show}
                 </div>
               )}
-              <div className="flex items-baseline gap-3">
+              <div className="flex min-w-0 items-baseline gap-3">
                 {isEpisode && (
-                  <span className="font-mono text-[11px] uppercase tracking-[0.22em] text-strata-paper/70">
+                  <span className="flex-none font-mono text-[11px] uppercase tracking-[0.22em] text-strata-paper/70">
                     {breadcrumb.season !== null
                       ? `S${breadcrumb.season}`
                       : null}
@@ -70,14 +82,14 @@ export const PlayerHeader = memo(function PlayerHeader({
                       : null}
                   </span>
                 )}
-                <span className="font-display text-lg italic text-strata-paper">
+                <span className="truncate font-display text-base italic text-strata-paper sm:text-lg">
                   {isEpisode ? `"${breadcrumb.title}"` : breadcrumb.title}
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="hidden items-center gap-2 sm:flex">
             <span
               className={cn(
                 "chip font-mono",
