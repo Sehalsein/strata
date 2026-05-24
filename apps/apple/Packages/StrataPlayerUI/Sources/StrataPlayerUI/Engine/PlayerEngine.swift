@@ -97,10 +97,18 @@ public final class PlayerEngine {
             let playerItem = AVPlayerItem(asset: asset)
             player.replaceCurrentItem(with: playerItem)
 
-            // Surface tracks from the planned media source. We re-fetch the
-            // item to pick up media streams if the bundled item lacks them.
-            let source = (try? await jellyfin.getItem(item.id))?.mediaSources?.first { $0.id == plan.mediaSourceId }
-                ?? item.mediaSources?.first { $0.id == plan.mediaSourceId }
+            // Surface tracks from the bundled item when present; only
+            // re-fetch when mediaSources are missing (some list-view
+            // models drop them to keep payloads small). The re-fetch
+            // used to be unconditional and blocked play() on a second
+            // round-trip after StreamPlanner already returned.
+            let bundledSource = item.mediaSources?.first { $0.id == plan.mediaSourceId }
+            let source: MediaSource?
+            if let bundledSource, (bundledSource.mediaStreams?.isEmpty == false) {
+                source = bundledSource
+            } else {
+                source = (try? await jellyfin.getItem(item.id))?.mediaSources?.first { $0.id == plan.mediaSourceId }
+            }
             audioTracks = (source?.mediaStreams ?? []).filter { $0.type == .audio }
             subtitleTracks = (source?.mediaStreams ?? []).filter { $0.type == .subtitle }
             activeAudioIndex = audioTracks.first(where: { $0.isDefault ?? false })?.index ?? audioTracks.first?.index
@@ -113,8 +121,12 @@ public final class PlayerEngine {
                 await seek(to: resume)
             }
 
-            reporter = PlaybackReporter(client: jellyfin, itemId: item.id, plan: plan)
-            await reporter?.start()
+            let r = PlaybackReporter(client: jellyfin, itemId: item.id, plan: plan)
+            reporter = r
+            // Fire-and-forget: server bookkeeping doesn't belong on the
+            // critical play() path. Awaiting it adds a serial round-trip
+            // between the AVPlayerItem being ready and the call to play().
+            Task { await r.start() }
             status = .ready
             nowPlaying?.update(item: item, position: position, duration: duration, rate: rate)
             player.play()

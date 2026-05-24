@@ -19,11 +19,6 @@ public struct StreamPlanner: Sendable {
         self.client = client
     }
 
-    private static let browserSafeContainers: Set<String> = ["mp4", "m4v", "mov"]
-    /// AVFoundation handles a wider audio set than the browser does;
-    /// AAC + AC-3 + E-AC-3 + Apple Lossless + MP3 all direct-play on iOS/Mac.
-    private static let avfSafeAudioCodecs: Set<String> = ["aac", "ac3", "eac3", "alac", "mp3"]
-
     public func plan(
         itemId: String,
         audioStreamIndex: Int? = nil,
@@ -44,9 +39,6 @@ public struct StreamPlanner: Sendable {
         let container = (source.container ?? "").lowercased().split(separator: ",").first.map(String.init)
         let videoStream = pickStream(in: source, type: .video)
         let audioStream = pickStream(in: source, type: .audio, preferIndex: audioStreamIndex)
-        let containerOK = container.map(Self.browserSafeContainers.contains) ?? false
-        let audioOK = Self.avfSafeAudioCodecs.contains((audioStream?.codec ?? "").lowercased())
-        let preferHLS = !(containerOK && audioOK)
         let sourceBitrate = videoStream?.bitRate ?? source.bitrate ?? 20_000_000
 
         // Direct stream
@@ -63,30 +55,58 @@ public struct StreamPlanner: Sendable {
         directComps.queryItems = directQ
         let directURL = directComps.url!
 
-        // HLS — h264 high@5.1 + AAC, TS segments. Same recipe as web.
-        var hlsQ: [URLQueryItem] = [
-            .init(name: "MediaSourceId", value: mediaSourceId),
-            .init(name: "PlaySessionId", value: playSessionId),
-            .init(name: "api_key", value: token),
-            .init(name: "VideoCodec", value: "h264"),
-            .init(name: "AudioCodec", value: "aac"),
-            .init(name: "TranscodingMaxAudioChannels", value: "6"),
-            .init(name: "SegmentContainer", value: "ts"),
-            .init(name: "MinSegments", value: "1"),
-            .init(name: "BreakOnNonKeyFrames", value: "true"),
-            .init(name: "h264-level", value: "51"),
-            .init(name: "h264-profile", value: "high"),
-            .init(name: "VideoBitrate", value: String(sourceBitrate))
-        ]
-        if let vIdx = videoStream?.index { hlsQ.append(.init(name: "VideoStreamIndex", value: String(vIdx))) }
-        if let a = audioStreamIndex { hlsQ.append(.init(name: "AudioStreamIndex", value: String(a))) }
-        if let s = subtitleStreamIndex { hlsQ.append(.init(name: "SubtitleStreamIndex", value: String(s))) }
-        var hlsComps = URLComponents(
-            url: client.serverURL.appendingPathComponent("/Videos/\(itemId)/master.m3u8"),
-            resolvingAgainstBaseURL: false
-        )!
-        hlsComps.queryItems = hlsQ
-        let hlsURL = hlsComps.url!
+        // HLS URL: prefer the server's TranscodingUrl when it returned
+        // one — Jellyfin built it from the DeviceProfile we sent, so it
+        // already has the right per-source params (audio-only transcode
+        // when video matches, subtitle burn-in when needed, etc.). Fall
+        // back to a hand-built URL only when the server didn't supply
+        // one (older Jellyfin or unusual edge case).
+        let hlsURL: URL = {
+            if let raw = source.transcodingUrl,
+               let abs = URL(string: raw, relativeTo: client.serverURL)?.absoluteURL,
+               var comps = URLComponents(url: abs, resolvingAgainstBaseURL: false) {
+                // AVPlayer fetches manifest and segments with a plain
+                // URLSession that can't carry our X-Emby-Authorization
+                // header. Inject api_key if Jellyfin didn't embed one.
+                var items = comps.queryItems ?? []
+                if !items.contains(where: { $0.name == "api_key" }), !token.isEmpty {
+                    items.append(.init(name: "api_key", value: token))
+                    comps.queryItems = items
+                }
+                if let url = comps.url { return url }
+            }
+            var hlsQ: [URLQueryItem] = [
+                .init(name: "MediaSourceId", value: mediaSourceId),
+                .init(name: "PlaySessionId", value: playSessionId),
+                .init(name: "api_key", value: token),
+                .init(name: "VideoCodec", value: "h264"),
+                .init(name: "AudioCodec", value: "aac"),
+                .init(name: "TranscodingMaxAudioChannels", value: "6"),
+                .init(name: "SegmentContainer", value: "ts"),
+                .init(name: "MinSegments", value: "1"),
+                .init(name: "BreakOnNonKeyFrames", value: "true"),
+                .init(name: "h264-level", value: "51"),
+                .init(name: "h264-profile", value: "high"),
+                .init(name: "VideoBitrate", value: String(sourceBitrate))
+            ]
+            if let vIdx = videoStream?.index { hlsQ.append(.init(name: "VideoStreamIndex", value: String(vIdx))) }
+            if let a = audioStreamIndex { hlsQ.append(.init(name: "AudioStreamIndex", value: String(a))) }
+            if let s = subtitleStreamIndex { hlsQ.append(.init(name: "SubtitleStreamIndex", value: String(s))) }
+            var hlsComps = URLComponents(
+                url: client.serverURL.appendingPathComponent("/Videos/\(itemId)/master.m3u8"),
+                resolvingAgainstBaseURL: false
+            )!
+            hlsComps.queryItems = hlsQ
+            return hlsComps.url!
+        }()
+
+        // Authoritative: Jellyfin evaluated the file against the
+        // DeviceProfile we sent. If it says DirectPlay works, AVPlayer
+        // gets the raw file (byte-range fetches, instant seeks). The
+        // hardcoded container/codec gate that used to live here couldn't
+        // see AVFoundation's actual capability and was overly
+        // conservative on MKV.
+        let preferHLS = !(source.supportsDirectPlay ?? false)
 
         return StreamPlan(
             directURL: directURL,

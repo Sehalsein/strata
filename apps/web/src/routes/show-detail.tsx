@@ -38,7 +38,7 @@ export const ShowDetailPage = () => {
 
 const ShowDetailInner = ({ id }: { id: string }) => {
   const show = useQuery({
-    queryKey: ["show", id],
+    queryKey: ["item", id],
     queryFn: () => getItem(id),
   });
   const seasonsQ = useQuery({

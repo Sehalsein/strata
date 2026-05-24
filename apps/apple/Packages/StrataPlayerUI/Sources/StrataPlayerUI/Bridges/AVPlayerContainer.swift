@@ -1,15 +1,23 @@
 import SwiftUI
 import AVFoundation
+import AVKit
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
 import AppKit
 #endif
 
-/// Hosts an `AVPlayerLayer` inside SwiftUI so the chrome can be entirely custom.
+/// Hosts Apple's standard system video player UI inside SwiftUI.
 ///
-/// Defaults to `.resizeAspect` — fit with letterbox/pillarbox, matching
-/// Apple's Photos and TV apps. Pass `.resizeAspectFill` to fill with cropping.
+/// On iOS/tvOS wraps `AVPlayerViewController`; on macOS wraps `AVPlayerView`.
+/// We get Apple's built-in transport controls, scrubber, AirPlay button, PiP,
+/// audio/subtitle selection, and error UI for free — which also gives us
+/// AVKit's diagnostic error sheet when playback fails (`Cannot Open` etc.),
+/// far more useful than a black `AVPlayerLayer`.
+///
+/// `gravity` defaults to `.resizeAspect` (fit with letterbox/pillarbox).
+/// AVPlayerViewController/AVPlayerView users can also toggle aspect fill via
+/// the built-in aspect button.
 public struct AVPlayerContainer: View {
     public let player: AVPlayer
     public let gravity: AVLayerVideoGravity
@@ -22,9 +30,9 @@ public struct AVPlayerContainer: View {
     public var body: some View {
         Group {
             #if canImport(UIKit)
-            AVPlayerContainerRepresentable(player: player, gravity: gravity)
+            SystemPlayerRepresentable(player: player, gravity: gravity)
             #elseif canImport(AppKit)
-            AVPlayerContainerRepresentableMac(player: player, gravity: gravity)
+            SystemPlayerRepresentableMac(player: player, gravity: gravity)
             #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -32,25 +40,57 @@ public struct AVPlayerContainer: View {
 }
 
 #if canImport(UIKit)
-struct AVPlayerContainerRepresentable: UIViewRepresentable {
+struct SystemPlayerRepresentable: UIViewControllerRepresentable {
     let player: AVPlayer
     let gravity: AVLayerVideoGravity
 
-    func makeUIView(context: Context) -> PlayerLayerHostView {
-        let v = PlayerLayerHostView()
-        v.backgroundColor = .black
-        v.layer.backgroundColor = UIColor.black.cgColor
-        v.playerLayer.player = player
-        v.playerLayer.videoGravity = gravity
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let vc = AVPlayerViewController()
+        vc.player = player
+        vc.videoGravity = gravity
+        vc.allowsPictureInPicturePlayback = true
+        vc.canStartPictureInPictureAutomaticallyFromInline = true
+        vc.entersFullScreenWhenPlaybackBegins = false
+        vc.exitsFullScreenWhenPlaybackEnds = false
+        vc.showsPlaybackControls = true
+        // We drive MPNowPlayingInfoCenter ourselves via NowPlayingBridge —
+        // letting AVKit also write to it causes thrashing between the two.
+        vc.updatesNowPlayingInfoCenter = false
+        return vc
+    }
+
+    func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
+        if vc.player !== player { vc.player = player }
+        if vc.videoGravity != gravity { vc.videoGravity = gravity }
+    }
+}
+#endif
+
+#if canImport(AppKit)
+struct SystemPlayerRepresentableMac: NSViewRepresentable {
+    let player: AVPlayer
+    let gravity: AVLayerVideoGravity
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let v = AVPlayerView()
+        v.player = player
+        v.videoGravity = gravity
+        v.allowsPictureInPicturePlayback = true
+        v.controlsStyle = .floating
         return v
     }
 
-    func updateUIView(_ uiView: PlayerLayerHostView, context: Context) {
-        uiView.playerLayer.player = player
-        uiView.playerLayer.videoGravity = gravity
+    func updateNSView(_ v: AVPlayerView, context: Context) {
+        if v.player !== player { v.player = player }
+        if v.videoGravity != gravity { v.videoGravity = gravity }
     }
 }
+#endif
 
+// Kept public for source-compat with `PiPController.attach(playerLayer:)`
+// callers — no longer instantiated by AVPlayerContainer. AVPlayerViewController
+// and AVPlayerView handle PiP internally, so callers can stop reaching for it.
+#if canImport(UIKit)
 public final class PlayerLayerHostView: UIView {
     public override class var layerClass: AnyClass { AVPlayerLayer.self }
     public var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
@@ -58,26 +98,6 @@ public final class PlayerLayerHostView: UIView {
 #endif
 
 #if canImport(AppKit)
-struct AVPlayerContainerRepresentableMac: NSViewRepresentable {
-    let player: AVPlayer
-    let gravity: AVLayerVideoGravity
-
-    func makeNSView(context: Context) -> PlayerLayerHostNSView {
-        let v = PlayerLayerHostNSView()
-        v.wantsLayer = true
-        v.layer = AVPlayerLayer()
-        v.playerLayer.backgroundColor = NSColor.black.cgColor
-        v.playerLayer.player = player
-        v.playerLayer.videoGravity = gravity
-        return v
-    }
-
-    func updateNSView(_ nsView: PlayerLayerHostNSView, context: Context) {
-        nsView.playerLayer.player = player
-        nsView.playerLayer.videoGravity = gravity
-    }
-}
-
 public final class PlayerLayerHostNSView: NSView {
     public var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
     public override func makeBackingLayer() -> CALayer { AVPlayerLayer() }

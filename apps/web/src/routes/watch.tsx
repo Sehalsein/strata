@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
-import { getItem, ticksToSeconds } from "@/lib/api";
+import { buildStreamPlan, getItem, ticksToSeconds } from "@/lib/api";
 import { useSession } from "@/lib/auth-client";
 import { Player } from "@/components/player/Player";
 
@@ -15,6 +15,22 @@ export const WatchPage = () => {
     queryKey: ["item", id],
     queryFn: () => getItem(id),
     enabled: Boolean(session?.user),
+  });
+  // Fire PlaybackInfo in parallel with the item metadata fetch. Player
+  // reads the same query key via useQuery, so by the time it mounts
+  // (which requires `detail.data`), this round-trip is usually done —
+  // taking the PlaybackInfo POST off the critical startup path.
+  // Audio stream index intentionally omitted: the server returns the
+  // default audio in MediaSources, which matches Player's initial pick.
+  useQuery({
+    queryKey: ["playbackInfo", id, "default"],
+    queryFn: () => buildStreamPlan(id),
+    enabled: Boolean(session?.user),
+    // Each PlaybackInfo call mints a new PlaySessionId — keep the
+    // prefetched plan short-lived so we don't reuse a stale session on
+    // a later visit. ~15s covers route mount + Player mount in practice.
+    staleTime: 15_000,
+    gcTime: 15_000,
   });
 
   if (isPending) return null;

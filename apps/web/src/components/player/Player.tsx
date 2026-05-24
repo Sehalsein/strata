@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "motion/react";
 import { RotateCcw, RotateCw } from "lucide-react";
@@ -92,6 +93,8 @@ export const Player = ({ item, resumeAt }: Props) => {
     playSessionId: string;
     mediaSourceId: string;
   } | null>(null);
+  const queryClient = useQueryClient();
+  const defaultAudioIndex = defaultAudio?.Index;
 
   const { next: nextEpisode, prev: prevEpisode } = useNextEpisode(item);
   const trickplay = useTrickplay(itemId, item.Trickplay);
@@ -235,29 +238,50 @@ export const Player = ({ item, resumeAt }: Props) => {
 
     (async () => {
       try {
-        localPlan = await buildStreamPlan(itemId, {
-          audioStreamIndex: currentAudio,
-          // Subtitles are loaded as a separate WebVTT <track> element
-          // (see the effect below) so changing them doesn't restart the
-          // transcode session and they work on every playback path.
+        // When the user hasn't switched audio away from the default,
+        // reuse the prefetched PlaybackInfo that WatchPage kicked off in
+        // parallel with getItem (see routes/watch.tsx). fetchQuery
+        // deduplicates against the in-flight request, so this either
+        // returns instantly (warm cache) or awaits the same promise.
+        // Subtitles are loaded as a separate WebVTT <track> element
+        // (see the effect below) so changing them doesn't restart the
+        // transcode session and they work on every playback path.
+        const isDefaultAudio =
+          currentAudio === undefined || currentAudio === defaultAudioIndex;
+        const fetched: StreamPlan = await queryClient.fetchQuery({
+          queryKey: [
+            "playbackInfo",
+            itemId,
+            isDefaultAudio ? "default" : currentAudio,
+          ],
+          queryFn: () =>
+            isDefaultAudio
+              ? buildStreamPlan(itemId)
+              : buildStreamPlan(itemId, { audioStreamIndex: currentAudio }),
+          staleTime: 15_000,
+          gcTime: 15_000,
         });
         if (cancelled) return;
-        setPlan(localPlan);
+        localPlan = fetched;
+        setPlan(fetched);
         sessionRef.current = {
-          playSessionId: localPlan.playSessionId,
-          mediaSourceId: localPlan.mediaSourceId,
+          playSessionId: fetched.playSessionId,
+          mediaSourceId: fetched.mediaSourceId,
         };
-        await reportPlaybackStart(
+        // Fire-and-forget: server bookkeeping doesn't belong on the
+        // critical startup path. Awaiting it adds a serial round-trip
+        // between PlaybackInfo and src assignment for no playback benefit.
+        void reportPlaybackStart(
           itemId,
-          localPlan.playSessionId,
-          localPlan.mediaSourceId,
-        );
-        if (localPlan.preferHls) {
+          fetched.playSessionId,
+          fetched.mediaSourceId,
+        ).catch(() => {});
+        if (fetched.preferHls) {
           usingDirect = false;
-          attachHls(localPlan.hlsUrl);
+          attachHls(fetched.hlsUrl);
         } else {
           setUsingHls(false);
-          video.src = localPlan.directUrl;
+          video.src = fetched.directUrl;
         }
       } catch (err) {
         if (cancelled) return;
@@ -610,7 +634,9 @@ export const Player = ({ item, resumeAt }: Props) => {
           <video
             ref={videoRef}
             playsInline
+            autoPlay
             controls={false}
+            preload="auto"
             onContextMenu={(e) => e.preventDefault()}
             className="absolute inset-0 h-full w-full select-none bg-black [-webkit-touch-callout:none]"
           />

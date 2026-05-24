@@ -53,8 +53,7 @@ export const WatchlistToggle = ({
       setIsFav(!next);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["movie", itemId] });
-      qc.invalidateQueries({ queryKey: ["show", itemId] });
+      qc.invalidateQueries({ queryKey: ["item", itemId] });
     },
   });
 

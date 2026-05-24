@@ -9,12 +9,18 @@ import { getUserApi } from "@jellyfin/sdk/lib/utils/api/user-api";
 import { getLibraryApi } from "@jellyfin/sdk/lib/utils/api/library-api";
 import {
   BaseItemKind,
+  DlnaProfileType,
+  EncodingContext,
   ImageType,
   ItemFields,
   ItemSortBy,
+  MediaStreamProtocol,
   SortOrder,
+  SubtitleDeliveryMethod,
   type BaseItemDto,
   type AuthenticationResult,
+  type DeviceProfile,
+  type DirectPlayProfile,
 } from "@jellyfin/sdk/lib/generated-client/models";
 
 const SERVER_URL =
@@ -298,9 +304,6 @@ export type StreamPlan = {
 type MediaSource = NonNullable<BaseItemDto["MediaSources"]>[number];
 type MediaStream = NonNullable<MediaSource["MediaStreams"]>[number];
 
-const BROWSER_SAFE_CONTAINERS = new Set(["mp4", "m4v", "mov"]);
-const BROWSER_SAFE_AUDIO_CODECS = new Set(["aac", "mp3"]);
-
 const pickStream = (
   source: MediaSource,
   type: "Video" | "Audio",
@@ -315,8 +318,129 @@ const pickStream = (
   );
 };
 
-const codecOf = (stream: MediaStream | undefined): string =>
-  (stream?.Codec ?? "").toLowerCase();
+// Probes <video>/<audio> capabilities once and builds a Jellyfin
+// DeviceProfile that mirrors what the native Jellyfin web client sends.
+// Sending this on PlaybackInfo lets Jellyfin decide DirectPlay vs
+// transcode authoritatively — without it the server can't tell what we
+// can decode and conservatively returns a transcode for anything that
+// isn't a basic mp4. The codec-heuristic gate the client used before
+// could not see proprietary codecs the browser actually supported
+// (AC3/EAC3 in Chrome on macOS, HEVC in Safari/Chrome on Apple Silicon),
+// which is why DirectPlay was being skipped on most MKV files.
+let cachedDeviceProfile: DeviceProfile | null = null;
+
+const buildDeviceProfile = (): DeviceProfile => {
+  if (cachedDeviceProfile) return cachedDeviceProfile;
+
+  const v = document.createElement("video");
+  const a = document.createElement("audio");
+  const cv = (mime: string) => v.canPlayType(mime) !== "";
+  const ca = (mime: string) => a.canPlayType(mime) !== "";
+
+  const videoCodecs: string[] = [];
+  if (cv('video/mp4; codecs="avc1.42E01E"')) videoCodecs.push("h264");
+  if (
+    cv('video/mp4; codecs="hev1.1.6.L93.B0"') ||
+    cv('video/mp4; codecs="hvc1.1.6.L93.B0"')
+  )
+    videoCodecs.push("hevc", "h265");
+  if (cv('video/mp4; codecs="vp09.00.10.08"') || cv('video/webm; codecs="vp9"'))
+    videoCodecs.push("vp9");
+  if (cv('video/webm; codecs="vp8"')) videoCodecs.push("vp8");
+  if (cv('video/mp4; codecs="av01.0.05M.08"')) videoCodecs.push("av1");
+
+  const audioCodecs: string[] = [];
+  if (ca('audio/mp4; codecs="mp4a.40.2"') || ca('audio/aac'))
+    audioCodecs.push("aac");
+  if (ca('audio/mpeg')) audioCodecs.push("mp3");
+  if (ca('audio/flac') || ca('audio/x-flac')) audioCodecs.push("flac");
+  if (ca('audio/ogg; codecs="opus"') || ca('audio/webm; codecs="opus"'))
+    audioCodecs.push("opus");
+  if (ca('audio/ogg; codecs="vorbis"') || ca('audio/webm; codecs="vorbis"'))
+    audioCodecs.push("vorbis");
+  // AC3/EAC3: Chromium on macOS plays these via the system decoder
+  // (canPlayType returns "" for some Chrome builds even when playback
+  // works). Advertise unconditionally — if the browser actually fails,
+  // Player.tsx's onVideoError handler falls back to HLS.
+  audioCodecs.push("ac3", "eac3");
+
+  // Containers we advertise as direct-playable. Test the bare container
+  // mime so codec strings don't false-negative on browsers that lie
+  // (Safari returns "" for video/x-matroska but plays many MKVs fine
+  // when codecs match). MP4 is universal; MKV gated on a positive probe.
+  const mkvOk = cv("video/x-matroska") || cv("video/mp4");
+  const webmOk = cv("video/webm");
+
+  const directPlayProfiles: DirectPlayProfile[] = [
+    {
+      Type: DlnaProfileType.Video,
+      Container: "mp4,m4v,mov",
+      VideoCodec: videoCodecs.join(","),
+      AudioCodec: audioCodecs.join(","),
+    },
+  ];
+  if (mkvOk) {
+    directPlayProfiles.push({
+      Type: DlnaProfileType.Video,
+      Container: "mkv",
+      VideoCodec: videoCodecs.join(","),
+      AudioCodec: audioCodecs.join(","),
+    });
+  }
+  if (webmOk) {
+    directPlayProfiles.push({
+      Type: DlnaProfileType.Video,
+      Container: "webm",
+      VideoCodec: "vp8,vp9,av1",
+      AudioCodec: "vorbis,opus",
+    });
+  }
+  directPlayProfiles.push(
+    { Type: DlnaProfileType.Audio, Container: "mp3", AudioCodec: "mp3" },
+    { Type: DlnaProfileType.Audio, Container: "m4a,aac", AudioCodec: "aac" },
+    { Type: DlnaProfileType.Audio, Container: "flac", AudioCodec: "flac" },
+    { Type: DlnaProfileType.Audio, Container: "opus", AudioCodec: "opus" },
+  );
+
+  const profile: DeviceProfile = {
+    Name: "Strata Browser",
+    MaxStreamingBitrate: 120_000_000,
+    MaxStaticBitrate: 200_000_000,
+    DirectPlayProfiles: directPlayProfiles,
+    TranscodingProfiles: [
+      {
+        Type: DlnaProfileType.Video,
+        Container: "ts",
+        Protocol: MediaStreamProtocol.Hls,
+        VideoCodec: "h264",
+        AudioCodec: "aac,mp3",
+        Context: EncodingContext.Streaming,
+        MaxAudioChannels: "6",
+        MinSegments: 1,
+        BreakOnNonKeyFrames: true,
+      },
+      {
+        Type: DlnaProfileType.Audio,
+        Container: "mp3",
+        Protocol: MediaStreamProtocol.Http,
+        AudioCodec: "mp3",
+        Context: EncodingContext.Streaming,
+      },
+    ],
+    ContainerProfiles: [],
+    CodecProfiles: [],
+    SubtitleProfiles: [
+      { Format: "vtt", Method: SubtitleDeliveryMethod.External },
+      { Format: "ass", Method: SubtitleDeliveryMethod.External },
+      { Format: "ssa", Method: SubtitleDeliveryMethod.External },
+      { Format: "srt", Method: SubtitleDeliveryMethod.External },
+      { Format: "sub", Method: SubtitleDeliveryMethod.External },
+      { Format: "pgssub", Method: SubtitleDeliveryMethod.External },
+    ],
+  };
+  cachedDeviceProfile = profile;
+  return profile;
+};
 
 export const buildStreamPlan = async (
   itemId: string,
@@ -333,6 +457,12 @@ export const buildStreamPlan = async (
       EnableDirectStream: true,
       EnableTranscoding: true,
       MaxStreamingBitrate: 120_000_000,
+      // Sending DeviceProfile is what makes Jellyfin's DirectPlay
+      // decision authoritative — without it the server returns
+      // SupportsDirectPlay=false for everything and clients fall back
+      // to transcoding. The profile probes the browser's codec support
+      // at runtime; see buildDeviceProfile() above.
+      DeviceProfile: buildDeviceProfile(),
       ...(opts.audioStreamIndex !== undefined
         ? { AudioStreamIndex: opts.audioStreamIndex }
         : {}),
@@ -346,10 +476,6 @@ export const buildStreamPlan = async (
   const playSessionId = res.data.PlaySessionId ?? "";
   const token = api.accessToken ?? "";
 
-  const container = (source.Container ?? "").toLowerCase().split(",")[0];
-  const audioStream = pickStream(source, "Audio", opts.audioStreamIndex);
-  const audioOk = BROWSER_SAFE_AUDIO_CODECS.has(codecOf(audioStream));
-  const containerOk = BROWSER_SAFE_CONTAINERS.has(container);
   const videoStream = pickStream(source, "Video");
   // Source video bitrate caps the transcode target — preserves quality
   // when Jellyfin re-encodes. Falls back to a generous 20 Mbps if the
@@ -404,14 +530,28 @@ export const buildStreamPlan = async (
   if (opts.subtitleStreamIndex !== undefined) {
     hlsQs.set("SubtitleStreamIndex", String(opts.subtitleStreamIndex));
   }
-  const hlsUrl = `${SERVER_URL}/Videos/${itemId}/master.m3u8?${hlsQs.toString()}`;
+  const fallbackHlsUrl = `${SERVER_URL}/Videos/${itemId}/master.m3u8?${hlsQs.toString()}`;
+
+  // When DirectPlay isn't supported and Jellyfin returned its own
+  // TranscodingUrl (built from the negotiated DeviceProfile), use it —
+  // it has the correct per-source params (audio passthrough vs encode,
+  // subtitle burn-in flags, etc.) that our hand-built URL can't infer.
+  const serverTranscodeUrl = source.TranscodingUrl
+    ? `${SERVER_URL}${source.TranscodingUrl}`
+    : null;
+  const hlsUrl = serverTranscodeUrl ?? fallbackHlsUrl;
 
   return {
     directUrl,
     hlsUrl,
     playSessionId,
     mediaSourceId: source.Id,
-    preferHls: !(containerOk && audioOk),
+    // Trust Jellyfin's decision. With the DeviceProfile sent, the
+    // server knows exactly what the browser can decode and sets this
+    // flag authoritatively. If it's wrong (e.g. a codec the browser
+    // advertised but can't actually play), Player.tsx's onVideoError
+    // handler falls back to HLS via the existing path.
+    preferHls: source.SupportsDirectPlay !== true,
     bitrate: videoStream?.BitRate ?? source.Bitrate ?? null,
   };
 };

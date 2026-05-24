@@ -35,7 +35,7 @@ export const MovieDetailPage = () => {
 
 const MovieDetailInner = ({ id }: { id: string }) => {
   const q = useQuery({
-    queryKey: ["movie", id],
+    queryKey: ["item", id],
     queryFn: () => getItem(id),
   });
   const similarQ = useQuery({

@@ -130,11 +130,24 @@ public struct JellyfinClient: Sendable {
             "EnableDirectPlay": true,
             "EnableDirectStream": true,
             "EnableTranscoding": true,
-            "MaxStreamingBitrate": maxStreamingBitrate
+            "MaxStreamingBitrate": maxStreamingBitrate,
+            // Sending DeviceProfile makes Jellyfin's DirectPlay decision
+            // authoritative — without it the server returns
+            // SupportsDirectPlay=false on every MediaSource and the
+            // client falls back to a forced HLS transcode. Mirrors the
+            // approach the web client adopted; see
+            // apps/web/src/lib/api.ts buildDeviceProfile().
+            "DeviceProfile": Self.avFoundationDeviceProfile
         ]
         if let audioStreamIndex { body["AudioStreamIndex"] = audioStreamIndex }
         if let subtitleStreamIndex { body["SubtitleStreamIndex"] = subtitleStreamIndex }
-        let q: [URLQueryItem] = [.init(name: "userId", value: userId)]
+        // Echo the api_key on the request URL so Jellyfin embeds it in the
+        // TranscodingUrl it returns — AVPlayer's URLSession can't reach
+        // back for our X-Emby-Authorization header on segment fetches.
+        var q: [URLQueryItem] = [.init(name: "userId", value: userId)]
+        if let token = session?.token, !token.isEmpty {
+            q.append(.init(name: "api_key", value: token))
+        }
         return try await post(
             path: "/Items/\(itemId)/PlaybackInfo",
             query: q,
@@ -142,6 +155,67 @@ public struct JellyfinClient: Sendable {
             as: PlaybackInfoResponse.self
         )
     }
+
+    /// Codec / container support advertised to Jellyfin so it can pick
+    /// DirectPlay when AVFoundation can decode the source. Scoped to what
+    /// AVPlayer can actually demux — anything else (MKV, MPEG-4 ASP,
+    /// Opus/Vorbis in MP4, …) routes through the HLS TranscodingProfile.
+    /// AVFoundation cannot demux Matroska on any iOS/macOS/tvOS version,
+    /// so MKV is intentionally absent from DirectPlayProfiles.
+    private static let avFoundationDeviceProfile: [String: Any] = [
+        "Name": "Strata Apple",
+        "MaxStreamingBitrate": 120_000_000,
+        "MaxStaticBitrate": 200_000_000,
+        "DirectPlayProfiles": [
+            [
+                "Type": "Video",
+                "Container": "mp4,m4v,mov",
+                "VideoCodec": "h264,hevc,h265",
+                "AudioCodec": "aac,ac3,eac3,alac,mp3,flac"
+            ],
+            ["Type": "Audio", "Container": "mp3", "AudioCodec": "mp3"],
+            ["Type": "Audio", "Container": "m4a,aac", "AudioCodec": "aac"],
+            ["Type": "Audio", "Container": "flac", "AudioCodec": "flac"],
+            ["Type": "Audio", "Container": "alac,m4a", "AudioCodec": "alac"],
+            ["Type": "Audio", "Container": "wav", "AudioCodec": "pcm_s16le,pcm_s24le"]
+        ],
+        "TranscodingProfiles": [
+            // Protocol values are the case-sensitive
+            // MediaStreamProtocol enum names — "Hls"/"Http", not
+            // "hls"/"http". Lowercase makes Jellyfin's .NET
+            // deserializer reject the profile silently, which leaves
+            // TranscodingUrl nil and breaks all non-DirectPlay
+            // playback.
+            [
+                "Type": "Video",
+                "Container": "ts",
+                "Protocol": "Hls",
+                "VideoCodec": "h264",
+                "AudioCodec": "aac,mp3",
+                "Context": "Streaming",
+                "MaxAudioChannels": "6",
+                "MinSegments": 1,
+                "BreakOnNonKeyFrames": true
+            ],
+            [
+                "Type": "Audio",
+                "Container": "mp3",
+                "Protocol": "Http",
+                "AudioCodec": "mp3",
+                "Context": "Streaming"
+            ]
+        ],
+        "ContainerProfiles": [],
+        "CodecProfiles": [],
+        "SubtitleProfiles": [
+            ["Format": "vtt", "Method": "External"],
+            ["Format": "ass", "Method": "External"],
+            ["Format": "ssa", "Method": "External"],
+            ["Format": "srt", "Method": "External"],
+            ["Format": "sub", "Method": "External"],
+            ["Format": "pgssub", "Method": "External"]
+        ]
+    ]
 
     public func reportPlaybackStart(itemId: String, playSessionId: String, mediaSourceId: String) async throws {
         let body: [String: Any] = [

@@ -68,26 +68,11 @@ public struct WatchView: View {
                 flashGravityIndicator()
             }
             #endif
-            SubtitleOverlay(engine: services.engine)
-                .allowsHitTesting(false)
-            VStack(spacing: 0) {
-                Spacer()
-                if !hideChrome {
-                    TransportBar(
-                        engine: services.engine,
-                        trickplayProvider: trickplayProvider,
-                        onClose: { dismiss() },
-                        onShowDetails: { withAnimation { showStreamDetails.toggle() } },
-                        onTogglePiP: { pip.toggle() }
-                    )
-                    #if os(tvOS)
-                    .focused($chromeFocused)
-                    .focusSection()
-                    #endif
-                    .transition(.opacity)
-                }
-            }
-            .ignoresSafeArea(edges: .bottom)
+            // Using AVPlayerViewController / AVPlayerView for video display;
+            // they provide their own transport controls, subtitle picker,
+            // AirPlay/PiP buttons, and aspect controls. Custom TransportBar
+            // and SubtitleOverlay are intentionally not rendered to avoid
+            // competing with the system UI.
 
             if showStreamDetails {
                 VStack {

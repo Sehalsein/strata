@@ -3,10 +3,16 @@ package com.strata.tv.data
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jellyfin.sdk.api.client.extensions.mediaInfoApi
+import org.jellyfin.sdk.model.api.DeviceProfile
+import org.jellyfin.sdk.model.api.DlnaProfileType
+import org.jellyfin.sdk.model.api.EncodingContext
 import org.jellyfin.sdk.model.api.MediaSourceInfo
 import org.jellyfin.sdk.model.api.MediaStream
+import org.jellyfin.sdk.model.api.MediaStreamProtocol
 import org.jellyfin.sdk.model.api.MediaStreamType
 import org.jellyfin.sdk.model.api.PlaybackInfoDto
+import org.jellyfin.sdk.model.api.SubtitleDeliveryMethod
+import org.jellyfin.sdk.model.deviceprofile.buildDeviceProfile
 import java.net.URLEncoder
 import java.util.UUID
 
@@ -78,7 +84,14 @@ class StreamPlanner(
                 startTimeTicks = null,
                 mediaSourceId = null,
                 liveStreamId = null,
-                deviceProfile = null,
+                // Sending DeviceProfile is what makes Jellyfin's
+                // DirectPlay decision authoritative — without it the
+                // server returned SupportsDirectPlay=false on every
+                // MediaSource and we always fell through to the HLS
+                // transcode. See [[jellyfin-deviceprofile-is-the-directplay-gate]].
+                // Mirrors apps/web/src/lib/api.ts buildDeviceProfile()
+                // and apps/apple/.../JellyfinClient.swift.
+                deviceProfile = EXOPLAYER_DEVICE_PROFILE,
             ),
         ).content
 
@@ -162,13 +175,80 @@ class StreamPlanner(
 
     companion object {
         private const val MAX_BITRATE = 120_000_000
-        // Conservative direct-play set: mp4/h264/aac only. Jellyfin's
-        // `/Videos/{id}/stream?Static=true` endpoint returns 404 for
-        // many non-mp4 sources even when the codec is theoretically
-        // ExoPlayer-decodable, so anything else goes through HLS where
-        // Jellyfin stream-copies on the wire when compatible and
-        // transcodes only when forced.
-        private val EXOPLAYER_SAFE_CONTAINERS = setOf("mp4", "m4v")
-        private val EXOPLAYER_SAFE_AUDIO = setOf("aac")
+
+        /**
+         * Codec / container support advertised to Jellyfin. Covers what
+         * ExoPlayer / Media3 reliably handles on Android TV hardware:
+         * - Containers: mp4, m4v, mov, mkv, webm.
+         * - Video: h264, hevc (h265 alias), vp8, vp9, av1.
+         * - Audio: aac, mp3, ac3, eac3, flac, opus, vorbis — all
+         *   passthrough on modern Android TVs without re-encoding.
+         *
+         * Built once at class load (object scope); the contents don't
+         * change per device or per call, so there's no point rebuilding
+         * on every PlaybackInfo POST.
+         */
+        private val EXOPLAYER_DEVICE_PROFILE: DeviceProfile = buildDeviceProfile {
+            name = "Strata Android TV"
+            maxStreamingBitrate = MAX_BITRATE
+            maxStaticBitrate = 200_000_000
+
+            directPlayProfile {
+                type = DlnaProfileType.VIDEO
+                container("mp4", "m4v", "mov", "mkv", "webm")
+                videoCodec("h264", "hevc", "h265", "vp8", "vp9", "av1")
+                audioCodec("aac", "mp3", "ac3", "eac3", "flac", "opus", "vorbis", "alac")
+            }
+            directPlayProfile {
+                type = DlnaProfileType.AUDIO
+                container("mp3")
+                audioCodec("mp3")
+            }
+            directPlayProfile {
+                type = DlnaProfileType.AUDIO
+                container("m4a", "aac")
+                audioCodec("aac")
+            }
+            directPlayProfile {
+                type = DlnaProfileType.AUDIO
+                container("flac")
+                audioCodec("flac")
+            }
+            directPlayProfile {
+                type = DlnaProfileType.AUDIO
+                container("opus", "ogg")
+                audioCodec("opus", "vorbis")
+            }
+
+            // Fallback transcode profile. Matches the existing recipe
+            // — HLS, ts segments, h264+aac, BreakOnNonKeyFrames for
+            // stream-copy compatibility — and only kicks in when the
+            // DirectPlay profiles above all reject the source.
+            transcodingProfile {
+                type = DlnaProfileType.VIDEO
+                container = "ts"
+                protocol = MediaStreamProtocol.HLS
+                context = EncodingContext.STREAMING
+                videoCodec("h264", "hevc")
+                audioCodec("aac", "mp3", "ac3", "eac3")
+                maxAudioChannels = "6"
+                minSegments = 1
+                breakOnNonKeyFrames = true
+            }
+            transcodingProfile {
+                type = DlnaProfileType.AUDIO
+                container = "mp3"
+                protocol = MediaStreamProtocol.HTTP
+                context = EncodingContext.STREAMING
+                audioCodec("mp3")
+            }
+
+            subtitleProfile("vtt", SubtitleDeliveryMethod.EXTERNAL)
+            subtitleProfile("ass", SubtitleDeliveryMethod.EXTERNAL)
+            subtitleProfile("ssa", SubtitleDeliveryMethod.EXTERNAL)
+            subtitleProfile("srt", SubtitleDeliveryMethod.EXTERNAL)
+            subtitleProfile("sub", SubtitleDeliveryMethod.EXTERNAL)
+            subtitleProfile("pgssub", SubtitleDeliveryMethod.EXTERNAL)
+        }
     }
 }

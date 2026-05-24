@@ -29,10 +29,10 @@ class ImageUrls(private val serverUrl: String, private val authStore: AuthStore)
     // `Thumb` is rarely populated for episodes — checking imageTags lets us skip
     // the request entirely when neither exists.
     fun episodeStill(episode: BaseItemDto, maxWidth: Int = 640): String? {
-        val tags = episode.imageTags ?: emptyMap()
+        val tags = episode.imageTags.orEmpty()
         return when {
-            tags["Primary"] != null -> image(episode.id, ImageType.PRIMARY, maxWidth)
-            tags["Thumb"] != null   -> image(episode.id, ImageType.THUMB, maxWidth)
+            tags[ImageType.PRIMARY] != null -> image(episode.id, ImageType.PRIMARY, maxWidth)
+            tags[ImageType.THUMB] != null   -> image(episode.id, ImageType.THUMB, maxWidth)
             else -> null
         }
     }
