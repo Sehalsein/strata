@@ -25,8 +25,10 @@ import com.strata.tv.ui.components.loadable
 import com.strata.tv.ui.nav.Routes
 import com.strata.tv.ui.screens.watch.chrome.ChromeHost
 import com.strata.tv.ui.screens.watch.chrome.PlayerEngine
+import com.strata.tv.ui.screens.watch.chrome.SkipSegment
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
+import org.jellyfin.sdk.model.api.MediaSegmentType
 import java.util.UUID
 
 @Composable
@@ -41,7 +43,14 @@ fun WatchScreen(nav: NavController, id: String) {
         val upNext = if (item.type == BaseItemKind.EPISODE) {
             item.seriesId?.let { repo.getNextUp(it) }?.takeIf { it.id != item.id }
         } else null
-        WatchBundle(item, plan, upNext)
+        val segments = repo.mediaSegments(itemId).mapNotNull { seg ->
+            when (seg.type) {
+                MediaSegmentType.INTRO -> SkipSegment(true, seg.startTicks / 10_000, seg.endTicks / 10_000)
+                MediaSegmentType.OUTRO -> SkipSegment(false, seg.startTicks / 10_000, seg.endTicks / 10_000)
+                else -> null
+            }
+        }
+        WatchBundle(item, plan, upNext, segments)
     }
 
     when (val l = bundle) {
@@ -55,6 +64,7 @@ private data class WatchBundle(
     val item: BaseItemDto,
     val plan: StreamPlan,
     val upNext: BaseItemDto?,
+    val segments: List<SkipSegment>,
 )
 
 @Composable
@@ -66,6 +76,7 @@ private fun PlayerHost(nav: NavController, bundle: WatchBundle) {
 
     LaunchedEffect(bundle.item.id) {
         engine.attach(bundle.item, bundle.plan, resumeSeconds)
+        engine.setSegments(bundle.segments)
     }
 
     DisposableEffect(engine) {

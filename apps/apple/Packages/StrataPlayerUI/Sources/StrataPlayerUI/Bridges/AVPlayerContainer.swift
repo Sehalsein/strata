@@ -49,13 +49,18 @@ struct SystemPlayerRepresentable: UIViewControllerRepresentable {
         vc.player = player
         vc.videoGravity = gravity
         vc.allowsPictureInPicturePlayback = true
+        vc.showsPlaybackControls = true
+        // These AVPlayerViewController knobs don't exist on tvOS — the
+        // system player there manages PiP, fullscreen, and Now Playing
+        // itself, so we only set them on iOS/iPadOS.
+        #if !os(tvOS)
         vc.canStartPictureInPictureAutomaticallyFromInline = true
         vc.entersFullScreenWhenPlaybackBegins = false
         vc.exitsFullScreenWhenPlaybackEnds = false
-        vc.showsPlaybackControls = true
         // We drive MPNowPlayingInfoCenter ourselves via NowPlayingBridge —
         // letting AVKit also write to it causes thrashing between the two.
         vc.updatesNowPlayingInfoCenter = false
+        #endif
         return vc
     }
 

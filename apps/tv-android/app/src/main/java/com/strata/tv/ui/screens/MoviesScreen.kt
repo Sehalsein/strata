@@ -1,55 +1,51 @@
 package com.strata.tv.ui.screens
 
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
 import androidx.navigation.NavController
 import com.strata.tv.di.ServiceLocator
-import com.strata.tv.ui.components.ErrorCenter
-import com.strata.tv.ui.components.Loadable
-import com.strata.tv.ui.components.LoadingCenter
-import com.strata.tv.ui.components.PosterGrid
-import com.strata.tv.ui.components.loadable
 import com.strata.tv.ui.nav.Routes
+import org.jellyfin.sdk.model.api.BaseItemKind
 
 @Composable
 fun MoviesScreen(nav: NavController) {
-    val data by loadable(Unit) { ServiceLocator.repository.listMovies() }
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(data) {
-        if (data is Loadable.Ready) runCatching { focus.requestFocus() }
-    }
-    when (val l = data) {
-        is Loadable.Loading -> LoadingCenter()
-        is Loadable.Error -> ErrorCenter(l.cause)
-        is Loadable.Ready -> PosterGrid(
-            items = l.value,
-            onSelect = { nav.navigate(Routes.movieDetail(it.id.toString())) },
-            firstFocusRequester = focus,
-            modifier = Modifier.fillMaxSize(),
-        )
-    }
+    LibraryGrid(
+        supportsSort = true,
+        onSelect = { nav.navigate(Routes.movieDetail(it.id.toString())) },
+        load = { sort -> ServiceLocator.repository.listMovies(sort) },
+    )
 }
 
 @Composable
 fun ShowsScreen(nav: NavController) {
-    val data by loadable(Unit) { ServiceLocator.repository.listShows() }
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(data) {
-        if (data is Loadable.Ready) runCatching { focus.requestFocus() }
-    }
-    when (val l = data) {
-        is Loadable.Loading -> LoadingCenter()
-        is Loadable.Error -> ErrorCenter(l.cause)
-        is Loadable.Ready -> PosterGrid(
-            items = l.value,
-            onSelect = { nav.navigate(Routes.showDetail(it.id.toString())) },
-            firstFocusRequester = focus,
-            modifier = Modifier.fillMaxSize(),
-        )
-    }
+    LibraryGrid(
+        supportsSort = true,
+        onSelect = { nav.navigate(Routes.showDetail(it.id.toString())) },
+        load = { sort -> ServiceLocator.repository.listShows(sort) },
+    )
+}
+
+/** The user's favorited titles — "My List". */
+@Composable
+fun MyListScreen(nav: NavController) {
+    LibraryGrid(
+        supportsSort = false,
+        onSelect = { item ->
+            if (item.type == BaseItemKind.SERIES) {
+                nav.navigate(Routes.showDetail(item.id.toString()))
+            } else {
+                nav.navigate(Routes.movieDetail(item.id.toString()))
+            }
+        },
+        load = { ServiceLocator.repository.favorites() },
+    )
+}
+
+/** Browse a single genre (reached from a detail-page genre chip). */
+@Composable
+fun GenreScreen(nav: NavController, name: String) {
+    LibraryGrid(
+        supportsSort = true,
+        onSelect = { nav.navigate(Routes.movieDetail(it.id.toString())) },
+        load = { sort -> ServiceLocator.repository.listMovies(sort, genres = listOf(name)) },
+    )
 }

@@ -79,6 +79,7 @@ public enum ItemKind: String, Codable, Hashable, Sendable {
     case episode = "Episode"
     case folder = "Folder"
     case collectionFolder = "CollectionFolder"
+    case boxSet = "BoxSet"
     case unknown
 
     public init(from decoder: Decoder) throws {

@@ -2,8 +2,10 @@ package com.strata.tv.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.jellyfin.sdk.api.client.extensions.genresApi
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.client.extensions.libraryApi
+import org.jellyfin.sdk.api.client.extensions.mediaSegmentsApi
 import org.jellyfin.sdk.api.client.extensions.tvShowsApi
 import org.jellyfin.sdk.api.client.extensions.userApi
 import org.jellyfin.sdk.api.client.extensions.userLibraryApi
@@ -14,7 +16,10 @@ import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.BaseItemPerson
 import org.jellyfin.sdk.model.api.ItemFields
+import org.jellyfin.sdk.model.api.ItemFilter
 import org.jellyfin.sdk.model.api.ItemSortBy
+import org.jellyfin.sdk.model.api.MediaSegmentDto
+import org.jellyfin.sdk.model.api.MediaSegmentType
 import org.jellyfin.sdk.model.api.QuickConnectDto
 import org.jellyfin.sdk.model.api.QuickConnectResult
 import org.jellyfin.sdk.model.api.SortOrder
@@ -91,6 +96,21 @@ class Repository(
         client.syncToken()
     }
 
+    /** Saved profiles, for the "Who's watching?" chooser. */
+    val accounts get() = authStore.accounts
+
+    /** Switch the active profile (no re-auth — the token is stored). */
+    fun switchAccount(userId: String) {
+        authStore.switchAccount(userId)
+        client.syncToken()
+    }
+
+    /** Remove a profile; falls back to another or signs out if it was the last. */
+    fun removeAccount(userId: String) {
+        authStore.removeAccount(userId)
+        client.syncToken()
+    }
+
     // ---------------------------------------------------------------------
     // Library
     // ---------------------------------------------------------------------
@@ -107,26 +127,71 @@ class Repository(
         ItemFields.TAGLINES,
     )
 
-    suspend fun listMovies(): List<BaseItemDto> = io {
+    suspend fun listMovies(
+        sort: LibrarySort = LibrarySort.RECENT,
+        genres: List<String>? = null,
+    ): List<BaseItemDto> = io {
         client.api.itemsApi.getItems(
             userId = userId(),
             includeItemTypes = listOf(BaseItemKind.MOVIE),
             recursive = true,
-            sortBy = listOf(ItemSortBy.DATE_CREATED),
-            sortOrder = listOf(SortOrder.DESCENDING),
+            sortBy = listOf(sort.by),
+            sortOrder = listOf(sort.order),
+            genres = genres,
             fields = movieFields,
         ).content.items.orEmpty()
     }
 
-    suspend fun listShows(): List<BaseItemDto> = io {
+    suspend fun listShows(
+        sort: LibrarySort = LibrarySort.RECENT,
+        genres: List<String>? = null,
+    ): List<BaseItemDto> = io {
         client.api.itemsApi.getItems(
             userId = userId(),
             includeItemTypes = listOf(BaseItemKind.SERIES),
             recursive = true,
-            sortBy = listOf(ItemSortBy.DATE_CREATED),
-            sortOrder = listOf(SortOrder.DESCENDING),
+            sortBy = listOf(sort.by),
+            sortOrder = listOf(sort.order),
+            genres = genres,
             fields = listOf(ItemFields.OVERVIEW, ItemFields.GENRES),
         ).content.items.orEmpty()
+    }
+
+    /** Distinct movie genres, for the genre browser reached from a detail chip. */
+    suspend fun genreList(): List<String> = io {
+        runCatching {
+            client.api.genresApi.getGenres(
+                userId = userId(),
+                includeItemTypes = listOf(BaseItemKind.MOVIE),
+            ).content.items.orEmpty().mapNotNull { it.name }
+        }.getOrElse { emptyList() }
+    }
+
+    /** The user's favorited movies & series — the "My List" screen. */
+    suspend fun favorites(): List<BaseItemDto> = io {
+        client.api.itemsApi.getItems(
+            userId = userId(),
+            includeItemTypes = listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
+            recursive = true,
+            filters = listOf(ItemFilter.IS_FAVORITE),
+            sortBy = listOf(ItemSortBy.SORT_NAME),
+            sortOrder = listOf(SortOrder.ASCENDING),
+            fields = listOf(ItemFields.OVERVIEW, ItemFields.GENRES),
+        ).content.items.orEmpty()
+    }
+
+    /**
+     * Intro / credits segments (Jellyfin MediaSegments, populated by the
+     * intro-skipper plugin). Empty when the plugin isn't present or hasn't
+     * analysed the item, so the player simply shows no skip button.
+     */
+    suspend fun mediaSegments(itemId: UUID): List<MediaSegmentDto> = io {
+        runCatching {
+            client.api.mediaSegmentsApi.getItemSegments(
+                itemId = itemId,
+                includeSegmentTypes = listOf(MediaSegmentType.INTRO, MediaSegmentType.OUTRO),
+            ).content.items.orEmpty()
+        }.getOrElse { emptyList() }
     }
 
     suspend fun getItem(itemId: UUID): BaseItemDto = io {
@@ -232,3 +297,16 @@ class Repository(
 }
 
 data class SearchResults(val movies: List<BaseItemDto>, val shows: List<BaseItemDto>)
+
+/** How a library grid is ordered. Mirrors the Apple app's `ItemSort`. */
+enum class LibrarySort(
+    val label: String,
+    val by: ItemSortBy,
+    val order: SortOrder,
+) {
+    RECENT("Date Added", ItemSortBy.DATE_CREATED, SortOrder.DESCENDING),
+    TITLE("Title", ItemSortBy.SORT_NAME, SortOrder.ASCENDING),
+    YEAR("Year", ItemSortBy.PRODUCTION_YEAR, SortOrder.DESCENDING),
+    RATING("Rating", ItemSortBy.COMMUNITY_RATING, SortOrder.DESCENDING),
+    RUNTIME("Runtime", ItemSortBy.RUNTIME, SortOrder.DESCENDING),
+}

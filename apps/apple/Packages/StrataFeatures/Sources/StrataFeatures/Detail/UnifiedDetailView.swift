@@ -24,6 +24,8 @@ public struct UnifiedDetailView: View {
                 ProgressView().tint(Strata.Tokens.paper)
             } else if kind == .series || kind == .season {
                 ShowDetailView(id: id, path: $path)
+            } else if kind == .boxSet {
+                CollectionDetailView(id: id, path: $path)
             } else {
                 MovieDetailView(id: id, path: $path)
             }

@@ -68,6 +68,14 @@ class PlayerEngine(
     private val _failure = MutableStateFlow<PlaybackException?>(null)
     val failure: StateFlow<PlaybackException?> = _failure.asStateFlow()
 
+    // Intro / credits segments (Jellyfin MediaSegments / intro-skipper).
+    private val _segments = MutableStateFlow<List<SkipSegment>>(emptyList())
+    val segments: StateFlow<List<SkipSegment>> = _segments.asStateFlow()
+
+    fun setSegments(list: List<SkipSegment>) {
+        _segments.value = list
+    }
+
     private var currentItem: BaseItemDto? = null
     private var currentPlan: StreamPlan? = null
     private var positionPoller: Job? = null
@@ -125,6 +133,7 @@ class PlayerEngine(
         _subtitleTracks.value = plan.subtitleStreams
         _selectedAudio.value = plan.audioStreams.firstOrNull()?.index
         _selectedSubtitle.value = null
+        _segments.value = emptyList()
         load(plan, startSeconds)
         startPolling()
         startProgressHeartbeat(item.id, plan)
@@ -258,4 +267,14 @@ class PlayerEngine(
         }
         runCatching { exoPlayer.release() }
     }
+}
+
+/** A skippable intro/credits segment, in milliseconds. */
+data class SkipSegment(
+    val isIntro: Boolean,
+    val startMs: Long,
+    val endMs: Long,
+) {
+    val label: String get() = if (isIntro) "Skip Intro" else "Skip Credits"
+    fun contains(ms: Long): Boolean = ms in startMs until endMs
 }

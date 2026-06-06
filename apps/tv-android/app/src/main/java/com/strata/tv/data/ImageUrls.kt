@@ -44,6 +44,21 @@ class ImageUrls(private val serverUrl: String, private val authStore: AuthStore)
     fun person(personId: UUID?, maxWidth: Int = 320): String? =
         image(personId, ImageType.PRIMARY, maxWidth = maxWidth)
 
+    /**
+     * A profile avatar (`/Users/{id}/Images/Primary`). Takes the account's own
+     * server + token explicitly so the chooser can show every profile's avatar,
+     * even ones not currently active. Jellyfin 404s when no image is set, so
+     * callers fall back to initials.
+     */
+    fun userAvatar(account: Account, maxWidth: Int = 240): String {
+        val params = buildList {
+            add("maxWidth=$maxWidth")
+            if (account.token.isNotEmpty()) add("api_key=${enc(account.token)}")
+        }
+        return "${account.serverUrl}/Users/${account.userId}/Images/Primary?" +
+            params.joinToString("&")
+    }
+
     /** Chapter thumbnail rendered above each scene marker. */
     fun chapter(itemId: UUID, index: Int, maxWidth: Int = 480): String {
         val params = buildList {

@@ -8,10 +8,9 @@ public struct MovieDetailView: View {
     @Binding var path: [Route]
     public let id: String
 
-    @State private var item: BaseItem?
+    @State private var state: Loadable<BaseItem> = .idle
     @State private var similar: [BaseItem] = []
     @State private var isFavorite: Bool = false
-    @State private var isLoading = true
 
     public init(id: String, path: Binding<[Route]>) {
         self.id = id
@@ -21,11 +20,9 @@ public struct MovieDetailView: View {
     public var body: some View {
         ZStack {
             AmbientBackdrop(key: id, intensity: 1.0)
-            if let item {
+            AsyncContent(state, retry: { Task { await load() } }) { item in
                 detail(item: item)
                     .handoffForViewing(item: item)
-            } else if isLoading {
-                ProgressView().tint(Strata.Tokens.paper)
             }
         }
         .task { await load() }
@@ -119,7 +116,10 @@ public struct MovieDetailView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(Array(genres.prefix(6).enumerated()), id: \.offset) { _, g in
-                                Chip(g, variant: .outline)
+                                Button { path.append(.genre(name: g, forShows: false)) } label: {
+                                    Chip(g, variant: .outline)
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -140,10 +140,17 @@ public struct MovieDetailView: View {
             }
             .padding(.horizontal, textGutter)
             .padding(.top, 12)
-            .padding(.bottom, 60)
+            .padding(.bottom, CGFloat.strataScrollBottom)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // Bleed the hero into the top safe area, but keep the bottom inset so
+        // content clears the tab bar / home indicator instead of hiding under
+        // it. (tvOS has no tab bar at the bottom, so let it bleed fully.)
+        #if os(tvOS)
         .ignoresSafeArea()
+        #else
+        .ignoresSafeArea(edges: .top)
+        #endif
     }
 
     private var sectionSpacing: CGFloat {
@@ -179,23 +186,18 @@ public struct MovieDetailView: View {
 
     private func load() async {
         guard let client = services.client else {
-            Log.detail.warning("MovieDetailView.load \(id, privacy: .public) — no client")
+            state = .failed("Not signed in")
             return
         }
-        Log.detail.info("MovieDetailView.load enter \(id, privacy: .public)")
-        isLoading = true
-        defer { isLoading = false }
-        async let itemTask: BaseItem? = try? await client.getItem(id)
+        if state.value == nil { state = .loading }
+        // Similar items are secondary — load them alongside the main item so a
+        // slow recommendations call never holds up the page.
         async let similarTask: [BaseItem] = (try? await client.getSimilarItems(itemId: id, limit: 12)) ?? []
-        let fetched = await itemTask
-        let fetchedSimilar = await similarTask
-        if let fetched {
-            Log.detail.info("MovieDetailView.load ok \(id, privacy: .public) type=\(fetched.type?.rawValue ?? "?", privacy: .public) similar=\(fetchedSimilar.count, privacy: .public)")
-            item = fetched
+        let result = await loadable { try await client.getItem(id) }
+        state = result
+        if case .loaded(let fetched) = result {
             isFavorite = fetched.userData?.isFavorite ?? false
-        } else {
-            Log.detail.error("MovieDetailView.load fail \(id, privacy: .public)")
         }
-        similar = fetchedSimilar
+        similar = await similarTask
     }
 }

@@ -208,7 +208,7 @@ private fun Masthead(nav: NavController) {
             }
         }
         Spacer(Modifier.weight(1f))
-        UserBadge()
+        UserBadge(nav)
     }
 }
 
@@ -265,7 +265,7 @@ private fun NavTab(spec: NavTabSpec, isActive: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun UserBadge() {
+private fun UserBadge(nav: NavController) {
     val session by ServiceLocator.authStore.session.collectAsState()
     val displayName = session?.userName?.takeIf { it.isNotBlank() } ?: "Guest"
     val initial = displayName.first().uppercaseChar().toString()
@@ -319,6 +319,14 @@ private fun UserBadge() {
         if (menuOpen) {
             UserMenu(
                 onDismiss = { menuOpen = false },
+                onMyList = {
+                    menuOpen = false
+                    nav.navigate(Routes.MyList)
+                },
+                onSwitchProfile = {
+                    menuOpen = false
+                    nav.navigate(Routes.Profiles)
+                },
                 onSignOut = {
                     menuOpen = false
                     ServiceLocator.repository.signOut()
@@ -335,7 +343,12 @@ private fun UserBadge() {
  * still incubating and doesn't auto-focus the first item on launch.
  */
 @Composable
-private fun UserMenu(onDismiss: () -> Unit, onSignOut: () -> Unit) {
+private fun UserMenu(
+    onDismiss: () -> Unit,
+    onMyList: () -> Unit,
+    onSwitchProfile: () -> Unit,
+    onSignOut: () -> Unit,
+) {
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
 
@@ -350,33 +363,44 @@ private fun UserMenu(onDismiss: () -> Unit, onSignOut: () -> Unit) {
                 .background(StrataColors.Bg2)
                 .padding(horizontal = 4.dp, vertical = 6.dp),
         ) {
-            var focused by remember { mutableStateOf(false) }
-            val interaction = remember { MutableInteractionSource() }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .focusRequester(focusRequester)
-                    .onFocusChanged { focused = it.isFocused }
-                    .clickable(
-                        interactionSource = interaction,
-                        indication = null,
-                        onClick = onSignOut,
-                    )
-                    .background(if (focused) StrataColors.Paper.copy(alpha = 0.1f) else Color.Transparent)
-                    .padding(horizontal = 18.dp, vertical = 10.dp),
-            ) {
-                Text(
-                    text = "SIGN OUT",
-                    color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.75f),
-                    style = TextStyle(
-                        fontFamily = StrataType.Mono,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.8.sp,
-                    ),
-                )
-            }
+            UserMenuItem(text = "MY LIST", focusRequester = focusRequester, onClick = onMyList)
+            UserMenuItem(text = "SWITCH PROFILE", onClick = onSwitchProfile)
+            UserMenuItem(text = "SIGN OUT", onClick = onSignOut)
         }
+    }
+}
+
+@Composable
+private fun UserMenuItem(
+    text: String,
+    focusRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val interaction = remember { MutableInteractionSource() }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            )
+            .background(if (focused) StrataColors.Paper.copy(alpha = 0.1f) else Color.Transparent)
+            .padding(horizontal = 18.dp, vertical = 10.dp),
+    ) {
+        Text(
+            text = text,
+            color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.75f),
+            style = TextStyle(
+                fontFamily = StrataType.Mono,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.8.sp,
+            ),
+        )
     }
 }
 

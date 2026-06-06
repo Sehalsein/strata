@@ -102,6 +102,44 @@ public struct WatchView: View {
                 }
             }
 
+            // Floating "Skip Intro / Skip Credits" button — appears only while
+            // the playhead sits inside an intro/credits segment.
+            if let skip = services.engine.activeSkip {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        SkipSegmentButton(title: skip.title) {
+                            Task { await services.engine.skipActiveSegment() }
+                        }
+                    }
+                }
+                .padding(.trailing, 28)
+                .padding(.bottom, 150)
+                .transition(.opacity)
+            }
+
+            // Sleep timer — surfaced with the rest of the chrome so it doesn't
+            // clutter the frame during playback. tvOS drives chrome through the
+            // focus engine, so the menu is phone/desktop only.
+            #if !os(tvOS)
+            if !hideChrome {
+                VStack {
+                    HStack {
+                        Spacer()
+                        SleepTimerMenu(
+                            current: services.engine.sleepTimerEnds,
+                            onSelect: { services.engine.setSleepTimer($0) }
+                        )
+                    }
+                    Spacer()
+                }
+                .padding(.trailing, 24)
+                .padding(.top, 60)
+                .transition(.opacity)
+            }
+            #endif
+
             if case .loading = services.engine.status {
                 ProgressView().tint(Strata.Tokens.paper).scaleEffect(1.4)
             }
@@ -291,6 +329,55 @@ public struct WatchView: View {
         }
     }
 }
+
+/// Floating editorial "Skip Intro / Skip Credits" pill, mirroring the
+/// bottom-trailing placement users know from Netflix / Apple TV.
+private struct SkipSegmentButton: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.mono(13, weight: .semibold))
+                    .tracking(1.5)
+                Image(systemName: "forward.end.fill")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .foregroundStyle(Strata.Tokens.bg)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(Capsule().fill(Strata.Tokens.paper))
+            .overlay(Capsule().stroke(Strata.Tokens.bg.opacity(0.15), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+}
+
+#if !os(tvOS)
+/// Sleep-timer menu button. Filled icon while armed.
+private struct SleepTimerMenu: View {
+    let current: Date?
+    let onSelect: (PlayerEngine.SleepOption) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(PlayerEngine.SleepOption.allCases) { option in
+                Button(option.label) { onSelect(option) }
+            }
+        } label: {
+            Image(systemName: current == nil ? "moon.zzz" : "moon.zzz.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Strata.Tokens.paper)
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(.black.opacity(0.45)))
+        }
+        .accessibilityLabel("Sleep timer")
+    }
+}
+#endif
 
 /// Brief centered HUD that confirms the new aspect mode after a pinch or
 /// double-tap — same idea as the volume / brightness indicators in Apple
