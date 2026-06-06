@@ -26,9 +26,14 @@ public enum Route: Hashable {
     case movie(id: String)
     case show(id: String)
     case unified(id: String)
+    case collection(id: String)
     case season(seriesId: String, seasonId: String, seriesName: String)
     case watch(WatchRequest)
     case search(query: String?)
+    /// Browse a single genre. `forShows` selects the item types queried.
+    case genre(name: String, forShows: Bool)
+    /// The user's favorited items ("My List").
+    case myList
 }
 
 public struct WatchRequest: Hashable, Codable, Sendable {

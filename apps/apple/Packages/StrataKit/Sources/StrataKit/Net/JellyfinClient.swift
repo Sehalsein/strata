@@ -5,16 +5,57 @@ public struct JellyfinClient: Sendable {
     public let session: Session?
     public let urlSession: URLSession
 
-    public init(session: Session, urlSession: URLSession = .shared) {
+    public init(session: Session, urlSession: URLSession = StrataNetworking.apiSession) {
         self.serverURL = session.serverURL
         self.session = session
         self.urlSession = urlSession
     }
 
-    public init(unauthenticated serverURL: URL, urlSession: URLSession = .shared) {
+    public init(unauthenticated serverURL: URL, urlSession: URLSession = StrataNetworking.apiSession) {
         self.serverURL = serverURL
         self.session = nil
         self.urlSession = urlSession
+    }
+
+    /// Drops all cached GET responses. Call after a mutation that changes list
+    /// contents, or on an explicit pull-to-refresh.
+    public static func clearResponseCache() async {
+        await ResponseCache.shared.clear()
+    }
+
+    /// How a library listing is ordered. Mirrors Jellyfin's `sortBy`/`sortOrder`.
+    public struct ItemSort: Sendable, Equatable, Hashable {
+        public enum Field: String, Sendable, CaseIterable, Hashable {
+            case dateAdded = "DateCreated"
+            case title = "SortName"
+            case year = "ProductionYear"
+            case rating = "CommunityRating"
+            case premiere = "PremiereDate"
+            case runtime = "Runtime"
+
+            public var label: String {
+                switch self {
+                case .dateAdded: return "Date Added"
+                case .title: return "Title"
+                case .year: return "Year"
+                case .rating: return "Rating"
+                case .premiere: return "Release Date"
+                case .runtime: return "Runtime"
+                }
+            }
+        }
+        public enum Order: String, Sendable, Hashable {
+            case ascending = "Ascending"
+            case descending = "Descending"
+        }
+        public var field: Field
+        public var order: Order
+        public init(field: Field, order: Order) {
+            self.field = field
+            self.order = order
+        }
+        public static let recentlyAdded = ItemSort(field: .dateAdded, order: .descending)
+        public static let titleAsc = ItemSort(field: .title, order: .ascending)
     }
 
     // MARK: - Auth
@@ -26,12 +67,67 @@ public struct JellyfinClient: Sendable {
 
     // MARK: - Library
 
-    public func listMovies() async throws -> [BaseItem] {
-        try await getItems(includeItemTypes: ["Movie"], fields: Self.movieFields)
+    public func listMovies(
+        sort: ItemSort = .recentlyAdded,
+        genres: [String]? = nil,
+        limit: Int? = nil
+    ) async throws -> [BaseItem] {
+        try await getItems(includeItemTypes: ["Movie", "BoxSet"],
+                           genres: genres, sort: sort, limit: limit,
+                           fields: Self.movieFields)
     }
 
-    public func listShows() async throws -> [BaseItem] {
-        try await getItems(includeItemTypes: ["Series"], fields: ["Overview", "Genres"])
+    public func listShows(
+        sort: ItemSort = .recentlyAdded,
+        genres: [String]? = nil,
+        limit: Int? = nil
+    ) async throws -> [BaseItem] {
+        try await getItems(includeItemTypes: ["Series"],
+                           genres: genres, sort: sort, limit: limit,
+                           fields: ["Overview", "Genres"])
+    }
+
+    /// Newest additions across films and series, merged and date-sorted by the
+    /// server — backs the "Recently Added" shelf on Home.
+    public func recentlyAdded(limit: Int = 20) async throws -> [BaseItem] {
+        try await getItems(includeItemTypes: ["Movie", "Series", "BoxSet"],
+                           sort: .recentlyAdded, limit: limit,
+                           fields: ["Overview", "Genres"])
+    }
+
+    /// The user's favorited items (the "My List" screen).
+    public func favorites(limit: Int? = nil) async throws -> [BaseItem] {
+        try await getItems(includeItemTypes: ["Movie", "Series", "BoxSet"],
+                           isFavorite: true, sort: .titleAsc, limit: limit,
+                           fields: ["Overview", "Genres"])
+    }
+
+    /// Distinct genre names available for the given item types — drives the
+    /// genre browser reached by tapping a genre chip.
+    public func genreList(itemTypes: [String]) async throws -> [String] {
+        let userId = try requireUserId()
+        let q: [URLQueryItem] = [
+            .init(name: "userId", value: userId),
+            .init(name: "includeItemTypes", value: itemTypes.joined(separator: ",")),
+            .init(name: "recursive", value: "true"),
+            .init(name: "sortBy", value: "SortName")
+        ]
+        let env: ItemsEnvelope<BaseItem> = try await get(path: "/Genres", query: q)
+        return (env.items ?? []).compactMap { $0.name }
+    }
+
+    /// Intro / credits (and other) timestamped segments for an item, from
+    /// Jellyfin's native MediaSegments API (populated by the intro-skipper
+    /// plugin). Returns an empty array when the plugin isn't present or hasn't
+    /// analysed the item, so callers simply show no skip button.
+    public func mediaSegments(
+        itemId: String,
+        types: [MediaSegment.Kind] = [.intro, .outro]
+    ) async throws -> [MediaSegment] {
+        var q: [URLQueryItem] = []
+        for t in types { q.append(.init(name: "includeSegmentTypes", value: t.rawValue)) }
+        let env: MediaSegmentEnvelope = try await get(path: "/MediaSegments/\(itemId)", query: q)
+        return env.items ?? []
     }
 
     public func continueWatching(kinds: [String] = ["Movie", "Episode"]) async throws -> [BaseItem] {
@@ -93,6 +189,9 @@ public struct JellyfinClient: Sendable {
         guard (200..<300).contains(http.statusCode) else {
             throw RequestError.http(status: http.statusCode, body: nil)
         }
+        // Favoriting changes the My List / favorites listings — drop cached
+        // GETs so the next read reflects the toggle.
+        await ResponseCache.shared.clear()
     }
 
     public func getSeasons(seriesId: String) async throws -> [BaseItem] {
@@ -112,6 +211,24 @@ public struct JellyfinClient: Sendable {
         ]
         if let seasonId { q.append(.init(name: "seasonId", value: seasonId)) }
         let env: ItemsEnvelope<BaseItem> = try await get(path: "/Shows/\(seriesId)/Episodes", query: q)
+        return env.items ?? []
+    }
+
+    /// Items contained in a collection (BoxSet). `recursive=true` is required:
+    /// a collection member's real ParentId is its library folder, not the
+    /// collection, so a plain parentId query returns nothing. Recursive
+    /// traverses the collection link to return the linked titles.
+    public func getCollectionItems(collectionId: String) async throws -> [BaseItem] {
+        let userId = try requireUserId()
+        let q: [URLQueryItem] = [
+            .init(name: "userId", value: userId),
+            .init(name: "parentId", value: collectionId),
+            .init(name: "recursive", value: "true"),
+            .init(name: "sortBy", value: "SortName"),
+            .init(name: "sortOrder", value: "Ascending"),
+            .init(name: "fields", value: Self.movieFields.joined(separator: ","))
+        ]
+        let env: ItemsEnvelope<BaseItem> = try await get(path: "/Items", query: q)
         return env.items ?? []
     }
 
@@ -292,6 +409,9 @@ public struct JellyfinClient: Sendable {
     private func getItems(
         includeItemTypes: [String],
         searchTerm: String? = nil,
+        genres: [String]? = nil,
+        isFavorite: Bool = false,
+        sort: ItemSort = .recentlyAdded,
         limit: Int? = nil,
         fields: [String]
     ) async throws -> [BaseItem] {
@@ -300,14 +420,30 @@ public struct JellyfinClient: Sendable {
             .init(name: "userId", value: userId),
             .init(name: "includeItemTypes", value: includeItemTypes.joined(separator: ",")),
             .init(name: "recursive", value: "true"),
-            .init(name: "sortBy", value: "DateCreated"),
-            .init(name: "sortOrder", value: "Descending"),
+            .init(name: "sortBy", value: sort.field.rawValue),
+            .init(name: "sortOrder", value: sort.order.rawValue),
             .init(name: "fields", value: fields.joined(separator: ","))
         ]
         if let searchTerm { q.append(.init(name: "searchTerm", value: searchTerm)) }
+        // Jellyfin expects genres pipe-delimited.
+        if let genres, !genres.isEmpty {
+            q.append(.init(name: "genres", value: genres.joined(separator: "|")))
+        }
+        if isFavorite { q.append(.init(name: "filters", value: "IsFavorite")) }
         if let limit { q.append(.init(name: "limit", value: String(limit))) }
         let env: ItemsEnvelope<BaseItem> = try await get(path: "/Items", query: q)
         return env.items ?? []
+    }
+
+    /// Connectivity hiccups worth one automatic retry — not auth/DNS/cancel.
+    private static func isTransient(_ error: URLError) -> Bool {
+        switch error.code {
+        case .timedOut, .networkConnectionLost, .cannotConnectToHost,
+             .dnsLookupFailed, .notConnectedToInternet:
+            return true
+        default:
+            return false
+        }
     }
 
     private func requireUserId() throws -> String {
@@ -413,7 +549,24 @@ public struct JellyfinClient: Sendable {
 
     private func perform<T: Decodable>(_ req: URLRequest) async throws -> T {
         let urlString = req.url?.absoluteString ?? "<no url>"
-        let (data, response) = try await urlSession.data(for: req)
+        let isGET = (req.httpMethod ?? "GET").uppercased() == "GET"
+
+        // Serve a fresh-enough cached body for repeat GETs (tab reappears,
+        // back-navigation) without a round-trip.
+        if isGET, let cached = await ResponseCache.shared.data(for: urlString, now: Date()),
+           let decoded = try? JSONDecoder().decode(T.self, from: cached) {
+            return decoded
+        }
+
+        // Idempotent GETs get one retry on a transient connectivity blip so a
+        // single dropped packet on LTE doesn't surface as a hard failure.
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await urlSession.data(for: req)
+        } catch let error as URLError where isGET && Self.isTransient(error) {
+            Log.net.error("\(req.httpMethod ?? "?") \(urlString, privacy: .public) — transient \(error.code.rawValue), retrying")
+            (data, response) = try await urlSession.data(for: req)
+        }
         guard let http = response as? HTTPURLResponse else {
             Log.net.error("\(req.httpMethod ?? "?") \(urlString, privacy: .public) — no HTTPURLResponse")
             throw RequestError.http(status: 0, body: nil)
@@ -424,7 +577,9 @@ public struct JellyfinClient: Sendable {
             throw RequestError.http(status: http.statusCode, body: body)
         }
         do {
-            return try JSONDecoder().decode(T.self, from: data)
+            let decoded = try JSONDecoder().decode(T.self, from: data)
+            if isGET { await ResponseCache.shared.store(data, for: urlString, now: Date()) }
+            return decoded
         } catch {
             Log.net.error("Decode failed for \(urlString, privacy: .public): \(String(describing: error), privacy: .public)")
             throw RequestError.decoding(String(describing: error))

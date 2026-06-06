@@ -11,12 +11,18 @@ public struct LoginView: View {
     private var isCompact: Bool { false }
     #endif
 
-    @State private var serverURL: String = AuthStore.lastServerURL ?? "http://192.168.2.162:8096"
+    @State private var serverURL: String
     @State private var username: String = ""
     @State private var password: String = ""
     @State private var motifIndex: Int = 0
-    @State private var focusedField: Field?
+    @State private var focusedField: Field? = nil
     @FocusState private var focus: Field?
+
+    /// `initialServerURL` lets the "Add Server" flow pre-fill the address the
+    /// user just entered; otherwise we fall back to the last-used server.
+    public init(initialServerURL: String? = nil) {
+        _serverURL = State(initialValue: initialServerURL ?? AuthStore.lastServerURL ?? "http://192.168.2.162:8096")
+    }
 
     /// Cycle through these motifs in the hero — picked for visual weight.
     private let heroMotifs: [MotifKey] = [.aurora, .megacity, .sunHorizon, .corridor, .vault, .archway]
@@ -27,8 +33,6 @@ public struct LoginView: View {
     }()
 
     private enum Field: Hashable { case server, username, password }
-
-    public init() {}
 
     public var body: some View {
         GeometryReader { geo in

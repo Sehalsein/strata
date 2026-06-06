@@ -47,6 +47,21 @@ public struct ImageURLBuilder: Sendable {
         return comps.url
     }
 
+    /// A user's profile avatar (`/Users/{id}/Images/Primary`). Returns a URL
+    /// even when the user has no image set — Jellyfin 404s and callers fall
+    /// back to initials.
+    public func userPrimary(userId: String, maxWidth: Int? = 240) -> URL? {
+        guard var comps = URLComponents(
+            url: serverURL.appendingPathComponent("/Users/\(userId)/Images/Primary"),
+            resolvingAgainstBaseURL: false
+        ) else { return nil }
+        var q: [URLQueryItem] = []
+        if let maxWidth { q.append(.init(name: "maxWidth", value: String(maxWidth))) }
+        if let token, !token.isEmpty { q.append(.init(name: "api_key", value: token)) }
+        if !q.isEmpty { comps.queryItems = q }
+        return comps.url
+    }
+
     public func subtitleVtt(itemId: String, mediaSourceId: String, streamIndex: Int) -> URL? {
         guard var comps = URLComponents(
             url: serverURL.appendingPathComponent("/Videos/\(itemId)/\(mediaSourceId)/Subtitles/\(streamIndex)/0/Stream.vtt"),

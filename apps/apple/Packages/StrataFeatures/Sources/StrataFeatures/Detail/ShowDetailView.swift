@@ -8,7 +8,7 @@ public struct ShowDetailView: View {
     @Binding var path: [Route]
     public let id: String
 
-    @State private var item: BaseItem?
+    @State private var state: Loadable<BaseItem> = .idle
     @State private var seasons: [BaseItem] = []
     @State private var selectedSeason: BaseItem?
     @State private var episodes: [BaseItem] = []
@@ -23,8 +23,8 @@ public struct ShowDetailView: View {
     public var body: some View {
         ZStack {
             AmbientBackdrop(key: id, intensity: 0.95)
-            ScrollView {
-                if let item {
+            AsyncContent(state, retry: { Task { await load() } }) { item in
+                ScrollView {
                     VStack(alignment: .leading, spacing: 28) {
                         hero(item: item)
                             .handoffForViewing(item: item)
@@ -48,13 +48,11 @@ public struct ShowDetailView: View {
                             }
                         }
                         MovieInfoSection(item: item)
-                        Spacer(minLength: 60)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 40)
+                    .padding(.bottom, CGFloat.strataScrollBottom)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    ProgressView().tint(Strata.Tokens.paper).padding(60)
                 }
             }
         }
@@ -147,7 +145,7 @@ public struct ShowDetailView: View {
                     services.coordinator.requestWatch(ep.id, start: ep.resumePositionSeconds)
                 } label: {
                     HStack(alignment: .top, spacing: 14) {
-                        if let url = services.images?.episodeStill(itemId: ep.id, imageTags: ep.imageTags) {
+                        if let url = services.images?.episodeStill(itemId: ep.id, imageTags: ep.imageTags, maxWidth: 360) {
                             AsyncImage(url: url) { phase in
                                 switch phase {
                                 case .success(let img):
@@ -189,21 +187,21 @@ public struct ShowDetailView: View {
 
     private func load() async {
         guard let client = services.client else {
-            Log.detail.warning("ShowDetailView.load \(id, privacy: .public) — no client")
+            state = .failed("Not signed in")
             return
         }
-        Log.detail.info("ShowDetailView.load enter \(id, privacy: .public)")
-        async let i = try? await client.getItem(id)
-        async let s = try? await client.getSeasons(seriesId: id)
-        async let sim = (try? await client.getSimilarItems(itemId: id, limit: 12)) ?? []
-        let fetchedItem = await i
-        let fetchedSeasons = await s ?? []
-        let fetchedSimilar = await sim
-        Log.detail.info("ShowDetailView.load ok \(id, privacy: .public) seasons=\(fetchedSeasons.count, privacy: .public) similar=\(fetchedSimilar.count, privacy: .public)")
-        item = fetchedItem
-        seasons = fetchedSeasons
-        similar = fetchedSimilar
-        isFavorite = fetchedItem?.userData?.isFavorite ?? false
+        if state.value == nil { state = .loading }
+        // Seasons and recommendations are secondary; fetch them alongside the
+        // series so neither blocks the hero from appearing.
+        async let seasonsTask = (try? await client.getSeasons(seriesId: id)) ?? []
+        async let similarTask = (try? await client.getSimilarItems(itemId: id, limit: 12)) ?? []
+        let result = await loadable { try await client.getItem(id) }
+        state = result
+        if case .loaded(let fetched) = result {
+            isFavorite = fetched.userData?.isFavorite ?? false
+        }
+        seasons = await seasonsTask
+        similar = await similarTask
         if let first = seasons.first {
             selectedSeason = first
             await loadEpisodes(seasonId: first.id)

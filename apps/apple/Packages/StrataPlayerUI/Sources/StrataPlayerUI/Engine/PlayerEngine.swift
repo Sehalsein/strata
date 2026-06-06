@@ -24,6 +24,36 @@ public final class PlayerEngine {
     public private(set) var activeSubtitleIndex: Int?
     public var captionsEnabled: Bool { activeSubtitleIndex != nil }
 
+    /// Intro / credits segments (from Jellyfin MediaSegments / intro-skipper).
+    public private(set) var segments: [MediaSegment] = []
+
+    /// The skip prompt to show right now, if the playhead is inside a skippable
+    /// intro or credits segment. Recomputed as `position` advances.
+    public var activeSkip: SkipPrompt? {
+        for seg in segments where seg.type == .intro || seg.type == .outro {
+            if seg.contains(position) {
+                return SkipPrompt(kind: seg.type, end: seg.end)
+            }
+        }
+        return nil
+    }
+
+    public struct SkipPrompt: Equatable {
+        public let kind: MediaSegment.Kind
+        public let end: TimeInterval
+        public var title: String { kind == .intro ? "Skip Intro" : "Skip Credits" }
+    }
+
+    /// When the sleep timer will pause playback, if armed.
+    public private(set) var sleepTimerEnds: Date?
+    private var sleepTask: Task<Void, Never>?
+
+    public enum SleepOption: Int, CaseIterable, Identifiable, Sendable {
+        case off = 0, m15 = 15, m30 = 30, m45 = 45, m60 = 60
+        public var id: Int { rawValue }
+        public var label: String { self == .off ? "Off" : "\(rawValue) min" }
+    }
+
     /// `.resizeAspect` (default) preserves the source aspect ratio with letterbox/
     /// pillarbox bars — same as Apple's Photos and TV apps. `.resizeAspectFill`
     /// fills the entire frame with cropping. Persisted across launches.
@@ -121,6 +151,13 @@ public final class PlayerEngine {
                 await seek(to: resume)
             }
 
+            // Intro/credits markers — fire-and-forget so they never delay
+            // playback. Empty (no plugin / unanalysed) simply shows no button.
+            Task { [weak self] in
+                let segs = (try? await jellyfin.mediaSegments(itemId: item.id)) ?? []
+                await MainActor.run { self?.segments = segs }
+            }
+
             let r = PlaybackReporter(client: jellyfin, itemId: item.id, plan: plan)
             reporter = r
             // Fire-and-forget: server bookkeeping doesn't belong on the
@@ -154,6 +191,30 @@ public final class PlayerEngine {
 
     public func skip(_ delta: TimeInterval) async {
         await seek(to: position + delta)
+    }
+
+    /// Jump to the end of the intro/credits segment the playhead is currently in.
+    public func skipActiveSegment() async {
+        guard let prompt = activeSkip else { return }
+        await seek(to: prompt.end)
+    }
+
+    /// Arm (or, with `.off`, disarm) the sleep timer. Pauses playback when it
+    /// fires. Survives auto-advance to the next episode; cleared on `unload()`.
+    public func setSleepTimer(_ option: SleepOption) {
+        sleepTask?.cancel()
+        guard option != .off else {
+            sleepTimerEnds = nil
+            return
+        }
+        let minutes = option.rawValue
+        sleepTimerEnds = Date().addingTimeInterval(TimeInterval(minutes * 60))
+        sleepTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(minutes) * 60 * 1_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.pause()
+            self.sleepTimerEnds = nil
+        }
     }
 
     public func seek(to seconds: TimeInterval) async {
@@ -193,6 +254,8 @@ public final class PlayerEngine {
     }
 
     public func unload() async {
+        sleepTask?.cancel()
+        sleepTimerEnds = nil
         await teardownCurrentItem()
         status = .idle
     }
@@ -264,6 +327,7 @@ public final class PlayerEngine {
         player.replaceCurrentItem(with: nil)
         position = 0
         duration = 0
+        segments = []
     }
 }
 

@@ -9,6 +9,7 @@ public struct SearchView: View {
     @State private var term: String = ""
     @State private var movies: [BaseItem] = []
     @State private var shows: [BaseItem] = []
+    @State private var searchError: String?
     @State private var searchTask: Task<Void, Never>?
 
     public init(path: Binding<[Route]>, initialQuery: String? = nil) {
@@ -46,10 +47,14 @@ public struct SearchView: View {
                             path.append(.show(id: item.id))
                         }
                     }
-                    Spacer(minLength: 60)
+                    if let searchError, movies.isEmpty, shows.isEmpty {
+                        ErrorRetryView(message: searchError, retry: { scheduleSearch() })
+                            .frame(minHeight: 240)
+                    }
                 }
                 .padding(.horizontal, 28)
                 .padding(.top, 32)
+                .padding(.bottom, CGFloat.strataScrollBottom)
             }
         }
         .onAppear {
@@ -71,10 +76,19 @@ public struct SearchView: View {
 
     private func runSearch(_ q: String) async {
         guard let client = services.client else { return }
-        let result = (try? await client.search(q)) ?? (movies: [], shows: [])
-        await MainActor.run {
-            self.movies = result.movies
-            self.shows = result.shows
+        do {
+            let result = try await client.search(q)
+            await MainActor.run {
+                self.movies = result.movies
+                self.shows = result.shows
+                self.searchError = nil
+            }
+        } catch is CancellationError {
+            // superseded by a newer keystroke; ignore
+        } catch let error as JellyfinClient.RequestError {
+            await MainActor.run { self.searchError = error.message }
+        } catch {
+            await MainActor.run { self.searchError = (error as NSError).localizedDescription }
         }
     }
 }

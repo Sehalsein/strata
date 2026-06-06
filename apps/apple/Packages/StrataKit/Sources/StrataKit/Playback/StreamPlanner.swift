@@ -48,12 +48,16 @@ public struct StreamPlanner: Sendable {
             .init(name: "api_key", value: token),
             .init(name: "PlaySessionId", value: playSessionId)
         ]
-        var directComps = URLComponents(
+        guard var directComps = URLComponents(
             url: client.serverURL.appendingPathComponent("/Videos/\(itemId)/stream"),
             resolvingAgainstBaseURL: false
-        )!
+        ) else {
+            throw JellyfinClient.RequestError.invalidURL
+        }
         directComps.queryItems = directQ
-        let directURL = directComps.url!
+        guard let directURL = directComps.url else {
+            throw JellyfinClient.RequestError.invalidURL
+        }
 
         // HLS URL: prefer the server's TranscodingUrl when it returned
         // one — Jellyfin built it from the DeviceProfile we sent, so it
@@ -61,7 +65,7 @@ public struct StreamPlanner: Sendable {
         // when video matches, subtitle burn-in when needed, etc.). Fall
         // back to a hand-built URL only when the server didn't supply
         // one (older Jellyfin or unusual edge case).
-        let hlsURL: URL = {
+        let hlsURL: URL? = {
             if let raw = source.transcodingUrl,
                let abs = URL(string: raw, relativeTo: client.serverURL)?.absoluteURL,
                var comps = URLComponents(url: abs, resolvingAgainstBaseURL: false) {
@@ -92,13 +96,16 @@ public struct StreamPlanner: Sendable {
             if let vIdx = videoStream?.index { hlsQ.append(.init(name: "VideoStreamIndex", value: String(vIdx))) }
             if let a = audioStreamIndex { hlsQ.append(.init(name: "AudioStreamIndex", value: String(a))) }
             if let s = subtitleStreamIndex { hlsQ.append(.init(name: "SubtitleStreamIndex", value: String(s))) }
-            var hlsComps = URLComponents(
+            guard var hlsComps = URLComponents(
                 url: client.serverURL.appendingPathComponent("/Videos/\(itemId)/master.m3u8"),
                 resolvingAgainstBaseURL: false
-            )!
+            ) else { return nil }
             hlsComps.queryItems = hlsQ
-            return hlsComps.url!
+            return hlsComps.url
         }()
+        guard let hlsURL else {
+            throw JellyfinClient.RequestError.invalidURL
+        }
 
         // Authoritative: Jellyfin evaluated the file against the
         // DeviceProfile we sent. If it says DirectPlay works, AVPlayer

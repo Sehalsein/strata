@@ -6,10 +6,16 @@ public struct HomeView: View {
     @Environment(AppServices.self) private var services
     @Binding var path: [Route]
 
+    @State private var recent: [BaseItem] = []
     @State private var resume: [BaseItem] = []
     @State private var movies: [BaseItem] = []
     @State private var shows: [BaseItem] = []
     @State private var isLoading = true
+    @State private var loadError: String?
+    @State private var showSettings = false
+    #if os(tvOS)
+    @State private var showProfiles = false
+    #endif
 
     public init(path: Binding<[Route]>) {
         self._path = path
@@ -33,18 +39,30 @@ public struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
                 header
-                shelves
-                if isLoading {
-                    VStack(spacing: 16) {
-                        SkeletonBlock(height: 120)
-                        SkeletonBlock(height: 220)
+                if let loadError, isEverythingEmpty {
+                    ErrorRetryView(message: loadError, retry: { Task { await reload() } })
+                        .frame(minHeight: 340)
+                } else {
+                    shelves
+                    if isLoading && isEverythingEmpty {
+                        VStack(spacing: 16) {
+                            SkeletonBlock(height: 120)
+                            SkeletonBlock(height: 220)
+                        }
                     }
                 }
-                Spacer(minLength: 60)
             }
             .padding(.horizontal, 28)
             .padding(.top, 32)
+            .padding(.bottom, CGFloat.strataScrollBottom)
         }
+        #if !os(tvOS)
+        .refreshable { await reload() }
+        #endif
+    }
+
+    private var isEverythingEmpty: Bool {
+        recent.isEmpty && resume.isEmpty && movies.isEmpty && shows.isEmpty
     }
 
     private var header: some View {
@@ -56,19 +74,31 @@ public struct HomeView: View {
                     .foregroundStyle(Strata.Tokens.paper)
             }
             Spacer()
-            if let name = services.auth.session?.userName {
-                Menu {
-                    Button(role: .destructive) {
-                        services.auth.signOut()
-                        services.refreshSessionDependentServices()
-                    } label: {
-                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
-                    }
+            HStack(spacing: 10) {
+                Button {
+                    path.append(.myList)
                 } label: {
-                    Chip(name, variant: .outline)
+                    Image(systemName: "bookmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Strata.Tokens.paper)
+                        .frame(width: 38, height: 38)
+                        .background(Circle().fill(Strata.Tokens.paper.opacity(0.08)))
+                        .overlay(Circle().stroke(Strata.Tokens.paperHair, lineWidth: 1))
                 }
-                .menuIndicator(.hidden)
+                .buttonStyle(.plain)
+                .accessibilityLabel("My List")
+                if let name = services.auth.session?.userName {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Chip(name, variant: .outline)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
         }
     }
 
@@ -121,6 +151,9 @@ public struct HomeView: View {
 
     private func tvAccountSection(name: String) -> some View {
         HStack(alignment: .center, spacing: 24) {
+            if let session = services.auth.session {
+                ProfileAvatar(session: session, size: 52)
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text("ACCOUNT")
                     .font(.mono(18, weight: .semibold)).tracking(3.2)
@@ -131,6 +164,12 @@ public struct HomeView: View {
             }
             Spacer()
             Button {
+                showProfiles = true
+            } label: {
+                Label("Switch Profile", systemImage: "person.2.fill")
+                    .font(.plex(20, weight: .semibold))
+            }
+            Button {
                 services.auth.signOut()
                 services.refreshSessionDependentServices()
             } label: {
@@ -140,6 +179,9 @@ public struct HomeView: View {
         }
         .padding(.horizontal, 60)
         .padding(.top, 32)
+        .fullScreenCover(isPresented: $showProfiles) {
+            ProfileGateView(onChosen: { showProfiles = false })
+        }
     }
     #endif
 
@@ -150,6 +192,11 @@ public struct HomeView: View {
         if !resume.isEmpty {
             Shelf(title: "Continue Watching", items: resume, images: services.images) { item in
                 path.append(.watch(.init(itemId: item.id, startSeconds: item.resumePositionSeconds)))
+            }
+        }
+        if !recent.isEmpty {
+            Shelf(title: "Recently Added", items: recent, images: services.images) { item in
+                path.append(defaultRoute(for: item))
             }
         }
         if !movies.isEmpty {
@@ -168,20 +215,35 @@ public struct HomeView: View {
         resume.first?.id ?? movies.first?.id ?? shows.first?.id
     }
 
+    /// Pull-to-refresh: drop cached responses so the reload genuinely re-hits
+    /// the server.
+    private func reload() async {
+        await JellyfinClient.clearResponseCache()
+        await load()
+    }
+
     private func load() async {
         guard let client = services.client else { return }
         isLoading = true
+        loadError = nil
         defer { isLoading = false }
-        async let r = try? await client.continueWatching()
-        async let m = try? await client.listMovies()
-        async let s = try? await client.listShows()
-        resume = await r ?? []
-        movies = Array((await m ?? []).prefix(20))
-        shows = Array((await s ?? []).prefix(20))
-        // Push everything into Spotlight so the user can launch a title from
-        // system search. Re-runs on every Home refresh — Spotlight dedupes
-        // by `uniqueIdentifier`.
-        Spotlight.index(items: movies + shows, images: services.images)
+        do {
+            async let recentT = client.recentlyAdded(limit: 20)
+            async let resumeT = client.continueWatching()
+            async let moviesT = client.listMovies(limit: 20)
+            async let showsT = client.listShows(limit: 20)
+            recent = try await recentT
+            resume = try await resumeT
+            movies = try await moviesT
+            shows = try await showsT
+            // Push everything into Spotlight so the user can launch a title
+            // from system search. Spotlight dedupes by `uniqueIdentifier`.
+            Spotlight.index(items: movies + shows, images: services.images)
+        } catch let error as JellyfinClient.RequestError {
+            loadError = error.message
+        } catch {
+            loadError = (error as NSError).localizedDescription
+        }
     }
 }
 

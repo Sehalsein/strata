@@ -26,7 +26,8 @@ public struct Shelf: View {
                             Poster(
                                 id: item.id,
                                 title: item.displayTitle,
-                                imageURL: images?.primary(itemId: item.id, maxWidth: 800)
+                                imageURL: images?.primary(itemId: item.id, maxWidth: 800),
+                                badge: item.type == .boxSet ? "Collection" : nil
                             )
                             .frame(width: 280)
                         }
@@ -48,7 +49,11 @@ public struct Shelf: View {
                             Poster(
                                 id: item.id,
                                 title: item.displayTitle,
-                                imageURL: images?.primary(itemId: item.id)
+                                // 160pt card on a 3× display ≈ 480px; ask for
+                                // 360 rather than the 720 default to cut grid
+                                // bandwidth without visible softening.
+                                imageURL: images?.primary(itemId: item.id, maxWidth: 360),
+                                badge: item.type == .boxSet ? "Collection" : nil
                             )
                             .frame(width: 160)
                         }
@@ -91,8 +96,10 @@ public struct PosterGrid: View {
     public var body: some View {
         #if os(tvOS)
         let columns = [GridItem(.adaptive(minimum: 220, maximum: 280), spacing: 32)]
+        let posterWidth = 800
         #else
         let columns = [GridItem(.adaptive(minimum: 150, maximum: 220), spacing: 18)]
+        let posterWidth = 500
         #endif
         LazyVGrid(columns: columns, spacing: 32) {
             ForEach(items) { item in
@@ -100,7 +107,8 @@ public struct PosterGrid: View {
                     Poster(
                         id: item.id,
                         title: item.displayTitle,
-                        imageURL: images?.primary(itemId: item.id)
+                        imageURL: images?.primary(itemId: item.id, maxWidth: posterWidth),
+                        badge: item.type == .boxSet ? "Collection" : nil
                     )
                 }
                 #if os(tvOS)

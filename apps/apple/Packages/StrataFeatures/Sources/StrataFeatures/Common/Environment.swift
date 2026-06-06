@@ -11,6 +11,9 @@ public final class AppServices {
     public let coordinator: AppCoordinator
 
     public init(auth: AuthStore) {
+        // Install the large shared URL cache before any image or request goes
+        // out, so artwork persists on disk across launches.
+        StrataNetworking.configureSharedCaches()
         self.auth = auth
         self.engine = PlayerEngine()
         self.coordinator = AppCoordinator()
