@@ -146,7 +146,7 @@ private fun SeasonChip(season: BaseItemDto, isSelected: Boolean, onSelect: () ->
 @Composable
 private fun EpisodeCard(episode: BaseItemDto, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, label = "ep-scale")
+    val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "ep-scale")
     val interaction = remember { MutableInteractionSource() }
     val repo = ServiceLocator.repository
 
@@ -163,9 +163,12 @@ private fun EpisodeCard(episode: BaseItemDto, onClick: () -> Unit) {
                 .aspectRatio(16f / 9f)
                 .clip(RoundedCornerShape(8.dp))
                 .background(StrataColors.Bg2)
+                // Always draw a border: a faint resting outline and a bold Paper
+                // ring on focus so the selected episode is unmistakable on a wide
+                // card (matches the poster cards' focus ring).
                 .border(
-                    width = if (focused) 3.dp else 0.dp,
-                    color = if (focused) StrataColors.Paper else Color.Transparent,
+                    width = if (focused) 3.dp else 1.dp,
+                    color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.12f),
                     shape = RoundedCornerShape(8.dp),
                 ),
         ) {
