@@ -98,8 +98,8 @@ fun SeasonsBrowser(
             }
         } else {
             TvLazyRow(
-                pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.1f),
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.06f),
+                horizontalArrangement = Arrangement.spacedBy(18.dp),
                 modifier = Modifier
                     .padding(horizontal = 44.dp)
                     .focusRestorer(),
@@ -152,7 +152,7 @@ private fun EpisodeCard(episode: BaseItemDto, onClick: () -> Unit) {
 
     Column(
         modifier = Modifier
-            .width(340.dp)
+            .width(272.dp)
             .scale(scale)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .onFocusChanged { focused = it.isFocused },

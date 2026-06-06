@@ -62,8 +62,8 @@ fun CastShelf(
         SectionHeading(title = title)
         Spacer(Modifier.height(20.dp))
         TvLazyRow(
-            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.1f),
-            horizontalArrangement = Arrangement.spacedBy(22.dp),
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.06f),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier
                 .padding(horizontal = 44.dp)
                 .focusRestorer(),
@@ -85,7 +85,7 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
 
     Column(
         modifier = Modifier
-            .width(140.dp)
+            .width(112.dp)
             .scale(scale)
             .clickable(
                 interactionSource = interaction,
@@ -97,7 +97,7 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
     ) {
         Box(
             modifier = Modifier
-                .size(128.dp)
+                .size(100.dp)
                 .clip(CircleShape)
                 .background(StrataColors.Bg2)
                 .border(
@@ -123,12 +123,12 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
                 color = StrataColors.Paper.copy(alpha = 0.6f),
                 style = TextStyle(
                     fontFamily = StrataType.Fraunces,
-                    fontSize = 38.sp,
+                    fontSize = 30.sp,
                     fontWeight = FontWeight.Medium,
                 ),
             )
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
         Text(
             text = person.name.orEmpty(),
             color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.85f),
