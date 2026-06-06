@@ -41,6 +41,7 @@ import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.strata.tv.di.ServiceLocator
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 import org.jellyfin.sdk.model.api.BaseItemPerson
 
@@ -58,13 +59,13 @@ fun CastShelf(
 ) {
     if (people.isEmpty()) return
     Column(modifier = modifier) {
-        SectionHeading(title = title, num = "·")
-        Spacer(Modifier.height(16.dp))
+        SectionHeading(title = title)
+        Spacer(Modifier.height(20.dp))
         TvLazyRow(
             pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.1f),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            horizontalArrangement = Arrangement.spacedBy(22.dp),
             modifier = Modifier
-                .padding(horizontal = 48.dp)
+                .padding(horizontal = 56.dp)
                 .focusRestorer(),
         ) {
             items(people, key = { it.id?.toString() ?: it.name.orEmpty() }) { person ->
@@ -84,7 +85,7 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
 
     Column(
         modifier = Modifier
-            .width(120.dp)
+            .width(140.dp)
             .scale(scale)
             .clickable(
                 interactionSource = interaction,
@@ -96,12 +97,12 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
     ) {
         Box(
             modifier = Modifier
-                .size(112.dp)
+                .size(128.dp)
                 .clip(CircleShape)
                 .background(StrataColors.Bg2)
                 .border(
-                    width = if (focused) 2.dp else 0.dp,
-                    color = if (focused) StrataColors.Accent2 else Color.Transparent,
+                    width = if (focused) 3.dp else 0.dp,
+                    color = if (focused) StrataColors.Paper else Color.Transparent,
                     shape = CircleShape,
                 ),
             contentAlignment = Alignment.Center,
@@ -127,17 +128,13 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
                 ),
             )
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(12.dp))
         Text(
             text = person.name.orEmpty(),
             color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.85f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            style = TextStyle(
-                fontFamily = StrataType.Plex,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-            ),
+            style = StrataText.Chip,
         )
         person.role?.takeIf { it.isNotBlank() }?.let { role ->
             Text(
@@ -145,42 +142,23 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
                 color = StrataColors.Paper.copy(alpha = 0.5f),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                style = TextStyle(
-                    fontFamily = StrataType.Fraunces,
-                    fontSize = 12.sp,
-                    fontStyle = FontStyle.Italic,
-                ),
+                style = StrataText.CardSub,
             )
         }
     }
 }
 
+/**
+ * Shared section heading for Cast / Similar / Seasons. Clean Fraunces title,
+ * no editorial number prefix, no italic. `num` is accepted-and-ignored so the
+ * existing call sites keep compiling.
+ */
 @Composable
-internal fun SectionHeading(title: String, num: String, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier.padding(horizontal = 48.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = num,
-            color = StrataColors.Paper.copy(alpha = 0.4f),
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 11.sp,
-                letterSpacing = 2.sp,
-            ),
-        )
-        Spacer(Modifier.width(12.dp))
-        Text(
-            text = title,
-            color = StrataColors.Paper,
-            style = TextStyle(
-                fontFamily = StrataType.Fraunces,
-                fontSize = 24.sp,
-                fontStyle = FontStyle.Italic,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = (-0.4).sp,
-            ),
-        )
-    }
+internal fun SectionHeading(title: String, num: String = "", modifier: Modifier = Modifier) {
+    Text(
+        text = title,
+        color = StrataColors.Paper,
+        style = StrataText.SectionTitle,
+        modifier = modifier.padding(horizontal = 56.dp),
+    )
 }

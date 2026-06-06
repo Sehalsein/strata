@@ -38,6 +38,7 @@ import com.strata.tv.ui.components.LoadingCenter
 import com.strata.tv.ui.components.PosterGrid
 import com.strata.tv.ui.components.loadable
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 import org.jellyfin.sdk.model.api.BaseItemDto
 
@@ -50,6 +51,7 @@ import org.jellyfin.sdk.model.api.BaseItemDto
 fun LibraryGrid(
     supportsSort: Boolean,
     onSelect: (BaseItemDto) -> Unit,
+    title: String? = null,
     load: suspend (LibrarySort) -> List<BaseItemDto>,
 ) {
     var sort by remember { mutableStateOf(LibrarySort.RECENT) }
@@ -60,6 +62,14 @@ fun LibraryGrid(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        if (title != null) {
+            Text(
+                text = title,
+                color = StrataColors.Paper,
+                style = StrataText.ScreenTitle,
+                modifier = Modifier.padding(start = 56.dp, top = 24.dp, bottom = 8.dp),
+            )
+        }
         if (supportsSort) {
             SortRow(current = sort, onSelect = { sort = it })
         }
@@ -82,19 +92,10 @@ private fun SortRow(current: LibrarySort, onSelect: (LibrarySort) -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .focusGroup()
-            .padding(horizontal = 48.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = 56.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = "SORT",
-            color = StrataColors.Paper.copy(alpha = 0.4f),
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 11.sp,
-                letterSpacing = 2.4.sp,
-            ),
-        )
         LibrarySort.entries.forEach { option ->
             SortChip(
                 label = option.label,
@@ -113,11 +114,11 @@ private fun SortChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .scale(scale)
-            .clip(RoundedCornerShape(2.dp))
+            .clip(RoundedCornerShape(8.dp))
             .border(
                 width = 1.dp,
                 color = if (focused || selected) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(2.dp),
+                shape = RoundedCornerShape(8.dp),
             )
             .background(
                 if (selected) StrataColors.Paper.copy(alpha = 0.14f)
@@ -126,17 +127,12 @@ private fun SortChip(label: String, selected: Boolean, onClick: () -> Unit) {
             )
             .onFocusChanged { focused = it.isFocused }
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
         Text(
-            text = label.uppercase(),
+            text = label,
             color = if (selected || focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.6f),
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 1.6.sp,
-            ),
+            style = StrataText.Chip,
         )
     }
 }

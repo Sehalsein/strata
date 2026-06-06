@@ -4,11 +4,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -27,18 +28,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
@@ -48,27 +46,19 @@ import com.strata.tv.di.ServiceLocator
 import com.strata.tv.ui.nav.Routes
 import com.strata.tv.ui.theme.LocalStrataPalette
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 import com.strata.tv.ui.theme.titleAmbience
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
-/** Editorial Strata shell: spec strip, numbered nav masthead, colophon. */
+/** App chrome: a single clean top bar over a full-bleed content area. */
 @Composable
 fun AppShell(nav: NavController, content: @Composable () -> Unit) {
     val palette = LocalStrataPalette.current
     Box(modifier = Modifier.fillMaxSize().titleAmbience(palette)) {
         Column(modifier = Modifier.fillMaxSize()) {
-            SpecStrip()
-            // Masthead is its own focus group so D-pad Right/Left stays on
-            // tabs without escaping into the user badge popover, and Down
-            // exits cleanly into the content area instead of jumping
-            // sideways onto an off-screen poster.
-            Box(modifier = Modifier.focusGroup()) { Masthead(nav) }
-            // `focusRestorer` remembers which child held focus when we leave
-            // (e.g. push to a detail screen) so the back button returns us
-            // to that same poster instead of dumping focus at the top.
+            // Top bar is its own focus group so D-pad Left/Right stays on the
+            // tabs and Down drops cleanly into the content.
+            Box(modifier = Modifier.focusGroup()) { TopBar(nav) }
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -77,133 +67,43 @@ fun AppShell(nav: NavController, content: @Composable () -> Unit) {
             ) {
                 content()
             }
-            Colophon()
         }
     }
 }
 
-@Composable
-private fun SpecStrip() {
-    val today = remember {
-        SimpleDateFormat("MMM dd · yyyy", Locale.US).format(Date()).uppercase()
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 48.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(StrataColors.Accent),
-            )
-            Spacer(Modifier.width(10.dp))
-            SpecText("On Air", alpha = 0.7f)
-            SpecDot()
-            SpecText("Vol. III")
-        }
-        Spacer(Modifier.weight(1f))
-        SpecText(today, alpha = 0.7f)
-        Spacer(Modifier.weight(1f))
-        SpecText("Est. MMXXVI", alpha = 0.35f)
-        SpecDot()
-        SpecText("Strata Cinemathèque", alpha = 0.7f)
-    }
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(1.dp)
-            .background(StrataColors.Paper.copy(alpha = 0.1f)),
-    )
-}
-
-@Composable
-private fun SpecText(text: String, alpha: Float = 0.55f) {
-    Text(
-        text = text.uppercase(),
-        color = StrataColors.Paper.copy(alpha = alpha),
-        style = TextStyle(
-            fontFamily = StrataType.Mono,
-            fontSize = 11.sp,
-            letterSpacing = 2.4.sp,
-        ),
-    )
-}
-
-@Composable
-private fun SpecDot() {
-    Spacer(Modifier.width(10.dp))
-    Text(
-        text = "·",
-        color = StrataColors.Paper.copy(alpha = 0.3f),
-        style = TextStyle(
-            fontFamily = StrataType.Mono,
-            fontSize = 11.sp,
-        ),
-    )
-    Spacer(Modifier.width(10.dp))
-}
-
-private data class NavTabSpec(val route: String, val label: String, val num: String, val matches: (String) -> Boolean)
+private data class NavTabSpec(val route: String, val label: String, val matches: (String) -> Boolean)
 
 private val tabs = listOf(
-    NavTabSpec(Routes.Home, "Index", "00") { it == Routes.Home },
-    NavTabSpec(Routes.Movies, "Films", "01") { it.startsWith("movies") },
-    NavTabSpec(Routes.Shows, "Series", "02") { it.startsWith("shows") },
-    NavTabSpec(Routes.Search, "Search", "03") { it.startsWith("search") },
+    NavTabSpec(Routes.Home, "Home") { it == Routes.Home },
+    NavTabSpec(Routes.Movies, "Movies") { it.startsWith("movies") },
+    NavTabSpec(Routes.Shows, "Shows") { it.startsWith("shows") },
+    NavTabSpec(Routes.Search, "Search") { it.startsWith("search") },
 )
 
 @Composable
-private fun Masthead(nav: NavController) {
+private fun TopBar(nav: NavController) {
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route ?: Routes.Home
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 48.dp, vertical = 12.dp),
+            .height(56.dp)
+            .padding(horizontal = 44.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                text = "Strata",
-                color = StrataColors.Paper,
-                style = TextStyle(
-                    fontFamily = StrataType.Fraunces,
-                    fontSize = 36.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = (-1.2).sp,
-                ),
-            )
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text = "№ 00.01",
-                color = StrataColors.Paper.copy(alpha = 0.4f),
-                modifier = Modifier.padding(bottom = 8.dp),
-                style = TextStyle(
-                    fontFamily = StrataType.Mono,
-                    fontSize = 10.sp,
-                    letterSpacing = 2.4.sp,
-                ),
-            )
-        }
-        Spacer(Modifier.width(20.dp))
-        Box(
-            Modifier
-                .width(1.dp)
-                .height(24.dp)
-                .background(StrataColors.Paper.copy(alpha = 0.15f)),
-        )
-        Spacer(Modifier.width(20.dp))
-        tabs.forEach { spec ->
-            NavTab(spec, isActive = spec.matches(route)) {
-                nav.navigate(spec.route) {
-                    launchSingleTop = true
-                    popUpTo(Routes.Home)
+        Text(text = "STRATA", color = StrataColors.Paper, style = StrataText.Wordmark)
+        Spacer(Modifier.width(32.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            tabs.forEach { spec ->
+                NavTab(spec.label, isActive = spec.matches(route)) {
+                    nav.navigate(spec.route) {
+                        launchSingleTop = true
+                        popUpTo(Routes.Home)
+                    }
                 }
             }
         }
@@ -213,54 +113,30 @@ private fun Masthead(nav: NavController) {
 }
 
 @Composable
-private fun NavTab(spec: NavTabSpec, isActive: Boolean, onClick: () -> Unit) {
+private fun NavTab(label: String, isActive: Boolean, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val color = when {
-        isActive || focused -> StrataColors.Paper
-        else -> StrataColors.Paper.copy(alpha = 0.45f)
-    }
-    val numColor = StrataColors.Paper.copy(alpha = if (focused) 0.7f else 0.35f)
+    val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "tab-scale")
     val interaction = remember { MutableInteractionSource() }
-
-    Column(
+    val bg = when {
+        focused -> StrataColors.Paper
+        isActive -> StrataColors.Paper.copy(alpha = 0.14f)
+        else -> Color.Transparent
+    }
+    val fg = when {
+        focused -> StrataColors.Ink
+        isActive -> StrataColors.Paper
+        else -> StrataColors.Paper.copy(alpha = 0.55f)
+    }
+    Box(
         modifier = Modifier
-            .padding(horizontal = 14.dp, vertical = 4.dp)
+            .scale(scale)
+            .clip(RoundedCornerShape(8.dp))
+            .background(bg)
             .onFocusChanged { focused = it.isFocused }
-            .clickable(
-                interactionSource = interaction,
-                indication = null,
-                onClick = onClick,
-            ),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                text = spec.num,
-                color = numColor,
-                modifier = Modifier.padding(end = 8.dp, bottom = 4.dp),
-                style = TextStyle(
-                    fontFamily = StrataType.Mono,
-                    fontSize = 10.sp,
-                    letterSpacing = 1.8.sp,
-                ),
-            )
-            Text(
-                text = spec.label,
-                color = color,
-                style = TextStyle(
-                    fontFamily = StrataType.Fraunces,
-                    fontSize = 19.sp,
-                    fontStyle = if (isActive) FontStyle.Italic else FontStyle.Normal,
-                ),
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        Box(
-            Modifier
-                .width(if (isActive || focused) 38.dp else 0.dp)
-                .height(2.dp)
-                .background(if (isActive) StrataColors.Accent else StrataColors.Paper.copy(alpha = 0.5f)),
-        )
+        Text(text = label, color = fg, style = StrataText.TabLabel)
     }
 }
 
@@ -272,46 +148,32 @@ private fun UserBadge(nav: NavController) {
 
     var focused by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.08f else 1f, label = "badge-scale")
     val interaction = remember { MutableInteractionSource() }
 
     Box {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
             modifier = Modifier
+                .scale(scale)
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(StrataColors.Accent)
+                .border(
+                    width = if (focused) 2.dp else 0.dp,
+                    color = if (focused) StrataColors.Accent2 else Color.Transparent,
+                    shape = CircleShape,
+                )
                 .onFocusChanged { focused = it.isFocused }
-                .clickable(
-                    interactionSource = interaction,
-                    indication = null,
-                    onClick = { menuOpen = true },
-                )
-                .padding(horizontal = 4.dp, vertical = 4.dp),
+                .clickable(interactionSource = interaction, indication = null, onClick = { menuOpen = true }),
+            contentAlignment = Alignment.Center,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(30.dp)
-                    .background(StrataColors.Accent),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = initial,
-                    color = StrataColors.Paper,
-                    style = TextStyle(
-                        fontFamily = StrataType.Fraunces,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium,
-                    ),
-                )
-            }
-            Spacer(Modifier.width(10.dp))
             Text(
-                text = displayName.uppercase(),
-                color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.55f),
-                maxLines = 1,
-                softWrap = false,
+                text = initial,
+                color = StrataColors.Paper,
                 style = TextStyle(
-                    fontFamily = StrataType.Mono,
-                    fontSize = 11.sp,
-                    letterSpacing = 1.8.sp,
+                    fontFamily = StrataType.Fraunces,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
                 ),
             )
         }
@@ -336,12 +198,6 @@ private fun UserBadge(nav: NavController) {
     }
 }
 
-/**
- * Tiny popover anchored under the masthead user badge. Uses `Popup` instead
- * of `DropdownMenu` so we get TV focus traversal: OK opens, Back closes,
- * D-pad navigates within. `DropdownMenu` from `androidx.tv.material3` is
- * still incubating and doesn't auto-focus the first item on launch.
- */
 @Composable
 private fun UserMenu(
     onDismiss: () -> Unit,
@@ -354,18 +210,19 @@ private fun UserMenu(
 
     androidx.compose.ui.window.Popup(
         alignment = Alignment.TopEnd,
-        offset = androidx.compose.ui.unit.IntOffset(0, 40),
+        offset = androidx.compose.ui.unit.IntOffset(0, 48),
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.PopupProperties(focusable = true),
     ) {
         Column(
             modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
                 .background(StrataColors.Bg2)
-                .padding(horizontal = 4.dp, vertical = 6.dp),
+                .padding(horizontal = 6.dp, vertical = 8.dp),
         ) {
-            UserMenuItem(text = "MY LIST", focusRequester = focusRequester, onClick = onMyList)
-            UserMenuItem(text = "SWITCH PROFILE", onClick = onSwitchProfile)
-            UserMenuItem(text = "SIGN OUT", onClick = onSignOut)
+            UserMenuItem("My List", focusRequester = focusRequester, onClick = onMyList)
+            UserMenuItem("Switch profile", onClick = onSwitchProfile)
+            UserMenuItem("Sign out", onClick = onSignOut)
         }
     }
 }
@@ -378,50 +235,19 @@ private fun UserMenuItem(
 ) {
     var focused by remember { mutableStateOf(false) }
     val interaction = remember { MutableInteractionSource() }
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    Box(
         modifier = Modifier
             .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
+            .clip(RoundedCornerShape(8.dp))
             .onFocusChanged { focused = it.isFocused }
-            .clickable(
-                interactionSource = interaction,
-                indication = null,
-                onClick = onClick,
-            )
-            .background(if (focused) StrataColors.Paper.copy(alpha = 0.1f) else Color.Transparent)
-            .padding(horizontal = 18.dp, vertical = 10.dp),
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .background(if (focused) StrataColors.Paper.copy(alpha = 0.12f) else Color.Transparent)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
         Text(
             text = text,
             color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.75f),
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.8.sp,
-            ),
+            style = StrataText.Chip,
         )
-    }
-}
-
-@Composable
-private fun Colophon() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(1.dp)
-            .background(StrataColors.Paper.copy(alpha = 0.08f)),
-    )
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 48.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        SpecText("A private repertory", alpha = 0.3f)
-        SpecDot()
-        SpecText("est. MMXXVI", alpha = 0.3f)
-        SpecDot()
-        SpecText("printed in the dark", alpha = 0.3f)
     }
 }

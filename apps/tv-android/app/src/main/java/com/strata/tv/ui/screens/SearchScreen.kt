@@ -42,6 +42,7 @@ import com.strata.tv.di.ServiceLocator
 import com.strata.tv.ui.components.PosterRow
 import com.strata.tv.ui.nav.Routes
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 import kotlinx.coroutines.delay
 
@@ -74,7 +75,7 @@ fun SearchScreen(nav: NavController) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 48.dp, vertical = 24.dp),
+            .padding(horizontal = 56.dp, vertical = 24.dp),
     ) {
         OutlinedTextField(
             value = query,
@@ -82,15 +83,15 @@ fun SearchScreen(nav: NavController) {
             singleLine = true,
             placeholder = {
                 Text(
-                    text = "Search films and series…",
+                    text = "Search movies and shows…",
                     color = StrataColors.Paper.copy(alpha = 0.4f),
-                    style = TextStyle(fontFamily = StrataType.Plex, fontSize = 16.sp),
+                    style = TextStyle(fontFamily = StrataType.Plex, fontSize = 20.sp),
                 )
             },
             textStyle = TextStyle(
                 fontFamily = StrataType.Plex,
                 color = StrataColors.Paper,
-                fontSize = 18.sp,
+                fontSize = 20.sp,
             ),
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,
@@ -103,7 +104,7 @@ fun SearchScreen(nav: NavController) {
                     runCatching { resultsFocus.requestFocus() }
                 },
             ),
-            shape = RoundedCornerShape(2.dp),
+            shape = RoundedCornerShape(10.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = StrataColors.Paper,
                 unfocusedTextColor = StrataColors.Paper,
@@ -114,7 +115,7 @@ fun SearchScreen(nav: NavController) {
                 unfocusedContainerColor = StrataColors.Paper.copy(alpha = 0.03f),
             ),
             modifier = Modifier
-                .fillMaxWidth(0.6f)
+                .fillMaxWidth(0.5f)
                 .focusRequester(fieldFocus)
                 // D-pad Down on the field should dismiss the IME and move
                 // focus to the first result row instead of being eaten by
@@ -133,19 +134,12 @@ fun SearchScreen(nav: NavController) {
                 .fillMaxSize()
                 .padding(top = 24.dp)
                 .focusGroup(),
-            verticalArrangement = Arrangement.spacedBy(24.dp),
+            verticalArrangement = Arrangement.spacedBy(40.dp),
             contentPadding = PaddingValues(vertical = 16.dp),
         ) {
             if (results.movies.isNotEmpty()) {
                 item(key = "films-label") {
-                    Text(
-                        text = "Films",
-                        color = StrataColors.Paper,
-                        style = TextStyle(
-                            fontFamily = StrataType.Fraunces,
-                            fontSize = 22.sp,
-                        ),
-                    )
+                    Text(text = "Movies", color = StrataColors.Paper, style = StrataText.SectionTitle)
                 }
                 item(key = "films-row") {
                     PosterRow(
@@ -157,14 +151,7 @@ fun SearchScreen(nav: NavController) {
             }
             if (results.shows.isNotEmpty()) {
                 item(key = "series-label") {
-                    Text(
-                        text = "Series",
-                        color = StrataColors.Paper,
-                        style = TextStyle(
-                            fontFamily = StrataType.Fraunces,
-                            fontSize = 22.sp,
-                        ),
-                    )
+                    Text(text = "Shows", color = StrataColors.Paper, style = StrataText.SectionTitle)
                 }
                 item(key = "series-row") {
                     PosterRow(

@@ -52,12 +52,17 @@ import com.strata.tv.ui.components.ChapterRail
 import com.strata.tv.ui.components.ErrorCenter
 import com.strata.tv.ui.components.Loadable
 import com.strata.tv.ui.components.LoadingCenter
+import com.strata.tv.ui.components.PrimaryButton
+import com.strata.tv.ui.components.SecondaryButton
 import com.strata.tv.ui.components.SimilarShelf
 import com.strata.tv.ui.components.loadable
 import kotlinx.coroutines.launch
 import com.strata.tv.ui.nav.Routes
 import com.strata.tv.ui.theme.LocalStrataPalette
+import androidx.compose.ui.BiasAlignment
+import androidx.compose.ui.layout.ContentScale
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 import com.strata.tv.ui.theme.opusFor
 import com.strata.tv.ui.theme.paletteFor
@@ -97,10 +102,10 @@ private fun DetailContent(nav: NavController, bundle: DetailBundle) {
 
     CompositionLocalProvider(LocalStrataPalette provides palette) {
         TvLazyColumn(
-            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.15f),
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.42f),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 48.dp),
-            verticalArrangement = Arrangement.spacedBy(48.dp),
+            verticalArrangement = Arrangement.spacedBy(36.dp),
         ) {
             item(key = "hero") {
                 Hero(
@@ -181,10 +186,13 @@ private fun Hero(
     beginFocus: FocusRequester,
 ) {
     val repo = ServiceLocator.repository
-    Box(modifier = Modifier.fillMaxWidth().height(680.dp)) {
+    val heroHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.74f).dp
+    Box(modifier = Modifier.fillMaxWidth().height(heroHeight)) {
             AsyncImage(
                 model = repo.imageUrls.backdrop(item.id),
                 contentDescription = null,
+                contentScale = ContentScale.Crop,
+                alignment = BiasAlignment(0.4f, 0f),
                 modifier = Modifier.fillMaxSize(),
             )
             // Gradient masks: left-to-right ink wash + bottom fade
@@ -207,117 +215,49 @@ private fun Hero(
                 ),
             )
 
-            // Right-side feature presentation rail
-            Column(
-                horizontalAlignment = Alignment.End,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(end = 48.dp, top = 24.dp),
-            ) {
-                MonoStrip("Feature Presentation", alpha = 0.65f)
-                Spacer(Modifier.height(6.dp))
-                Row {
-                    MonoStrip("Opus № $opus", alpha = 0.45f)
-                }
-                Spacer(Modifier.height(16.dp))
-                Box(
-                    Modifier
-                        .width(40.dp)
-                        .height(1.dp)
-                        .background(StrataColors.Paper.copy(alpha = 0.3f)),
-                )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = "presented in",
-                    color = StrataColors.Paper.copy(alpha = 0.55f),
-                    style = TextStyle(
-                        fontFamily = StrataType.Fraunces,
-                        fontStyle = FontStyle.Italic,
-                        fontSize = 14.sp,
-                    ),
-                )
-                Spacer(Modifier.height(4.dp))
-                MonoStrip("4K · HDR · Atmos", alpha = 0.75f)
-            }
-
-            // Left-bottom: title + meta + buttons (pinned bottom, scales with content)
+            // Left-bottom: title + meta + overview + buttons
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .widthIn(max = 920.dp)
-                    .padding(start = 48.dp, bottom = 28.dp, end = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                    .widthIn(max = 1000.dp)
+                    .padding(start = 56.dp, bottom = 48.dp, end = 40.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .width(36.dp)
-                            .height(1.dp)
-                            .background(StrataColors.Accent),
-                    )
-                    Spacer(Modifier.width(16.dp))
-                    MonoStrip("Now Showing", alpha = 0.85f, tracking = 3.2.sp)
-                    Spacer(Modifier.width(12.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(StrataColors.Accent),
-                    )
-                }
                 Text(
                     text = item.name.orEmpty(),
                     color = StrataColors.Paper,
-                    style = TextStyle(
-                        fontFamily = StrataType.Fraunces,
-                        fontSize = 72.sp,
-                        fontWeight = FontWeight.Medium,
-                        lineHeight = 70.sp,
-                        letterSpacing = (-2.5).sp,
-                    ),
+                    maxLines = 2,
+                    style = StrataText.DetailTitle,
                 )
                 item.taglines?.firstOrNull()?.let {
-                    Text(
-                        text = it,
-                        color = StrataColors.Accent2,
-                        style = TextStyle(
-                            fontFamily = StrataType.Fraunces,
-                            fontStyle = FontStyle.Italic,
-                            fontSize = 20.sp,
-                        ),
-                    )
+                    Text(text = it, color = StrataColors.Accent2, style = StrataText.Tagline)
                 }
                 MetaRow(item)
                 item.overview?.let {
                     Text(
                         text = it,
-                        color = StrataColors.Paper.copy(alpha = 0.78f),
-                        style = TextStyle(
-                            fontFamily = StrataType.Fraunces,
-                            fontSize = 15.sp,
-                            lineHeight = 22.sp,
-                        ),
+                        color = StrataColors.Paper.copy(alpha = 0.8f),
+                        style = StrataText.Overview,
                         maxLines = 3,
                     )
                 }
-                Spacer(Modifier.height(4.dp))
                 val resume = (item.userData?.playbackPositionTicks ?: 0L) > 0L
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    SolidActionButton(
-                        label = if (resume) "RESUME" else "BEGIN",
+                    PrimaryButton(
+                        label = if (resume) "Resume" else "Play",
                         modifier = Modifier.focusRequester(beginFocus),
                         onClick = onPlay,
                     )
-                    GhostActionButton(
-                        label = "BACK",
-                        onClick = onBack,
+                    SecondaryButton(label = "Back", onClick = onBack)
+                    SecondaryButton(
+                        label = if (isFavorite) "Watchlisted" else "Watchlist",
+                        leadingGlyph = if (isFavorite) "★" else "☆",
+                        accent = isFavorite,
+                        onClick = onToggleFavorite,
                     )
-                    WatchlistButton(isFavorite = isFavorite, onToggle = onToggleFavorite)
-                    Spacer(Modifier.width(8.dp))
-                    MonoStrip(if (resume) "Press OK to resume" else "Press OK to begin", alpha = 0.4f)
                 }
             }
         }
@@ -325,40 +265,27 @@ private fun Hero(
 
 @Composable
 private fun MetaRow(item: BaseItemDto) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        item.productionYear?.let { MonoStrip("Anno $it", alpha = 0.7f); Dot() }
+    val pieces = buildList {
+        item.productionYear?.let { add(it.toString()) }
         item.runTimeTicks?.let {
             val mins = it / 600_000_000L
             val h = mins / 60
             val m = mins % 60
-            MonoStrip(if (h > 0) "${h}H ${m}M" else "${m}M", alpha = 0.7f)
-            Dot()
+            add(if (h > 0) "${h}h ${m}m" else "${m}m")
         }
-        item.officialRating?.let { MonoStrip(it, alpha = 0.7f); Dot() }
-        Text(
-            text = "a motion picture",
-            color = StrataColors.Paper.copy(alpha = 0.85f),
-            style = TextStyle(
-                fontFamily = StrataType.Fraunces,
-                fontStyle = FontStyle.Italic,
-                fontSize = 14.sp,
-            ),
-        )
+        item.officialRating?.let { if (it.isNotBlank()) add(it) }
+    }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        pieces.forEachIndexed { i, piece ->
+            if (i > 0) Dot()
+            Text(text = piece, color = StrataColors.Paper.copy(alpha = 0.85f), style = StrataText.Meta)
+        }
         item.communityRating?.let {
-            Dot()
-            val score = (it * 10).toInt()
-            Text(
-                text = "★ $score/100",
-                color = StrataColors.Accent2,
-                style = TextStyle(
-                    fontFamily = StrataType.Mono,
-                    fontSize = 11.sp,
-                    letterSpacing = 2.sp,
-                ),
-            )
+            if (pieces.isNotEmpty()) Dot()
+            Text(text = "★ ${(it * 10).toInt()}", color = StrataColors.Accent2, style = StrataText.Meta)
         }
     }
 }
@@ -368,11 +295,10 @@ private fun GenreChips(genres: List<String>, onSelect: (String) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 48.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = 56.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MonoStrip("Genre", alpha = 0.5f)
         genres.take(6).forEach { g ->
             GenreChip(label = g, onClick = { onSelect(g) })
         }
@@ -387,173 +313,26 @@ private fun GenreChip(label: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .scale(scale)
-            .clip(RoundedCornerShape(2.dp))
+            .clip(RoundedCornerShape(8.dp))
             .border(
                 width = 1.dp,
                 color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(2.dp),
+                shape = RoundedCornerShape(8.dp),
             )
-            .background(if (focused) StrataColors.Paper.copy(alpha = 0.08f) else Color.Transparent)
+            .background(if (focused) StrataColors.Paper.copy(alpha = 0.10f) else Color.Transparent)
             .onFocusChanged { focused = it.isFocused }
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = 18.dp, vertical = 10.dp),
     ) {
         Text(
-            text = label.uppercase(),
+            text = label,
             color = StrataColors.Paper.copy(alpha = if (focused) 1f else 0.8f),
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 1.6.sp,
-            ),
+            style = StrataText.Chip,
         )
     }
 }
 
 @Composable
 private fun Dot() {
-    Text(
-        text = "·",
-        color = StrataColors.Paper.copy(alpha = 0.3f),
-        style = TextStyle(fontFamily = StrataType.Mono, fontSize = 11.sp),
-    )
-}
-
-@Composable
-private fun MonoStrip(
-    text: String,
-    alpha: Float = 0.6f,
-    tracking: androidx.compose.ui.unit.TextUnit = 2.sp,
-) {
-    Text(
-        text = text.uppercase(),
-        color = StrataColors.Paper.copy(alpha = alpha),
-        style = TextStyle(
-            fontFamily = StrataType.Mono,
-            fontSize = 11.sp,
-            letterSpacing = tracking,
-        ),
-    )
-}
-
-@Composable
-private fun SolidActionButton(
-    label: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, label = "begin-scale")
-    val interaction = remember { MutableInteractionSource() }
-    Box(
-        modifier = modifier
-            .scale(scale)
-            .clip(RoundedCornerShape(4.dp))
-            .background(if (focused) Color.White else StrataColors.Paper)
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = 26.dp, vertical = 14.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "▶",
-                color = StrataColors.Ink,
-                style = TextStyle(fontSize = 14.sp),
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = label,
-                color = StrataColors.Ink,
-                style = TextStyle(
-                    fontFamily = StrataType.Mono,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 3.sp,
-                ),
-            )
-        }
-    }
-}
-
-@Composable
-private fun WatchlistButton(isFavorite: Boolean, onToggle: () -> Unit) {
-    var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, label = "fav-scale")
-    val interaction = remember { MutableInteractionSource() }
-    Box(
-        modifier = Modifier
-            .scale(scale)
-            .clip(RoundedCornerShape(4.dp))
-            .border(
-                width = 1.dp,
-                color = when {
-                    focused -> StrataColors.Paper
-                    isFavorite -> StrataColors.Accent2
-                    else -> StrataColors.Paper.copy(alpha = 0.4f)
-                },
-                shape = RoundedCornerShape(4.dp),
-            )
-            .background(
-                when {
-                    isFavorite -> StrataColors.Accent2.copy(alpha = 0.12f)
-                    focused -> StrataColors.Paper.copy(alpha = 0.08f)
-                    else -> Color.Transparent
-                },
-            )
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(interactionSource = interaction, indication = null, onClick = onToggle)
-            .padding(horizontal = 22.dp, vertical = 14.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = if (isFavorite) "★" else "☆",
-                color = if (isFavorite) StrataColors.Accent2 else StrataColors.Paper,
-                style = TextStyle(fontSize = 14.sp),
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = if (isFavorite) "WATCHLISTED" else "WATCHLIST",
-                color = if (isFavorite) StrataColors.Accent2 else StrataColors.Paper,
-                style = TextStyle(
-                    fontFamily = StrataType.Mono,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 3.sp,
-                ),
-            )
-        }
-    }
-}
-
-@Composable
-private fun GhostActionButton(label: String, onClick: () -> Unit) {
-    var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, label = "ghost-scale")
-    val interaction = remember { MutableInteractionSource() }
-    Box(
-        modifier = Modifier
-            .scale(scale)
-            .clip(RoundedCornerShape(4.dp))
-            .border(
-                width = 1.dp,
-                color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.4f),
-                shape = RoundedCornerShape(4.dp),
-            )
-            .background(if (focused) StrataColors.Paper.copy(alpha = 0.08f) else Color.Transparent)
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = 26.dp, vertical = 14.dp),
-    ) {
-        Text(
-            text = label,
-            color = StrataColors.Paper,
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 3.sp,
-            ),
-        )
-    }
+    Text(text = "·", color = StrataColors.Paper.copy(alpha = 0.4f), style = StrataText.Meta)
 }

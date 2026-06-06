@@ -39,7 +39,7 @@ private val strataTypography = Typography(
     bodySmall = TextStyle(fontFamily = body, fontSize = 16.sp),
     labelLarge = TextStyle(fontFamily = body, fontWeight = FontWeight.Medium, fontSize = 18.sp),
     labelMedium = TextStyle(fontFamily = body, fontWeight = FontWeight.Medium, fontSize = 16.sp),
-    labelSmall = TextStyle(fontFamily = mono, fontWeight = FontWeight.Medium, fontSize = 12.sp),
+    labelSmall = TextStyle(fontFamily = body, fontWeight = FontWeight.Medium, fontSize = 14.sp),
 )
 
 private val strataColors: ColorScheme = darkColorScheme(

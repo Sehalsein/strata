@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.foundation.PivotOffsets
 import androidx.tv.foundation.lazy.grid.TvGridCells
@@ -21,11 +22,14 @@ fun PosterGrid(
     items: List<BaseItemDto>,
     onSelect: (BaseItemDto) -> Unit,
     modifier: Modifier = Modifier,
-    columns: Int = 5,
+    // Adaptive: the grid fits as many ~minPosterWidth columns as the screen
+    // allows — more on a wide display, fewer on a small box — so poster size
+    // stays constant and content density follows the TV.
+    minPosterWidth: Dp = 132.dp,
     firstFocusRequester: FocusRequester? = null,
 ) {
     TvLazyVerticalGrid(
-        columns = TvGridCells.Fixed(columns),
+        columns = TvGridCells.Adaptive(minPosterWidth),
         // Pivot offset 0.25 keeps the focused row in the upper-third of the
         // grid instead of pinning to the edge — feels closer to Apple TV's
         // "as you walk down, the row scrolls under you" behavior.
@@ -54,6 +58,7 @@ fun PosterRow(
     items: List<BaseItemDto>,
     onSelect: (BaseItemDto) -> Unit,
     modifier: Modifier = Modifier,
+    posterWidth: Dp = 132.dp,
     firstFocusRequester: FocusRequester? = null,
 ) {
     TvLazyRow(
@@ -65,13 +70,14 @@ fun PosterRow(
             .fillMaxWidth()
             .focusRestorer(),
         horizontalArrangement = Arrangement.spacedBy(20.dp),
-        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 16.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp),
     ) {
         itemsIndexed(items, key = { _, it -> it.id.toString() }) { idx, item ->
             PosterCard(
                 itemId = item.id,
                 title = item.name.orEmpty(),
                 subtitle = item.seriesName ?: item.productionYear?.toString(),
+                width = posterWidth,
                 focusRequester = if (idx == 0) firstFocusRequester else null,
                 onClick = { onSelect(item) },
             )

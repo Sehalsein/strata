@@ -24,10 +24,10 @@ fun SimilarShelf(
 ) {
     if (items.isEmpty()) return
     Column(modifier = modifier) {
-        SectionHeading(title = title, num = num)
-        Spacer(Modifier.height(16.dp))
+        SectionHeading(title = title)
+        Spacer(Modifier.height(20.dp))
         androidx.compose.foundation.layout.Box(
-            modifier = Modifier.padding(horizontal = 48.dp),
+            modifier = Modifier.padding(horizontal = 56.dp),
         ) {
             PosterRow(items = items, onSelect = onSelect)
         }
