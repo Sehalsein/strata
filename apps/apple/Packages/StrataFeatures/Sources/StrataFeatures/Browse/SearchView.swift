@@ -13,6 +13,9 @@ public struct SearchView: View {
     @State private var isSearching = false
     @State private var recents: [RecentSearch] = RecentSearchStore.load()
     @State private var searchTask: Task<Void, Never>?
+    // Drives the idle discovery grid only (results keep their imperative,
+    // debounced plumbing below).
+    @State private var genres: Loadable<[String]> = .idle
     #if !os(tvOS)
     @FocusState private var focused: Bool
     #endif
@@ -53,8 +56,7 @@ public struct SearchView: View {
         do {
             let result = try await client.search(trimmed)
             await MainActor.run {
-                // One ranked list, films then series — the native search shows
-                // a single results column rather than separate rails.
+                // One ranked list, films then series.
                 results = result.movies + result.shows
                 searchError = nil
                 isSearching = false
@@ -66,6 +68,20 @@ public struct SearchView: View {
         } catch {
             await MainActor.run { searchError = (error as NSError).localizedDescription; isSearching = false }
         }
+    }
+
+    private func loadGenresIfNeeded() async {
+        if case .loaded = genres { return }
+        await reloadGenres()
+    }
+
+    private func reloadGenres() async {
+        guard let client = services.client else {
+            genres = .failed("Not signed in")
+            return
+        }
+        if genres.value == nil { genres = .loading }
+        genres = await loadable { try await client.genreList(itemTypes: ["Movie"]) }
     }
 
     private func typeLabel(_ kind: ItemKind?) -> String {
@@ -105,26 +121,83 @@ private extension SearchView {
         ZStack {
             AmbientBackdrop(key: "search", intensity: 0.6)
             content
+                .animation(.easeInOut(duration: 0.22), value: focused)
+                .animation(.easeInOut(duration: 0.22), value: term.isEmpty)
         }
         .safeAreaInset(edge: .bottom) { searchBar }
+        .task { await loadGenresIfNeeded() }
         .onAppear {
+            // Open on the discovery grid (don't steal focus). A deep-linked
+            // query jumps straight to results.
             if term.isEmpty, let q = initialQuery, !q.isEmpty {
                 term = q
                 scheduleSearch()
-            } else if term.isEmpty {
-                focused = true
             }
         }
     }
 
     @ViewBuilder
     var content: some View {
-        if term.isEmpty {
+        if !term.isEmpty {
+            resultsList
+        } else if focused {
             recentsList
         } else {
-            resultsList
+            discoveryGrid
         }
     }
+
+    // MARK: Idle — discovery grid
+
+    var discoveryGrid: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("BROWSE").strataSpec()
+                    Text("Search")
+                        .font(.fraunces(36, opticalSize: 144, soft: 50))
+                        .foregroundStyle(Strata.Tokens.paper)
+                }
+                AsyncContent(genres, retry: { Task { await reloadGenres() } }) { names in
+                    if names.isEmpty {
+                        genresEmptyState
+                    } else {
+                        LazyVGrid(columns: tileColumns, spacing: 14) {
+                            ForEach(names, id: \.self) { name in
+                                Button { path.append(.genre(name: name, forShows: false)) } label: {
+                                    CategoryTile(name: name)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 28)
+            .padding(.bottom, 16)
+        }
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    var tileColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 168, maximum: 240), spacing: 14)]
+    }
+
+    var genresEmptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "square.grid.2x2")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(Strata.Tokens.paperDim)
+            Text("No categories yet.")
+                .font(.plex(14))
+                .foregroundStyle(Strata.Tokens.paperDim)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 60)
+    }
+
+    // MARK: Focused + empty — recently searched
 
     var recentsList: some View {
         ScrollView {
@@ -145,8 +218,9 @@ private extension SearchView {
                     .padding(.bottom, 10)
                     ForEach(recents) { recent in
                         Button { openRecent(recent) } label: {
-                            SearchRow(
-                                imageURL: services.images?.primary(itemId: recent.id, maxWidth: 200),
+                            SearchResultRow(
+                                id: recent.id,
+                                images: services.images,
                                 title: recent.title,
                                 subtitle: recent.subtitle
                             )
@@ -163,6 +237,8 @@ private extension SearchView {
         .scrollDismissesKeyboard(.interactively)
     }
 
+    // MARK: Typing — results
+
     var resultsList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -174,8 +250,9 @@ private extension SearchView {
                 } else {
                     ForEach(results) { item in
                         Button { open(item) } label: {
-                            SearchRow(
-                                imageURL: services.images?.primary(itemId: item.id, maxWidth: 200),
+                            SearchResultRow(
+                                id: item.id,
+                                images: services.images,
                                 title: item.displayTitle,
                                 subtitle: typeLabel(item.type)
                             )
@@ -191,6 +268,8 @@ private extension SearchView {
         }
         .scrollDismissesKeyboard(.interactively)
     }
+
+    // MARK: Bottom bar
 
     var searchBar: some View {
         HStack(spacing: 12) {
@@ -251,7 +330,7 @@ private extension SearchView {
         Rectangle()
             .fill(Strata.Tokens.paperHair)
             .frame(height: 1)
-            .padding(.leading, 68)
+            .padding(.leading, 126)
     }
 
     var emptyHint: some View {
@@ -292,24 +371,86 @@ private extension SearchView {
     }
 }
 
-/// One result / recent row: small poster, title, and type subtitle.
-private struct SearchRow: View {
-    let imageURL: URL?
+/// Discovery tile for a genre. Lazily loads a representative title's backdrop
+/// for the artwork; a deterministic Motif (keyed by the genre name) sits behind
+/// it as the always-present, theme-coherent fallback.
+private struct CategoryTile: View {
+    @Environment(AppServices.self) private var services
+    let name: String
+
+    @State private var heroId: String?
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Motif(key: StrataTheme.motif(for: name), palette: StrataTheme.palette(for: name))
+            if let heroId, let url = services.images?.backdrop(itemId: heroId, maxWidth: 600) {
+                Color.clear.overlay(
+                    AsyncImage(url: url) { phase in
+                        if case .success(let img) = phase {
+                            img.resizable().scaledToFill().transition(.opacity)
+                        } else {
+                            EmptyView()
+                        }
+                    }
+                )
+                .clipped()
+            }
+            LinearGradient(colors: [.black.opacity(0.6), .clear],
+                           startPoint: .bottom, endPoint: .center)
+            Text(name)
+                .font(.fraunces(20, opticalSize: 40, soft: 50))
+                .foregroundStyle(Strata.Tokens.paper)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .padding(12)
+        }
+        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        .strataCard()
+        .strataBorder(Strata.Tokens.paperHair)
+        .task { await loadHero() }
+    }
+
+    private func loadHero() async {
+        guard heroId == nil, let client = services.client else { return }
+        let items = (try? await client.listMovies(genres: [name], limit: 1)) ?? []
+        heroId = items.first?.id
+    }
+}
+
+/// One result / recent row: a 16:9 landscape thumbnail (backdrop, falling back
+/// to the portrait poster, then a Motif), title, and type subtitle.
+private struct SearchResultRow: View {
+    let id: String
+    let images: ImageURLBuilder?
     let title: String
     let subtitle: String
 
     var body: some View {
         HStack(spacing: 14) {
             ZStack {
-                RoundedRectangle(cornerRadius: 6).fill(Strata.Tokens.bg2)
-                AsyncImage(url: imageURL) { phase in
-                    if case .success(let img) = phase {
-                        img.resizable().scaledToFill()
+                Motif(key: StrataTheme.motif(for: id), palette: StrataTheme.palette(for: id))
+                Color.clear.overlay(
+                    AsyncImage(url: images?.backdrop(itemId: id, maxWidth: 320)) { phase in
+                        switch phase {
+                        case .success(let img):
+                            img.resizable().scaledToFill().transition(.opacity)
+                        case .failure:
+                            // Backdrop missing — fall back to the portrait poster.
+                            AsyncImage(url: images?.primary(itemId: id, maxWidth: 320)) { p2 in
+                                if case .success(let i2) = p2 {
+                                    i2.resizable().scaledToFill()
+                                }
+                            }
+                        default:
+                            EmptyView()
+                        }
                     }
-                }
+                )
+                .clipped()
             }
-            .frame(width: 54, height: 80)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .frame(width: 112, height: 63)
+            .strataCard()
+            .strataBorder(Strata.Tokens.paperHair)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
