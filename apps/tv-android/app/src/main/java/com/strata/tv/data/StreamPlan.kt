@@ -63,6 +63,10 @@ class StreamPlanner(
         itemId: UUID,
         audioStreamIndex: Int? = null,
         subtitleStreamIndex: Int? = null,
+        // When true, tell Jellyfin to skip DirectPlay/DirectStream and hand back
+        // a real transcode (HLS) URL. Used as the recovery path when a DirectPlay
+        // attempt fails to decode on this device — see PlayerEngine.onPlayerError.
+        forceTranscode: Boolean = false,
     ): StreamPlan = withContext(Dispatchers.IO) {
         val userId = requireNotNull(authStore.userId()?.let(UUID::fromString)) {
             "Not signed in"
@@ -75,8 +79,8 @@ class StreamPlanner(
                 audioStreamIndex = audioStreamIndex,
                 subtitleStreamIndex = subtitleStreamIndex,
                 autoOpenLiveStream = true,
-                enableDirectPlay = true,
-                enableDirectStream = true,
+                enableDirectPlay = !forceTranscode,
+                enableDirectStream = !forceTranscode,
                 enableTranscoding = true,
                 allowVideoStreamCopy = true,
                 allowAudioStreamCopy = true,
@@ -124,7 +128,7 @@ class StreamPlanner(
         // Trust server flags. supportsDirectPlay = the file can stream as
         // bytes-on-wire (Static=true). Otherwise Jellyfin gave us the
         // exact transcode URL its ffmpeg can produce.
-        val preferHls = !source.supportsDirectPlay && transcodingUrl != null
+        val preferHls = (forceTranscode || !source.supportsDirectPlay) && transcodingUrl != null
         val hlsUrl = transcodingUrl ?: directUrl
 
         val streams = source.mediaStreams.orEmpty()
@@ -220,16 +224,19 @@ class StreamPlanner(
                 audioCodec("opus", "vorbis")
             }
 
-            // Fallback transcode profile. Matches the existing recipe
-            // — HLS, ts segments, h264+aac, BreakOnNonKeyFrames for
-            // stream-copy compatibility — and only kicks in when the
-            // DirectPlay profiles above all reject the source.
+            // Fallback transcode profile. Only kicks in when the DirectPlay
+            // profiles above all reject the source (or DirectPlay fails to
+            // decode on-device). Deliberately h264 — a transcode is the
+            // universally-decodable safety net, so we don't list hevc here
+            // (which the server would stream-copy, reproducing the very codec
+            // DirectPlay just failed on). DirectPlay above still keeps hevc/4K
+            // source-quality on TVs that can decode it.
             transcodingProfile {
                 type = DlnaProfileType.VIDEO
                 container = "ts"
                 protocol = MediaStreamProtocol.HLS
                 context = EncodingContext.STREAMING
-                videoCodec("h264", "hevc")
+                videoCodec("h264")
                 audioCodec("aac", "mp3", "ac3", "eac3")
                 maxAudioChannels = "6"
                 minSegments = 1
