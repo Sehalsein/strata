@@ -2,6 +2,7 @@ package com.strata.tv.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -62,8 +63,8 @@ fun CastShelf(
         SectionHeading(title = title)
         Spacer(Modifier.height(20.dp))
         TvLazyRow(
-            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.06f),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.4f),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
             modifier = Modifier
                 .padding(horizontal = 44.dp)
                 .focusRestorer(),
@@ -100,9 +101,11 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
                 .size(100.dp)
                 .clip(CircleShape)
                 .background(StrataColors.Bg2)
+                // Faint resting ring + bold Paper ring on focus, so the active
+                // cast member is unmistakable (matches the poster/episode cards).
                 .border(
-                    width = if (focused) 3.dp else 0.dp,
-                    color = if (focused) StrataColors.Paper else Color.Transparent,
+                    width = if (focused) 3.dp else 1.dp,
+                    color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.15f),
                     shape = CircleShape,
                 ),
             contentAlignment = Alignment.Center,
@@ -133,8 +136,10 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
             text = person.name.orEmpty(),
             color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.85f),
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis,
             style = StrataText.Chip,
+            modifier = if (focused) Modifier.basicMarquee(iterations = Int.MAX_VALUE) else Modifier,
         )
         person.role?.takeIf { it.isNotBlank() }?.let { role ->
             Text(

@@ -2,6 +2,7 @@ package com.strata.tv.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -98,7 +99,7 @@ fun SeasonsBrowser(
             }
         } else {
             TvLazyRow(
-                pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.06f),
+                pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.4f),
                 horizontalArrangement = Arrangement.spacedBy(18.dp),
                 modifier = Modifier
                     .padding(horizontal = 44.dp)
@@ -210,8 +211,10 @@ private fun EpisodeCard(episode: BaseItemDto, onClick: () -> Unit) {
             text = episode.name.orEmpty(),
             color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.85f),
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis,
             style = StrataText.Meta,
+            modifier = if (focused) Modifier.basicMarquee(iterations = Int.MAX_VALUE) else Modifier,
         )
         episode.overview?.let {
             Text(

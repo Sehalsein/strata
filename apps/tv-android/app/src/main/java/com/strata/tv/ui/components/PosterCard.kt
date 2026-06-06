@@ -3,6 +3,7 @@ package com.strata.tv.ui.components
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -50,7 +51,7 @@ fun PosterCard(
 ) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (focused) 1.09f else 1f,
+        targetValue = if (focused) 1.06f else 1f,
         animationSpec = tween(durationMillis = 130),
         label = "poster-scale",
     )
@@ -98,9 +99,14 @@ fun PosterCard(
             text = title,
             color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.75f),
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis,
             style = StrataText.CardTitle,
-            modifier = Modifier.padding(top = 8.dp),
+            modifier = Modifier
+                .padding(top = 8.dp)
+                // On focus, a long title scrolls instead of truncating; at rest
+                // it ellipsizes.
+                .then(if (focused) Modifier.basicMarquee(iterations = Int.MAX_VALUE) else Modifier),
         )
         if (subtitle != null) {
             Text(

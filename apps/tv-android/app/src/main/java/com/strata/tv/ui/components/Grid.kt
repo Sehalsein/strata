@@ -44,8 +44,8 @@ fun PosterGrid(
         modifier = modifier
             .fillMaxWidth()
             .focusRestorer(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalArrangement = Arrangement.spacedBy(22.dp),
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
+        verticalArrangement = Arrangement.spacedBy(28.dp),
         // Top padding clears the floating app bar (the header scrolls under it);
         // bottom padding keeps the last row's title + focus ring off the screen
         // edge / TV overscan when scrolled to the end.
@@ -75,16 +75,17 @@ fun PosterRow(
     firstFocusRequester: FocusRequester? = null,
 ) {
     TvLazyRow(
-        // Pivot ~0.06: focused poster sits just in from the left edge, keeping
-        // the trailing posters visible. The row fills the full width and carries
-        // its own horizontal contentPadding (instead of an outer padded Box) so
-        // the first poster's focus ring has room to grow and isn't clipped at
-        // the row's left edge. Vertical padding gives the scaled ring headroom.
-        pivotOffsets = PivotOffsets(parentFraction = 0.06f),
+        // Pivot 0.4 keeps the focused poster left-of-centre so the first several
+        // items can be navigated WITHOUT scrolling the row (the list stays
+        // clamped at the start until focus passes the pivot line) — that kills
+        // the "whole row shifts on every right-press" jank a far-left pivot
+        // causes, while still revealing trailing posters. The row's own
+        // contentPadding keeps the first poster's focus ring off the edge.
+        pivotOffsets = PivotOffsets(parentFraction = 0.4f),
         modifier = modifier
             .fillMaxWidth()
             .focusRestorer(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
         contentPadding = PaddingValues(start = 44.dp, end = 44.dp, top = 12.dp, bottom = 16.dp),
     ) {
         itemsIndexed(items, key = { _, it -> it.id.toString() }) { idx, item ->

@@ -2,6 +2,7 @@ package com.strata.tv.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -39,6 +40,7 @@ import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.strata.tv.di.ServiceLocator
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 import org.jellyfin.sdk.model.api.ChapterInfo
 import java.util.UUID
@@ -60,10 +62,10 @@ fun ChapterRail(
         SectionHeading(title = "Chapters", num = "·")
         Spacer(Modifier.height(16.dp))
         TvLazyRow(
-            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.1f),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.4f),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
             modifier = Modifier
-                .padding(horizontal = 48.dp)
+                .padding(horizontal = 44.dp)
                 .focusRestorer(),
         ) {
             itemsIndexed(chapters) { index, chapter ->
@@ -78,12 +80,12 @@ fun ChapterRail(
 @Composable
 private fun ChapterCard(itemId: UUID, index: Int, chapter: ChapterInfo, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, label = "chapter-scale")
+    val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "chapter-scale")
     val interaction = remember { MutableInteractionSource() }
 
     Column(
         modifier = Modifier
-            .width(220.dp)
+            .width(240.dp)
             .scale(scale)
             .clickable(
                 interactionSource = interaction,
@@ -94,14 +96,16 @@ private fun ChapterCard(itemId: UUID, index: Int, chapter: ChapterInfo, onClick:
     ) {
         Box(
             modifier = Modifier
-                .width(220.dp)
+                .width(240.dp)
                 .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(4.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(StrataColors.Bg2)
+                // Faint resting outline + bold Paper ring on focus (matches the
+                // poster / episode cards).
                 .border(
-                    width = if (focused) 2.dp else 0.dp,
-                    color = if (focused) StrataColors.Accent2 else Color.Transparent,
-                    shape = RoundedCornerShape(4.dp),
+                    width = if (focused) 3.dp else 1.dp,
+                    color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(8.dp),
                 ),
         ) {
             AsyncImage(
@@ -120,12 +124,7 @@ private fun ChapterCard(itemId: UUID, index: Int, chapter: ChapterInfo, onClick:
                 Text(
                     text = formatTicks(chapter.startPositionTicks),
                     color = StrataColors.Paper,
-                    style = TextStyle(
-                        fontFamily = StrataType.Mono,
-                        fontSize = 10.sp,
-                        letterSpacing = 1.4.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    ),
+                    style = StrataText.TimeCode.copy(fontSize = 12.sp),
                 )
             }
         }
@@ -134,12 +133,10 @@ private fun ChapterCard(itemId: UUID, index: Int, chapter: ChapterInfo, onClick:
             text = chapter.name.orEmpty().ifBlank { "Chapter ${index + 1}" },
             color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.75f),
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis,
-            style = TextStyle(
-                fontFamily = StrataType.Plex,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-            ),
+            style = StrataText.CardTitle,
+            modifier = if (focused) Modifier.basicMarquee(iterations = Int.MAX_VALUE) else Modifier,
         )
     }
 }
