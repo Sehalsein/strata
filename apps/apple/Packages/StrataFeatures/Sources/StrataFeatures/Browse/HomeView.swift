@@ -164,6 +164,18 @@ public struct HomeView: View {
             }
             Spacer()
             Button {
+                path.append(.myList)
+            } label: {
+                Label("My List", systemImage: "bookmark")
+                    .font(.plex(20, weight: .semibold))
+            }
+            Button {
+                showSettings = true
+            } label: {
+                Label("Settings", systemImage: "gearshape")
+                    .font(.plex(20, weight: .semibold))
+            }
+            Button {
                 showProfiles = true
             } label: {
                 Label("Switch Profile", systemImage: "person.2.fill")
@@ -181,6 +193,9 @@ public struct HomeView: View {
         .padding(.top, 32)
         .fullScreenCover(isPresented: $showProfiles) {
             ProfileGateView(onChosen: { showProfiles = false })
+        }
+        .fullScreenCover(isPresented: $showSettings) {
+            SettingsView()
         }
     }
     #endif

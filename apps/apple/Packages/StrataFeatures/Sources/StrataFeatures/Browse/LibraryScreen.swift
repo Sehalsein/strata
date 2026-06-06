@@ -73,14 +73,11 @@ struct LibraryScreen: View {
                 if let label = countLabel?(state.value ?? []) {
                     Chip(label, variant: .outline)
                 }
-                #if !os(tvOS)
                 if supportsSort { sortMenu }
-                #endif
             }
         }
     }
 
-    #if !os(tvOS)
     private var sortMenu: some View {
         Menu {
             ForEach(JellyfinClient.ItemSort.Field.allCases, id: \.self) { field in
@@ -103,7 +100,6 @@ struct LibraryScreen: View {
         }
         .accessibilityLabel("Sort")
     }
-    #endif
 
     private var emptyState: some View {
         VStack(spacing: 8) {

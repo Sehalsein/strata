@@ -432,52 +432,6 @@ private extension SearchView {
     }
 }
 
-/// Discovery tile for a genre. Lazily loads a representative title's backdrop
-/// for the artwork; a deterministic Motif (keyed by the genre name) sits behind
-/// it as the always-present, theme-coherent fallback.
-private struct CategoryTile: View {
-    @Environment(AppServices.self) private var services
-    let name: String
-
-    @State private var heroId: String?
-
-    var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            Motif(key: StrataTheme.motif(for: name), palette: StrataTheme.palette(for: name))
-            if let heroId, let url = services.images?.backdrop(itemId: heroId, maxWidth: 600) {
-                Color.clear.overlay(
-                    AsyncImage(url: url) { phase in
-                        if case .success(let img) = phase {
-                            img.resizable().scaledToFill().transition(.opacity)
-                        } else {
-                            EmptyView()
-                        }
-                    }
-                )
-                .clipped()
-            }
-            LinearGradient(colors: [.black.opacity(0.6), .clear],
-                           startPoint: .bottom, endPoint: .center)
-            Text(name)
-                .font(.fraunces(20, opticalSize: 40, soft: 50))
-                .foregroundStyle(Strata.Tokens.paper)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .padding(12)
-        }
-        .aspectRatio(16.0 / 9.0, contentMode: .fit)
-        .strataCard()
-        .strataBorder(Strata.Tokens.paperHair)
-        .task { await loadHero() }
-    }
-
-    private func loadHero() async {
-        guard heroId == nil, let client = services.client else { return }
-        let items = (try? await client.listMovies(genres: [name], limit: 1)) ?? []
-        heroId = items.first?.id
-    }
-}
-
 /// One result / recent row: a 16:9 landscape thumbnail (backdrop, falling back
 /// to the portrait poster, then a Motif), title, and type subtitle.
 private struct SearchResultRow: View {
@@ -531,7 +485,53 @@ private struct SearchResultRow: View {
 }
 #endif
 
-// MARK: - tvOS (focus-driven, unchanged shape)
+/// Discovery tile for a genre. Lazily loads a representative title's backdrop
+/// for the artwork; a deterministic Motif (keyed by the genre name) sits behind
+/// it as the always-present, theme-coherent fallback. Shared by iOS and tvOS.
+private struct CategoryTile: View {
+    @Environment(AppServices.self) private var services
+    let name: String
+
+    @State private var heroId: String?
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Motif(key: StrataTheme.motif(for: name), palette: StrataTheme.palette(for: name))
+            if let heroId, let url = services.images?.backdrop(itemId: heroId, maxWidth: 600) {
+                Color.clear.overlay(
+                    AsyncImage(url: url) { phase in
+                        if case .success(let img) = phase {
+                            img.resizable().scaledToFill().transition(.opacity)
+                        } else {
+                            EmptyView()
+                        }
+                    }
+                )
+                .clipped()
+            }
+            LinearGradient(colors: [.black.opacity(0.6), .clear],
+                           startPoint: .bottom, endPoint: .center)
+            Text(name)
+                .font(.fraunces(20, opticalSize: 40, soft: 50))
+                .foregroundStyle(Strata.Tokens.paper)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .padding(12)
+        }
+        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        .strataCard()
+        .strataBorder(Strata.Tokens.paperHair)
+        .task { await loadHero() }
+    }
+
+    private func loadHero() async {
+        guard heroId == nil, let client = services.client else { return }
+        let items = (try? await client.listMovies(genres: [name], limit: 1)) ?? []
+        heroId = items.first?.id
+    }
+}
+
+// MARK: - tvOS (focus-driven)
 
 #if os(tvOS)
 private extension SearchView {
@@ -539,7 +539,7 @@ private extension SearchView {
         ZStack {
             AmbientBackdrop(key: "search", intensity: 0.6)
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 40) {
                     Text("SEARCH").strataSpec()
                     TextField("Title, year, genre…", text: $term)
                         .font(.fraunces(28, opticalSize: 96, soft: 50))
@@ -547,24 +547,95 @@ private extension SearchView {
                         .autocorrectionDisabled()
                         .onChange(of: term) { _, _ in scheduleSearch() }
 
-                    let films = results.filter { $0.type == .movie }
-                    let series = results.filter { $0.type == .series }
-                    if !films.isEmpty {
-                        Shelf(title: "Films", items: films, images: services.images) { path.append(.movie(id: $0.id)) }
-                    }
-                    if !series.isEmpty {
-                        Shelf(title: "Series", items: series, images: services.images) { path.append(.show(id: $0.id)) }
+                    if term.isEmpty {
+                        tvDiscovery
+                    } else {
+                        tvResults
                     }
                 }
-                .padding(.horizontal, 28)
+                .padding(.horizontal, 60)
                 .padding(.top, 32)
                 .padding(.bottom, CGFloat.strataScrollBottom)
             }
         }
+        .task { await loadGenresIfNeeded() }
         .onAppear {
             if term.isEmpty, let q = initialQuery, !q.isEmpty {
                 term = q
                 scheduleSearch()
+            }
+        }
+    }
+
+    // Idle: recently searched + a genre discovery wall.
+    @ViewBuilder
+    var tvDiscovery: some View {
+        if !recents.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("RECENTLY SEARCHED").strataSpec()
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 28) {
+                        ForEach(recents) { recent in
+                            Button {
+                                path.append(recent.isShow ? .show(id: recent.id) : .movie(id: recent.id))
+                            } label: {
+                                Poster(id: recent.id, title: recent.title,
+                                       imageURL: services.images?.primary(itemId: recent.id, maxWidth: 800))
+                                    .frame(width: 220)
+                            }
+                            .buttonStyle(StrataCardButtonStyle())
+                        }
+                    }
+                    .padding(.vertical, 16)
+                }
+            }
+        }
+        VStack(alignment: .leading, spacing: 16) {
+            Text("BROWSE BY GENRE").strataSpec()
+            AsyncContent(genres, retry: { Task { await reloadGenres() } }) { names in
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 320, maximum: 420), spacing: 32)], spacing: 32) {
+                    ForEach(names, id: \.self) { name in
+                        Button { path.append(.genre(name: name, forShows: false)) } label: {
+                            CategoryTile(name: name)
+                        }
+                        .buttonStyle(StrataCardButtonStyle())
+                    }
+                }
+            }
+        }
+    }
+
+    // Typing: results as focusable shelves, with error / empty states.
+    @ViewBuilder
+    var tvResults: some View {
+        if let searchError, results.isEmpty {
+            ErrorRetryView(message: searchError, retry: { scheduleSearch() })
+                .frame(minHeight: 300)
+        } else if results.isEmpty && !isSearching {
+            VStack(spacing: 8) {
+                Text("No results")
+                    .font(.fraunces(24, opticalSize: 40, soft: 40))
+                    .foregroundStyle(Strata.Tokens.paper)
+                Text("Nothing matched \u{201C}\(term)\u{201D}.")
+                    .font(.plex(16))
+                    .foregroundStyle(Strata.Tokens.paperDim)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 60)
+        } else {
+            let films = results.filter { $0.type == .movie }
+            let series = results.filter { $0.type == .series }
+            if !films.isEmpty {
+                Shelf(title: "Films", items: films, images: services.images) { item in
+                    addRecent(from: item)
+                    path.append(.movie(id: item.id))
+                }
+            }
+            if !series.isEmpty {
+                Shelf(title: "Series", items: series, images: services.images) { item in
+                    addRecent(from: item)
+                    path.append(.show(id: item.id))
+                }
             }
         }
     }
