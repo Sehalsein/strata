@@ -45,15 +45,15 @@ struct PhoneShell: View {
             }
             // The search role renders as a detached button; activating it
             // minimizes the other tabs and expands the system search field.
+            // `.searchable` lives INSIDE this tab (not on the TabView) so the
+            // field is scoped to Search only — Home/Movies/Shows get no search
+            // bar. Liquid Glass tab bar is intentionally left untinted (no
+            // .toolbarBackground); dark theme still comes from RootView.
             Tab(value: AppSection.search, role: .search) {
                 tabStack(.search)
+                    .searchable(text: $searchText)
             }
         }
-        // Binds the system field into the search tab. Liquid Glass tab bar is
-        // intentionally left untinted (no .toolbarBackground) so the
-        // detach/minimize material reads correctly; dark theme still comes
-        // from RootView.
-        .searchable(text: $searchText)
     }
 
     // MARK: - iOS 17–25: classic tab bar (unchanged)
