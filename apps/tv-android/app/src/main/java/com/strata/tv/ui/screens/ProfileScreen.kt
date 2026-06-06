@@ -43,6 +43,7 @@ import com.strata.tv.data.Account
 import com.strata.tv.di.ServiceLocator
 import com.strata.tv.ui.nav.Routes
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 import java.util.Locale
 
@@ -74,12 +75,7 @@ fun ProfileScreen(nav: NavController) {
                 Text(
                     text = "STRATA",
                     color = StrataColors.Paper.copy(alpha = 0.55f),
-                    style = TextStyle(
-                        fontFamily = StrataType.Mono,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 3.2.sp,
-                    ),
+                    style = StrataText.Wordmark,
                 )
                 Text(
                     text = "Who's watching?",

@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
@@ -55,21 +56,25 @@ import com.strata.tv.ui.theme.titleAmbience
 @Composable
 fun AppShell(nav: NavController, content: @Composable () -> Unit) {
     val palette = LocalStrataPalette.current
+    // The bar floats over the content, so the two overlap at the top of the
+    // screen and D-pad Down can't resolve from a tab into the content by
+    // geometry alone. We route Down explicitly to this requester, which restores
+    // focus to whatever was last focused in the content (the hero on load).
+    val contentFocus = remember { FocusRequester() }
     Box(modifier = Modifier.fillMaxSize().titleAmbience(palette)) {
         // Content bleeds to every edge so the home hero is a true full-screen
-        // billboard. The bar floats on top of it (Apple-TV style) rather than
-        // stealing a 56dp band off the top.
+        // billboard rather than a 56dp-band-cropped strip.
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .focusRequester(contentFocus)
                 .focusRestorer(),
         ) {
             content()
         }
         // Floating top bar: a scrim keeps the wordmark/tabs legible over bright
         // artwork, and the top inset keeps them clear of TV overscan. Its own
-        // focus group so D-pad Left/Right stays on the tabs and Down drops into
-        // the content.
+        // focus group so D-pad Left/Right stays on the tabs.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -82,7 +87,7 @@ fun AppShell(nav: NavController, content: @Composable () -> Unit) {
                 )
                 .focusGroup(),
         ) {
-            TopBar(nav)
+            TopBar(nav, downTarget = contentFocus)
         }
     }
 }
@@ -97,7 +102,7 @@ private val tabs = listOf(
 )
 
 @Composable
-private fun TopBar(nav: NavController) {
+private fun TopBar(nav: NavController, downTarget: FocusRequester) {
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route ?: Routes.Home
 
@@ -116,7 +121,7 @@ private fun TopBar(nav: NavController) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             tabs.forEach { spec ->
-                NavTab(spec.label, isActive = spec.matches(route)) {
+                NavTab(spec.label, isActive = spec.matches(route), downTarget = downTarget) {
                     nav.navigate(spec.route) {
                         launchSingleTop = true
                         popUpTo(Routes.Home)
@@ -125,12 +130,17 @@ private fun TopBar(nav: NavController) {
             }
         }
         Spacer(Modifier.weight(1f))
-        UserBadge(nav)
+        UserBadge(nav, downTarget = downTarget)
     }
 }
 
 @Composable
-private fun NavTab(label: String, isActive: Boolean, onClick: () -> Unit) {
+private fun NavTab(
+    label: String,
+    isActive: Boolean,
+    downTarget: FocusRequester,
+    onClick: () -> Unit,
+) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "tab-scale")
     val interaction = remember { MutableInteractionSource() }
@@ -149,6 +159,8 @@ private fun NavTab(label: String, isActive: Boolean, onClick: () -> Unit) {
             .scale(scale)
             .clip(RoundedCornerShape(8.dp))
             .background(bg)
+            // Down drops into the content (overlap defeats geometric resolution).
+            .focusProperties { down = downTarget }
             .onFocusChanged { focused = it.isFocused }
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -158,7 +170,7 @@ private fun NavTab(label: String, isActive: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun UserBadge(nav: NavController) {
+private fun UserBadge(nav: NavController, downTarget: FocusRequester) {
     val session by ServiceLocator.authStore.session.collectAsState()
     val displayName = session?.userName?.takeIf { it.isNotBlank() } ?: "Guest"
     val initial = displayName.first().uppercaseChar().toString()
@@ -180,6 +192,7 @@ private fun UserBadge(nav: NavController) {
                     color = if (focused) StrataColors.Accent2 else Color.Transparent,
                     shape = CircleShape,
                 )
+                .focusProperties { down = downTarget }
                 .onFocusChanged { focused = it.isFocused }
                 .clickable(interactionSource = interaction, indication = null, onClick = { menuOpen = true }),
             contentAlignment = Alignment.Center,

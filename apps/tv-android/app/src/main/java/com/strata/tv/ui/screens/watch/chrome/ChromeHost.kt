@@ -31,14 +31,11 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import com.strata.tv.data.StreamPlan
 import com.strata.tv.ui.theme.StrataColors
-import com.strata.tv.ui.theme.StrataType
+import com.strata.tv.ui.theme.StrataText
 import kotlinx.coroutines.delay
 import org.jellyfin.sdk.model.api.BaseItemDto
 
@@ -255,12 +252,7 @@ private fun SkipButton(
         Text(
             text = label,
             color = StrataColors.Ink,
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 2.sp,
-            ),
+            style = StrataText.Button,
         )
     }
 }

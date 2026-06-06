@@ -329,25 +329,6 @@ private fun LoginForm(modifier: Modifier = Modifier, onSignedIn: () -> Unit) {
     }
 }
 
-@Composable
-private fun MonoSpec(
-    text: String,
-    alpha: Float = 0.6f,
-    size: androidx.compose.ui.unit.TextUnit = 11.sp,
-    tracking: androidx.compose.ui.unit.TextUnit = 2.0.sp,
-) {
-    Text(
-        text = text.uppercase(Locale.US),
-        color = StrataColors.Paper.copy(alpha = alpha),
-        style = TextStyle(
-            fontFamily = StrataType.Mono,
-            fontSize = size,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = tracking,
-        ),
-    )
-}
-
 // ---------------------------------------------------------------------
 // Editorial text field — focus-driven border + label + mono/plex split
 // ---------------------------------------------------------------------
@@ -489,14 +470,9 @@ private fun ErrorBanner(message: String) {
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
-            text = "SIGN-IN FAILED",
+            text = "Sign-in failed",
             color = StrataColors.Accent,
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 2.4.sp,
-            ),
+            style = StrataText.Meta,
         )
         Text(
             text = message,

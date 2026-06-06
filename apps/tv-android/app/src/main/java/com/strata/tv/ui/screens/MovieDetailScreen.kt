@@ -102,7 +102,10 @@ private fun DetailContent(nav: NavController, bundle: DetailBundle) {
 
     CompositionLocalProvider(LocalStrataPalette provides palette) {
         TvLazyColumn(
-            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.42f),
+            // High pivot pins the tall hero to the top (its bottom-anchored
+            // buttons rest above this line, so no upward scroll clips the title
+            // under the floating app bar). Matches the Home standard.
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.66f),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 48.dp),
             verticalArrangement = Arrangement.spacedBy(36.dp),
@@ -186,7 +189,9 @@ private fun Hero(
     beginFocus: FocusRequester,
 ) {
     val repo = ServiceLocator.repository
-    val heroHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.74f).dp
+    // Tall hero so the bottom-anchored title/overview/buttons stack sits low
+    // enough to clear the floating app bar at the top. Matches the Home cover.
+    val heroHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.84f).dp
     Box(modifier = Modifier.fillMaxWidth().height(heroHeight)) {
             AsyncImage(
                 model = repo.imageUrls.backdrop(item.id),
@@ -220,8 +225,8 @@ private fun Hero(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .widthIn(max = 1000.dp)
-                    .padding(start = 56.dp, bottom = 48.dp, end = 40.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
+                    .padding(start = 56.dp, bottom = 44.dp, end = 40.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
                     text = item.name.orEmpty(),
@@ -238,7 +243,7 @@ private fun Hero(
                         text = it,
                         color = StrataColors.Paper.copy(alpha = 0.8f),
                         style = StrataText.Overview,
-                        maxLines = 3,
+                        maxLines = 2,
                     )
                 }
                 val resume = (item.userData?.playbackPositionTicks ?: 0L) > 0L

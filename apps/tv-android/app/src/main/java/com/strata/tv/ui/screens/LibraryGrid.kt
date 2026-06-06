@@ -61,13 +61,15 @@ fun LibraryGrid(
         if (data is Loadable.Ready) runCatching { focus.requestFocus() }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    // Top inset clears the floating app bar (content is full-bleed now, so grid
+    // screens must start below it — unlike the hero screens which bleed up).
+    Column(modifier = Modifier.fillMaxSize().padding(top = 72.dp)) {
         if (title != null) {
             Text(
                 text = title,
                 color = StrataColors.Paper,
                 style = StrataText.ScreenTitle,
-                modifier = Modifier.padding(start = 56.dp, top = 24.dp, bottom = 8.dp),
+                modifier = Modifier.padding(start = 56.dp, top = 8.dp, bottom = 8.dp),
             )
         }
         if (supportsSort) {

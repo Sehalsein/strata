@@ -72,10 +72,13 @@ fun SearchScreen(nav: NavController) {
             .getOrDefault(SearchResults(emptyList(), emptyList()))
     }
 
+    // No horizontal padding on the Column: the result PosterRows carry their own
+    // 48dp content padding (so focus rings aren't clipped), and the field/labels
+    // are padded to match. Top inset clears the floating app bar.
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 56.dp, vertical = 24.dp),
+            .padding(top = 88.dp),
     ) {
         OutlinedTextField(
             value = query,
@@ -115,6 +118,7 @@ fun SearchScreen(nav: NavController) {
                 unfocusedContainerColor = StrataColors.Paper.copy(alpha = 0.03f),
             ),
             modifier = Modifier
+                .padding(start = 48.dp)
                 .fillMaxWidth(0.5f)
                 .focusRequester(fieldFocus)
                 // D-pad Down on the field should dismiss the IME and move
@@ -139,7 +143,12 @@ fun SearchScreen(nav: NavController) {
         ) {
             if (results.movies.isNotEmpty()) {
                 item(key = "films-label") {
-                    Text(text = "Movies", color = StrataColors.Paper, style = StrataText.SectionTitle)
+                    Text(
+                        text = "Movies",
+                        color = StrataColors.Paper,
+                        style = StrataText.SectionTitle,
+                        modifier = Modifier.padding(start = 48.dp),
+                    )
                 }
                 item(key = "films-row") {
                     PosterRow(
@@ -151,7 +160,12 @@ fun SearchScreen(nav: NavController) {
             }
             if (results.shows.isNotEmpty()) {
                 item(key = "series-label") {
-                    Text(text = "Shows", color = StrataColors.Paper, style = StrataText.SectionTitle)
+                    Text(
+                        text = "Shows",
+                        color = StrataColors.Paper,
+                        style = StrataText.SectionTitle,
+                        modifier = Modifier.padding(start = 48.dp),
+                    )
                 }
                 item(key = "series-row") {
                     PosterRow(
