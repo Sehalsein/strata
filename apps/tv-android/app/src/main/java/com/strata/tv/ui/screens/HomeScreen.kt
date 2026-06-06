@@ -84,10 +84,11 @@ private fun HomeContent(nav: NavController, data: HomeData) {
     }
 
     TvLazyColumn(
-        // Higher pivot so the focused hero/Play button sits lower in the frame,
-        // keeping the hero title above it on screen (a low pivot yanked the
-        // title under the top bar). Rows below settle in the eye-line too.
-        pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.42f),
+        // Pivot tuned to the tall hero: the hero's Resume button rests near ~66%
+        // of the screen, so a 0.66 pivot keeps the hero pinned to the top (no
+        // upward scroll that would clip the backdrop) when it's focused. Content
+        // rows then settle around the same line, lower-third, like Apple TV.
+        pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.66f),
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(20.dp),
         contentPadding = PaddingValues(top = 0.dp, bottom = 48.dp),
@@ -107,16 +108,16 @@ private fun HomeContent(nav: NavController, data: HomeData) {
         if (data.continueWatching.isNotEmpty()) {
             item(key = "label-continue") { SectionLabel("Continue Watching") }
             item(key = "row-continue") {
-                PadRow { PosterRow(items = data.continueWatching, onSelect = { navigateTo(nav, it) }) }
+                PosterRow(items = data.continueWatching, onSelect = { navigateTo(nav, it) })
             }
         }
         item(key = "label-films") { SectionLabel("Movies") }
         item(key = "row-films") {
-            PadRow { PosterRow(items = data.movies, onSelect = { navigateTo(nav, it) }) }
+            PosterRow(items = data.movies, onSelect = { navigateTo(nav, it) })
         }
         item(key = "label-series") { SectionLabel("Shows") }
         item(key = "row-series") {
-            PadRow { PosterRow(items = data.shows, onSelect = { navigateTo(nav, it) }) }
+            PosterRow(items = data.shows, onSelect = { navigateTo(nav, it) })
         }
         session?.let { s ->
             item(key = "account") { AccountSection(nav = nav, name = s.userName) }
@@ -132,11 +133,6 @@ private fun SectionLabel(text: String) {
         style = StrataText.SectionTitle,
         modifier = Modifier.padding(horizontal = 48.dp, vertical = 2.dp),
     )
-}
-
-@Composable
-private fun PadRow(content: @Composable () -> Unit) {
-    Box(modifier = Modifier.padding(horizontal = 48.dp)) { content() }
 }
 
 @Composable
@@ -174,10 +170,10 @@ private fun Hero(
 ) {
     val palette = paletteFor(item.id.toString())
     val repo = ServiceLocator.repository
-    // Hero sized to the screen (scales with the TV). Kept moderate so its
-    // backdrop doesn't leave a tall black fade below the content when the list
-    // scrolls down to the first shelf.
-    val heroHeight = (LocalConfiguration.current.screenHeightDp * 0.62f).dp
+    // Tall full-bleed billboard like Apple TV's "Up Next" cover: the backdrop
+    // fills most of the screen and the first shelf only peeks in at the bottom,
+    // inviting a scroll. Scales with the TV.
+    val heroHeight = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
 
     CompositionLocalProvider(LocalStrataPalette provides palette) {
         Box(
@@ -219,8 +215,11 @@ private fun Hero(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .widthIn(max = 900.dp)
-                    .padding(start = 48.dp, bottom = 28.dp, end = 40.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    // start matches the row contentPadding so the hero title and
+                    // the posters below share a left margin; extra bottom keeps
+                    // the buttons clear of TV overscan.
+                    .padding(start = 48.dp, bottom = 40.dp, end = 40.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Text(
                     text = item.name.orEmpty(),

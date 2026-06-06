@@ -62,15 +62,17 @@ fun PosterRow(
     firstFocusRequester: FocusRequester? = null,
 ) {
     TvLazyRow(
-        // Pivot 0.1: focused poster sits 10% from the left, keeping the next
-        // two posters visible to its right. Matches the "trail to come" feel
-        // of tvOS shelves.
-        pivotOffsets = PivotOffsets(parentFraction = 0.1f),
+        // Pivot ~0.06: focused poster sits just in from the left edge, keeping
+        // the trailing posters visible. The row fills the full width and carries
+        // its own horizontal contentPadding (instead of an outer padded Box) so
+        // the first poster's focus ring has room to grow and isn't clipped at
+        // the row's left edge. Vertical padding gives the scaled ring headroom.
+        pivotOffsets = PivotOffsets(parentFraction = 0.06f),
         modifier = modifier
             .fillMaxWidth()
             .focusRestorer(),
         horizontalArrangement = Arrangement.spacedBy(20.dp),
-        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp),
+        contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 12.dp, bottom = 16.dp),
     ) {
         itemsIndexed(items, key = { _, it -> it.id.toString() }) { idx, item ->
             PosterCard(

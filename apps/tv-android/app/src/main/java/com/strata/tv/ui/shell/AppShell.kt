@@ -34,6 +34,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -50,23 +51,38 @@ import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 import com.strata.tv.ui.theme.titleAmbience
 
-/** App chrome: a single clean top bar over a full-bleed content area. */
+/** App chrome: a floating top bar over a full-bleed content area. */
 @Composable
 fun AppShell(nav: NavController, content: @Composable () -> Unit) {
     val palette = LocalStrataPalette.current
     Box(modifier = Modifier.fillMaxSize().titleAmbience(palette)) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Top bar is its own focus group so D-pad Left/Right stays on the
-            // tabs and Down drops cleanly into the content.
-            Box(modifier = Modifier.focusGroup()) { TopBar(nav) }
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .focusRestorer(),
-            ) {
-                content()
-            }
+        // Content bleeds to every edge so the home hero is a true full-screen
+        // billboard. The bar floats on top of it (Apple-TV style) rather than
+        // stealing a 56dp band off the top.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .focusRestorer(),
+        ) {
+            content()
+        }
+        // Floating top bar: a scrim keeps the wordmark/tabs legible over bright
+        // artwork, and the top inset keeps them clear of TV overscan. Its own
+        // focus group so D-pad Left/Right stays on the tabs and Down drops into
+        // the content.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopStart)
+                .background(
+                    Brush.verticalGradient(
+                        0f to StrataColors.Bg.copy(alpha = 0.80f),
+                        1f to Color.Transparent,
+                    ),
+                )
+                .focusGroup(),
+        ) {
+            TopBar(nav)
         }
     }
 }
@@ -88,8 +104,9 @@ private fun TopBar(nav: NavController) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp)
-            .padding(horizontal = 44.dp),
+            // top inset clears TV overscan; generous bottom padding lets the
+            // scrim fade out below the tabs.
+            .padding(start = 48.dp, end = 48.dp, top = 24.dp, bottom = 22.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text = "STRATA", color = StrataColors.Paper, style = StrataText.Wordmark)
