@@ -1,11 +1,16 @@
 package com.strata.tv.ui.screens.watch.chrome
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -15,14 +20,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.tv.material3.Text
 import com.strata.tv.data.StreamPlan
+import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataType
 import kotlinx.coroutines.delay
 import org.jellyfin.sdk.model.api.BaseItemDto
 
@@ -51,6 +67,9 @@ fun ChromeHost(
     val subtitleTracks by engine.subtitleTracks.collectAsState()
     val selectedAudio by engine.selectedAudio.collectAsState()
     val selectedSubtitle by engine.selectedSubtitle.collectAsState()
+    val segments by engine.segments.collectAsState()
+    val activeSkip = segments.firstOrNull { it.contains(positionMs) }
+    val skipFocus = remember { FocusRequester() }
 
     var chromeVisible by remember { mutableStateOf(true) }
     var menu by remember { mutableStateOf<ChromeMenu?>(null) }
@@ -191,6 +210,58 @@ fun ChromeHost(
                 modifier = Modifier.align(Alignment.BottomEnd),
             )
         }
+
+        // Skip Intro / Skip Credits — appears (and grabs focus) while the
+        // playhead sits inside an intro/credits segment.
+        if (activeSkip != null) {
+            LaunchedEffect(activeSkip.isIntro, activeSkip.startMs) {
+                runCatching { skipFocus.requestFocus() }
+            }
+            SkipButton(
+                label = activeSkip.label,
+                focusRequester = skipFocus,
+                onClick = {
+                    engine.seekTo(activeSkip.endMs)
+                    bumpInteraction()
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 60.dp, bottom = 170.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SkipButton(
+    label: String,
+    focusRequester: FocusRequester,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "skip-scale")
+    val interaction = remember { MutableInteractionSource() }
+    Box(
+        modifier = modifier
+            .scale(scale)
+            .focusRequester(focusRequester)
+            .clip(RoundedCornerShape(4.dp))
+            .background(if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.9f))
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(horizontal = 24.dp, vertical = 14.dp),
+    ) {
+        Text(
+            text = label,
+            color = StrataColors.Ink,
+            style = TextStyle(
+                fontFamily = StrataType.Mono,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 2.sp,
+            ),
+        )
     }
 }
 

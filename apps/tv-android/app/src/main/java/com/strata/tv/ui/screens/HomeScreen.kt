@@ -142,13 +142,13 @@ private fun HomeContent(nav: NavController, data: HomeData) {
             PadRow { PosterRow(items = data.shows, onSelect = { navigateTo(nav, it) }) }
         }
         session?.let { s ->
-            item(key = "account") { AccountSection(name = s.userName) }
+            item(key = "account") { AccountSection(nav = nav, name = s.userName) }
         }
     }
 }
 
 @Composable
-private fun AccountSection(name: String) {
+private fun AccountSection(nav: NavController, name: String) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -185,17 +185,21 @@ private fun AccountSection(name: String) {
                 ),
             )
             Spacer(Modifier.weight(1f))
-            SignOutButton(
-                onClick = {
-                    ServiceLocator.repository.signOut()
-                },
+            OutlineButton(
+                text = "SWITCH PROFILE",
+                onClick = { nav.navigate(Routes.Profiles) },
+            )
+            Spacer(Modifier.width(16.dp))
+            OutlineButton(
+                text = "SIGN OUT",
+                onClick = { ServiceLocator.repository.signOut() },
             )
         }
     }
 }
 
 @Composable
-private fun SignOutButton(onClick: () -> Unit) {
+private fun OutlineButton(text: String, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.04f else 1f, label = "signout-scale")
     val interaction = remember { MutableInteractionSource() }
@@ -214,7 +218,7 @@ private fun SignOutButton(onClick: () -> Unit) {
             .padding(horizontal = 22.dp, vertical = 12.dp),
     ) {
         Text(
-            text = "SIGN OUT",
+            text = text,
             color = StrataColors.Paper,
             style = TextStyle(
                 fontFamily = StrataType.Mono,

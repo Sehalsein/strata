@@ -120,6 +120,14 @@ private fun DetailContent(nav: NavController, bundle: DetailBundle) {
                     beginFocus = beginFocus,
                 )
             }
+            if (!item.genres.isNullOrEmpty()) {
+                item(key = "genres") {
+                    GenreChips(
+                        genres = item.genres.orEmpty(),
+                        onSelect = { nav.navigate(Routes.genre(it)) },
+                    )
+                }
+            }
             if (!item.people.isNullOrEmpty()) {
                 item(key = "cast") {
                     CastShelf(people = item.people.orEmpty())
@@ -352,6 +360,54 @@ private fun MetaRow(item: BaseItemDto) {
                 ),
             )
         }
+    }
+}
+
+@Composable
+private fun GenreChips(genres: List<String>, onSelect: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 48.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MonoStrip("Genre", alpha = 0.5f)
+        genres.take(6).forEach { g ->
+            GenreChip(label = g, onClick = { onSelect(g) })
+        }
+    }
+}
+
+@Composable
+private fun GenreChip(label: String, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.05f else 1f, label = "genre-scale")
+    val interaction = remember { MutableInteractionSource() }
+    Box(
+        modifier = Modifier
+            .scale(scale)
+            .clip(RoundedCornerShape(2.dp))
+            .border(
+                width = 1.dp,
+                color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(2.dp),
+            )
+            .background(if (focused) StrataColors.Paper.copy(alpha = 0.08f) else Color.Transparent)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = label.uppercase(),
+            color = StrataColors.Paper.copy(alpha = if (focused) 1f else 0.8f),
+            style = TextStyle(
+                fontFamily = StrataType.Mono,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.6.sp,
+            ),
+        )
     }
 }
 
