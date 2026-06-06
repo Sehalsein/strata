@@ -18,26 +18,49 @@ public struct SearchView: View {
     @State private var genres: Loadable<[String]> = .idle
     #if !os(tvOS)
     @FocusState private var focused: Bool
+    // The TabView's system search field state (iOS 26 search-role tab). Only
+    // meaningful when `externalSearchText` is non-nil. Named to avoid clashing
+    // with the `isSearching` async-in-flight flag above.
+    @Environment(\.isSearching) private var systemIsSearching
     #endif
+
+    // When hosted as the iOS 26 search-role tab, PhoneShell owns the search
+    // field and passes its text down here. nil for the legacy bottom-bar path
+    // and for any `.search` route pushed onto another tab's stack.
+    private let externalSearchText: Binding<String>?
 
     public init(path: Binding<[Route]>, initialQuery: String? = nil) {
         self._path = path
         self.initialQuery = initialQuery
+        self.externalSearchText = nil
+    }
+
+    init(path: Binding<[Route]>, searchText: Binding<String>, initialQuery: String? = nil) {
+        self._path = path
+        self.initialQuery = initialQuery
+        self.externalSearchText = searchText
     }
 
     public var body: some View {
         #if os(tvOS)
         tvBody
         #else
-        phoneBody
+        if #available(iOS 26.0, *), externalSearchText != nil {
+            searchableBody
+        } else {
+            legacyPhoneBody
+        }
         #endif
     }
 
     // MARK: - Shared search plumbing
 
     private func scheduleSearch() {
+        scheduleSearch(term)
+    }
+
+    private func scheduleSearch(_ snapshot: String) {
         searchTask?.cancel()
-        let snapshot = term
         searchTask = Task {
             try? await Task.sleep(nanoseconds: 250_000_000)
             if Task.isCancelled { return }
@@ -117,7 +140,45 @@ public struct SearchView: View {
 
 #if !os(tvOS)
 private extension SearchView {
-    var phoneBody: some View {
+    // The active query, regardless of which path owns the field.
+    var activeQuery: String { externalSearchText?.wrappedValue ?? term }
+
+    // iOS 26 search-role tab: the field lives in the tab bar (PhoneShell's
+    // `.searchable`), so there's no custom bar here — state is driven by the
+    // system `\.isSearching` and the shared `searchText` binding.
+    @available(iOS 26.0, *)
+    var searchableBody: some View {
+        let query = externalSearchText?.wrappedValue ?? ""
+        return ZStack {
+            AmbientBackdrop(key: "search", intensity: 0.6)
+            searchableContent
+                .animation(.easeInOut(duration: 0.22), value: systemIsSearching)
+                .animation(.easeInOut(duration: 0.22), value: query.isEmpty)
+        }
+        .onChange(of: query) { _, q in scheduleSearch(q) }
+        .task { await loadGenresIfNeeded() }
+        .onAppear {
+            if let q = initialQuery, !q.isEmpty, query.isEmpty {
+                externalSearchText?.wrappedValue = q
+                scheduleSearch(q)
+            }
+        }
+    }
+
+    @available(iOS 26.0, *)
+    @ViewBuilder
+    var searchableContent: some View {
+        let query = externalSearchText?.wrappedValue ?? ""
+        if systemIsSearching && !query.isEmpty {
+            resultsList
+        } else if systemIsSearching {
+            recentsList
+        } else {
+            discoveryGrid
+        }
+    }
+
+    var legacyPhoneBody: some View {
         ZStack {
             AmbientBackdrop(key: "search", intensity: 0.6)
             content
@@ -351,7 +412,7 @@ private extension SearchView {
             Text("No results")
                 .font(.fraunces(22, opticalSize: 40, soft: 40))
                 .foregroundStyle(Strata.Tokens.paper)
-            Text("Nothing matched \u{201C}\(term)\u{201D}.")
+            Text("Nothing matched \u{201C}\(activeQuery)\u{201D}.")
                 .font(.plex(14))
                 .foregroundStyle(Strata.Tokens.paperDim)
         }
