@@ -65,7 +65,7 @@ fun CastShelf(
             pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.1f),
             horizontalArrangement = Arrangement.spacedBy(22.dp),
             modifier = Modifier
-                .padding(horizontal = 56.dp)
+                .padding(horizontal = 44.dp)
                 .focusRestorer(),
         ) {
             items(people, key = { it.id?.toString() ?: it.name.orEmpty() }) { person ->
@@ -159,6 +159,6 @@ internal fun SectionHeading(title: String, num: String = "", modifier: Modifier 
         text = title,
         color = StrataColors.Paper,
         style = StrataText.SectionTitle,
-        modifier = modifier.padding(horizontal = 56.dp),
+        modifier = modifier.padding(horizontal = 44.dp),
     )
 }

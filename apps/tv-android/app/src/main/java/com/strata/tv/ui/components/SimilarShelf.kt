@@ -26,10 +26,8 @@ fun SimilarShelf(
     Column(modifier = modifier) {
         SectionHeading(title = title)
         Spacer(Modifier.height(20.dp))
-        androidx.compose.foundation.layout.Box(
-            modifier = Modifier.padding(horizontal = 56.dp),
-        ) {
-            PosterRow(items = items, onSelect = onSelect)
-        }
+        // No outer padding — PosterRow carries its own 44dp content padding so
+        // the first poster's focus ring isn't clipped at the row's left edge.
+        PosterRow(items = items, onSelect = onSelect)
     }
 }

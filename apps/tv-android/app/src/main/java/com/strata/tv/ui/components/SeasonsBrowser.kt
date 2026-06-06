@@ -71,7 +71,7 @@ fun SeasonsBrowser(
                 pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.1f),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
-                    .padding(horizontal = 56.dp)
+                    .padding(horizontal = 44.dp)
                     .focusRestorer(),
             ) {
                 items(seasons, key = { it.id.toString() }) { season ->
@@ -88,7 +88,7 @@ fun SeasonsBrowser(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 56.dp),
+                    .padding(horizontal = 44.dp),
             ) {
                 Text(
                     text = "No episodes",
@@ -101,7 +101,7 @@ fun SeasonsBrowser(
                 pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.1f),
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
                 modifier = Modifier
-                    .padding(horizontal = 56.dp)
+                    .padding(horizontal = 44.dp)
                     .focusRestorer(),
             ) {
                 items(episodes, key = { it.id.toString() }) { ep ->
