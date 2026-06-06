@@ -20,11 +20,13 @@ android {
         versionCode = 1
         versionName = "1.0.0"
 
-        // Same default the web uses (api.ts:19-21). 10.0.2.2 reaches the
-        // host loopback from the Android TV emulator.
+        // Default server for real Android TV hardware on the home LAN.
+        // Override per-build with `-Pstrata.jellyfinUrl=...` or a
+        // `strata.jellyfinUrl` gradle property (e.g. 10.0.2.2:8096 for the
+        // emulator's host loopback).
         val jellyfinUrl = providers
             .gradleProperty("strata.jellyfinUrl")
-            .orElse("http://10.0.2.2:8096")
+            .orElse("http://192.168.2.162:8096")
             .get()
         buildConfigField("String", "JELLYFIN_URL", "\"$jellyfinUrl\"")
     }
