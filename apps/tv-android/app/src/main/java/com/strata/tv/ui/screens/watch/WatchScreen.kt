@@ -92,11 +92,14 @@ private fun PlayerHost(nav: NavController, bundle: WatchBundle) {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
-                    // The Compose chrome replaces Media3's default controls.
+                    // Media3's own controller can't reliably take DPAD focus
+                    // inside a Compose AndroidView on TV, so the Compose chrome
+                    // (ChromeHost) owns the controls and key handling instead.
                     useController = false
                     player = engine.exoPlayer
                 }
             },
+            update = { it.player = engine.exoPlayer },
         )
         ChromeHost(
             engine = engine,
