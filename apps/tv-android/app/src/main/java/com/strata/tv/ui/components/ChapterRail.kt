@@ -103,7 +103,7 @@ private fun ChapterCard(itemId: UUID, index: Int, chapter: ChapterInfo, onClick:
                 // Faint resting outline + bold Paper ring on focus (matches the
                 // poster / episode cards).
                 .border(
-                    width = if (focused) 3.dp else 1.dp,
+                    width = if (focused) 4.dp else 1.dp,
                     color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.12f),
                     shape = RoundedCornerShape(8.dp),
                 ),

@@ -104,7 +104,7 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
                 // Faint resting ring + bold Paper ring on focus, so the active
                 // cast member is unmistakable (matches the poster/episode cards).
                 .border(
-                    width = if (focused) 3.dp else 1.dp,
+                    width = if (focused) 4.dp else 1.dp,
                     color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.15f),
                     shape = CircleShape,
                 ),
