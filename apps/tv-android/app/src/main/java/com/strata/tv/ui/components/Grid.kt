@@ -49,7 +49,7 @@ fun PosterGrid(
         // Top padding clears the floating app bar (the header scrolls under it);
         // bottom padding keeps the last row's title + focus ring off the screen
         // edge / TV overscan when scrolled to the end.
-        contentPadding = PaddingValues(start = 44.dp, end = 44.dp, top = 64.dp, bottom = 56.dp),
+        contentPadding = PaddingValues(start = 44.dp, end = 44.dp, top = 64.dp, bottom = 88.dp),
     ) {
         if (header != null) {
             item(span = { TvGridItemSpan(maxLineSpan) }) { header() }
@@ -81,7 +81,7 @@ fun PosterRow(
         // the "whole row shifts on every right-press" jank a far-left pivot
         // causes, while still revealing trailing posters. The row's own
         // contentPadding keeps the first poster's focus ring off the edge.
-        pivotOffsets = PivotOffsets(parentFraction = 0.4f),
+        pivotOffsets = PivotOffsets(parentFraction = 0.7f),
         modifier = modifier
             .fillMaxWidth()
             .focusRestorer(),

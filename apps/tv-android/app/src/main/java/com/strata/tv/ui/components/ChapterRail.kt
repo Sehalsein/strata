@@ -62,7 +62,7 @@ fun ChapterRail(
         SectionHeading(title = "Chapters", num = "·")
         Spacer(Modifier.height(16.dp))
         TvLazyRow(
-            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.4f),
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.7f),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
             modifier = Modifier
                 .padding(horizontal = 44.dp)

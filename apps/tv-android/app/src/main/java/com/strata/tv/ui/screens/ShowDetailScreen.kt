@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -99,6 +100,8 @@ private fun ShowContent(nav: NavController, bundle: ShowBundle) {
     val opus = opusFor(bundle.series.id.toString())
     val repo = ServiceLocator.repository
     val beginFocus = remember { FocusRequester() }
+    val castFocus = remember { FocusRequester() }
+    val hasCast = !bundle.series.people.isNullOrEmpty()
     val scope = rememberCoroutineScope()
     var selectedSeason by remember(bundle.series.id) {
         mutableStateOf(bundle.seasons.firstOrNull())
@@ -117,9 +120,9 @@ private fun ShowContent(nav: NavController, bundle: ShowBundle) {
             // High pivot pins the tall hero to the top (its bottom-anchored
             // buttons rest above this line, so no upward scroll clips the title
             // under the floating app bar). Matches the Home standard.
-            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.66f),
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.5f),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 48.dp),
+            contentPadding = PaddingValues(bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(36.dp),
         ) {
             item(key = "hero") {
@@ -142,11 +145,15 @@ private fun ShowContent(nav: NavController, bundle: ShowBundle) {
                         }
                     },
                     beginFocus = beginFocus,
+                    downTarget = if (hasCast) castFocus else null,
                 )
             }
-            if (!bundle.series.people.isNullOrEmpty()) {
+            if (hasCast) {
                 item(key = "cast") {
-                    CastShelf(people = bundle.series.people.orEmpty())
+                    CastShelf(
+                        people = bundle.series.people.orEmpty(),
+                        firstFocus = castFocus,
+                    )
                 }
             }
             item(key = "episodes") {
@@ -197,11 +204,12 @@ private fun Hero(
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
     beginFocus: FocusRequester,
+    downTarget: FocusRequester? = null,
 ) {
     val repo = ServiceLocator.repository
     // Tall hero so the bottom-anchored title/overview/buttons stack sits low
     // enough to clear the floating app bar at the top. Matches the Home cover.
-    val heroHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.84f).dp
+    val heroHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.68f).dp
     Box(modifier = Modifier.fillMaxWidth().height(heroHeight)) {
         AsyncImage(
             model = repo.imageUrls.backdrop(series.id),
@@ -255,20 +263,28 @@ private fun Hero(
                 )
             }
             val resume = (series.userData?.playbackPositionTicks ?: 0L) > 0L
+            // D-pad Down from a hero button drops straight onto the first section
+            // below (cast) — the lazy column's focus search otherwise skips the
+            // partially-visible rows. Applied per-button (a non-focusable Row
+            // doesn't forward focusProperties to its children).
+            val downMod = if (downTarget != null) {
+                Modifier.focusProperties { down = downTarget }
+            } else Modifier
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 PrimaryButton(
                     label = if (resume) "Resume" else "Play",
-                    modifier = Modifier.focusRequester(beginFocus),
+                    modifier = Modifier.focusRequester(beginFocus).then(downMod),
                     onClick = onPlay,
                 )
-                SecondaryButton(label = "Back", onClick = onBack)
+                SecondaryButton(label = "Back", modifier = downMod, onClick = onBack)
                 SecondaryButton(
                     label = if (isFavorite) "Watchlisted" else "Watchlist",
                     leadingGlyph = if (isFavorite) "★" else "☆",
                     accent = isFavorite,
+                    modifier = downMod,
                     onClick = onToggleFavorite,
                 )
             }

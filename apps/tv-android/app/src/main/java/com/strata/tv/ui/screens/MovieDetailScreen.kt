@@ -105,9 +105,9 @@ private fun DetailContent(nav: NavController, bundle: DetailBundle) {
             // High pivot pins the tall hero to the top (its bottom-anchored
             // buttons rest above this line, so no upward scroll clips the title
             // under the floating app bar). Matches the Home standard.
-            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.66f),
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.5f),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 48.dp),
+            contentPadding = PaddingValues(bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(36.dp),
         ) {
             item(key = "hero") {
@@ -191,7 +191,7 @@ private fun Hero(
     val repo = ServiceLocator.repository
     // Tall hero so the bottom-anchored title/overview/buttons stack sits low
     // enough to clear the floating app bar at the top. Matches the Home cover.
-    val heroHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.84f).dp
+    val heroHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.68f).dp
     Box(modifier = Modifier.fillMaxWidth().height(heroHeight)) {
             AsyncImage(
                 model = repo.imageUrls.backdrop(item.id),

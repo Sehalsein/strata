@@ -26,6 +26,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -37,7 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.foundation.lazy.list.TvLazyRow
-import androidx.tv.foundation.lazy.list.items
+import androidx.tv.foundation.lazy.list.itemsIndexed
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.strata.tv.di.ServiceLocator
@@ -56,6 +58,7 @@ fun CastShelf(
     people: List<BaseItemPerson>,
     modifier: Modifier = Modifier,
     title: String = "Cast",
+    firstFocus: FocusRequester? = null,
     onSelect: ((BaseItemPerson) -> Unit)? = null,
 ) {
     if (people.isEmpty()) return
@@ -63,21 +66,29 @@ fun CastShelf(
         SectionHeading(title = title)
         Spacer(Modifier.height(20.dp))
         TvLazyRow(
-            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.4f),
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.7f),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
             modifier = Modifier
                 .padding(horizontal = 44.dp)
                 .focusRestorer(),
         ) {
-            items(people, key = { it.id?.toString() ?: it.name.orEmpty() }) { person ->
-                CastCard(person = person, onClick = { onSelect?.invoke(person) })
+            itemsIndexed(people, key = { _, it -> it.id?.toString() ?: it.name.orEmpty() }) { idx, person ->
+                CastCard(
+                    person = person,
+                    focusRequester = if (idx == 0) firstFocus else null,
+                    onClick = { onSelect?.invoke(person) },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
+private fun CastCard(
+    person: BaseItemPerson,
+    focusRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "cast-scale")
     val interaction = remember { MutableInteractionSource() }
@@ -88,6 +99,7 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
         modifier = Modifier
             .width(112.dp)
             .scale(scale)
+            .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
             .clickable(
                 interactionSource = interaction,
                 indication = null,

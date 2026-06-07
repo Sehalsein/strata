@@ -79,12 +79,16 @@ fun AppShell(nav: NavController, content: @Composable () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopStart)
+                // Strong, tall scrim so posters scrolling under the bar stay
+                // dark enough for the wordmark/tabs to read clearly.
                 .background(
                     Brush.verticalGradient(
-                        0f to StrataColors.Bg.copy(alpha = 0.80f),
+                        0f to StrataColors.Bg,
+                        0.55f to StrataColors.Bg.copy(alpha = 0.92f),
                         1f to Color.Transparent,
                     ),
                 )
+                .padding(bottom = 28.dp)
                 .focusGroup(),
         ) {
             TopBar(nav, downTarget = contentFocus)

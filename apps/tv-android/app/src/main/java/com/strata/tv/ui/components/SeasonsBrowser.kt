@@ -27,6 +27,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -39,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.foundation.lazy.list.TvLazyRow
 import androidx.tv.foundation.lazy.list.items
+import androidx.tv.foundation.lazy.list.itemsIndexed
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.strata.tv.di.ServiceLocator
@@ -64,6 +68,9 @@ fun SeasonsBrowser(
     onSelectSeason: (BaseItemDto) -> Unit,
     onSelectEpisode: (BaseItemDto) -> Unit,
 ) {
+    // Down from a season chip drops onto the first episode card — the lazy
+    // column's focus search otherwise skips the episode rail.
+    val episodeFocus = remember { FocusRequester() }
     Column(modifier = modifier) {
         SectionHeading(title = "Episodes")
         Spacer(Modifier.height(20.dp))
@@ -79,6 +86,7 @@ fun SeasonsBrowser(
                     SeasonChip(
                         season = season,
                         isSelected = season.id == selectedSeason?.id,
+                        downTarget = if (episodes.isNotEmpty()) episodeFocus else null,
                         onSelect = { onSelectSeason(season) },
                     )
                 }
@@ -99,14 +107,18 @@ fun SeasonsBrowser(
             }
         } else {
             TvLazyRow(
-                pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.4f),
+                pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.7f),
                 horizontalArrangement = Arrangement.spacedBy(18.dp),
                 modifier = Modifier
                     .padding(horizontal = 44.dp)
                     .focusRestorer(),
             ) {
-                items(episodes, key = { it.id.toString() }) { ep ->
-                    EpisodeCard(episode = ep, onClick = { onSelectEpisode(ep) })
+                itemsIndexed(episodes, key = { _, it -> it.id.toString() }) { idx, ep ->
+                    EpisodeCard(
+                        episode = ep,
+                        focusRequester = if (idx == 0) episodeFocus else null,
+                        onClick = { onSelectEpisode(ep) },
+                    )
                 }
             }
         }
@@ -114,7 +126,12 @@ fun SeasonsBrowser(
 }
 
 @Composable
-private fun SeasonChip(season: BaseItemDto, isSelected: Boolean, onSelect: () -> Unit) {
+private fun SeasonChip(
+    season: BaseItemDto,
+    isSelected: Boolean,
+    downTarget: FocusRequester? = null,
+    onSelect: () -> Unit,
+) {
     var focused by remember { mutableStateOf(false) }
     val interaction = remember { MutableInteractionSource() }
     val bg = when {
@@ -125,6 +142,7 @@ private fun SeasonChip(season: BaseItemDto, isSelected: Boolean, onSelect: () ->
     val fg = if (isSelected) StrataColors.Ink else StrataColors.Paper
     Box(
         modifier = Modifier
+            .let { if (downTarget != null) it.focusProperties { down = downTarget } else it }
             .clip(RoundedCornerShape(8.dp))
             .background(bg)
             .border(
@@ -145,7 +163,11 @@ private fun SeasonChip(season: BaseItemDto, isSelected: Boolean, onSelect: () ->
 }
 
 @Composable
-private fun EpisodeCard(episode: BaseItemDto, onClick: () -> Unit) {
+private fun EpisodeCard(
+    episode: BaseItemDto,
+    focusRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "ep-scale")
     val interaction = remember { MutableInteractionSource() }
@@ -155,6 +177,7 @@ private fun EpisodeCard(episode: BaseItemDto, onClick: () -> Unit) {
         modifier = Modifier
             .width(272.dp)
             .scale(scale)
+            .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .onFocusChanged { focused = it.isFocused },
     ) {

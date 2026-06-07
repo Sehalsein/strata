@@ -88,10 +88,10 @@ private fun HomeContent(nav: NavController, data: HomeData) {
         // of the screen, so a 0.66 pivot keeps the hero pinned to the top (no
         // upward scroll that would clip the backdrop) when it's focused. Content
         // rows then settle around the same line, lower-third, like Apple TV.
-        pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.66f),
+        pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.5f),
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(20.dp),
-        contentPadding = PaddingValues(top = 0.dp, bottom = 48.dp),
+        contentPadding = PaddingValues(top = 0.dp, bottom = 100.dp),
     ) {
         if (featured != null) {
             val resumeSeconds = (featured.userData?.playbackPositionTicks ?: 0L) / 10_000_000.0
@@ -173,7 +173,7 @@ private fun Hero(
     // Tall full-bleed billboard like Apple TV's "Up Next" cover: the backdrop
     // fills most of the screen and the first shelf only peeks in at the bottom,
     // inviting a scroll. Scales with the TV.
-    val heroHeight = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
+    val heroHeight = (LocalConfiguration.current.screenHeightDp * 0.72f).dp
 
     CompositionLocalProvider(LocalStrataPalette provides palette) {
         Box(
