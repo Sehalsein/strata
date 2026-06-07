@@ -20,29 +20,20 @@ import androidx.compose.ui.unit.Dp
  */
 @Composable
 fun Modifier.titleAmbience(palette: StrataPalette, intensity: Float = 1f): Modifier =
+    // Deliberately faint: a barely-there warm vignette over the page bg, not a
+    // procedural motif. Keeps Strata's warmth without the busy "web" texture.
     this
         .background(StrataColors.Bg)
         .background(
             Brush.radialGradient(
-                colors = listOf(palette.c1.copy(alpha = 0.32f * intensity), Color.Transparent),
+                colors = listOf(palette.c1.copy(alpha = 0.10f * intensity), Color.Transparent),
                 center = Offset.Unspecified, // resolved by Compose to component center
                 radius = Float.POSITIVE_INFINITY,
             ),
         )
         .background(
             Brush.radialGradient(
-                colors = listOf(palette.c2.copy(alpha = 0.22f * intensity), Color.Transparent),
-            ),
-        )
-        .background(
-            Brush.radialGradient(
-                colors = listOf(palette.c3.copy(alpha = 0.14f * intensity), Color.Transparent),
-            ),
-        )
-        .background(
-            Brush.verticalGradient(
-                0f to palette.c2.copy(alpha = 0.08f * intensity),
-                0.6f to Color.Transparent,
+                colors = listOf(palette.c2.copy(alpha = 0.06f * intensity), Color.Transparent),
             ),
         )
 

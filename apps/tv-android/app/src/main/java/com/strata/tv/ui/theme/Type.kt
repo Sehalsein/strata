@@ -86,3 +86,69 @@ fun mono(
     fontSize = size,
     letterSpacing = tracking,
 )
+
+/**
+ * TV-first named text styles. Screens reference intent (`StrataText.Meta`)
+ * instead of hardcoding sizes/families. Colour is set by the call site.
+ *
+ * Rules of this scale: Fraunces only on big titles/taglines; IBM Plex Sans for
+ * all metadata/labels/buttons/chips; JetBrains Mono only on player time-codes.
+ * Nothing below 14sp (TV legibility), and metadata is sentence-case (no
+ * uppercase, no heavy tracking) — that's what kills the "spec sheet" feel.
+ */
+object StrataText {
+    val HeroTitle = TextStyle(
+        fontFamily = StrataType.Fraunces, fontWeight = FontWeight.Medium,
+        fontSize = 64.sp, lineHeight = 62.sp, letterSpacing = (-2).sp,
+    )
+    val DetailTitle = TextStyle(
+        fontFamily = StrataType.Fraunces, fontWeight = FontWeight.Medium,
+        fontSize = 54.sp, lineHeight = 54.sp, letterSpacing = (-1.6).sp,
+    )
+    val ScreenTitle = TextStyle(
+        fontFamily = StrataType.Fraunces, fontWeight = FontWeight.Medium,
+        fontSize = 30.sp, letterSpacing = (-0.6).sp,
+    )
+    val SectionTitle = TextStyle(
+        fontFamily = StrataType.Fraunces, fontWeight = FontWeight.Medium,
+        fontSize = 22.sp, letterSpacing = (-0.3).sp,
+    )
+    val Wordmark = TextStyle(
+        fontFamily = StrataType.Fraunces, fontWeight = FontWeight.Medium,
+        fontSize = 20.sp, letterSpacing = (-0.4).sp,
+    )
+    val Tagline = TextStyle(
+        fontFamily = StrataType.Fraunces, fontWeight = FontWeight.Medium,
+        fontStyle = FontStyle.Italic, fontSize = 18.sp,
+    )
+    val Overview = TextStyle(
+        fontFamily = StrataType.Plex, fontWeight = FontWeight.Normal,
+        fontSize = 15.sp, lineHeight = 22.sp,
+    )
+    val Meta = TextStyle(
+        fontFamily = StrataType.Plex, fontWeight = FontWeight.Medium, fontSize = 14.sp,
+    )
+    val MetaDim = TextStyle(
+        fontFamily = StrataType.Plex, fontWeight = FontWeight.Normal, fontSize = 13.sp,
+    )
+    val Button = TextStyle(
+        fontFamily = StrataType.Plex, fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp, letterSpacing = 0.3.sp,
+    )
+    val TabLabel = TextStyle(
+        fontFamily = StrataType.Plex, fontWeight = FontWeight.Medium, fontSize = 14.sp,
+    )
+    val Chip = TextStyle(
+        fontFamily = StrataType.Plex, fontWeight = FontWeight.Medium, fontSize = 13.sp,
+    )
+    val CardTitle = TextStyle(
+        fontFamily = StrataType.Plex, fontWeight = FontWeight.Medium, fontSize = 14.sp,
+    )
+    val CardSub = TextStyle(
+        fontFamily = StrataType.Plex, fontWeight = FontWeight.Normal, fontSize = 12.sp,
+    )
+    val TimeCode = TextStyle(
+        fontFamily = StrataType.Mono, fontWeight = FontWeight.Medium,
+        fontSize = 13.sp, letterSpacing = 0.8.sp,
+    )
+}

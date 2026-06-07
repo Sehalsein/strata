@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import com.strata.tv.ui.screens.watch.chrome.PlayerEngine.Status
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 
 /**
@@ -78,42 +79,21 @@ fun TransportBar(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .width(28.dp)
-                    .height(1.dp)
-                    .background(StrataColors.Accent),
-            )
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text = "NOW PLAYING",
-                color = StrataColors.Paper.copy(alpha = 0.7f),
-                style = TextStyle(
-                    fontFamily = StrataType.Mono,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 3.sp,
-                ),
-            )
-            Spacer(Modifier.width(20.dp))
             Text(
                 text = title,
                 color = StrataColors.Paper,
                 style = TextStyle(
                     fontFamily = StrataType.Fraunces,
-                    fontSize = 18.sp,
+                    fontSize = 22.sp,
                     fontWeight = FontWeight.Medium,
                 ),
             )
             subtitle?.let {
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(12.dp))
                 Text(
                     text = "· $it",
-                    color = StrataColors.Paper.copy(alpha = 0.55f),
-                    style = TextStyle(
-                        fontFamily = StrataType.Fraunces,
-                        fontSize = 14.sp,
-                    ),
+                    color = StrataColors.Paper.copy(alpha = 0.6f),
+                    style = StrataText.MetaDim,
                 )
             }
         }
@@ -139,11 +119,11 @@ fun TransportBar(
             Spacer(Modifier.width(14.dp))
             Time(durationMs)
             Spacer(Modifier.width(28.dp))
-            ChromeIconButton(label = "AUDIO", onClick = onAudio)
+            ChromeIconButton(label = "Audio", onClick = onAudio)
             Spacer(Modifier.width(10.dp))
-            ChromeIconButton(label = "CC", onClick = onSubtitles)
+            ChromeIconButton(label = "Subtitles", onClick = onSubtitles)
             Spacer(Modifier.width(10.dp))
-            ChromeIconButton(label = "INFO", onClick = onInfo)
+            ChromeIconButton(label = "Info", onClick = onInfo)
         }
     }
 }
@@ -155,16 +135,7 @@ private fun Time(ms: Long) {
     val m = (total % 3600L) / 60L
     val s = total % 60L
     val text = if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
-    Text(
-        text = text,
-        color = StrataColors.Paper,
-        style = TextStyle(
-            fontFamily = StrataType.Mono,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            letterSpacing = 1.4.sp,
-        ),
-    )
+    Text(text = text, color = StrataColors.Paper, style = StrataText.TimeCode)
 }
 
 @Composable
@@ -196,37 +167,26 @@ private fun PlayPauseButton(
 @Composable
 private fun ChromeIconButton(
     label: String,
-    iconWidth: Dp = 56.dp,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, label = "chip-scale")
+    val scale by animateFloatAsState(if (focused) 1.05f else 1f, label = "chip-scale")
     val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = Modifier
             .scale(scale)
-            .clip(RoundedCornerShape(2.dp))
+            .clip(RoundedCornerShape(8.dp))
             .border(
                 width = 1.dp,
                 color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(2.dp),
+                shape = RoundedCornerShape(8.dp),
             )
-            .background(if (focused) StrataColors.Paper.copy(alpha = 0.08f) else Color.Transparent)
+            .background(if (focused) StrataColors.Paper.copy(alpha = 0.10f) else Color.Transparent)
             .onFocusChanged { focused = it.isFocused }
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp)
-            .width(iconWidth),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            color = StrataColors.Paper,
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 2.sp,
-            ),
-        )
+        Text(text = label, color = StrataColors.Paper, style = StrataText.Chip)
     }
 }

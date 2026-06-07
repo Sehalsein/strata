@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -38,6 +39,7 @@ import com.strata.tv.ui.components.LoadingCenter
 import com.strata.tv.ui.components.PosterGrid
 import com.strata.tv.ui.components.loadable
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 import org.jellyfin.sdk.model.api.BaseItemDto
 
@@ -50,55 +52,66 @@ import org.jellyfin.sdk.model.api.BaseItemDto
 fun LibraryGrid(
     supportsSort: Boolean,
     onSelect: (BaseItemDto) -> Unit,
+    title: String? = null,
     load: suspend (LibrarySort) -> List<BaseItemDto>,
 ) {
     var sort by remember { mutableStateOf(LibrarySort.RECENT) }
     val data by loadable(sort) { load(sort) }
     val focus = remember { FocusRequester() }
+    val sortFocus = remember { FocusRequester() }
     LaunchedEffect(data) {
         if (data is Loadable.Ready) runCatching { focus.requestFocus() }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        if (supportsSort) {
-            SortRow(current = sort, onSelect = { sort = it })
-        }
-        when (val l = data) {
-            is Loadable.Loading -> LoadingCenter()
-            is Loadable.Error -> ErrorCenter(l.cause)
-            is Loadable.Ready -> PosterGrid(
-                items = l.value,
-                onSelect = onSelect,
-                firstFocusRequester = focus,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+    when (val l = data) {
+        is Loadable.Loading -> LoadingCenter()
+        is Loadable.Error -> ErrorCenter(l.cause)
+        is Loadable.Ready -> PosterGrid(
+            items = l.value,
+            onSelect = onSelect,
+            firstFocusRequester = focus,
+            modifier = Modifier.fillMaxSize(),
+            // Title + sort ride inside the grid as a full-width header so they
+            // share its focus/scroll tree — that's what lets D-pad Up from the
+            // first poster row reach the sort chips.
+            header = {
+                Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                    if (title != null) {
+                        Text(
+                            text = title,
+                            color = StrataColors.Paper,
+                            style = StrataText.ScreenTitle,
+                            modifier = Modifier.padding(start = 44.dp, bottom = 10.dp),
+                        )
+                    }
+                    if (supportsSort) {
+                        SortRow(current = sort, firstFocus = sortFocus, onSelect = { sort = it })
+                    }
+                }
+            },
+        )
     }
 }
 
 @Composable
-private fun SortRow(current: LibrarySort, onSelect: (LibrarySort) -> Unit) {
+private fun SortRow(
+    current: LibrarySort,
+    firstFocus: FocusRequester,
+    onSelect: (LibrarySort) -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .focusGroup()
-            .padding(horizontal = 48.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = 44.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = "SORT",
-            color = StrataColors.Paper.copy(alpha = 0.4f),
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 11.sp,
-                letterSpacing = 2.4.sp,
-            ),
-        )
-        LibrarySort.entries.forEach { option ->
+        LibrarySort.entries.forEachIndexed { index, option ->
             SortChip(
                 label = option.label,
                 selected = option == current,
+                focusRequester = if (index == 0) firstFocus else null,
                 onClick = { onSelect(option) },
             )
         }
@@ -106,18 +119,24 @@ private fun SortRow(current: LibrarySort, onSelect: (LibrarySort) -> Unit) {
 }
 
 @Composable
-private fun SortChip(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun SortChip(
+    label: String,
+    selected: Boolean,
+    focusRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.05f else 1f, label = "sort-scale")
     val interaction = remember { MutableInteractionSource() }
     Row(
         modifier = Modifier
+            .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
             .scale(scale)
-            .clip(RoundedCornerShape(2.dp))
+            .clip(RoundedCornerShape(8.dp))
             .border(
                 width = 1.dp,
                 color = if (focused || selected) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(2.dp),
+                shape = RoundedCornerShape(8.dp),
             )
             .background(
                 if (selected) StrataColors.Paper.copy(alpha = 0.14f)
@@ -126,17 +145,12 @@ private fun SortChip(label: String, selected: Boolean, onClick: () -> Unit) {
             )
             .onFocusChanged { focused = it.isFocused }
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
         Text(
-            text = label.uppercase(),
+            text = label,
             color = if (selected || focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.6f),
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 1.6.sp,
-            ),
+            style = StrataText.Chip,
         )
     }
 }

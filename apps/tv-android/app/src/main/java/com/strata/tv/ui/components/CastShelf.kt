@@ -2,6 +2,7 @@ package com.strata.tv.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -25,6 +26,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -36,11 +39,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.foundation.lazy.list.TvLazyRow
-import androidx.tv.foundation.lazy.list.items
+import androidx.tv.foundation.lazy.list.itemsIndexed
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.strata.tv.di.ServiceLocator
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 import org.jellyfin.sdk.model.api.BaseItemPerson
 
@@ -54,28 +58,37 @@ fun CastShelf(
     people: List<BaseItemPerson>,
     modifier: Modifier = Modifier,
     title: String = "Cast",
+    firstFocus: FocusRequester? = null,
     onSelect: ((BaseItemPerson) -> Unit)? = null,
 ) {
     if (people.isEmpty()) return
     Column(modifier = modifier) {
-        SectionHeading(title = title, num = "·")
-        Spacer(Modifier.height(16.dp))
+        SectionHeading(title = title)
+        Spacer(Modifier.height(20.dp))
         TvLazyRow(
-            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.1f),
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.7f),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
             modifier = Modifier
-                .padding(horizontal = 48.dp)
+                .padding(horizontal = 44.dp)
                 .focusRestorer(),
         ) {
-            items(people, key = { it.id?.toString() ?: it.name.orEmpty() }) { person ->
-                CastCard(person = person, onClick = { onSelect?.invoke(person) })
+            itemsIndexed(people, key = { _, it -> it.id?.toString() ?: it.name.orEmpty() }) { idx, person ->
+                CastCard(
+                    person = person,
+                    focusRequester = if (idx == 0) firstFocus else null,
+                    onClick = { onSelect?.invoke(person) },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
+private fun CastCard(
+    person: BaseItemPerson,
+    focusRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "cast-scale")
     val interaction = remember { MutableInteractionSource() }
@@ -84,8 +97,9 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
 
     Column(
         modifier = Modifier
-            .width(120.dp)
+            .width(112.dp)
             .scale(scale)
+            .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
             .clickable(
                 interactionSource = interaction,
                 indication = null,
@@ -96,12 +110,14 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
     ) {
         Box(
             modifier = Modifier
-                .size(112.dp)
+                .size(100.dp)
                 .clip(CircleShape)
                 .background(StrataColors.Bg2)
+                // Faint resting ring + bold Paper ring on focus, so the active
+                // cast member is unmistakable (matches the poster/episode cards).
                 .border(
-                    width = if (focused) 2.dp else 0.dp,
-                    color = if (focused) StrataColors.Accent2 else Color.Transparent,
+                    width = if (focused) 4.dp else 1.dp,
+                    color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.15f),
                     shape = CircleShape,
                 ),
             contentAlignment = Alignment.Center,
@@ -122,7 +138,7 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
                 color = StrataColors.Paper.copy(alpha = 0.6f),
                 style = TextStyle(
                     fontFamily = StrataType.Fraunces,
-                    fontSize = 38.sp,
+                    fontSize = 30.sp,
                     fontWeight = FontWeight.Medium,
                 ),
             )
@@ -132,12 +148,10 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
             text = person.name.orEmpty(),
             color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.85f),
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis,
-            style = TextStyle(
-                fontFamily = StrataType.Plex,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-            ),
+            style = StrataText.Chip,
+            modifier = if (focused) Modifier.basicMarquee(iterations = Int.MAX_VALUE) else Modifier,
         )
         person.role?.takeIf { it.isNotBlank() }?.let { role ->
             Text(
@@ -145,42 +159,23 @@ private fun CastCard(person: BaseItemPerson, onClick: () -> Unit) {
                 color = StrataColors.Paper.copy(alpha = 0.5f),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                style = TextStyle(
-                    fontFamily = StrataType.Fraunces,
-                    fontSize = 12.sp,
-                    fontStyle = FontStyle.Italic,
-                ),
+                style = StrataText.CardSub,
             )
         }
     }
 }
 
+/**
+ * Shared section heading for Cast / Similar / Seasons. Clean Fraunces title,
+ * no editorial number prefix, no italic. `num` is accepted-and-ignored so the
+ * existing call sites keep compiling.
+ */
 @Composable
-internal fun SectionHeading(title: String, num: String, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier.padding(horizontal = 48.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = num,
-            color = StrataColors.Paper.copy(alpha = 0.4f),
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 11.sp,
-                letterSpacing = 2.sp,
-            ),
-        )
-        Spacer(Modifier.width(12.dp))
-        Text(
-            text = title,
-            color = StrataColors.Paper,
-            style = TextStyle(
-                fontFamily = StrataType.Fraunces,
-                fontSize = 24.sp,
-                fontStyle = FontStyle.Italic,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = (-0.4).sp,
-            ),
-        )
-    }
+internal fun SectionHeading(title: String, num: String = "", modifier: Modifier = Modifier) {
+    Text(
+        text = title,
+        color = StrataColors.Paper,
+        style = StrataText.SectionTitle,
+        modifier = modifier.padding(horizontal = 44.dp),
+    )
 }

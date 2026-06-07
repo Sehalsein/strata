@@ -21,15 +21,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.media3.common.Format
 import androidx.tv.material3.Text
 import com.strata.tv.data.StreamPlan
 import com.strata.tv.ui.theme.StrataColors
-import com.strata.tv.ui.theme.StrataType
+import com.strata.tv.ui.theme.StrataText
 
 /**
  * Read-only diagnostic panel. Mirrors Apple's `StreamDetailsPanel`:
@@ -54,14 +51,9 @@ fun StreamDetailsPanel(
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Text(
-                    text = "STREAM",
+                    text = "Stream",
                     color = StrataColors.Paper,
-                    style = TextStyle(
-                        fontFamily = StrataType.Mono,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 3.sp,
-                    ),
+                    style = StrataText.SectionTitle,
                 )
                 Spacer(Modifier.height(12.dp))
                 Field(label = "Mode", value = if (plan.preferHls) "HLS transcode" else "Direct play")
@@ -107,24 +99,15 @@ private fun Field(label: String, value: String) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = label.uppercase(),
+            text = label,
             color = StrataColors.Paper.copy(alpha = 0.45f),
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 10.sp,
-                letterSpacing = 1.8.sp,
-                fontWeight = FontWeight.SemiBold,
-            ),
+            style = StrataText.MetaDim,
             modifier = Modifier.padding(end = 18.dp),
         )
         Text(
             text = value,
             color = StrataColors.Paper,
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 12.sp,
-                letterSpacing = 1.4.sp,
-            ),
+            style = StrataText.Meta,
         )
     }
 }
@@ -144,14 +127,9 @@ private fun CloseChip(onClick: () -> Unit) {
             .padding(horizontal = 14.dp, vertical = 8.dp),
     ) {
         Text(
-            text = "CLOSE",
+            text = "Close",
             color = StrataColors.Paper,
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 10.sp,
-                letterSpacing = 2.sp,
-                fontWeight = FontWeight.SemiBold,
-            ),
+            style = StrataText.Button,
         )
     }
 }

@@ -42,6 +42,7 @@ import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.strata.tv.di.ServiceLocator
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 import kotlinx.coroutines.delay
 import org.jellyfin.sdk.model.api.BaseItemDto
@@ -116,14 +117,9 @@ fun UpNextCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = "UP NEXT",
+                    text = "Up Next",
                     color = StrataColors.Accent,
-                    style = TextStyle(
-                        fontFamily = StrataType.Mono,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.8.sp,
-                    ),
+                    style = StrataText.SectionTitle,
                 )
                 Text(
                     text = next.name.orEmpty(),
@@ -151,11 +147,7 @@ fun UpNextCard(
                     Text(
                         text = "Plays in ${(remainingMs / 1000).coerceAtLeast(0)}s",
                         color = StrataColors.Paper.copy(alpha = 0.6f),
-                        style = TextStyle(
-                            fontFamily = StrataType.Mono,
-                            fontSize = 10.sp,
-                            letterSpacing = 1.6.sp,
-                        ),
+                        style = StrataText.MetaDim,
                     )
                     Spacer(Modifier.weight(1f))
                     DismissChip(onClick = onDismiss)
@@ -180,14 +172,9 @@ private fun DismissChip(onClick: () -> Unit) {
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
         Text(
-            text = "DISMISS",
+            text = "Dismiss",
             color = StrataColors.Paper,
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 2.sp,
-            ),
+            style = StrataText.Chip,
         )
     }
 }

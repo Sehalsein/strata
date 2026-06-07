@@ -24,17 +24,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.tv.foundation.lazy.list.TvLazyColumn
 import androidx.tv.foundation.lazy.list.items
 import androidx.tv.material3.Text
 import com.strata.tv.data.AudioStream
 import com.strata.tv.data.SubtitleStream
 import com.strata.tv.ui.theme.StrataColors
-import com.strata.tv.ui.theme.StrataType
+import com.strata.tv.ui.theme.StrataText
 
 /**
  * Audio + subtitle picker overlays. Rendered as a focus-trapped sheet
@@ -108,14 +106,9 @@ private fun MenuSheet(title: String, onDismiss: () -> Unit, body: @Composable ()
             Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = title.uppercase(),
+                        text = title,
                         color = StrataColors.Paper,
-                        style = TextStyle(
-                            fontFamily = StrataType.Mono,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            letterSpacing = 3.sp,
-                        ),
+                        style = StrataText.SectionTitle,
                     )
                     Spacer(Modifier.width(12.dp))
                     Box(Modifier.height(1.dp).background(StrataColors.Paper.copy(alpha = 0.18f)).width(80.dp))
@@ -158,9 +151,7 @@ private fun TrackRow(
             Text(
                 text = title,
                 color = if (focused || isSelected) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.75f),
-                style = TextStyle(
-                    fontFamily = StrataType.Plex,
-                    fontSize = 15.sp,
+                style = StrataText.Meta.copy(
                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                 ),
             )
@@ -168,11 +159,7 @@ private fun TrackRow(
                 Text(
                     text = subtitle,
                     color = StrataColors.Paper.copy(alpha = 0.5f),
-                    style = TextStyle(
-                        fontFamily = StrataType.Mono,
-                        fontSize = 10.sp,
-                        letterSpacing = 1.4.sp,
-                    ),
+                    style = StrataText.MetaDim,
                 )
             }
         }
@@ -196,14 +183,9 @@ private fun CloseButton(onClick: () -> Unit) {
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
         Text(
-            text = "CLOSE",
+            text = "Close",
             color = StrataColors.Paper,
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 10.sp,
-                letterSpacing = 2.sp,
-                fontWeight = FontWeight.SemiBold,
-            ),
+            style = StrataText.Button,
         )
     }
 }

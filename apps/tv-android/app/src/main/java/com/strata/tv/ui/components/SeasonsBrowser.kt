@@ -2,6 +2,7 @@ package com.strata.tv.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -26,6 +27,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -38,10 +42,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.foundation.lazy.list.TvLazyRow
 import androidx.tv.foundation.lazy.list.items
+import androidx.tv.foundation.lazy.list.itemsIndexed
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.strata.tv.di.ServiceLocator
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 import org.jellyfin.sdk.model.api.BaseItemDto
 
@@ -62,21 +68,25 @@ fun SeasonsBrowser(
     onSelectSeason: (BaseItemDto) -> Unit,
     onSelectEpisode: (BaseItemDto) -> Unit,
 ) {
+    // Down from a season chip drops onto the first episode card — the lazy
+    // column's focus search otherwise skips the episode rail.
+    val episodeFocus = remember { FocusRequester() }
     Column(modifier = modifier) {
-        SectionHeading(title = "Episodes", num = "·")
-        Spacer(Modifier.height(16.dp))
+        SectionHeading(title = "Episodes")
+        Spacer(Modifier.height(20.dp))
         if (seasons.isNotEmpty()) {
             TvLazyRow(
                 pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.1f),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
-                    .padding(horizontal = 48.dp)
+                    .padding(horizontal = 44.dp)
                     .focusRestorer(),
             ) {
                 items(seasons, key = { it.id.toString() }) { season ->
                     SeasonChip(
                         season = season,
                         isSelected = season.id == selectedSeason?.id,
+                        downTarget = if (episodes.isNotEmpty()) episodeFocus else null,
                         onSelect = { onSelectSeason(season) },
                     )
                 }
@@ -87,24 +97,28 @@ fun SeasonsBrowser(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 48.dp),
+                    .padding(horizontal = 44.dp),
             ) {
                 Text(
                     text = "No episodes",
                     color = StrataColors.Paper.copy(alpha = 0.45f),
-                    style = TextStyle(fontFamily = StrataType.Plex, fontSize = 14.sp),
+                    style = StrataText.MetaDim,
                 )
             }
         } else {
             TvLazyRow(
-                pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.1f),
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
+                pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.7f),
+                horizontalArrangement = Arrangement.spacedBy(18.dp),
                 modifier = Modifier
-                    .padding(horizontal = 48.dp)
+                    .padding(horizontal = 44.dp)
                     .focusRestorer(),
             ) {
-                items(episodes, key = { it.id.toString() }) { ep ->
-                    EpisodeCard(episode = ep, onClick = { onSelectEpisode(ep) })
+                itemsIndexed(episodes, key = { _, it -> it.id.toString() }) { idx, ep ->
+                    EpisodeCard(
+                        episode = ep,
+                        focusRequester = if (idx == 0) episodeFocus else null,
+                        onClick = { onSelectEpisode(ep) },
+                    )
                 }
             }
         }
@@ -112,7 +126,12 @@ fun SeasonsBrowser(
 }
 
 @Composable
-private fun SeasonChip(season: BaseItemDto, isSelected: Boolean, onSelect: () -> Unit) {
+private fun SeasonChip(
+    season: BaseItemDto,
+    isSelected: Boolean,
+    downTarget: FocusRequester? = null,
+    onSelect: () -> Unit,
+) {
     var focused by remember { mutableStateOf(false) }
     val interaction = remember { MutableInteractionSource() }
     val bg = when {
@@ -123,41 +142,42 @@ private fun SeasonChip(season: BaseItemDto, isSelected: Boolean, onSelect: () ->
     val fg = if (isSelected) StrataColors.Ink else StrataColors.Paper
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(2.dp))
+            .let { if (downTarget != null) it.focusProperties { down = downTarget } else it }
+            .clip(RoundedCornerShape(8.dp))
             .background(bg)
             .border(
                 width = 1.dp,
                 color = if (isSelected) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.25f),
-                shape = RoundedCornerShape(2.dp),
+                shape = RoundedCornerShape(8.dp),
             )
             .onFocusChanged { focused = it.isFocused }
             .clickable(interactionSource = interaction, indication = null, onClick = onSelect)
-            .padding(horizontal = 18.dp, vertical = 10.dp),
+            .padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
         Text(
-            text = (season.name ?: "Season").uppercase(),
+            text = season.name ?: "Season",
             color = fg,
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 2.4.sp,
-            ),
+            style = StrataText.Chip,
         )
     }
 }
 
 @Composable
-private fun EpisodeCard(episode: BaseItemDto, onClick: () -> Unit) {
+private fun EpisodeCard(
+    episode: BaseItemDto,
+    focusRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, label = "ep-scale")
+    val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "ep-scale")
     val interaction = remember { MutableInteractionSource() }
     val repo = ServiceLocator.repository
 
     Column(
         modifier = Modifier
-            .width(300.dp)
+            .width(272.dp)
             .scale(scale)
+            .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .onFocusChanged { focused = it.isFocused },
     ) {
@@ -165,12 +185,15 @@ private fun EpisodeCard(episode: BaseItemDto, onClick: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(4.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(StrataColors.Bg2)
+                // Always draw a border: a faint resting outline and a bold Paper
+                // ring on focus so the selected episode is unmistakable on a wide
+                // card (matches the poster cards' focus ring).
                 .border(
-                    width = if (focused) 2.dp else 0.dp,
-                    color = if (focused) StrataColors.Accent2 else Color.Transparent,
-                    shape = RoundedCornerShape(4.dp),
+                    width = if (focused) 4.dp else 1.dp,
+                    color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(8.dp),
                 ),
         ) {
             AsyncImage(
@@ -202,26 +225,19 @@ private fun EpisodeCard(episode: BaseItemDto, onClick: () -> Unit) {
                 Text(
                     text = "S${s}·E$e",
                     color = StrataColors.Paper,
-                    style = TextStyle(
-                        fontFamily = StrataType.Mono,
-                        fontSize = 10.sp,
-                        letterSpacing = 1.6.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    ),
+                    style = StrataText.TimeCode.copy(fontSize = 12.sp),
                 )
             }
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(12.dp))
         Text(
             text = episode.name.orEmpty(),
             color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.85f),
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis,
-            style = TextStyle(
-                fontFamily = StrataType.Plex,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-            ),
+            style = StrataText.Meta,
+            modifier = if (focused) Modifier.basicMarquee(iterations = Int.MAX_VALUE) else Modifier,
         )
         episode.overview?.let {
             Text(
@@ -229,26 +245,16 @@ private fun EpisodeCard(episode: BaseItemDto, onClick: () -> Unit) {
                 color = StrataColors.Paper.copy(alpha = 0.55f),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                style = TextStyle(
-                    fontFamily = StrataType.Fraunces,
-                    fontSize = 12.sp,
-                    fontStyle = FontStyle.Italic,
-                ),
+                style = StrataText.CardSub,
             )
         }
         episode.runTimeTicks?.let { ticks ->
             val mins = ticks / 600_000_000L
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "${mins}M",
-                    color = StrataColors.Paper.copy(alpha = 0.5f),
-                    style = TextStyle(
-                        fontFamily = StrataType.Mono,
-                        fontSize = 10.sp,
-                        letterSpacing = 1.6.sp,
-                    ),
-                )
-            }
+            Text(
+                text = "${mins}m",
+                color = StrataColors.Paper.copy(alpha = 0.5f),
+                style = StrataText.CardSub,
+            )
         }
     }
 }

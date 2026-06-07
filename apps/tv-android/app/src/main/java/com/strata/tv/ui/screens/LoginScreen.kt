@@ -61,6 +61,7 @@ import com.strata.tv.di.ServiceLocator
 import com.strata.tv.ui.theme.MotifBackdrop
 import com.strata.tv.ui.theme.StrataColors
 import com.strata.tv.ui.theme.StrataMotif
+import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 import com.strata.tv.ui.theme.paletteFor
 import kotlinx.coroutines.delay
@@ -171,22 +172,8 @@ private fun LoginHero(modifier: Modifier = Modifier) {
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(start = 56.dp, bottom = 64.dp, end = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                MonoSpec("CINEMATHÈQUE", alpha = 0.75f, tracking = 3.0.sp)
-                Spacer(Modifier.width(12.dp))
-                Box(
-                    Modifier
-                        .width(32.dp)
-                        .height(1.dp)
-                        .background(StrataColors.Paper.copy(alpha = 0.18f)),
-                )
-                Spacer(Modifier.width(12.dp))
-                MonoSpec("№ ${opusFor(motifIndex)}", alpha = 0.55f, tracking = 1.8.sp)
-                Spacer(Modifier.width(20.dp))
-                MonoSpec(dateLine, alpha = 0.55f, tracking = 1.8.sp)
-            }
             Text(
                 text = "STRATA",
                 color = StrataColors.Paper,
@@ -202,21 +189,13 @@ private fun LoginHero(modifier: Modifier = Modifier) {
                 Text(
                     text = "Tonight's programme,",
                     color = StrataColors.Paper.copy(alpha = 0.7f),
-                    style = TextStyle(
-                        fontFamily = StrataType.Fraunces,
-                        fontStyle = FontStyle.Italic,
-                        fontSize = 18.sp,
-                    ),
+                    style = StrataText.Tagline,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = "served warm.",
                     color = StrataColors.Accent2,
-                    style = TextStyle(
-                        fontFamily = StrataType.Fraunces,
-                        fontStyle = FontStyle.Italic,
-                        fontSize = 18.sp,
-                    ),
+                    style = StrataText.Tagline,
                 )
             }
         }
@@ -292,35 +271,15 @@ private fun LoginForm(modifier: Modifier = Modifier, onSignedIn: () -> Unit) {
             .widthIn(max = 520.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        // ACT I header
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            MonoSpec("ACT I", alpha = 0.85f, tracking = 3.0.sp)
-            Spacer(Modifier.width(10.dp))
-            Box(
-                Modifier
-                    .weight(1f)
-                    .height(1.dp)
-                    .background(StrataColors.Paper.copy(alpha = 0.16f)),
-            )
-        }
         Text(
             text = "Sign in",
             color = StrataColors.Paper,
-            style = TextStyle(
-                fontFamily = StrataType.Fraunces,
-                fontSize = 36.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = (-1.4).sp,
-            ),
+            style = StrataText.ScreenTitle,
         )
         Text(
             text = "Point Strata at your Jellyfin server and step inside.",
             color = StrataColors.Paper.copy(alpha = 0.62f),
-            style = TextStyle(
-                fontFamily = StrataType.Plex,
-                fontSize = 14.sp,
-                lineHeight = 20.sp,
-            ),
+            style = StrataText.MetaDim,
         )
 
         Spacer(Modifier.height(4.dp))
@@ -367,55 +326,7 @@ private fun LoginForm(modifier: Modifier = Modifier, onSignedIn: () -> Unit) {
             enabled = canSubmit,
             onClick = { submit() },
         )
-
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-            Box(
-                Modifier
-                    .weight(1f)
-                    .height(1.dp)
-                    .background(StrataColors.Paper.copy(alpha = 0.12f)),
-            )
-            Spacer(Modifier.width(10.dp))
-            MonoSpec("HOSTED ON YOUR HARDWARE", alpha = 0.4f, size = 10.sp, tracking = 2.4.sp)
-            Spacer(Modifier.width(10.dp))
-            Box(
-                Modifier
-                    .weight(1f)
-                    .height(1.dp)
-                    .background(StrataColors.Paper.copy(alpha = 0.12f)),
-            )
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            MonoSpec("STRATA · BUILD 1.0.0", alpha = 0.32f, size = 10.sp)
-            Spacer(Modifier.weight(1f))
-            MonoSpec("VOL. III", alpha = 0.32f, size = 10.sp)
-        }
     }
-}
-
-@Composable
-private fun MonoSpec(
-    text: String,
-    alpha: Float = 0.6f,
-    size: androidx.compose.ui.unit.TextUnit = 11.sp,
-    tracking: androidx.compose.ui.unit.TextUnit = 2.0.sp,
-) {
-    Text(
-        text = text.uppercase(Locale.US),
-        color = StrataColors.Paper.copy(alpha = alpha),
-        style = TextStyle(
-            fontFamily = StrataType.Mono,
-            fontSize = size,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = tracking,
-        ),
-    )
 }
 
 // ---------------------------------------------------------------------
@@ -448,12 +359,12 @@ private fun EditorialField(
     val textStyle = TextStyle(
         fontFamily = if (mono) StrataType.Mono else StrataType.Plex,
         color = StrataColors.Paper,
-        fontSize = if (mono) 14.sp else 15.sp,
+        fontSize = 20.sp,
         letterSpacing = if (mono) 0.5.sp else 0.sp,
     )
 
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        MonoSpec(label, alpha = 0.7f, size = 10.sp, tracking = 2.4.sp)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(text = label, color = StrataColors.Paper.copy(alpha = 0.7f), style = StrataText.Chip)
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
@@ -477,7 +388,7 @@ private fun EditorialField(
                 onDone = { onImeAction?.invoke() },
                 onGo = { onImeAction?.invoke() },
             ),
-            shape = RoundedCornerShape(2.dp),
+            shape = RoundedCornerShape(10.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = StrataColors.Paper,
                 unfocusedTextColor = StrataColors.Paper,
@@ -523,7 +434,7 @@ private fun SignInButton(
         modifier = Modifier
             .fillMaxWidth()
             .scale(scale)
-            .clip(RoundedCornerShape(2.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(bg)
             .onFocusChanged { focused = it.isFocused }
             .clickable(
@@ -532,29 +443,16 @@ private fun SignInButton(
                 indication = null,
                 onClick = onClick,
             )
-            .padding(horizontal = 22.dp, vertical = 16.dp),
+            .padding(horizontal = 24.dp, vertical = 16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = if (isBusy) "SIGNING IN" else "SIGN IN",
+                text = if (isBusy) "Signing in…" else "Sign in",
                 color = fg,
-                style = TextStyle(
-                    fontFamily = StrataType.Mono,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 3.sp,
-                ),
+                style = StrataText.Button,
             )
             Spacer(Modifier.weight(1f))
-            Text(
-                text = if (isBusy) "…" else "→",
-                color = fg,
-                style = TextStyle(
-                    fontFamily = StrataType.Mono,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                ),
-            )
+            Text(text = if (isBusy) "…" else "→", color = fg, style = StrataText.Button)
         }
     }
 }
@@ -572,14 +470,9 @@ private fun ErrorBanner(message: String) {
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
-            text = "SIGN-IN FAILED",
+            text = "Sign-in failed",
             color = StrataColors.Accent,
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 2.4.sp,
-            ),
+            style = StrataText.Meta,
         )
         Text(
             text = message,

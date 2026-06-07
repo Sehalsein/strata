@@ -103,16 +103,29 @@ class PlayerEngine(
         override fun onPlayerError(error: PlaybackException) {
             Log.e("Strata", "player error code=${error.errorCode} name=${error.errorCodeName}", error)
             val plan = currentPlan
-            if (plan != null && !plan.preferHls) {
-                // First-failure fallback: re-prepare with HLS at the same
-                // position. Matches the previous inline behaviour in
-                // WatchScreen.kt.
+            val item = currentItem
+            if (plan != null && item != null && !plan.preferHls) {
+                // First-failure fallback: DirectPlay couldn't decode on this
+                // device. Ask the server for a real transcode (HLS) plan and
+                // re-prepare at the same position. We must re-build — the
+                // original plan's `hlsUrl` falls back to the static DirectPlay
+                // URL when the server gave no TranscodingUrl, so flipping
+                // `preferHls` alone would hand ExoPlayer a non-HLS URL tagged as
+                // m3u8 (ERROR_CODE_PARSING_MANIFEST_MALFORMED).
                 val pos = exoPlayer.currentPosition / 1000.0
                 scope.launch {
-                    Log.i("Strata", "retrying via HLS at $pos s")
-                    val fallback = plan.copy(preferHls = true)
-                    currentPlan = fallback
-                    load(fallback, pos)
+                    Log.i("Strata", "DirectPlay failed; retrying via transcode at $pos s")
+                    val fresh = runCatching {
+                        ServiceLocator.repository.streamPlanner.build(item.id, forceTranscode = true)
+                    }.getOrNull()
+                    if (fresh != null && fresh.preferHls) {
+                        currentPlan = fresh
+                        load(fresh, pos)
+                    } else {
+                        Log.e("Strata", "no transcode URL available; giving up")
+                        _status.value = Status.Failed
+                        _failure.value = error
+                    }
                 }
             } else {
                 _status.value = Status.Failed

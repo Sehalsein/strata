@@ -43,6 +43,7 @@ import com.strata.tv.data.Account
 import com.strata.tv.di.ServiceLocator
 import com.strata.tv.ui.nav.Routes
 import com.strata.tv.ui.theme.StrataColors
+import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 import java.util.Locale
 
@@ -68,25 +69,20 @@ fun ProfileScreen(nav: NavController) {
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(48.dp),
+            verticalArrangement = Arrangement.spacedBy(36.dp),
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = "STRATA",
                     color = StrataColors.Paper.copy(alpha = 0.55f),
-                    style = TextStyle(
-                        fontFamily = StrataType.Mono,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 3.2.sp,
-                    ),
+                    style = StrataText.Wordmark,
                 )
                 Text(
                     text = "Who's watching?",
                     color = StrataColors.Paper,
                     style = TextStyle(
                         fontFamily = StrataType.Fraunces,
-                        fontSize = 52.sp,
+                        fontSize = 40.sp,
                         fontWeight = FontWeight.Medium,
                         letterSpacing = (-1.4).sp,
                     ),
@@ -94,7 +90,7 @@ fun ProfileScreen(nav: NavController) {
             }
 
             Row(
-                horizontalArrangement = Arrangement.spacedBy(40.dp, Alignment.CenterHorizontally),
+                horizontalArrangement = Arrangement.spacedBy(28.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.Top,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 60.dp),
             ) {
@@ -141,7 +137,7 @@ private fun ProfileTile(
     ) {
         Box(
             modifier = Modifier
-                .size(150.dp)
+                .size(120.dp)
                 .scale(scale)
                 .clip(CircleShape)
                 .border(
@@ -164,7 +160,7 @@ private fun ProfileTile(
                     color = StrataColors.Paper,
                     style = TextStyle(
                         fontFamily = StrataType.Fraunces,
-                        fontSize = 56.sp,
+                        fontSize = 42.sp,
                         fontWeight = FontWeight.Medium,
                     ),
                 )
@@ -180,7 +176,7 @@ private fun ProfileTile(
             color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.6f),
             style = TextStyle(
                 fontFamily = StrataType.Plex,
-                fontSize = 22.sp,
+                fontSize = 18.sp,
                 fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Normal,
             ),
         )
@@ -202,7 +198,7 @@ private fun AddProfileTile(onSelect: () -> Unit) {
     ) {
         Box(
             modifier = Modifier
-                .size(150.dp)
+                .size(120.dp)
                 .scale(scale)
                 .clip(CircleShape)
                 .background(StrataColors.Paper.copy(alpha = 0.06f))
@@ -216,13 +212,13 @@ private fun AddProfileTile(onSelect: () -> Unit) {
             Text(
                 text = "+",
                 color = StrataColors.Paper.copy(alpha = 0.7f),
-                style = TextStyle(fontFamily = StrataType.Mono, fontSize = 56.sp, fontWeight = FontWeight.Light),
+                style = TextStyle(fontFamily = StrataType.Mono, fontSize = 42.sp, fontWeight = FontWeight.Light),
             )
         }
         Text(
             text = "Add Profile",
             color = StrataColors.Paper.copy(alpha = 0.6f),
-            style = TextStyle(fontFamily = StrataType.Plex, fontSize = 22.sp),
+            style = TextStyle(fontFamily = StrataType.Plex, fontSize = 18.sp),
         )
     }
 }

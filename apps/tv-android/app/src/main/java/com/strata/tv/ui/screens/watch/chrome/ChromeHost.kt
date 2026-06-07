@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,14 +32,11 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import com.strata.tv.data.StreamPlan
 import com.strata.tv.ui.theme.StrataColors
-import com.strata.tv.ui.theme.StrataType
+import com.strata.tv.ui.theme.StrataText
 import kotlinx.coroutines.delay
 import org.jellyfin.sdk.model.api.BaseItemDto
 
@@ -77,6 +75,11 @@ fun ChromeHost(
     var lastInteractionMs by remember { mutableStateOf(System.currentTimeMillis()) }
     var upNextDismissed by remember(item.id) { mutableStateOf(false) }
     val playFocus = remember { FocusRequester() }
+    // When the chrome hides, its focusable controls leave composition and focus
+    // would be lost — after which key events never reach onPreviewKeyEvent and
+    // the chrome could never be summoned back. This focusable root holds focus
+    // while the chrome is hidden so the next key press re-shows it.
+    val rootFocus = remember { FocusRequester() }
 
     fun bumpInteraction() {
         lastInteractionMs = System.currentTimeMillis()
@@ -91,9 +94,12 @@ fun ChromeHost(
         }
     }
 
-    LaunchedEffect(chromeVisible) {
-        if (chromeVisible && menu == null) {
-            runCatching { playFocus.requestFocus() }
+    LaunchedEffect(chromeVisible, menu) {
+        if (chromeVisible) {
+            if (menu == null) runCatching { playFocus.requestFocus() }
+        } else {
+            // Park focus on the root so it keeps catching key presses.
+            runCatching { rootFocus.requestFocus() }
         }
     }
 
@@ -105,6 +111,8 @@ fun ChromeHost(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .focusRequester(rootFocus)
+            .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when (event.key) {
@@ -115,9 +123,30 @@ fun ChromeHost(
                             else -> { onBack(); true }
                         }
                     }
-                    else -> {
+                    // Center/Enter while the chrome is hidden: re-show it (and
+                    // toggle play so the centre button still pauses fast).
+                    Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar -> {
+                        if (!chromeVisible) {
+                            engine.togglePlayPause()
+                            bumpInteraction()
+                            true
+                        } else {
+                            bumpInteraction()
+                            false
+                        }
+                    }
+                    Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> {
+                        engine.togglePlayPause()
                         bumpInteraction()
-                        false
+                        true
+                    }
+                    else -> {
+                        // Hidden: any key just summons the chrome (consume it so
+                        // it isn't also treated as navigation). Visible: keep the
+                        // chrome alive but let the key navigate the controls.
+                        val wasHidden = !chromeVisible
+                        bumpInteraction()
+                        wasHidden
                     }
                 }
             },
@@ -255,12 +284,7 @@ private fun SkipButton(
         Text(
             text = label,
             color = StrataColors.Ink,
-            style = TextStyle(
-                fontFamily = StrataType.Mono,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 2.sp,
-            ),
+            style = StrataText.Button,
         )
     }
 }
