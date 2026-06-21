@@ -219,6 +219,10 @@ private fun UserBadge(nav: NavController, downTarget: FocusRequester) {
                     menuOpen = false
                     nav.navigate(Routes.MyList)
                 },
+                onSettings = {
+                    menuOpen = false
+                    nav.navigate(Routes.Settings)
+                },
                 onSwitchProfile = {
                     menuOpen = false
                     nav.navigate(Routes.Profiles)
@@ -236,6 +240,7 @@ private fun UserBadge(nav: NavController, downTarget: FocusRequester) {
 private fun UserMenu(
     onDismiss: () -> Unit,
     onMyList: () -> Unit,
+    onSettings: () -> Unit,
     onSwitchProfile: () -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -255,6 +260,7 @@ private fun UserMenu(
                 .padding(horizontal = 6.dp, vertical = 8.dp),
         ) {
             UserMenuItem("My List", focusRequester = focusRequester, onClick = onMyList)
+            UserMenuItem("Settings", onClick = onSettings)
             UserMenuItem("Switch profile", onClick = onSwitchProfile)
             UserMenuItem("Sign out", onClick = onSignOut)
         }

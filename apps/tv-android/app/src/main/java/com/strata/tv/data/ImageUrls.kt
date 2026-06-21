@@ -25,6 +25,16 @@ class ImageUrls(private val serverUrl: String, private val authStore: AuthStore)
     fun backdrop(itemId: UUID?): String? = image(itemId, ImageType.BACKDROP, maxWidth = 1920)
     fun thumb(itemId: UUID?): String? = image(itemId, ImageType.THUMB, maxWidth = 640)
 
+    /**
+     * Title logo (`/Items/{id}/Images/Logo`). Returns null when the item has no
+     * logo tag so the detail hero falls back to rendering the title as text
+     * rather than firing a request that 404s.
+     */
+    fun logo(item: BaseItemDto, maxWidth: Int = 720): String? {
+        if (item.imageTags.orEmpty()[ImageType.LOGO] == null) return null
+        return image(item.id, ImageType.LOGO, maxWidth = maxWidth)
+    }
+
     // Jellyfin stores the episode still frame under the `Primary` image tag.
     // `Thumb` is rarely populated for episodes — checking imageTags lets us skip
     // the request entirely when neither exists.

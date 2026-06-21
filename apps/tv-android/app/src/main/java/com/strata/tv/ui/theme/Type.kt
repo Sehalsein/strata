@@ -99,7 +99,7 @@ fun mono(
 object StrataText {
     val HeroTitle = TextStyle(
         fontFamily = StrataType.Fraunces, fontWeight = FontWeight.Medium,
-        fontSize = 64.sp, lineHeight = 62.sp, letterSpacing = (-2).sp,
+        fontSize = 48.sp, lineHeight = 50.sp, letterSpacing = (-1.4).sp,
     )
     val DetailTitle = TextStyle(
         fontFamily = StrataType.Fraunces, fontWeight = FontWeight.Medium,

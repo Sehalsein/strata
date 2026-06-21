@@ -9,6 +9,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -68,9 +69,11 @@ fun CastShelf(
         TvLazyRow(
             pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.7f),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
-            modifier = Modifier
-                .padding(horizontal = 44.dp)
-                .focusRestorer(),
+            // contentPadding (not Modifier.padding) so items scroll cleanly to the
+            // screen edge instead of being hard-clipped at a 44dp gutter when the
+            // row scrolls right — the leading cards no longer get cut off.
+            contentPadding = PaddingValues(horizontal = 44.dp),
+            modifier = Modifier.focusRestorer(),
         ) {
             itemsIndexed(people, key = { _, it -> it.id?.toString() ?: it.name.orEmpty() }) { idx, person ->
                 CastCard(
@@ -95,10 +98,12 @@ private fun CastCard(
     val imageUrl = person.id?.let { ServiceLocator.repository.imageUrls.person(it) }
     val initial = (person.name?.firstOrNull()?.uppercaseChar() ?: '?').toString()
 
+    // Outer Column is the (unscaled) focus target so its layout bounds stay
+    // constant — the scale lives on the inner wrapper, which stops the parent
+    // column from re-pivoting vertically on every horizontal D-pad press.
     Column(
         modifier = Modifier
             .width(112.dp)
-            .scale(scale)
             .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
             .clickable(
                 interactionSource = interaction,
@@ -108,6 +113,10 @@ private fun CastCard(
             .onFocusChanged { focused = it.isFocused },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+      Column(
+          modifier = Modifier.scale(scale),
+          horizontalAlignment = Alignment.CenterHorizontally,
+      ) {
         Box(
             modifier = Modifier
                 .size(100.dp)
@@ -142,6 +151,15 @@ private fun CastCard(
                     fontWeight = FontWeight.Medium,
                 ),
             )
+            // Dim every resting portrait so the focused one reads as clearly
+            // brighter — the strongest "this is selected" cue on a wall of faces.
+            if (!focused) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(StrataColors.Bg.copy(alpha = 0.45f)),
+                )
+            }
         }
         Spacer(Modifier.height(10.dp))
         Text(
@@ -162,6 +180,7 @@ private fun CastCard(
                 style = StrataText.CardSub,
             )
         }
+      }
     }
 }
 

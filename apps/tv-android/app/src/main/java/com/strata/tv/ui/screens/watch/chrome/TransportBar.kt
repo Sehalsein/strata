@@ -2,7 +2,6 @@ package com.strata.tv.ui.screens.watch.chrome
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -11,10 +10,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,9 +38,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
@@ -41,14 +50,15 @@ import com.strata.tv.ui.theme.StrataText
 import com.strata.tv.ui.theme.StrataType
 
 /**
- * Bottom-anchored transport bar. Layout: a fine spec strip above
- * (now-playing title), then a single row of:
- *   [play/pause]  current-position  ────────── scrubber ──────────  duration
- *                                                            [audio][subs][info]
+ * Bottom transport chrome, modelled on the Jellyfin Android TV player.
  *
- * Focus model: play/pause is the default focus target when the chrome
- * shows up cold; once the user starts pressing Right, focus moves through
- * the scrubber and onto the trailing buttons.
+ * Layout (top to bottom inside the bottom gradient):
+ *   title · subtitle
+ *   [position] ───────────── seek bar ───────────── [duration]
+ *   [‹‹10] [▶/❚❚] [10››]  ·····  [next] [cc] [audio] [tune]
+ *
+ * Focus model: the seek bar is the default target (DPAD Left/Right scrub).
+ * DPAD Down drops into the transport button row; Up returns to the bar.
  */
 @Composable
 fun TransportBar(
@@ -57,13 +67,20 @@ fun TransportBar(
     status: Status,
     positionMs: Long,
     durationMs: Long,
+    bufferedMs: Long,
+    segments: List<SkipSegment>,
+    hasNext: Boolean,
     onTogglePlay: () -> Unit,
+    onRewind: () -> Unit,
+    onForward: () -> Unit,
+    onNext: () -> Unit,
     onSeek: (Long) -> Unit,
     onScrubChange: (Long?) -> Unit,
     onAudio: () -> Unit,
     onSubtitles: () -> Unit,
     onInfo: () -> Unit,
-    playFocus: FocusRequester,
+    seekFocus: FocusRequester,
+    preview: (@Composable (positionMs: Long) -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
@@ -71,20 +88,21 @@ fun TransportBar(
             .background(
                 Brush.verticalGradient(
                     0f to Color.Transparent,
-                    0.35f to StrataColors.Bg.copy(alpha = 0.6f),
-                    1f to StrataColors.Bg.copy(alpha = 0.95f),
+                    0.30f to StrataColors.Bg.copy(alpha = 0.55f),
+                    1f to StrataColors.Bg.copy(alpha = 0.96f),
                 ),
             )
-            .padding(horizontal = 60.dp, vertical = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(start = 60.dp, end = 60.dp, top = 56.dp, bottom = 36.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = title,
                 color = StrataColors.Paper,
+                maxLines = 1,
                 style = TextStyle(
                     fontFamily = StrataType.Fraunces,
-                    fontSize = 22.sp,
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.Medium,
                 ),
             )
@@ -93,37 +111,58 @@ fun TransportBar(
                 Text(
                     text = "· $it",
                     color = StrataColors.Paper.copy(alpha = 0.6f),
+                    maxLines = 1,
                     style = StrataText.MetaDim,
                 )
             }
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            PlayPauseButton(
-                isPlaying = status == Status.Playing,
-                modifier = Modifier.focusRequester(playFocus),
-                onClick = onTogglePlay,
-            )
-            Spacer(Modifier.width(20.dp))
             Time(positionMs)
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(18.dp))
             Box(modifier = Modifier.weight(1f)) {
                 Scrubber(
                     positionMs = positionMs,
                     durationMs = durationMs,
+                    bufferedMs = bufferedMs,
+                    segments = segments,
                     onSeek = onSeek,
                     onScrubChange = onScrubChange,
                     onTogglePlay = onTogglePlay,
+                    preview = preview,
+                    modifier = Modifier.focusRequester(seekFocus),
                 )
             }
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(18.dp))
             Time(durationMs)
-            Spacer(Modifier.width(28.dp))
-            ChromeIconButton(label = "Audio", onClick = onAudio)
-            Spacer(Modifier.width(10.dp))
-            ChromeIconButton(label = "Subtitles", onClick = onSubtitles)
-            Spacer(Modifier.width(10.dp))
-            ChromeIconButton(label = "Info", onClick = onInfo)
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            ControlButton(icon = Icons.Filled.Replay10, contentDescription = "Rewind 10 seconds", onClick = onRewind)
+            Spacer(Modifier.width(14.dp))
+            ControlButton(
+                icon = if (status == Status.Playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = "Play or pause",
+                onClick = onTogglePlay,
+                primary = true,
+            )
+            Spacer(Modifier.width(14.dp))
+            ControlButton(icon = Icons.Filled.Forward10, contentDescription = "Forward 10 seconds", onClick = onForward)
+
+            Spacer(Modifier.weight(1f))
+
+            if (hasNext) {
+                ControlButton(icon = Icons.Filled.SkipNext, contentDescription = "Next episode", onClick = onNext)
+                Spacer(Modifier.width(14.dp))
+            }
+            ControlButton(icon = Icons.Filled.ClosedCaption, contentDescription = "Subtitles", onClick = onSubtitles)
+            Spacer(Modifier.width(14.dp))
+            ControlButton(icon = Icons.Filled.Audiotrack, contentDescription = "Audio", onClick = onAudio)
+            Spacer(Modifier.width(14.dp))
+            ControlButton(icon = Icons.Filled.Tune, contentDescription = "Stream info", onClick = onInfo)
         }
     }
 }
@@ -139,54 +178,38 @@ private fun Time(ms: Long) {
 }
 
 @Composable
-private fun PlayPauseButton(
-    isPlaying: Boolean,
-    modifier: Modifier = Modifier,
+private fun ControlButton(
+    icon: ImageVector,
+    contentDescription: String,
     onClick: () -> Unit,
+    primary: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "play-scale")
+    val scale by animateFloatAsState(if (focused) 1.12f else 1f, label = "ctrl-scale")
     val interaction = remember { MutableInteractionSource() }
-    Box(
-        modifier = modifier
-            .scale(scale)
-            .clip(RoundedCornerShape(4.dp))
-            .background(if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.95f))
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 12.dp),
-    ) {
-        Text(
-            text = if (isPlaying) "❚❚" else "▶",
-            color = StrataColors.Ink,
-            style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Bold),
-        )
-    }
-}
-
-@Composable
-private fun ChromeIconButton(
-    label: String,
-    onClick: () -> Unit,
-) {
-    var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.05f else 1f, label = "chip-scale")
-    val interaction = remember { MutableInteractionSource() }
+    val box = if (primary) 56.dp else 46.dp
+    val glyph = if (primary) 30.dp else 24.dp
     Box(
         modifier = Modifier
             .scale(scale)
-            .clip(RoundedCornerShape(8.dp))
-            .border(
-                width = 1.dp,
-                color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(8.dp),
+            .size(box)
+            .clip(CircleShape)
+            .background(
+                when {
+                    focused -> StrataColors.Paper
+                    primary -> StrataColors.Paper.copy(alpha = 0.16f)
+                    else -> Color.Transparent
+                },
             )
-            .background(if (focused) StrataColors.Paper.copy(alpha = 0.10f) else Color.Transparent)
             .onFocusChanged { focused = it.isFocused }
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text = label, color = StrataColors.Paper, style = StrataText.Chip)
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = if (focused) StrataColors.Ink else StrataColors.Paper,
+            modifier = Modifier.size(glyph),
+        )
     }
 }

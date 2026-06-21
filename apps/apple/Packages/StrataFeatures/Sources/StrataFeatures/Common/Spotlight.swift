@@ -14,7 +14,7 @@ public enum Spotlight {
         let entries: [CSSearchableItem] = items.compactMap { item in
             let attrs = CSSearchableItemAttributeSet(itemContentType: UTType.movie.identifier)
             attrs.title = item.displayTitle
-            attrs.contentDescription = item.overview
+            attrs.contentDescription = item.overviewText
             attrs.genre = item.genres?.joined(separator: ", ")
             if let year = item.productionYear { attrs.contentCreationDate = makeDate(year: year) }
             if let url = images?.primary(itemId: item.id) {

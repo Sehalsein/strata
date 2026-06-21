@@ -109,4 +109,8 @@ dependencies {
 
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.security.crypto)
+
+    // Android TV launcher home-screen channels (Watch Next + preview rows)
+    implementation(libs.androidx.tvprovider)
+    implementation(libs.androidx.work.runtime)
 }

@@ -8,7 +8,6 @@ import StrataDesign
 struct SettingsView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
-    @State private var showServers = false
     @State private var showAccounts = false
 
     private var appVersion: String {
@@ -46,13 +45,6 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
 
-                    Button { showServers = true } label: {
-                        SettingsActionRow(title: "Switch Server",
-                                          systemImage: "arrow.left.arrow.right",
-                                          tint: .blue, showChevron: true)
-                    }
-                    .buttonStyle(.plain)
-
                     Button(role: .destructive) {
                         services.auth.signOut()
                         services.refreshSessionDependentServices()
@@ -79,7 +71,6 @@ struct SettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .sheet(isPresented: $showServers) { ServerPickerView() }
             .sheet(isPresented: $showAccounts) { AccountPickerView() }
         }
         #if os(macOS)
@@ -87,141 +78,6 @@ struct SettingsView: View {
         #elseif os(iOS)
         .presentationDetents([.medium, .large])
         #endif
-    }
-}
-
-/// Nested sheet listing saved servers. Tap to switch (no re-auth), swipe to
-/// remove, or add a new one via the standard login flow.
-struct ServerPickerView: View {
-    @Environment(AppServices.self) private var services
-    @Environment(\.dismiss) private var dismiss
-    @State private var showAdd = false
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("Servers") {
-                    ForEach(services.auth.savedEndpoints, id: \.self) { url in
-                        Button {
-                            services.auth.switchEndpoint(to: url)
-                            services.refreshSessionDependentServices()
-                            dismiss()
-                        } label: {
-                            endpointRow(url)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .onDelete(perform: deleteEndpoints)
-                }
-
-                Section {
-                    Button { showAdd = true } label: {
-                        SettingsActionRow(title: "Add Server",
-                                          systemImage: "plus", tint: .green)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .navigationTitle("Servers")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-            .sheet(isPresented: $showAdd) { AddServerSheet() }
-        }
-        #if os(macOS)
-        .frame(minWidth: 440, minHeight: 380)
-        #elseif os(iOS)
-        .presentationDetents([.medium, .large])
-        #endif
-    }
-
-    private func endpointRow(_ url: URL) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "server.rack")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 28, height: 28)
-                .background(Color.indigo, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            Text(url.absoluteString)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer()
-            if url == services.auth.session?.serverURL {
-                Image(systemName: "checkmark")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.tint)
-            }
-        }
-        .contentShape(Rectangle())
-    }
-
-    private func deleteEndpoints(_ offsets: IndexSet) {
-        let endpoints = services.auth.savedEndpoints
-        for index in offsets where endpoints.indices.contains(index) {
-            services.auth.removeEndpoint(endpoints[index])
-        }
-        services.refreshSessionDependentServices()
-    }
-}
-
-/// "Add Server" is just a server-address input. It adds the endpoint and
-/// switches the current session to it — same token/user, new base URL. No
-/// login required.
-struct AddServerSheet: View {
-    @Environment(AppServices.self) private var services
-    @Environment(\.dismiss) private var dismiss
-    @State private var address = ""
-
-    private var parsedURL: URL? {
-        guard let url = URL(string: address.trimmingCharacters(in: .whitespaces)),
-              url.scheme != nil else { return nil }
-        return url
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("https://media.example.com", text: $address)
-                        .autocorrectionDisabled()
-                        #if os(iOS)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .onSubmit(add)
-                } header: {
-                    Text("Server Address")
-                } footer: {
-                    Text("Add another address for the same server (e.g. a local IP, domain, or VPN). Switching only changes the endpoint — you stay signed in.")
-                }
-            }
-            .navigationTitle("Add Server")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add", action: add)
-                        .disabled(parsedURL == nil)
-                }
-            }
-        }
-    }
-
-    private func add() {
-        guard let url = parsedURL else { return }
-        services.auth.switchEndpoint(to: url)
-        services.refreshSessionDependentServices()
-        dismiss()
     }
 }
 

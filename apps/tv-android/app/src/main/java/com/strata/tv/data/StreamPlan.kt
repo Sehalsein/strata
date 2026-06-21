@@ -58,6 +58,7 @@ data class AudioStream(
 class StreamPlanner(
     private val client: ApiClient,
     private val authStore: AuthStore,
+    private val prefs: Prefs,
 ) {
     suspend fun build(
         itemId: UUID,
@@ -66,27 +67,36 @@ class StreamPlanner(
         // When true, tell Jellyfin to skip DirectPlay/DirectStream and hand back
         // a real transcode (HLS) URL. Used as the recovery path when a DirectPlay
         // attempt fails to decode on this device — see PlayerEngine.onPlayerError.
+        // The user's "Force transcode" setting (Settings) ORs in here too.
         forceTranscode: Boolean = false,
+        // The detail-screen version picker passes the chosen source id here; the
+        // server scopes PlaybackInfo to it and we select the matching source
+        // below. Null = let the server/first source win (the common single-file
+        // case).
+        mediaSourceId: String? = null,
     ): StreamPlan = withContext(Dispatchers.IO) {
         val userId = requireNotNull(authStore.userId()?.let(UUID::fromString)) {
             "Not signed in"
         }
+        // Honor the user's "Force transcode" setting in addition to the caller's
+        // recovery-path flag.
+        val transcode = forceTranscode || prefs.forceTranscode()
         val res = client.api.mediaInfoApi.getPostedPlaybackInfo(
             itemId = itemId,
             data = PlaybackInfoDto(
                 userId = userId,
-                maxStreamingBitrate = MAX_BITRATE,
+                maxStreamingBitrate = prefs.maxStreamingBitrate(),
                 audioStreamIndex = audioStreamIndex,
                 subtitleStreamIndex = subtitleStreamIndex,
                 autoOpenLiveStream = true,
-                enableDirectPlay = !forceTranscode,
-                enableDirectStream = !forceTranscode,
+                enableDirectPlay = !transcode,
+                enableDirectStream = !transcode,
                 enableTranscoding = true,
                 allowVideoStreamCopy = true,
                 allowAudioStreamCopy = true,
                 maxAudioChannels = null,
                 startTimeTicks = null,
-                mediaSourceId = null,
+                mediaSourceId = mediaSourceId,
                 liveStreamId = null,
                 // Sending DeviceProfile is what makes Jellyfin's
                 // DirectPlay decision authoritative — without it the
@@ -99,7 +109,8 @@ class StreamPlanner(
             ),
         ).content
 
-        val source = res.mediaSources.firstOrNull()
+        val source = mediaSourceId?.let { id -> res.mediaSources.firstOrNull { it.id == id } }
+            ?: res.mediaSources.firstOrNull()
             ?: error("Jellyfin returned no media source")
         val sourceId = source.id ?: error("Media source missing id")
         val playSessionId = res.playSessionId.orEmpty()
@@ -128,7 +139,7 @@ class StreamPlanner(
         // Trust server flags. supportsDirectPlay = the file can stream as
         // bytes-on-wire (Static=true). Otherwise Jellyfin gave us the
         // exact transcode URL its ffmpeg can produce.
-        val preferHls = (forceTranscode || !source.supportsDirectPlay) && transcodingUrl != null
+        val preferHls = (transcode || !source.supportsDirectPlay) && transcodingUrl != null
         val hlsUrl = transcodingUrl ?: directUrl
 
         val streams = source.mediaStreams.orEmpty()

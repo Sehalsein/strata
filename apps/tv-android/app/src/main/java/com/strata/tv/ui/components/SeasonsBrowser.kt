@@ -9,6 +9,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -78,9 +79,10 @@ fun SeasonsBrowser(
             TvLazyRow(
                 pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.1f),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .padding(horizontal = 44.dp)
-                    .focusRestorer(),
+                // contentPadding keeps the leading chip off the edge while letting
+                // the row scroll cleanly to the screen edge (no hard 44dp clip).
+                contentPadding = PaddingValues(horizontal = 44.dp),
+                modifier = Modifier.focusRestorer(),
             ) {
                 items(seasons, key = { it.id.toString() }) { season ->
                     SeasonChip(
@@ -109,9 +111,12 @@ fun SeasonsBrowser(
             TvLazyRow(
                 pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.7f),
                 horizontalArrangement = Arrangement.spacedBy(18.dp),
-                modifier = Modifier
-                    .padding(horizontal = 44.dp)
-                    .focusRestorer(),
+                // contentPadding so episode cards scroll to the screen edge instead
+                // of being cut off at a 44dp gutter when navigating right; the
+                // vertical inset keeps the focused card's scaled-up ring from
+                // being clipped at the row's top/bottom edge.
+                contentPadding = PaddingValues(horizontal = 44.dp, vertical = 8.dp),
+                modifier = Modifier.focusRestorer(),
             ) {
                 itemsIndexed(episodes, key = { _, it -> it.id.toString() }) { idx, ep ->
                     EpisodeCard(
@@ -173,28 +178,34 @@ private fun EpisodeCard(
     val interaction = remember { MutableInteractionSource() }
     val repo = ServiceLocator.repository
 
+    // Outer Column is the unscaled focus target (stable layout bounds → the
+    // parent column doesn't re-pivot vertically as you arrow across the row);
+    // the visual zoom lives on the inner wrapper.
     Column(
         modifier = Modifier
             .width(272.dp)
-            .scale(scale)
             .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .onFocusChanged { focused = it.isFocused },
     ) {
+      Column(modifier = Modifier.scale(scale)) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(8.dp))
-                .background(StrataColors.Bg2)
-                // Always draw a border: a faint resting outline and a bold Paper
-                // ring on focus so the selected episode is unmistakable on a wide
-                // card (matches the poster cards' focus ring).
+                // Focus ring as the OUTERMOST modifier so the whole stroke renders
+                // — a preceding `.clip()` shaves off the outer half and a thin
+                // remainder vanishes against a bright still. The matching padding
+                // insets the artwork so a dark gap sits between ring and image,
+                // making the selected episode unmistakable on any backdrop.
                 .border(
-                    width = if (focused) 4.dp else 1.dp,
-                    color = if (focused) StrataColors.Paper else StrataColors.Paper.copy(alpha = 0.12f),
-                    shape = RoundedCornerShape(8.dp),
-                ),
+                    width = if (focused) 3.dp else 1.dp,
+                    color = if (focused) StrataColors.Accent2 else StrataColors.Paper.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(10.dp),
+                )
+                .padding(if (focused) 4.dp else 1.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(StrataColors.Bg2),
         ) {
             AsyncImage(
                 model = repo.imageUrls.episodeStill(episode),
@@ -202,6 +213,15 @@ private fun EpisodeCard(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
+            // Dim every resting card so the focused episode reads as clearly
+            // brighter — the clearest "this one is selected" cue across the row.
+            if (!focused) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(StrataColors.Bg.copy(alpha = 0.5f)),
+                )
+            }
             // Resume progress underline (Apple parity).
             val resumePct = resumeFraction(episode)
             if (resumePct > 0f) {
@@ -256,6 +276,7 @@ private fun EpisodeCard(
                 style = StrataText.CardSub,
             )
         }
+      }
     }
 }
 

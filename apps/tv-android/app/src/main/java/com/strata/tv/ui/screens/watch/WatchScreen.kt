@@ -32,13 +32,13 @@ import org.jellyfin.sdk.model.api.MediaSegmentType
 import java.util.UUID
 
 @Composable
-fun WatchScreen(nav: NavController, id: String) {
+fun WatchScreen(nav: NavController, id: String, mediaSourceId: String? = null) {
     val itemId = UUID.fromString(id)
     val repo = ServiceLocator.repository
 
-    val bundle by loadable(id) {
+    val bundle by loadable(id, mediaSourceId) {
         val item = repo.getItem(itemId)
-        val plan = repo.streamPlanner.build(itemId)
+        val plan = repo.streamPlanner.build(itemId, mediaSourceId = mediaSourceId)
         // Episodes get an up-next lookup; movies don't. Look up by series.
         val upNext = if (item.type == BaseItemKind.EPISODE) {
             item.seriesId?.let { repo.getNextUp(it) }?.takeIf { it.id != item.id }

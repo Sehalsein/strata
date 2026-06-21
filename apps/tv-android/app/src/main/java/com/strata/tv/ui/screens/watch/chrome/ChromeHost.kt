@@ -61,6 +61,7 @@ fun ChromeHost(
     val status by engine.status.collectAsState()
     val positionMs by engine.positionMs.collectAsState()
     val durationMs by engine.durationMs.collectAsState()
+    val bufferedMs by engine.bufferedMs.collectAsState()
     val audioTracks by engine.audioTracks.collectAsState()
     val subtitleTracks by engine.subtitleTracks.collectAsState()
     val selectedAudio by engine.selectedAudio.collectAsState()
@@ -74,7 +75,7 @@ fun ChromeHost(
     var scrubPos by remember { mutableStateOf<Long?>(null) }
     var lastInteractionMs by remember { mutableStateOf(System.currentTimeMillis()) }
     var upNextDismissed by remember(item.id) { mutableStateOf(false) }
-    val playFocus = remember { FocusRequester() }
+    val seekFocus = remember { FocusRequester() }
     // When the chrome hides, its focusable controls leave composition and focus
     // would be lost — after which key events never reach onPreviewKeyEvent and
     // the chrome could never be summoned back. This focusable root holds focus
@@ -96,7 +97,7 @@ fun ChromeHost(
 
     LaunchedEffect(chromeVisible, menu) {
         if (chromeVisible) {
-            if (menu == null) runCatching { playFocus.requestFocus() }
+            if (menu == null) runCatching { seekFocus.requestFocus() }
         } else {
             // Park focus on the root so it keeps catching key presses.
             runCatching { rootFocus.requestFocus() }
@@ -154,22 +155,6 @@ fun ChromeHost(
         val trickplay = remember(item.id, plan.mediaSourceId) {
             trickplayFor(item, plan.mediaSourceId)
         }
-        AnimatedVisibility(
-            visible = scrubPos != null && trickplay != null,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 140.dp),
-        ) {
-            if (trickplay != null) {
-                TrickplayThumbnail(
-                    itemId = item.id,
-                    info = trickplay,
-                    positionMs = scrubPos ?: positionMs,
-                )
-            }
-        }
 
         AnimatedVisibility(
             visible = chromeVisible,
@@ -183,9 +168,23 @@ fun ChromeHost(
                 status = status,
                 positionMs = positionMs,
                 durationMs = durationMs,
+                bufferedMs = bufferedMs,
+                segments = segments,
+                hasNext = upNext != null,
                 onTogglePlay = {
                     engine.togglePlayPause()
                     bumpInteraction()
+                },
+                onRewind = {
+                    engine.seekBy(-10_000)
+                    bumpInteraction()
+                },
+                onForward = {
+                    engine.seekBy(10_000)
+                    bumpInteraction()
+                },
+                onNext = {
+                    upNext?.let { upNextDismissed = true; onPlayUpNext(it) }
                 },
                 onSeek = { ms ->
                     engine.seekTo(ms)
@@ -195,7 +194,10 @@ fun ChromeHost(
                 onAudio = { menu = ChromeMenu.Audio },
                 onSubtitles = { menu = ChromeMenu.Subtitles },
                 onInfo = { menu = ChromeMenu.Info },
-                playFocus = playFocus,
+                seekFocus = seekFocus,
+                preview = trickplay?.let { info ->
+                    { pos -> TrickplayThumbnail(itemId = item.id, info = info, positionMs = pos) }
+                },
             )
         }
 

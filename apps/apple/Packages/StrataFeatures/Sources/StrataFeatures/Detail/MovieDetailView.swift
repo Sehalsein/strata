@@ -105,7 +105,7 @@ public struct MovieDetailView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if let overview = item.overview {
+                if let overview = item.overviewText {
                     Text(overview)
                         .font(.plex(15))
                         .foregroundStyle(Strata.Tokens.paper.opacity(0.86))
