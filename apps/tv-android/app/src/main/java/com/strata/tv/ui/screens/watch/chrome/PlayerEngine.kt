@@ -53,6 +53,9 @@ class PlayerEngine(
     private val _durationMs = MutableStateFlow(0L)
     val durationMs: StateFlow<Long> = _durationMs.asStateFlow()
 
+    private val _bufferedMs = MutableStateFlow(0L)
+    val bufferedMs: StateFlow<Long> = _bufferedMs.asStateFlow()
+
     private val _audioTracks = MutableStateFlow<List<AudioStream>>(emptyList())
     val audioTracks: StateFlow<List<AudioStream>> = _audioTracks.asStateFlow()
 
@@ -116,7 +119,12 @@ class PlayerEngine(
                 scope.launch {
                     Log.i("Strata", "DirectPlay failed; retrying via transcode at $pos s")
                     val fresh = runCatching {
-                        ServiceLocator.repository.streamPlanner.build(item.id, forceTranscode = true)
+                        ServiceLocator.repository.streamPlanner.build(
+                            item.id,
+                            forceTranscode = true,
+                            // Keep the version the user picked when falling back.
+                            mediaSourceId = plan.mediaSourceId,
+                        )
                     }.getOrNull()
                     if (fresh != null && fresh.preferHls) {
                         currentPlan = fresh
@@ -136,6 +144,18 @@ class PlayerEngine(
 
     init {
         exoPlayer.addListener(listener)
+        // Seed track selection from the user's preferred languages (Settings) so
+        // ExoPlayer auto-picks them when the stream has matching tracks. Per-title
+        // overrides via the audio/subtitle menus still win at runtime.
+        val prefs = ServiceLocator.prefs
+        val audioLang = prefs.preferredAudioLang()
+        val subLang = prefs.preferredSubtitleLang()
+        if (audioLang != null || subLang != null) {
+            var builder = exoPlayer.trackSelectionParameters.buildUpon()
+            audioLang?.let { builder = builder.setPreferredAudioLanguage(it) }
+            subLang?.let { builder = builder.setPreferredTextLanguage(it) }
+            exoPlayer.trackSelectionParameters = builder.build()
+        }
     }
 
     /** Bind a new item + plan to the engine. Resets position state. */
@@ -232,6 +252,7 @@ class PlayerEngine(
             while (true) {
                 _positionMs.value = exoPlayer.currentPosition
                 _durationMs.value = exoPlayer.duration.coerceAtLeast(0)
+                _bufferedMs.value = exoPlayer.bufferedPosition.coerceAtLeast(0)
                 delay(250)
             }
         }

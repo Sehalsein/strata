@@ -18,6 +18,8 @@ serialization = "1.7.3"
 datastore = "1.1.1"
 securityCrypto = "1.1.0-alpha06"
 core = "1.13.1"
+tvProvider = "1.0.0"
+work = "2.9.1"
 
 [libraries]
 androidx-core = { module = "androidx.core:core-ktx", version.ref = "core" }
@@ -57,6 +59,9 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "securityCrypto" }
+
+androidx-tvprovider = { module = "androidx.tvprovider:tvprovider", version.ref = "tvProvider" }
+androidx-work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

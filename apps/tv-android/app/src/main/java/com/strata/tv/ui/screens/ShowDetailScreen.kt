@@ -1,5 +1,7 @@
 package com.strata.tv.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -38,6 +41,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -99,6 +103,7 @@ private fun ShowContent(nav: NavController, bundle: ShowBundle) {
     val palette = paletteFor(bundle.series.id.toString())
     val opus = opusFor(bundle.series.id.toString())
     val repo = ServiceLocator.repository
+    val context = LocalContext.current
     val beginFocus = remember { FocusRequester() }
     val castFocus = remember { FocusRequester() }
     val hasCast = !bundle.series.people.isNullOrEmpty()
@@ -109,6 +114,10 @@ private fun ShowContent(nav: NavController, bundle: ShowBundle) {
     var isFavorite by remember(bundle.series.id) {
         mutableStateOf(bundle.series.userData?.isFavorite ?: false)
     }
+    var isWatched by remember(bundle.series.id) {
+        mutableStateOf(bundle.series.userData?.played ?: false)
+    }
+    val trailerUrl = bundle.series.remoteTrailers?.firstOrNull()?.url
     val episodes by loadable(bundle.series.id, selectedSeason?.id) {
         selectedSeason?.let { repo.getEpisodes(bundle.series.id, it.id) } ?: emptyList()
     }
@@ -117,10 +126,10 @@ private fun ShowContent(nav: NavController, bundle: ShowBundle) {
 
     CompositionLocalProvider(LocalStrataPalette provides palette) {
         TvLazyColumn(
-            // High pivot pins the tall hero to the top (its bottom-anchored
-            // buttons rest above this line, so no upward scroll clips the title
-            // under the floating app bar). Matches the Home standard.
-            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.5f),
+            // Pivot matches the hero's button row (~0.6 of the viewport for a
+            // 0.68-tall hero) so focusing Play on load doesn't scroll the column
+            // and clip the cover. Matches the Home standard.
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.62f),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(36.dp),
@@ -130,10 +139,19 @@ private fun ShowContent(nav: NavController, bundle: ShowBundle) {
                     series = bundle.series,
                     opus = opus,
                     isFavorite = isFavorite,
+                    isWatched = isWatched,
                     onPlay = {
                         val target = pickFirstWatchTarget(bundle.series)
                             ?: bundle.series.id
                         nav.navigate(Routes.watch(target.toString()))
+                    },
+                    onPlayTrailer = trailerUrl?.let {
+                        {
+                            runCatching {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it)))
+                            }
+                            Unit
+                        }
                     },
                     onBack = { nav.popBackStack() },
                     onToggleFavorite = {
@@ -142,6 +160,14 @@ private fun ShowContent(nav: NavController, bundle: ShowBundle) {
                         scope.launch {
                             runCatching { repo.setFavorite(bundle.series.id, next) }
                                 .onFailure { isFavorite = !next }
+                        }
+                    },
+                    onToggleWatched = {
+                        val next = !isWatched
+                        isWatched = next
+                        scope.launch {
+                            runCatching { repo.setPlayed(bundle.series.id, next) }
+                                .onFailure { isWatched = !next }
                         }
                     },
                     beginFocus = beginFocus,
@@ -200,13 +226,17 @@ private fun Hero(
     series: BaseItemDto,
     opus: String,
     isFavorite: Boolean,
+    isWatched: Boolean,
     onPlay: () -> Unit,
+    onPlayTrailer: (() -> Unit)?,
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onToggleWatched: () -> Unit,
     beginFocus: FocusRequester,
     downTarget: FocusRequester? = null,
 ) {
     val repo = ServiceLocator.repository
+    val logoUrl = repo.imageUrls.logo(series)
     // Tall hero so the bottom-anchored title/overview/buttons stack sits low
     // enough to clear the floating app bar at the top. Matches the Home cover.
     val heroHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.68f).dp
@@ -244,12 +274,22 @@ private fun Hero(
                 .padding(start = 56.dp, bottom = 44.dp, end = 40.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = series.name.orEmpty(),
-                color = StrataColors.Paper,
-                maxLines = 2,
-                style = StrataText.DetailTitle,
-            )
+            if (logoUrl != null) {
+                AsyncImage(
+                    model = logoUrl,
+                    contentDescription = series.name,
+                    contentScale = ContentScale.Fit,
+                    alignment = Alignment.BottomStart,
+                    modifier = Modifier.heightIn(max = 132.dp).widthIn(max = 520.dp),
+                )
+            } else {
+                Text(
+                    text = series.name.orEmpty(),
+                    color = StrataColors.Paper,
+                    maxLines = 2,
+                    style = StrataText.DetailTitle,
+                )
+            }
             series.taglines?.firstOrNull()?.let {
                 Text(text = it, color = StrataColors.Accent2, style = StrataText.Tagline)
             }
@@ -279,7 +319,9 @@ private fun Hero(
                     modifier = Modifier.focusRequester(beginFocus).then(downMod),
                     onClick = onPlay,
                 )
-                SecondaryButton(label = "Back", modifier = downMod, onClick = onBack)
+                if (onPlayTrailer != null) {
+                    SecondaryButton(label = "Trailer", leadingGlyph = "▶", modifier = downMod, onClick = onPlayTrailer)
+                }
                 SecondaryButton(
                     label = if (isFavorite) "Watchlisted" else "Watchlist",
                     leadingGlyph = if (isFavorite) "★" else "☆",
@@ -287,6 +329,14 @@ private fun Hero(
                     modifier = downMod,
                     onClick = onToggleFavorite,
                 )
+                SecondaryButton(
+                    label = if (isWatched) "Watched" else "Mark Watched",
+                    leadingGlyph = if (isWatched) "✓" else null,
+                    accent = isWatched,
+                    modifier = downMod,
+                    onClick = onToggleWatched,
+                )
+                SecondaryButton(label = "Back", modifier = downMod, onClick = onBack)
             }
         }
     }

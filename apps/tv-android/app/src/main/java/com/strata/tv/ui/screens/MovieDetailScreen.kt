@@ -38,6 +38,10 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -92,20 +96,31 @@ private fun DetailContent(nav: NavController, bundle: DetailBundle) {
     val palette = paletteFor(item.id.toString())
     val opus = opusFor(item.id.toString())
     val repo = ServiceLocator.repository
+    val context = LocalContext.current
     val beginFocus = remember { FocusRequester() }
     var isFavorite by remember(item.id) {
         mutableStateOf(item.userData?.isFavorite ?: false)
     }
+    var isWatched by remember(item.id) {
+        mutableStateOf(item.userData?.played ?: false)
+    }
     val scope = rememberCoroutineScope()
+
+    // First trailer URL, if Jellyfin has one — opens in the device's browser /
+    // YouTube app rather than an in-app player (v1).
+    val trailerUrl = item.remoteTrailers?.firstOrNull()?.url
+    // Alternate versions (multi-edition / quality). Only offered when there's a
+    // real choice to make.
+    val versions = item.mediaSources?.takeIf { it.size > 1 }.orEmpty()
 
     LaunchedEffect(Unit) { runCatching { beginFocus.requestFocus() } }
 
     CompositionLocalProvider(LocalStrataPalette provides palette) {
         TvLazyColumn(
-            // High pivot pins the tall hero to the top (its bottom-anchored
-            // buttons rest above this line, so no upward scroll clips the title
-            // under the floating app bar). Matches the Home standard.
-            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.5f),
+            // Pivot matches the hero's button row (~0.6 of the viewport for a
+            // 0.68-tall hero) so focusing Play on load doesn't scroll the column
+            // and clip the cover. Matches the Home standard.
+            pivotOffsets = androidx.tv.foundation.PivotOffsets(parentFraction = 0.62f),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(36.dp),
@@ -115,7 +130,20 @@ private fun DetailContent(nav: NavController, bundle: DetailBundle) {
                     item = item,
                     opus = opus,
                     isFavorite = isFavorite,
+                    isWatched = isWatched,
+                    versions = versions,
                     onPlay = { nav.navigate(Routes.watch(item.id.toString())) },
+                    onPlayVersion = { sourceId ->
+                        nav.navigate(Routes.watch(item.id.toString(), sourceId))
+                    },
+                    onPlayTrailer = trailerUrl?.let {
+                        {
+                            runCatching {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it)))
+                            }
+                            Unit
+                        }
+                    },
                     onBack = { nav.popBackStack() },
                     onToggleFavorite = {
                         val next = !isFavorite
@@ -123,6 +151,14 @@ private fun DetailContent(nav: NavController, bundle: DetailBundle) {
                         scope.launch {
                             runCatching { repo.setFavorite(item.id, next) }
                                 .onFailure { isFavorite = !next }
+                        }
+                    },
+                    onToggleWatched = {
+                        val next = !isWatched
+                        isWatched = next
+                        scope.launch {
+                            runCatching { repo.setPlayed(item.id, next) }
+                                .onFailure { isWatched = !next }
                         }
                     },
                     beginFocus = beginFocus,
@@ -183,12 +219,18 @@ private fun Hero(
     item: BaseItemDto,
     opus: String,
     isFavorite: Boolean,
+    isWatched: Boolean,
+    versions: List<org.jellyfin.sdk.model.api.MediaSourceInfo>,
     onPlay: () -> Unit,
+    onPlayVersion: (String) -> Unit,
+    onPlayTrailer: (() -> Unit)?,
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onToggleWatched: () -> Unit,
     beginFocus: FocusRequester,
 ) {
     val repo = ServiceLocator.repository
+    val logoUrl = repo.imageUrls.logo(item)
     // Tall hero so the bottom-anchored title/overview/buttons stack sits low
     // enough to clear the floating app bar at the top. Matches the Home cover.
     val heroHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.68f).dp
@@ -228,12 +270,22 @@ private fun Hero(
                     .padding(start = 56.dp, bottom = 44.dp, end = 40.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    text = item.name.orEmpty(),
-                    color = StrataColors.Paper,
-                    maxLines = 2,
-                    style = StrataText.DetailTitle,
-                )
+                if (logoUrl != null) {
+                    AsyncImage(
+                        model = logoUrl,
+                        contentDescription = item.name,
+                        contentScale = ContentScale.Fit,
+                        alignment = Alignment.BottomStart,
+                        modifier = Modifier.heightIn(max = 132.dp).widthIn(max = 520.dp),
+                    )
+                } else {
+                    Text(
+                        text = item.name.orEmpty(),
+                        color = StrataColors.Paper,
+                        maxLines = 2,
+                        style = StrataText.DetailTitle,
+                    )
+                }
                 item.taglines?.firstOrNull()?.let {
                     Text(text = it, color = StrataColors.Accent2, style = StrataText.Tagline)
                 }
@@ -256,13 +308,43 @@ private fun Hero(
                         modifier = Modifier.focusRequester(beginFocus),
                         onClick = onPlay,
                     )
-                    SecondaryButton(label = "Back", onClick = onBack)
+                    if (onPlayTrailer != null) {
+                        SecondaryButton(label = "Trailer", leadingGlyph = "▶", onClick = onPlayTrailer)
+                    }
                     SecondaryButton(
                         label = if (isFavorite) "Watchlisted" else "Watchlist",
                         leadingGlyph = if (isFavorite) "★" else "☆",
                         accent = isFavorite,
                         onClick = onToggleFavorite,
                     )
+                    SecondaryButton(
+                        label = if (isWatched) "Watched" else "Mark Watched",
+                        leadingGlyph = if (isWatched) "✓" else null,
+                        accent = isWatched,
+                        onClick = onToggleWatched,
+                    )
+                    SecondaryButton(label = "Back", onClick = onBack)
+                }
+                if (versions.isNotEmpty()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            text = "Version",
+                            color = StrataColors.Paper.copy(alpha = 0.6f),
+                            style = StrataText.Meta,
+                        )
+                        versions.forEach { src ->
+                            val sid = src.id
+                            if (sid != null) {
+                                GenreChip(
+                                    label = src.name ?: "Source",
+                                    onClick = { onPlayVersion(sid) },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

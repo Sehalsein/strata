@@ -125,5 +125,25 @@ public extension BaseItem {
         return TimeInterval(ticks) / 10_000_000
     }
 
+    /// Fraction watched in `0...1`, for resume progress bars. Prefers
+    /// Jellyfin's server-computed `playedPercentage`; falls back to
+    /// position ÷ runtime. Nil when there's nothing meaningful to show.
+    var watchedFraction: Double? {
+        if let pct = userData?.playedPercentage, pct > 0 {
+            return min(pct / 100, 1)
+        }
+        guard let position = resumePositionSeconds,
+              let total = runtimeSeconds, total > 0 else { return nil }
+        return min(position / total, 1)
+    }
+
     var displayTitle: String { name ?? originalTitle ?? "Untitled" }
+
+    /// `overview` with Jellyfin's embedded HTML (`<br>`, `<i>`, `&amp;`, …)
+    /// converted to clean, wrappable plain text. Nil/empty stays nil.
+    var overviewText: String? {
+        guard let overview, !overview.isEmpty else { return nil }
+        let cleaned = overview.strippingHTML()
+        return cleaned.isEmpty ? nil : cleaned
+    }
 }

@@ -66,7 +66,7 @@ public struct CollectionDetailView: View {
                 Chip("Collection", variant: .solid)
                 Chip("\(films.count) Films", variant: .outline)
             }
-            if let overview = item.overview, !overview.isEmpty {
+            if let overview = item.overviewText {
                 Text(overview)
                     .font(.plex(15))
                     .foregroundStyle(Strata.Tokens.paper.opacity(0.86))

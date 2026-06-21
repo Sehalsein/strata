@@ -6,6 +6,7 @@ import org.jellyfin.sdk.api.client.extensions.genresApi
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.client.extensions.libraryApi
 import org.jellyfin.sdk.api.client.extensions.mediaSegmentsApi
+import org.jellyfin.sdk.api.client.extensions.playStateApi
 import org.jellyfin.sdk.api.client.extensions.tvShowsApi
 import org.jellyfin.sdk.api.client.extensions.userApi
 import org.jellyfin.sdk.api.client.extensions.userLibraryApi
@@ -15,6 +16,7 @@ import org.jellyfin.sdk.model.api.AuthenticateUserByName
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.BaseItemPerson
+import org.jellyfin.sdk.model.api.CollectionType
 import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemFilter
 import org.jellyfin.sdk.model.api.ItemSortBy
@@ -38,8 +40,9 @@ private suspend inline fun <T> io(crossinline block: suspend () -> T): T =
 class Repository(
     private val client: ApiClient,
     private val authStore: AuthStore,
+    private val prefs: Prefs,
 ) {
-    val streamPlanner = StreamPlanner(client, authStore)
+    val streamPlanner = StreamPlanner(client, authStore, prefs)
     val progress = ProgressReporter(client)
     val imageUrls = ImageUrls(client.serverUrl, authStore)
     val serverUrl: String get() = client.serverUrl
@@ -130,14 +133,20 @@ class Repository(
     suspend fun listMovies(
         sort: LibrarySort = LibrarySort.RECENT,
         genres: List<String>? = null,
+        parentId: UUID? = null,
+        nameStartsWith: String? = null,
+        filters: List<ItemFilter>? = null,
     ): List<BaseItemDto> = io {
         client.api.itemsApi.getItems(
             userId = userId(),
+            parentId = parentId,
             includeItemTypes = listOf(BaseItemKind.MOVIE),
             recursive = true,
             sortBy = listOf(sort.by),
             sortOrder = listOf(sort.order),
             genres = genres,
+            nameStartsWith = nameStartsWith,
+            filters = filters,
             fields = movieFields,
         ).content.items.orEmpty()
     }
@@ -145,14 +154,20 @@ class Repository(
     suspend fun listShows(
         sort: LibrarySort = LibrarySort.RECENT,
         genres: List<String>? = null,
+        parentId: UUID? = null,
+        nameStartsWith: String? = null,
+        filters: List<ItemFilter>? = null,
     ): List<BaseItemDto> = io {
         client.api.itemsApi.getItems(
             userId = userId(),
+            parentId = parentId,
             includeItemTypes = listOf(BaseItemKind.SERIES),
             recursive = true,
             sortBy = listOf(sort.by),
             sortOrder = listOf(sort.order),
             genres = genres,
+            nameStartsWith = nameStartsWith,
+            filters = filters,
             fields = listOf(ItemFields.OVERVIEW, ItemFields.GENRES),
         ).content.items.orEmpty()
     }
@@ -242,8 +257,56 @@ class Repository(
         )
     }
 
-    suspend fun featured(): List<BaseItemDto> = io {
+    /**
+     * The user's library views (Movies, Shows, …) — the source for Home's
+     * "My Media" tile row and the per-library "Latest in <view>" rows. Filtered
+     * to the collection types we render so a Music or Photos view doesn't open an
+     * empty movie/show grid.
+     */
+    suspend fun libraryViews(): List<BaseItemDto> = io {
         client.api.userViewsApi.getUserViews(userId = userId()).content.items.orEmpty()
+            .filter { it.collectionType in BROWSABLE_VIEWS }
+    }
+
+    /**
+     * Recently added items in one library view, for Home's "Latest in <view>"
+     * rows. `getLatestMedia` returns a bare list (not a query result).
+     */
+    suspend fun latestInLibrary(parentId: UUID, limit: Int = 20): List<BaseItemDto> = io {
+        runCatching {
+            client.api.userLibraryApi.getLatestMedia(
+                userId = userId(),
+                parentId = parentId,
+                limit = limit,
+                fields = listOf(ItemFields.OVERVIEW),
+            ).content
+        }.getOrElse { emptyList() }
+    }
+
+    /**
+     * Next episode to watch across every in-progress series, for Home's
+     * "Next Up" row. Distinct from the player's per-series `getNextUp(seriesId)`.
+     */
+    suspend fun nextUp(limit: Int = 24): List<BaseItemDto> = io {
+        runCatching {
+            client.api.tvShowsApi.getNextUp(
+                userId = userId(),
+                limit = limit,
+                fields = listOf(ItemFields.OVERVIEW),
+            ).content.items.orEmpty()
+        }.getOrElse { emptyList() }
+    }
+
+    /**
+     * Mark watched / unwatched. Optimistic UI lives in the caller; mirrors
+     * [setFavorite].
+     */
+    suspend fun setPlayed(itemId: UUID, played: Boolean): Unit = io {
+        if (played) {
+            client.api.playStateApi.markPlayedItem(userId = userId(), itemId = itemId)
+        } else {
+            client.api.playStateApi.markUnplayedItem(userId = userId(), itemId = itemId)
+        }
     }
 
     /**
@@ -297,6 +360,9 @@ class Repository(
 }
 
 data class SearchResults(val movies: List<BaseItemDto>, val shows: List<BaseItemDto>)
+
+/** Library view collection types we can open in a poster grid. */
+private val BROWSABLE_VIEWS = setOf(CollectionType.MOVIES, CollectionType.TVSHOWS)
 
 /** How a library grid is ordered. Mirrors the Apple app's `ItemSort`. */
 enum class LibrarySort(

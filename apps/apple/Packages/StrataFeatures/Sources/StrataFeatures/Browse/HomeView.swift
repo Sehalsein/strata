@@ -143,10 +143,7 @@ public struct HomeView: View {
     }
 
     private func appendRoute(for item: BaseItem) {
-        switch item.type {
-        case .episode, .series: path.append(.show(id: item.id))
-        default: path.append(.movie(id: item.id))
-        }
+        path.append(defaultRoute(for: item))
     }
 
     private func tvAccountSection(name: String) -> some View {
@@ -205,7 +202,7 @@ public struct HomeView: View {
     @ViewBuilder
     private var shelves: some View {
         if !resume.isEmpty {
-            Shelf(title: "Continue Watching", items: resume, images: services.images) { item in
+            ContinueShelf(title: "Continue Watching", items: resume, images: services.images) { item in
                 path.append(.watch(.init(itemId: item.id, startSeconds: item.resumePositionSeconds)))
             }
         }
@@ -216,12 +213,12 @@ public struct HomeView: View {
         }
         if !movies.isEmpty {
             Shelf(title: "Recent Films", items: movies, images: services.images) { item in
-                path.append(.movie(id: item.id))
+                path.append(defaultRoute(for: item))
             }
         }
         if !shows.isEmpty {
             Shelf(title: "Recent Series", items: shows, images: services.images) { item in
-                path.append(.show(id: item.id))
+                path.append(defaultRoute(for: item))
             }
         }
     }
@@ -432,7 +429,7 @@ private struct HeroBillboard: View {
 
     private var blurb: String? {
         if let line = item.taglines?.first, !line.isEmpty { return line }
-        if let overview = item.overview, !overview.isEmpty { return overview }
+        if let overview = item.overviewText { return overview }
         return nil
     }
 }
