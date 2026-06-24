@@ -142,6 +142,7 @@ public struct MovieDetailView: View {
             .padding(.top, 12)
             .padding(.bottom, CGFloat.strataScrollBottom)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .environment(\.pageGutter, textGutter)
         }
         // Bleed the hero into the top safe area, but keep the bottom inset so
         // content clears the tab bar / home indicator instead of hiding under

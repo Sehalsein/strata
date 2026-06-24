@@ -11,9 +11,30 @@ public struct ShowDetailView: View {
     @State private var state: Loadable<BaseItem> = .idle
     @State private var seasons: [BaseItem] = []
     @State private var selectedSeason: BaseItem?
-    @State private var episodes: [BaseItem] = []
+    /// Every episode of the series, fetched once. The visible `episodes` list is
+    /// derived from this by filtering on `selectedSeason` — see below. Deriving
+    /// client-side (instead of re-fetching per season) keeps the list perfectly
+    /// in sync with the highlighted season chip and sidesteps any server-side
+    /// `seasonId` filtering quirk that left the list frozen on one season.
+    @State private var allEpisodes: [BaseItem] = []
     @State private var similar: [BaseItem] = []
     @State private var isFavorite: Bool = false
+    /// In-progress / next-unwatched episode for a mid-series viewer. Drives the
+    /// primary Play button so it resumes instead of always offering S01E01.
+    @State private var resumeTarget: BaseItem?
+
+    /// Episodes of the selected season, derived from `allEpisodes`. Matches on
+    /// the season's item id first, falling back to its number, so it stays
+    /// correct even if some episodes carry only one of those fields.
+    private var episodes: [BaseItem] {
+        guard let season = selectedSeason else { return [] }
+        let byId = allEpisodes.filter { $0.seasonId == season.id }
+        if !byId.isEmpty { return byId }
+        if let number = season.indexNumber {
+            return allEpisodes.filter { $0.parentIndexNumber == number }
+        }
+        return byId
+    }
 
     public init(id: String, path: Binding<[Route]>) {
         self.id = id
@@ -29,10 +50,6 @@ public struct ShowDetailView: View {
             }
         }
         .task { await load() }
-        .onChange(of: selectedSeason) { _, new in
-            guard let new else { return }
-            Task { await loadEpisodes(seasonId: new.id) }
-        }
     }
 
     private func detail(item: BaseItem) -> some View {
@@ -129,6 +146,7 @@ public struct ShowDetailView: View {
             .padding(.top, 12)
             .padding(.bottom, CGFloat.strataScrollBottom)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .environment(\.pageGutter, textGutter)
         }
         #if os(tvOS)
         .ignoresSafeArea()
@@ -156,11 +174,14 @@ public struct ShowDetailView: View {
     }
 
     private var actionRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        // Resume the in-progress / next-unwatched episode when there is one,
+        // otherwise start from the first episode of the selected season.
+        let target = resumeTarget ?? episodes.first
+        return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
-                if let firstEpisode = episodes.first {
-                    PrimaryButton(playLabel(firstEpisode), systemImage: "play.fill") {
-                        services.coordinator.requestWatch(firstEpisode.id, start: firstEpisode.resumePositionSeconds)
+                if let target {
+                    PrimaryButton(playLabel(target), systemImage: "play.fill") {
+                        services.coordinator.requestWatch(target.id, start: target.resumePositionSeconds)
                     }
                 }
                 WatchlistButton(itemId: id, isFavorite: $isFavorite, client: services.client)
@@ -171,7 +192,8 @@ public struct ShowDetailView: View {
     private func playLabel(_ episode: BaseItem) -> String {
         let season = episode.parentIndexNumber ?? 1
         let epNum = episode.indexNumber ?? 1
-        return String(format: "Play S%02d·E%02d", season, epNum)
+        let verb = episode.resumePositionSeconds != nil ? "Resume" : "Play"
+        return String(format: "%@ S%02d·E%02d", verb, season, epNum)
     }
 
     private var seasonStrip: some View {
@@ -260,22 +282,24 @@ public struct ShowDetailView: View {
         // Seasons and recommendations are secondary; fetch them alongside the
         // series so neither blocks the hero from appearing.
         async let seasonsTask = (try? await client.getSeasons(seriesId: id)) ?? []
+        async let episodesTask = (try? await client.getEpisodes(seriesId: id)) ?? []
         async let similarTask = (try? await client.getSimilarItems(itemId: id, limit: 12)) ?? []
+        async let nextUpTask = (try? await client.nextUp(seriesId: id)) ?? nil
         let result = await loadable { try await client.getItem(id) }
         state = result
         if case .loaded(let fetched) = result {
             isFavorite = fetched.userData?.isFavorite ?? false
         }
         seasons = await seasonsTask
+        allEpisodes = await episodesTask
         similar = await similarTask
-        if let first = seasons.first {
-            selectedSeason = first
-            await loadEpisodes(seasonId: first.id)
-        }
-    }
-
-    private func loadEpisodes(seasonId: String) async {
-        guard let client = services.client else { return }
-        episodes = (try? await client.getEpisodes(seriesId: id, seasonId: seasonId)) ?? []
+        resumeTarget = await nextUpTask
+        // Open on the season holding the resume target so the episode list lands
+        // where the viewer left off; otherwise fall back to the first season.
+        // `episodes` is derived from `selectedSeason`, so this is all it takes —
+        // tapping another chip re-derives the list with no extra fetch.
+        selectedSeason = resumeTarget
+            .flatMap { target in seasons.first(where: { $0.id == target.seasonId }) }
+            ?? seasons.first
     }
 }
