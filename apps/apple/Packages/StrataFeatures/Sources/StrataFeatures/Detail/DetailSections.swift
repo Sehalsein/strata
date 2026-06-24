@@ -75,6 +75,7 @@ public struct CastShelf: View {
     public let people: [Person]
     public let images: ImageURLBuilder?
     public let onSelect: ((Person) -> Void)?
+    @Environment(\.pageGutter) private var pageGutter
 
     public init(people: [Person], images: ImageURLBuilder?, onSelect: ((Person) -> Void)? = nil) {
         self.people = people
@@ -109,6 +110,9 @@ public struct CastShelf: View {
                 .padding(.vertical, 4)
                 #endif
             }
+            #if !os(tvOS)
+            .fullBleedRow(gutter: pageGutter)
+            #endif
         }
     }
 

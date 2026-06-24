@@ -8,6 +8,7 @@ public struct HomeView: View {
 
     @State private var recent: [BaseItem] = []
     @State private var resume: [BaseItem] = []
+    @State private var watchNext: [BaseItem] = []
     @State private var movies: [BaseItem] = []
     @State private var shows: [BaseItem] = []
     @State private var isLoading = true
@@ -55,6 +56,7 @@ public struct HomeView: View {
             .padding(.horizontal, 28)
             .padding(.top, 32)
             .padding(.bottom, CGFloat.strataScrollBottom)
+            .environment(\.pageGutter, 28)
         }
         #if !os(tvOS)
         .refreshable { await reload() }
@@ -62,7 +64,7 @@ public struct HomeView: View {
     }
 
     private var isEverythingEmpty: Bool {
-        recent.isEmpty && resume.isEmpty && movies.isEmpty && shows.isEmpty
+        recent.isEmpty && resume.isEmpty && watchNext.isEmpty && movies.isEmpty && shows.isEmpty
     }
 
     private var header: some View {
@@ -206,6 +208,11 @@ public struct HomeView: View {
                 path.append(.watch(.init(itemId: item.id, startSeconds: item.resumePositionSeconds)))
             }
         }
+        if !watchNext.isEmpty {
+            ContinueShelf(title: "Watch Next", items: watchNext, images: services.images) { item in
+                path.append(.watch(.init(itemId: item.id, startSeconds: item.resumePositionSeconds)))
+            }
+        }
         if !recent.isEmpty {
             Shelf(title: "Recently Added", items: recent, images: services.images) { item in
                 path.append(defaultRoute(for: item))
@@ -242,12 +249,18 @@ public struct HomeView: View {
         do {
             async let recentT = client.recentlyAdded(limit: 20)
             async let resumeT = client.continueWatching()
+            async let nextUpT = client.nextUp()
             async let moviesT = client.listMovies(limit: 20)
             async let showsT = client.listShows(limit: 20)
             recent = try await recentT
             resume = try await resumeT
             movies = try await moviesT
             shows = try await showsT
+            // Drop any next-up episode the viewer is already mid-way through —
+            // those surface in Continue Watching, so showing them here too would
+            // duplicate the same card in two adjacent rails.
+            let resumeIds = Set(resume.map(\.id))
+            watchNext = try await nextUpT.filter { !resumeIds.contains($0.id) }
             // Push everything into Spotlight so the user can launch a title
             // from system search. Spotlight dedupes by `uniqueIdentifier`.
             Spotlight.index(items: movies + shows, images: services.images)

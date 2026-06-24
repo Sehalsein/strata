@@ -112,6 +112,10 @@ public final class PlayerEngine {
 
     public func load(item: BaseItem) async {
         guard let jellyfin else { status = .failed("No client configured"); return }
+        // A reload of the *same* item (an audio/subtitle switch re-plans the
+        // stream) must keep the viewer's chosen audio track; a genuinely new
+        // item falls back to the source's default below.
+        let isReload = self.item?.id == item.id
         await teardownCurrentItem()
         self.item = item
         status = .loading
@@ -141,7 +145,14 @@ public final class PlayerEngine {
             }
             audioTracks = (source?.mediaStreams ?? []).filter { $0.type == .audio }
             subtitleTracks = (source?.mediaStreams ?? []).filter { $0.type == .subtitle }
-            activeAudioIndex = audioTracks.first(where: { $0.isDefault ?? false })?.index ?? audioTracks.first?.index
+            // Keep the viewer's audio choice across a same-item reload; otherwise
+            // pick the source's default (or first) track. Without this guard the
+            // reload triggered by selectAudio(_:) would snap straight back to the
+            // default, leaving the picker's checkmark out of sync with playback.
+            let keepsAudio = isReload && audioTracks.contains { $0.index == activeAudioIndex }
+            if !keepsAudio {
+                activeAudioIndex = audioTracks.first(where: { $0.isDefault ?? false })?.index ?? audioTracks.first?.index
+            }
             // Subtitles default to off until user enables.
 
             duration = item.runtimeSeconds ?? 0

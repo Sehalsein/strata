@@ -14,6 +14,10 @@ public struct WatchView: View {
     @State private var showStreamDetails = false
     @State private var pip = PiPController()
     @State private var upNext: BaseItem?
+    /// The next episode is fetched at load time but the card stays hidden until
+    /// the playhead nears the end — this gate keeps it out of the way at the
+    /// start of the episode.
+    @State private var showUpNext = false
     @State private var upNextCountdown: Int = 30
     @State private var upNextTimer: Task<Void, Never>?
     @State private var trickplayProvider: TrickplayProvider?
@@ -86,7 +90,7 @@ public struct WatchView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            if let next = upNext {
+            if showUpNext, let next = upNext {
                 VStack {
                     Spacer()
                     UpNextCard(
@@ -125,8 +129,17 @@ public struct WatchView: View {
             #if !os(tvOS)
             if !hideChrome {
                 VStack {
-                    HStack {
+                    HStack(spacing: 12) {
                         Spacer()
+                        if services.engine.audioTracks.count > 1 {
+                            AudioTrackMenu(
+                                tracks: services.engine.audioTracks,
+                                activeIndex: services.engine.activeAudioIndex,
+                                onSelect: { stream in
+                                    Task { await services.engine.selectAudio(stream) }
+                                }
+                            )
+                        }
                         SleepTimerMenu(
                             current: services.engine.sleepTimerEnds,
                             onSelect: { services.engine.setSleepTimer($0) }
@@ -265,6 +278,7 @@ public struct WatchView: View {
         guard duration > 0, upNext != nil, upNextTimer == nil else { return }
         let remaining = duration - position
         guard remaining < 30, remaining > 0 else { return }
+        withAnimation(.easeOut(duration: 0.3)) { showUpNext = true }
         upNextCountdown = max(0, Int(remaining))
         upNextTimer = Task { @MainActor in
             while !Task.isCancelled, let _ = upNext {
@@ -283,12 +297,14 @@ public struct WatchView: View {
     private func cancelUpNext() {
         upNextTimer?.cancel()
         upNextTimer = nil
+        withAnimation(.easeOut(duration: 0.25)) { showUpNext = false }
         upNext = nil
     }
 
     private func playNext(_ next: BaseItem) async {
         upNextTimer?.cancel()
         upNextTimer = nil
+        showUpNext = false
         upNext = nil
         await services.engine.load(item: next)
         await prepareNextEpisode(after: next)
@@ -357,6 +373,43 @@ private struct SkipSegmentButton: View {
 }
 
 #if !os(tvOS)
+/// Audio-track picker. Surfaced only when the source carries more than one
+/// audio stream. Picking a track re-plans the stream server-side — Jellyfin
+/// pins the chosen `AudioStreamIndex` — and the engine resumes at the current
+/// position, so a transcoded title (which delivers a single muxed track and
+/// therefore hides the system picker) can still switch languages/commentary.
+private struct AudioTrackMenu: View {
+    let tracks: [MediaStream]
+    let activeIndex: Int?
+    let onSelect: (MediaStream) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(tracks, id: \.index) { stream in
+                Button {
+                    onSelect(stream)
+                } label: {
+                    HStack {
+                        Text(label(for: stream))
+                        if stream.index == activeIndex { Image(systemName: "checkmark") }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "waveform")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Strata.Tokens.paper)
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(.black.opacity(0.45)))
+        }
+        .accessibilityLabel("Audio track")
+    }
+
+    private func label(for stream: MediaStream) -> String {
+        stream.displayTitle ?? stream.title ?? stream.language ?? "Track \(stream.index)"
+    }
+}
+
 /// Sleep-timer menu button. Filled icon while armed.
 private struct SleepTimerMenu: View {
     let current: Date?

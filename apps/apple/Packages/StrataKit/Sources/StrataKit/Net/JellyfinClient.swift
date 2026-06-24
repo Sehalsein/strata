@@ -375,6 +375,40 @@ public struct JellyfinClient: Sendable {
         return [:]
     }
 
+    /// The next episode to watch for a series. Jellyfin's NextUp tracks the
+    /// in-progress (or next-unwatched) episode, so a mid-series viewer resumes
+    /// where they left off instead of restarting at S01E01. Returns nil for a
+    /// fresh series — callers fall back to the first episode.
+    public func nextUp(seriesId: String) async throws -> BaseItem? {
+        let userId = try requireUserId()
+        let q: [URLQueryItem] = [
+            .init(name: "userId", value: userId),
+            .init(name: "seriesId", value: seriesId),
+            .init(name: "limit", value: "1"),
+            .init(name: "fields", value: "Overview,MediaSources"),
+            .init(name: "enableImageTypes", value: "Primary,Backdrop,Thumb")
+        ]
+        let env: ItemsEnvelope<BaseItem> = try await get(path: "/Shows/NextUp", query: q)
+        return env.items?.first
+    }
+
+    /// Next-up episodes across every series — the next unwatched (or in-progress)
+    /// episode for each show the viewer is partway through. Powers the Home
+    /// "Watch Next" rail so a returning viewer can jump straight into the next
+    /// episode without drilling into the series. Unlike `nextUp(seriesId:)` this
+    /// omits the series filter, so Jellyfin returns one entry per show.
+    public func nextUp(limit: Int = 12) async throws -> [BaseItem] {
+        let userId = try requireUserId()
+        let q: [URLQueryItem] = [
+            .init(name: "userId", value: userId),
+            .init(name: "limit", value: String(limit)),
+            .init(name: "fields", value: "Overview"),
+            .init(name: "enableImageTypes", value: "Primary,Backdrop,Thumb")
+        ]
+        let env: ItemsEnvelope<BaseItem> = try await get(path: "/Shows/NextUp", query: q)
+        return env.items ?? []
+    }
+
     public func nextEpisode(after episode: BaseItem) async throws -> BaseItem? {
         guard let seriesId = episode.seriesId else { return nil }
         let siblings = try await getEpisodes(seriesId: seriesId, seasonId: episode.seasonId)

@@ -7,6 +7,7 @@ public struct Shelf: View {
     public let items: [BaseItem]
     public let images: ImageURLBuilder?
     public let onSelect: (BaseItem) -> Void
+    @Environment(\.pageGutter) private var pageGutter
 
     public init(title: String, items: [BaseItem], images: ImageURLBuilder?, onSelect: @escaping (BaseItem) -> Void) {
         self.title = title
@@ -60,8 +61,8 @@ public struct Shelf: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 1)
             }
+            .fullBleedRow(gutter: pageGutter)
         }
         #endif
     }
@@ -89,6 +90,7 @@ public struct ContinueShelf: View {
     public let items: [BaseItem]
     public let images: ImageURLBuilder?
     public let onSelect: (BaseItem) -> Void
+    @Environment(\.pageGutter) private var pageGutter
 
     public init(title: String, items: [BaseItem], images: ImageURLBuilder?, onSelect: @escaping (BaseItem) -> Void) {
         self.title = title
@@ -130,10 +132,11 @@ public struct ContinueShelf: View {
                 #if os(tvOS)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 16)
-                #else
-                .padding(.horizontal, 1)
                 #endif
             }
+            #if !os(tvOS)
+            .fullBleedRow(gutter: pageGutter)
+            #endif
         }
     }
 
