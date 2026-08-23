@@ -1,0 +1,85 @@
+name: Apple CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/apple/**"
+      - ".github/workflows/apple-*.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/apple/**"
+      - ".github/workflows/apple-*.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apple-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: macos-15
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: iOS and iPadOS
+            id: ios
+            sdk: iphonesimulator
+            destination: generic/platform=iOS Simulator
+          - name: tvOS
+            id: tvos
+            sdk: appletvsimulator
+            destination: generic/platform=tvOS Simulator
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Select Xcode 26
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: apps/apple
+        run: xcodegen generate
+
+      - name: Run Swift package tests
+        if: matrix.id == 'ios'
+        working-directory: apps/apple
+        run: |
+          swift test --package-path Packages/StrataKit
+          swift test --package-path Packages/StrataDesign
+
+      - name: Build ${{ matrix.name }}
+        uses: Apple-Actions/xcodebuild@v1
+        with:
+          working-directory: apps/apple
+          project: Strata.xcodeproj
+          scheme: Strata
+          configuration: Debug
+          sdk: ${{ matrix.sdk }}
+          destination: ${{ matrix.destination }}
+          build-settings: |
+            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_REQUIRED=NO
+          disable-automatic-package-resolution: false
+
+      - name: Upload build log
+        if: ${{ failure() || cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: apple-${{ matrix.id }}-logs
+          include-hidden-files: true
+          if-no-files-found: warn
+          path: apps/apple/.build/*.log

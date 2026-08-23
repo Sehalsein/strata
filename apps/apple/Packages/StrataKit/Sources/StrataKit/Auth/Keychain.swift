@@ -6,7 +6,7 @@ import Security
 /// (`errSecAuthFailed`, `errSecMissingEntitlement`, etc.) instead of silently
 /// dropping writes.
 public enum Keychain {
-    public static let service = "com.strata.client"
+    public static let service = "com.sehalsein.strata"
 
     @discardableResult
     public static func set(_ value: String?, for key: String) -> OSStatus {

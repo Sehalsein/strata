@@ -122,7 +122,7 @@ if path.exists():
 else:
     src = {
         "name": "Strata (personal)",
-        "identifier": "com.strata.client.source",
+        "identifier": "com.sehalsein.strata.source",
         "subtitle": "Personal Jellyfin client builds",
         "description": "Sideload Strata to iPhone and iPad via AltStore.",
         "iconURL": "",
@@ -134,13 +134,13 @@ else:
 # Ensure the Strata app entry exists.
 app = None
 for a in src.get("apps", []):
-    if a.get("bundleIdentifier") == "com.strata.client":
+    if a.get("bundleIdentifier") == "com.sehalsein.strata":
         app = a
         break
 if app is None:
     app = {
         "name": "Strata",
-        "bundleIdentifier": "com.strata.client",
+        "bundleIdentifier": "com.sehalsein.strata",
         "developerName": "Personal Build",
         "subtitle": "Native Jellyfin client",
         "localizedDescription": "Cinematheque-styled native Jellyfin client.",

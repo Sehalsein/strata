@@ -1,0 +1,169 @@
+name: Apple TestFlight
+
+on:
+  push:
+    tags:
+      - "apple-v*"
+  workflow_dispatch:
+    inputs:
+      marketing_version:
+        description: Version to upload, for example 0.1.0 (defaults to project.yml)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apple-testflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    name: Upload ${{ matrix.name }}
+    runs-on: macos-15
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: iOS and iPadOS
+            id: ios
+            sdk: iphoneos
+            destination: generic/platform=iOS
+            profile_type: IOS_APP_STORE
+            export_options: ci/ExportOptions-iOS.plist
+            archive_path: .build/Archives/Strata-iOS.xcarchive
+            export_path: .build/Artifacts/Strata-iOS
+            app_type: ios
+          - name: tvOS
+            id: tvos
+            sdk: appletvos
+            destination: generic/platform=tvOS
+            profile_type: TVOS_APP_STORE
+            export_options: ci/ExportOptions-tvOS.plist
+            archive_path: .build/Archives/Strata-tvOS.xcarchive
+            export_path: .build/Artifacts/Strata-tvOS
+            app_type: appletvos
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Validate TestFlight configuration
+        env:
+          APPSTORE_TEAM_ID: ${{ vars.APPSTORE_TEAM_ID }}
+          APPSTORE_ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+          APPSTORE_API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          APPSTORE_CERTIFICATES_FILE_BASE64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          APPSTORE_CERTIFICATES_PASSWORD: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
+        run: |
+          missing=()
+          [[ -n "$APPSTORE_TEAM_ID" ]] || missing+=(APPSTORE_TEAM_ID)
+          [[ -n "$APPSTORE_ISSUER_ID" ]] || missing+=(APPSTORE_ISSUER_ID)
+          [[ -n "$APPSTORE_API_KEY_ID" ]] || missing+=(APPSTORE_API_KEY_ID)
+          [[ -n "$APPSTORE_API_PRIVATE_KEY" ]] || missing+=(APPSTORE_API_PRIVATE_KEY)
+          [[ -n "$APPSTORE_CERTIFICATES_FILE_BASE64" ]] || missing+=(APPSTORE_CERTIFICATES_FILE_BASE64)
+          [[ -n "$APPSTORE_CERTIFICATES_PASSWORD" ]] || missing+=(APPSTORE_CERTIFICATES_PASSWORD)
+          if (( ${#missing[@]} )); then
+            echo "Missing GitHub Actions configuration: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Select Xcode 26
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Resolve version and build number
+        id: version
+        working-directory: apps/apple
+        env:
+          REQUESTED_VERSION: ${{ inputs.marketing_version }}
+        run: |
+          version="$REQUESTED_VERSION"
+          if [[ -z "$version" && "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#apple-v}"
+          fi
+          if [[ -z "$version" ]]; then
+            version="$(awk -F'"' '/MARKETING_VERSION:/ {print $2; exit}' project.yml)"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+            echo "Invalid marketing version: $version" >&2
+            exit 1
+          fi
+          echo "marketing_version=$version" >> "$GITHUB_OUTPUT"
+          echo "build_number=$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Xcode project
+        working-directory: apps/apple
+        run: xcodegen generate
+
+      - name: Import Apple Distribution certificate
+        uses: Apple-Actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          p12-password: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
+
+      - name: Download main app provisioning profile
+        uses: Apple-Actions/download-provisioning-profiles@v6
+        with:
+          bundle-id: com.sehalsein.strata
+          profile-type: ${{ matrix.profile_type }}
+          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+
+      - name: Download widget provisioning profile
+        if: matrix.id == 'ios'
+        uses: Apple-Actions/download-provisioning-profiles@v6
+        with:
+          bundle-id: com.sehalsein.strata.widgets
+          profile-type: IOS_APP_STORE
+          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+
+      - name: Archive and export ${{ matrix.name }}
+        id: build
+        uses: Apple-Actions/xcodebuild@v1
+        with:
+          working-directory: apps/apple
+          project: Strata.xcodeproj
+          scheme: Strata
+          configuration: Release
+          sdk: ${{ matrix.sdk }}
+          destination: ${{ matrix.destination }}
+          action: archive
+          archive-path: ${{ matrix.archive_path }}
+          export-options-plist: ${{ matrix.export_options }}
+          export-path: ${{ matrix.export_path }}
+          build-number: ${{ steps.version.outputs.build_number }}
+          build-settings: |
+            DEVELOPMENT_TEAM=${{ vars.APPSTORE_TEAM_ID }}
+            MARKETING_VERSION=${{ steps.version.outputs.marketing_version }}
+          disable-automatic-package-resolution: false
+
+      - name: Upload ${{ matrix.name }} to TestFlight
+        uses: Apple-Actions/upload-testflight-build@v5
+        with:
+          app-path: ${{ steps.build.outputs.ipa-path }}
+          app-type: ${{ matrix.app_type }}
+          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          uses-non-exempt-encryption: "false"
+          wait-for-processing: "true"
+
+      - name: Upload build log
+        if: ${{ failure() || cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: testflight-${{ matrix.id }}-logs
+          include-hidden-files: true
+          if-no-files-found: warn
+          path: apps/apple/.build/*.log

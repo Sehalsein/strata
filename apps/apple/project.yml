@@ -42,6 +42,9 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: Strata
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen:
           UIColorName: StrataBackground
         UIBackgroundModes: [audio]
@@ -62,7 +65,7 @@ targets:
           - com.strata.watching
         NSSupportsLiveActivities: true
         CFBundleURLTypes:
-          - CFBundleURLName: com.strata.client
+          - CFBundleURLName: com.sehalsein.strata
             CFBundleURLSchemes: [strata]
         UIAppFonts:
           - Fraunces[opsz,wght,SOFT,WONK].ttf
@@ -88,8 +91,11 @@ targets:
         platformFilter: iOS
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.strata.client
-        TARGETED_DEVICE_FAMILY: "1,2,3"
+        PRODUCT_BUNDLE_IDENTIFIER: com.sehalsein.strata
+        "TARGETED_DEVICE_FAMILY[sdk=iphoneos*]": "1,2"
+        "TARGETED_DEVICE_FAMILY[sdk=iphonesimulator*]": "1,2"
+        "TARGETED_DEVICE_FAMILY[sdk=appletvos*]": "3"
+        "TARGETED_DEVICE_FAMILY[sdk=appletvsimulator*]": "3"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_APPICON_NAME[sdk=appletvos*]: "App Icon & Top Shelf Image"
         ASSETCATALOG_COMPILER_APPICON_NAME[sdk=appletvsimulator*]: "App Icon & Top Shelf Image"
@@ -103,6 +109,12 @@ targets:
           CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: App/Strata-iOS.entitlements
           CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: App/Strata-iOS.entitlements
           CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: App/Strata.entitlements
+          "CODE_SIGN_STYLE[sdk=iphoneos*]": Manual
+          "CODE_SIGN_STYLE[sdk=appletvos*]": Manual
+          "CODE_SIGN_IDENTITY[sdk=iphoneos*]": Apple Distribution
+          "CODE_SIGN_IDENTITY[sdk=appletvos*]": Apple Distribution
+          "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]": AppStore com.sehalsein.strata
+          "PROVISIONING_PROFILE_SPECIFIER[sdk=appletvos*]": AppStore tvOS com.sehalsein.strata
 
   StrataWidgets:
     type: app-extension
@@ -113,23 +125,29 @@ targets:
       path: StrataWidgets/Info.plist
       properties:
         CFBundleDisplayName: Strata
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
         NSSupportsLiveActivities: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.strata.client.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.sehalsein.strata.widgets
         SKIP_INSTALL: YES
         SWIFT_VERSION: "5.10"
         ENABLE_USER_SCRIPT_SANDBOXING: YES
         TARGETED_DEVICE_FAMILY: "1,2"
+      configs:
+        Release:
+          "CODE_SIGN_STYLE[sdk=iphoneos*]": Manual
+          "CODE_SIGN_IDENTITY[sdk=iphoneos*]": Apple Distribution
+          "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]": AppStore com.sehalsein.strata.widgets
 
 schemes:
   Strata:
     build:
       targets:
         Strata: all
-        StrataWidgets: all
     run:
       config: Debug
     test:

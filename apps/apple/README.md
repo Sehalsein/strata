@@ -40,7 +40,9 @@ If `swift test` fails with "Xcode license not accepted", run `sudo xcodebuild -l
 
 ## Signing
 
-Set `DEVELOPMENT_TEAM` in `project.yml` (or via an `.xcconfig`) before building to a physical device. Bundle ID defaults to `com.strata.client` (widget: `com.strata.client.widgets`).
+Set `DEVELOPMENT_TEAM` in `project.yml` (or via an `.xcconfig`) before building to a physical device. The registered bundle ID is `com.sehalsein.strata` (widget: `com.sehalsein.strata.widgets`).
+
+GitHub Actions CI and TestFlight delivery for iOS/iPadOS and tvOS are documented in [TESTFLIGHT.md](TESTFLIGHT.md). Release builds use App Store distribution profiles with fixed names; local Debug signing remains unchanged.
 
 ## Feature matrix
 
