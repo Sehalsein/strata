@@ -151,7 +151,7 @@ jobs:
       - name: Upload ${{ matrix.name }} to TestFlight
         uses: Apple-Actions/upload-testflight-build@v5
         with:
-          app-path: ${{ steps.build.outputs.ipa-path }}
+          app-path: apps/apple/${{ steps.build.outputs.ipa-path }}
           app-type: ${{ matrix.app_type }}
           issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
           api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
@@ -161,6 +161,7 @@ jobs:
 
       - name: Upload build log
         if: ${{ failure() || cancelled() }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: testflight-${{ matrix.id }}-logs
