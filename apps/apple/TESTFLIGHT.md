@@ -1,5 +1,7 @@
 # TestFlight delivery
 
+[![Apple CI](https://github.com/Sehalsein/strata/actions/workflows/apple-ci.yml/badge.svg)](https://github.com/Sehalsein/strata/actions/workflows/apple-ci.yml)
+
 GitHub Actions builds and uploads two artifacts from the shared `Strata` target:
 
 - iOS/iPadOS, including the `StrataWidgets` extension
