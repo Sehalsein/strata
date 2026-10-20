@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { recentLogs } from "../../log";
+import { dashboardUrls } from "../../platform/network";
 import { settingsSchema, SECRET_KEYS, type SecretKey } from "../../settings";
 import { TorboxClient } from "../../sources/torbox/client";
 import { toCandidate } from "../../sources/resolver";
@@ -34,6 +35,9 @@ export const adminRoutes = new Hono<Env>()
       jobs: s.jobs.status(),
       sessions: s.sessions.list().map(sessionDto),
       library: s.library.stats(),
+      // Read-only: port and bind host come from the CLI/env (see README).
+      network: { host: s.config.host, port: s.config.port, urls: dashboardUrls(s.config.host, s.config.port), bonjour: s.bonjour.active },
+      update: (({ state, updateAvailable, latest, lastError }) => ({ state, updateAvailable, latestVersion: latest?.version ?? null, lastError }))(s.updater.status()),
     });
   })
 

@@ -12,6 +12,7 @@ import type {
   SettingsResponse,
   TmdbResult,
   TorboxAccount,
+  UpdateStatus,
 } from "./types";
 
 const TOKEN_KEY = "strata.token";
@@ -120,6 +121,10 @@ export const api = {
   ignoreFile: (fileId: number) => request<{ ok: true }>("POST", `/admin/files/${fileId}/ignore`),
   unignoreFile: (fileId: number) => request<{ ok: true }>("POST", `/admin/files/${fileId}/unignore`),
   tmdbSearch: (query: string, type: "movie" | "show") => request<{ items: TmdbResult[] }>("GET", `/admin/tmdb/search${q({ q: query, type })}`),
+
+  updateStatus: () => request<UpdateStatus>("GET", "/admin/update"),
+  checkUpdate: () => request<UpdateStatus>("POST", "/admin/update/check"),
+  applyUpdate: () => request<UpdateStatus>("POST", "/admin/update/apply"),
 
   stopSession: (id: string) => request<{ ok: true }>("DELETE", `/admin/sessions/${encodeURIComponent(id)}`),
   logs: (limit = 500) => request<{ items: LogEntry[] }>("GET", `/admin/logs${q({ limit })}`),

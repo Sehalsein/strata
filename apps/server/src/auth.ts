@@ -24,6 +24,15 @@ export class Auth {
     return this.db.insert(users).values({ username, passwordHash, isAdmin }).returning({ id: users.id }).get();
   }
 
+  /** Creates the first admin, or returns null if any user already exists (race-safe). */
+  async createFirstAdmin(username: string, password: string): Promise<{ id: number } | null> {
+    const passwordHash = await Bun.password.hash(password);
+    return this.db.transaction((tx) => {
+      if (tx.select({ id: users.id }).from(users).limit(1).get()) return null;
+      return tx.insert(users).values({ username, passwordHash, isAdmin: true }).returning({ id: users.id }).get();
+    }, { behavior: "immediate" });
+  }
+
   async login(username: string, password: string, deviceName?: string): Promise<string | null> {
     const user = this.db.select().from(users).where(eq(users.username, username)).get();
     if (!user) {

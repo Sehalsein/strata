@@ -3,6 +3,9 @@
 //   bun scripts/build.ts                # this machine's platform only
 //   bun scripts/build.ts --all          # every release target
 //   bun scripts/build.ts --target bun-linux-x64 --skip-web
+//   bun scripts/build.ts --all --version 0.2.0   # stamp a version (release CI does)
+//   bun scripts/build.ts --update-url https://updates.example.com/server[/nightly]
+//                                       # bake the update feed (or STRATA_UPDATE_URL); none = no self-update
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
@@ -14,6 +17,10 @@ const RELEASE_TARGETS = ["bun-darwin-arm64", "bun-linux-x64", "bun-linux-arm64"]
 
 const args = process.argv.slice(2);
 const skipWeb = args.includes("--skip-web");
+const versionArg = args.flatMap((a, i) => (a === "--version" && args[i + 1] ? [args[i + 1]!] : []))[0];
+if (versionArg && !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(versionArg)) throw new Error(`Invalid --version ${versionArg}`);
+const updateUrl = args.flatMap((a, i) => (a === "--update-url" && args[i + 1] ? [args[i + 1]!] : []))[0] ?? process.env.STRATA_UPDATE_URL ?? "";
+if (updateUrl && !/^https?:\/\/\S+$/.test(updateUrl)) throw new Error(`Invalid update URL ${updateUrl}`);
 const targets = args.includes("--all")
   ? RELEASE_TARGETS
   : args.flatMap((a, i) => (a === "--target" && args[i + 1] ? [args[i + 1]!] : [])).concat([]);
@@ -53,16 +60,20 @@ try {
     console.warn("web/dist not found; building without the dashboard");
   }
 
-  const version = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version as string;
+  const version = versionArg ?? (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version as string);
+  const define = [
+    ...(versionArg ? [`--define=STRATA_BUILD_VERSION=${JSON.stringify(versionArg)}`] : []),
+    ...(updateUrl ? [`--define=STRATA_UPDATE_URL=${JSON.stringify(updateUrl.replace(/\/+$/, ""))}`] : []),
+  ];
   for (const target of targets) {
     const outfile = join(ROOT, "dist", `strata-server-${target.replace(/^bun-/, "")}`);
-    await sh(["bun", "build", "src/main.ts", "--compile", "--minify", "--sourcemap", `--target=${target}`, `--outfile=${outfile}`], ROOT);
+    await sh(["bun", "build", "src/main.ts", "--compile", "--minify", "--sourcemap", `--target=${target}`, `--outfile=${outfile}`, ...define], ROOT);
     // Current macOS SIGKILLs Bun's linker-signed output; an explicit ad-hoc signature fixes it.
     if (target.includes("darwin")) {
       if (process.platform !== "darwin") throw new Error("darwin targets must be built on macOS (they need codesign)");
       await sh(["codesign", "--force", "--sign", "-", outfile], ROOT);
     }
-    console.log(`Built ${relative(ROOT, outfile)} (v${version})`);
+    console.log(`Built ${relative(ROOT, outfile)} (v${version}${updateUrl ? `, feed ${updateUrl}` : ", no update feed"})`);
   }
 } finally {
   writeFileSync(EMBED, stub);

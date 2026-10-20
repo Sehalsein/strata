@@ -6,7 +6,7 @@ export interface ParsedName {
   episode?: number;
   episodeEnd?: number;
   resolution?: number;
-  source?: "remux" | "bluray" | "web" | "hdtv" | "dvd";
+  source?: "remux" | "bluray" | "web" | "hdtv" | "dvd" | "cam";
   videoCodec?: "hevc" | "h264" | "av1";
   hdr?: "dv" | "hdr10+" | "hdr10" | "hlg";
   group?: string;
@@ -31,7 +31,7 @@ const EPISODE_PATTERNS: RegExp[] = [
 const MARKERS: RegExp[] = [
   /\b(?:2160|1080|720|576|480)[pi]\b/i,
   /\b(?:4k|uhd)\b/i,
-  /\b(?:blu-?ray|bdrip|brrip|bdremux|remux|web-?dl|web-?rip|webrip|web|hdtv|dvdrip|dvd|hdrip|amzn|nf|dsnp|hmax|atvp)\b/i,
+  /\b(?:cam|hdcam|hdts|telesync|blu-?ray|bdrip|brrip|bdremux|remux|web-?dl|web-?rip|webrip|web|hdtv|dvdrip|dvd|hdrip|amzn|nf|dsnp|hmax|atvp)\b/i,
   /\b(?:x26[45]|h\.?26[45]|hevc|avc|av1|xvid|divx)\b/i,
   /\b(?:hdr10\+?|hdr|dv|dovi|dolby[\s.]?vision|hlg|sdr)\b/i,
   /\b(?:proper|repack|extended|unrated|directors?[\s.]cut|imax|multi|dual)\b/i,
@@ -152,6 +152,7 @@ function detectResolution(text: string): number | undefined {
 }
 
 function detectSource(text: string): ParsedName["source"] {
+  if (/\b(?:cam|camrip|hdcam|hd-?ts|telesync|telecine|hd-?tc|hdtc|scr|screener|dvdscr)\b/i.test(text)) return "cam";
   if (/\b(?:bdremux|remux)\b/i.test(text)) return "remux";
   if (/\b(?:blu-?ray|bdrip|brrip)\b/i.test(text)) return "bluray";
   if (/\b(?:web-?dl|web-?rip|webrip|web|amzn|nf|dsnp|hmax|atvp)\b/i.test(text)) return "web";

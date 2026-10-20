@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { Auth } from "./auth";
 import { CatalogService } from "./catalog/service";
 import { Matcher } from "./catalog/matcher";
@@ -17,6 +18,12 @@ import { SettingsStore } from "./settings";
 import { scanLocal } from "./sources/local/scanner";
 import { TorboxClient } from "./sources/torbox/client";
 import { syncTorbox } from "./sources/torbox/sync";
+import { Discovery } from "./sources/discovery";
+import { SubtitleService } from "./playback/subtitles";
+import { Bonjour } from "./platform/bonjour";
+import { loadServerId } from "./platform/network";
+import { createUpdater, type Updater } from "./update";
+import { API_VERSION, VERSION } from "./version";
 
 const log = logger("server");
 const MINUTE = 60_000;
@@ -33,7 +40,13 @@ export interface Services {
   catalog: CatalogService;
   sessions: SessionManager;
   playback: PlaybackService;
+  discovery: Discovery;
+  subtitles: SubtitleService;
   jobs: Jobs;
+  /** Stable per-install id (advertised over Bonjour, returned by /api/info). */
+  serverId: string;
+  bonjour: Bonjour;
+  updater: Updater;
   ffmpeg: () => FfmpegInfo | null;
   torbox: () => TorboxClient | null;
   startedAt: number;
@@ -68,7 +81,9 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   const progress = new ProgressStore(db);
   const catalog = new CatalogService(tmdb, library, progress, () => settings.get());
   const sessions = new SessionManager(paths.transcode, ffmpeg, new KeepAwake(), () => settings.get().maxTranscodes, () => settings.get().hardwareAcceleration);
-  const playback = new PlaybackService(library, sessions, progress, () => settings.get(), ffmpeg, torbox);
+  const subtitles = new SubtitleService(join(paths.root, "cache", "subtitles"), ffmpeg);
+  const discovery = new Discovery(tmdb, library, () => settings.get(), torbox, fetchImpl);
+  const playback = new PlaybackService(library, sessions, progress, () => settings.get(), ffmpeg, torbox, discovery, (id, s, e) => catalog.nextEpisode(id, s, e));
 
   const jobs = new Jobs();
   jobs.register("scanLocal", (report) => scanLocal(library, settings.get().mediaFolders, report));
@@ -82,6 +97,16 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     ffmpegInfo = await detectFfmpeg(paths.root);
     return { found: !!ffmpegInfo };
   });
+
+  const serverId = loadServerId(paths.root);
+  const updater = createUpdater({ dataDir: paths.root, dbPath: paths.db, backupsDir: paths.backups, db, settings, activeSessions: () => sessions.list().length, fetch: fetchImpl });
+  jobs.register("checkUpdates", () => updater.checkAndMaybeApply());
+  // Started by main.ts once the HTTP server is listening; refreshed when the name/toggle changes.
+  const bonjour = new Bonjour(() => {
+    const s = settings.get();
+    return s.bonjourEnabled ? { name: s.serverName, port: config.port, txt: { version: VERSION, api: String(API_VERSION), id: serverId } } : null;
+  });
+  settings.onChange(() => bonjour.refresh());
 
   const applySchedule = () => {
     const s = settings.get();
@@ -100,14 +125,18 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   });
   const initial = settings.get();
   scheduled = { scan: initial.scanIntervalMinutes, sync: initial.torboxSyncMinutes, folders: JSON.stringify(initial.mediaFolders) };
-  if (process.env.STRATA_NO_JOBS !== "1") applySchedule();
+  if (process.env.STRATA_NO_JOBS !== "1") {
+    applySchedule();
+    jobs.schedule("checkUpdates", 6 * 60 * MINUTE, 60_000);
+  }
 
   const shutdown = () => {
+    bonjour.stop();
     jobs.stop();
     sessions.stopAll();
     db.$client.close();
     log.info("Stopped");
   };
 
-  return { config, paths, db, settings, auth: new Auth(db), tmdb, library, progress, catalog, sessions, playback, jobs, ffmpeg, torbox, startedAt: Date.now(), shutdown };
+  return { config, paths, db, settings, auth: new Auth(db), tmdb, library, progress, catalog, sessions, playback, discovery, subtitles, jobs, serverId, bonjour, updater, ffmpeg, torbox, startedAt: Date.now(), shutdown };
 }

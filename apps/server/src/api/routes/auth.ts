@@ -22,7 +22,7 @@ const profileInput = z.object({
 export const authRoutes = new Hono<Env>()
   .get("/info", (c) => {
     const s = c.var.services;
-    return c.json({ name: "strata", serverName: s.settings.get().serverName, version: VERSION, apiVersion: API_VERSION, setupRequired: !s.auth.hasAnyUser() });
+    return c.json({ name: "strata", serverName: s.settings.get().serverName, id: s.serverId, version: VERSION, apiVersion: API_VERSION, setupRequired: !s.auth.hasAnyUser() });
   })
 
   // First-run: creates the admin and a first profile. Locked once any user exists.
@@ -30,7 +30,8 @@ export const authRoutes = new Hono<Env>()
     const s = c.var.services;
     const input = await body(c, credentials.extend({ password: z.string().min(8).max(256) }));
     if (s.auth.hasAnyUser()) throw new HTTPException(409, { message: "Setup already completed" });
-    const user = await s.auth.createUser(input.username, input.password, true);
+    const user = await s.auth.createFirstAdmin(input.username, input.password);
+    if (!user) throw new HTTPException(409, { message: "Setup already completed" });
     s.db.insert(profiles).values({ name: input.username }).run();
     return c.json({ token: s.auth.issue(user.id, input.deviceName ?? "Dashboard") });
   })

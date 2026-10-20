@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { copyFileSync, existsSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, readdirSync, rmSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import * as schema from "./schema";
@@ -30,7 +30,7 @@ function migrate(sqlite: Database, path: string, backupsDir?: string) {
   }
   if (current === migrations.length) return;
 
-  if (backupsDir) backup(sqlite, path, backupsDir, current);
+  if (backupsDir) backupDatabase(sqlite, path, backupsDir, `v${current}`);
 
   for (let v = current; v < migrations.length; v++) {
     sqlite.transaction(() => {
@@ -41,14 +41,21 @@ function migrate(sqlite: Database, path: string, backupsDir?: string) {
   }
 }
 
-function backup(sqlite: Database, path: string, dir: string, version: number) {
+/** Checkpoints the WAL and copies the DB into `dir` (keeping the newest few). Returns the copy's path. */
+export function backupDatabase(sqlite: Database, path: string, dir: string, label: string): string {
   sqlite.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const target = join(dir, `strata-v${version}-${stamp}.db`);
+  const target = join(dir, `strata-${label}-${stamp}.db`);
   copyFileSync(path, target);
+  const now = new Date();
+  utimesSync(target, now, now); // some platforms' copy keeps the source mtime
   log.info(`Backed up database to ${target}`);
-  const old = readdirSync(dir).filter((f) => f.endsWith(".db")).sort();
+  // Oldest first by mtime, so differently-labelled backups prune in the right order.
+  const old = readdirSync(dir)
+    .filter((f) => f.endsWith(".db"))
+    .sort((a, b) => statSync(join(dir, a)).mtimeMs - statSync(join(dir, b)).mtimeMs);
   for (const name of old.slice(0, Math.max(0, old.length - BACKUPS_KEPT))) {
     rmSync(join(dir, name));
   }
+  return target;
 }

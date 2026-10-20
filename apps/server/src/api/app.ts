@@ -1,10 +1,10 @@
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { ZodError } from "zod";
 import { TmdbError } from "../catalog/tmdb";
 import { PlaybackError } from "../playback/service";
 import { TorboxError } from "../sources/torbox/client";
+import { NotReadyError } from "../sources/discovery";
 import type { Services } from "../services";
 import { logger } from "../log";
 import type { Env } from "./context";
@@ -12,6 +12,7 @@ import { adminRoutes } from "./routes/admin";
 import { authRoutes } from "./routes/auth";
 import { catalogRoutes } from "./routes/catalog";
 import { streamRoutes } from "./routes/stream";
+import { systemRoutes } from "./routes/system";
 import { webHandler } from "../web/static";
 
 const log = logger("http");
@@ -19,9 +20,8 @@ const log = logger("http");
 export function createApp(services: Services) {
   const app = new Hono<Env>();
 
-  // Stream responses skip CORS (and any header-rewriting middleware): see serveRange.
-  const corsMiddleware = cors();
-  app.use("/api/*", (c, next) => (c.req.path.startsWith("/api/stream/") ? next() : corsMiddleware(c, next)));
+  // No CORS: the dashboard is same-origin and native clients don't need it. Stream
+  // responses must also stay unwrapped by header-rewriting middleware (see serveRange).
   app.use(async (c, next) => {
     c.set("services", services);
     await next();
@@ -31,6 +31,7 @@ export function createApp(services: Services) {
   // so the public and stream routes must be registered first.
   app.route("/api", authRoutes);
   app.route("/api", streamRoutes);
+  app.route("/api/admin", systemRoutes);
   app.route("/api/admin", adminRoutes);
   app.route("/api", catalogRoutes);
 
@@ -39,6 +40,8 @@ export function createApp(services: Services) {
 
   app.onError((err, c) => {
     if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
+    // Not an error for the client: the release is downloading; poll by repeating the request.
+    if (err instanceof NotReadyError) return c.json({ ...err.info, error: err.message }, 202);
     if (err instanceof ZodError) return c.json({ error: "Invalid request", issues: err.issues }, 400);
     if (err instanceof TmdbError || err instanceof PlaybackError || err instanceof TorboxError) {
       return c.json({ error: err.message }, err.status as 400);

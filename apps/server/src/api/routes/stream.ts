@@ -22,8 +22,32 @@ export const streamRoutes = new Hono<Env>()
   .get("/stream/:sid/file", async (c) => {
     const session = c.var.services.sessions.get(c.req.param("sid"));
     if (!session || session.plan.mode !== "direct") throw new HTTPException(404, { message: "No such stream" });
-    if (session.inputKind === "url") return c.redirect(session.input, 302);
+    if (session.inputKind === "url") {
+      const key = c.var.services.settings.getSecret("torboxApiKey");
+      // TorBox CDN links are normally key-free and safe to hand out; if one ever embeds
+      // the account key, proxy the bytes rather than leak it to the client.
+      if (!key || !session.input.includes(key)) return c.redirect(session.input, 302);
+      return proxyRange(session.input, c.req.header("range"));
+    }
     return serveRange(session.input, c.req.header("range"));
+  })
+
+  // Extraction can take a while (the whole file is read); after a short wait the client
+  // gets 202 and retries while it finishes in the background.
+  .get("/stream/:sid/subtitles/:track{[sx]\\d+\\.vtt}", async (c) => {
+    const services = c.var.services;
+    const session = services.sessions.get(c.req.param("sid"));
+    const id = c.req.param("track").replace(/\.vtt$/, "");
+    const track = session?.subtitles.find((t) => t.id === id);
+    if (!session || !track) throw new HTTPException(404, { message: "No such subtitle track" });
+    if (!track.text) throw new HTTPException(415, { message: "Bitmap subtitles can't be converted to WebVTT" });
+    const job = services.subtitles.vtt(session.fileId, session.input, track);
+    const path = await Promise.race([job, Bun.sleep(25_000).then(() => null)]);
+    if (!path) {
+      job.catch(() => {});
+      return c.json({ status: "extracting" }, 202, { "Retry-After": "5" });
+    }
+    return new Response(Bun.file(path), { headers: { "Content-Type": "text/vtt; charset=utf-8", "Cache-Control": "private, max-age=3600" } });
   })
 
   .get("/stream/:sid/:name{(?:stream\\.m3u8|init\\.mp4|seg\\d{5}\\.m4s)}", async (c) => {
@@ -37,6 +61,16 @@ export const streamRoutes = new Hono<Env>()
       headers: { "Content-Type": typeOf(name), "Cache-Control": name.endsWith(".m3u8") ? "no-cache" : "private, max-age=3600" },
     });
   });
+
+async function proxyRange(url: string, range: string | undefined): Promise<Response> {
+  const upstream = await fetch(url, { headers: range ? { Range: range } : {} });
+  const headers = new Headers();
+  for (const h of ["content-type", "content-length", "content-range", "accept-ranges"]) {
+    const v = upstream.headers.get(h);
+    if (v) headers.set(h, v);
+  }
+  return new Response(upstream.body, { status: upstream.status, headers });
+}
 
 export function serveRange(path: string, range: string | undefined): Response {
   const file = Bun.file(path);

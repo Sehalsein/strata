@@ -62,6 +62,8 @@ export const files = sqliteTable(
     season: integer("season"),
     episode: integer("episode"),
     matchStatus: text("match_status").$type<MatchStatus>().notNull().default("pending"),
+    /** Torrent info-hash (lowercase) for TorBox torrent files. */
+    sourceHash: text("source_hash"),
     missing: integer("missing", { mode: "boolean" }).notNull().default(false),
     addedAt: integer("added_at").notNull().default(now),
     updatedAt: integer("updated_at").notNull().default(now),
@@ -69,6 +71,7 @@ export const files = sqliteTable(
   (t) => [
     uniqueIndex("files_provider_ref").on(t.provider, t.ref),
     index("files_tmdb").on(t.mediaType, t.tmdbId, t.season, t.episode),
+    index("files_source_hash").on(t.sourceHash),
   ],
 );
 

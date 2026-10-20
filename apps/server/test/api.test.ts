@@ -87,6 +87,11 @@ describe("playback", () => {
   test("mp4 + aac direct plays with byte ranges", async () => {
     const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 1 } }));
     expect(play.mode).toBe("direct");
+    expect(play.nextEpisode).toMatchObject({ season: 1, episode: 2, name: "Second", available: true });
+    // The next episode's file gets probed in the background.
+    const nextFile = (await json(await server.request("/api/sources?mediaType=episode&tmdbId=9001&season=1&episode=2", { token }))).items[0];
+    for (let i = 0; i < 50 && !server.services.library.get(nextFile.fileId)?.probeJson; i++) await Bun.sleep(100);
+    expect(server.services.library.get(nextFile.fileId)?.probeJson).toBeTruthy();
     const res = await server.request(play.url, { headers: { Range: "bytes=0-99" } });
     expect(res.status).toBe(206);
     expect(res.headers.get("content-range")).toMatch(/^bytes 0-99\//);
@@ -107,6 +112,23 @@ describe("playback", () => {
     expect(segment.status).toBe(200);
     expect((await segment.arrayBuffer()).byteLength).toBeGreaterThan(1000);
     expect((await server.request(`/api/play/${play.sessionId}`, { method: "DELETE", token })).status).toBe(200);
+  }, 30_000);
+
+  test("embedded and sidecar subtitles are served as WebVTT", async () => {
+    const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, startMs: 0 } }));
+    const tracks = play.subtitleTracks;
+    expect(tracks.map((t: any) => [t.external, t.language, t.forced])).toEqual([
+      [false, "eng", false],
+      [true, "en", true],
+    ]);
+    const embedded = await server.request(tracks[0].url);
+    expect(embedded.status).toBe(200);
+    expect(embedded.headers.get("content-type")).toContain("text/vtt");
+    const text = await embedded.text();
+    expect(text).toStartWith("WEBVTT");
+    expect(text).toContain("Hello from Strata");
+    expect(await (await server.request(tracks[1].url)).text()).toContain("Forced sidecar");
+    server.services.sessions.stop(play.sessionId);
   }, 30_000);
 
   test("DTS audio is transcoded", async () => {

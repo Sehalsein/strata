@@ -19,6 +19,7 @@ export interface FileInput {
   size: number;
   mtime?: number;
   parsed: ParsedName;
+  sourceHash?: string;
 }
 
 /** The `files` table: every playable file Strata knows about, from any provider. */
@@ -35,7 +36,7 @@ export class Library {
     const parsedJson = JSON.stringify(input.parsed);
     if (existing) {
       const changed = existing.size !== input.size || existing.mtime !== (input.mtime ?? null) || existing.parsedJson !== parsedJson;
-      if (!changed && !existing.missing) return existing;
+      if (!changed && !existing.missing && existing.sourceHash === (input.sourceHash ?? null)) return existing;
       const keepMatch = existing.matchStatus === "manual" || existing.matchStatus === "ignored";
       return this.db
         .update(files)
@@ -45,6 +46,7 @@ export class Library {
           mtime: input.mtime ?? null,
           parsedJson,
           missing: false,
+          sourceHash: input.sourceHash ?? null,
           updatedAt: Date.now(),
           ...(changed ? { probeJson: null } : {}),
           ...(changed && !keepMatch ? { matchStatus: "pending" as MatchStatus } : {}),
@@ -55,7 +57,7 @@ export class Library {
     }
     return this.db
       .insert(files)
-      .values({ provider: input.provider, ref: input.ref, name: input.name, size: input.size, mtime: input.mtime ?? null, parsedJson })
+      .values({ provider: input.provider, ref: input.ref, name: input.name, size: input.size, mtime: input.mtime ?? null, parsedJson, sourceHash: input.sourceHash ?? null })
       .returning()
       .get();
   }
@@ -101,14 +103,14 @@ export class Library {
     return { matched, unmatched };
   }
 
-  async setManualMatch(fileId: number, type: "movie" | "show", tmdbId: number, season?: number, episode?: number) {
+  async setManualMatch(fileId: number, type: "movie" | "show", tmdbId: number, season?: number, episode?: number, status: MatchStatus = "manual") {
     if (type === "movie") {
       const m = await this.tmdb.movie(tmdbId);
-      this.applyMatch(fileId, { type, tmdbId, title: m.title, year: yearOf(m.release_date), posterPath: m.poster_path ?? null, backdropPath: m.backdrop_path ?? null }, undefined, undefined, "manual");
+      this.applyMatch(fileId, { type, tmdbId, title: m.title, year: yearOf(m.release_date), posterPath: m.poster_path ?? null, backdropPath: m.backdrop_path ?? null }, undefined, undefined, status);
     } else {
       if (season === undefined || episode === undefined) throw new Error("season and episode are required for shows");
       const s = await this.tmdb.show(tmdbId);
-      this.applyMatch(fileId, { type, tmdbId, title: s.name, year: yearOf(s.first_air_date), posterPath: s.poster_path ?? null, backdropPath: s.backdrop_path ?? null }, season, episode, "manual");
+      this.applyMatch(fileId, { type, tmdbId, title: s.name, year: yearOf(s.first_air_date), posterPath: s.poster_path ?? null, backdropPath: s.backdrop_path ?? null }, season, episode, status);
     }
   }
 
@@ -138,6 +140,16 @@ export class Library {
 
   saveProbe(fileId: number, info: MediaInfo) {
     this.db.update(files).set({ probeJson: JSON.stringify(info) }).where(eq(files.id, fileId)).run();
+  }
+
+  byHash(hash: string): FileRow[] {
+    return this.db.select().from(files).where(and(eq(files.sourceHash, hash.toLowerCase()), eq(files.missing, false))).all();
+  }
+
+  /** Hashes of every TorBox torrent already in the library. */
+  knownHashes(): Set<string> {
+    const rows = this.db.selectDistinct({ h: files.sourceHash }).from(files).where(and(eq(files.provider, "torbox"), eq(files.missing, false))).all();
+    return new Set(rows.map((r) => r.h).filter((h): h is string => !!h));
   }
 
   get(fileId: number): FileRow | undefined {

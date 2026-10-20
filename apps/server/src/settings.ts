@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Db } from "./db";
 import { settings as settingsTable } from "./db/schema";
 import type { SecretBox } from "./secrets";
+import { BUILD_CHANNEL } from "./version";
 
 export const mediaFolderSchema = z.object({
   path: z.string().min(1),
@@ -22,6 +23,27 @@ export const settingsSchema = z.object({
   maxResolution: z.number().int().default(2160),
   hardwareAcceleration: z.boolean().default(true),
   maxTranscodes: z.number().int().min(1).max(16).default(3),
+  // Discovery: finding TorBox-playable releases for titles not in the library.
+  discoveryEnabled: z.boolean().default(true),
+  /** Base URL of a Stremio stream addon (Torrentio-compatible); empty disables it. */
+  torrentioUrl: z.string().default("https://torrentio.strem.fun"),
+  useTorboxSearch: z.boolean().default(true),
+  /** Offer releases TorBox hasn't cached (they must download before playing). */
+  showUncached: z.boolean().default(true),
+  /** Largest release discovery will pick automatically, in GB (0 = no limit). */
+  maxReleaseSizeGb: z.number().min(0).default(0),
+  // Network / updates (port and bind host stay CLI/env-driven on purpose).
+  /** Advertise `_strata._tcp` on the LAN so the apps find the server. */
+  bonjourEnabled: z.boolean().default(true),
+  /** Defaults to the channel this binary was published to. */
+  updateChannel: z.enum(["stable", "nightly"]).default(BUILD_CHANNEL),
+  /** Apply updates automatically once nothing is playing. */
+  autoUpdate: z.boolean().default(false),
+  /**
+   * Advanced override for the signed update manifest (`{channel}` is replaced with the channel;
+   * the signature is read from `<url>.sig`). Empty = the feed baked into the binary.
+   */
+  updateManifestUrl: z.union([z.literal(""), z.string().url()]).default(""),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 

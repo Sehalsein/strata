@@ -5,9 +5,10 @@ import type { Subprocess } from "bun";
 import type { MediaInfo } from "../media/probe";
 import type { FfmpegInfo } from "../platform/ffmpeg";
 import type { KeepAwake } from "../platform/keepAwake";
-import { logger } from "../log";
+import { logger, redactSecrets } from "../log";
 import type { PlaybackPlan } from "./decide";
 import { buildHlsArgs } from "./ffmpegArgs";
+import type { SubtitleTrack } from "./subtitles";
 
 const log = logger("playback");
 
@@ -35,6 +36,7 @@ export interface PlaybackSession {
   input: string;
   inputKind: "path" | "url";
   startOffsetMs: number;
+  subtitles: SubtitleTrack[];
   createdAt: number;
   lastAccessAt: number;
   // HLS only
@@ -150,7 +152,7 @@ export class SessionManager {
       outDir: session.dir,
       hwEncoder: this.hwAllowed() ? ffmpeg.hwEncoder : undefined,
     });
-    log.debug(`ffmpeg ${args.slice(1).join(" ").replace(/token=[^&\s]+/g, "token=***")}`);
+    log.debug(`ffmpeg ${redactSecrets(args.slice(1).join(" "))}`);
     const proc = Bun.spawn(args, { stdout: "ignore", stderr: "pipe" });
     session.proc = proc;
     void (async () => {
@@ -158,7 +160,7 @@ export class SessionManager {
       const code = await proc.exited;
       session.exitCode = code;
       if (code !== 0 && this.sessions.has(session.id)) {
-        session.error = stderr.trim().split("\n").slice(-3).join(" | ").replace(/token=[^&\s]+/g, "token=***");
+        session.error = redactSecrets(stderr.trim().split("\n").slice(-3).join(" | "));
         log.warn(`ffmpeg exited ${code} for ${session.id.slice(0, 8)}: ${session.error}`);
       }
     })();

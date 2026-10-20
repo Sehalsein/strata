@@ -6,10 +6,8 @@ export class SecretBox {
   private constructor(private readonly key: Buffer) {}
 
   static load(path: string): SecretBox {
-    if (!existsSync(path)) {
-      writeFileSync(path, randomBytes(32).toString("base64"));
-      chmodSync(path, 0o600);
-    }
+    if (!existsSync(path)) writeFileSync(path, randomBytes(32).toString("base64"), { mode: 0o600, flag: "wx" });
+    chmodSync(path, 0o600);
     const key = Buffer.from(readFileSync(path, "utf8").trim(), "base64");
     if (key.length !== 32) throw new Error(`Invalid secret key at ${path}`);
     return new SecretBox(key);

@@ -1,3 +1,5 @@
+import { redactSecrets } from "../log";
+
 export interface VideoTrack {
   index: number;
   codec: string;
@@ -50,7 +52,7 @@ export async function probe(ffprobe: string, input: string, timeoutMs = 45_000):
   const timer = setTimeout(() => proc.kill(), timeoutMs);
   const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
   clearTimeout(timer);
-  if (code !== 0) throw new Error(`ffprobe failed (${code}): ${err.trim().split("\n").pop() ?? "unknown error"}`);
+  if (code !== 0) throw new Error(redactSecrets(`ffprobe failed (${code}): ${err.trim().split("\n").pop() ?? "unknown error"}`));
   return summarize(JSON.parse(out), input);
 }
 

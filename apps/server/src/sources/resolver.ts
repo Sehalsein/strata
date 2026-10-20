@@ -17,9 +17,15 @@ export interface Candidate {
   audio?: { codec: string; channels: number; language?: string }[];
   durationMs?: number;
   probed: boolean;
+  /** ready: in the library. cached: TorBox can serve it instantly once added. uncached: must download first. */
+  availability: "ready" | "cached" | "uncached";
+  seeders?: number;
+  /** Torrent name, for discovered releases. */
+  releaseTitle?: string;
+  isPack?: boolean;
 }
 
-const SOURCE_RANK: Record<NonNullable<ParsedName["source"]>, number> = { remux: 5, bluray: 4, web: 3, hdtv: 2, dvd: 1 };
+const SOURCE_RANK: Record<NonNullable<ParsedName["source"]>, number> = { remux: 5, bluray: 4, web: 3, hdtv: 2, dvd: 1, cam: 0 };
 
 export function toCandidate(file: FileRow): Candidate {
   const parsed = JSON.parse(file.parsedJson ?? "{}") as ParsedName;
@@ -37,6 +43,7 @@ export function toCandidate(file: FileRow): Candidate {
     audio: probe?.audio.map((a) => ({ codec: a.codec, channels: a.channels, language: a.language })),
     durationMs: probe?.durationMs,
     probed: !!probe,
+    availability: "ready",
   };
 }
 

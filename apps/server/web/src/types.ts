@@ -3,6 +3,8 @@
 export interface ServerInfo {
   name: string;
   serverName: string;
+  /** Stable per-install id. */
+  id: string;
   version: string;
   apiVersion: number | string;
   setupRequired: boolean;
@@ -27,6 +29,35 @@ export interface Settings {
   maxResolution: number;
   hardwareAcceleration: boolean;
   maxTranscodes: number;
+  discoveryEnabled: boolean;
+  torrentioUrl: string;
+  useTorboxSearch: boolean;
+  showUncached: boolean;
+  maxReleaseSizeGb: number;
+  bonjourEnabled: boolean;
+  updateChannel: UpdateChannel;
+  autoUpdate: boolean;
+  updateManifestUrl: string;
+}
+
+export type UpdateChannel = "stable" | "nightly";
+export type UpdateState = "idle" | "checking" | "available" | "downloading" | "waiting-for-idle" | "restarting" | "error";
+
+export interface UpdateStatus {
+  currentVersion: string;
+  platform: string;
+  channel: UpdateChannel;
+  autoUpdate: boolean;
+  state: UpdateState;
+  disabledReason: string | null;
+  /** The manifest being polled; null when the build has no feed and no override is set. */
+  manifestUrl: string | null;
+  latest: { version: string; publishedAt: string; minClientApi: number; notes: string | null; size: number | null } | null;
+  updateAvailable: boolean;
+  lastCheckedAt: number | null;
+  lastError: string | null;
+  progress: { received: number; total: number } | null;
+  lastUpdate: { result: "ok" | "rolled-back"; fromVersion: string; toVersion: string; at: string; message?: string } | null;
 }
 
 export type SecretKey = "tmdbApiKey" | "torboxApiKey";
@@ -96,6 +127,8 @@ export interface AdminStatus {
   jobs: JobStatus[];
   sessions: PlaybackSessionDto[];
   library: LibraryStats;
+  network: { host: string; port: number; urls: string[]; bonjour: boolean };
+  update: { state: UpdateState; updateAvailable: boolean; latestVersion: string | null; lastError: string | null };
 }
 
 export interface TorboxAccount {

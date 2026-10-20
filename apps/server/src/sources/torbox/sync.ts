@@ -1,7 +1,7 @@
 import { isVideoFile, parseMediaPath } from "../../media/parse";
-import type { Library } from "../../library";
+import type { FileRow, Library } from "../../library";
 import { logger } from "../../log";
-import type { TorboxClient, TorboxKind } from "./client";
+import type { TorboxClient, TorboxItem, TorboxKind } from "./client";
 
 const log = logger("torbox");
 const KINDS: TorboxKind[] = ["torrents", "usenet", "webdl"];
@@ -14,6 +14,27 @@ export function parseTorboxRef(ref: string): { kind: TorboxKind; itemId: number;
   const [kind, itemId, fileId] = ref.split(":");
   if (!KINDS.includes(kind as TorboxKind) || !itemId || !fileId) throw new Error(`Bad TorBox ref ${ref}`);
   return { kind: kind as TorboxKind, itemId: Number(itemId), fileId: Number(fileId) };
+}
+
+/** Upserts the video files of one finished TorBox item. */
+export function ingestItem(library: Library, kind: TorboxKind, item: TorboxItem): FileRow[] {
+  const rows: FileRow[] = [];
+  for (const file of item.files ?? []) {
+    const path = file.name.includes("/") ? file.name : `${item.name}/${file.short_name ?? file.name}`;
+    const segments = path.split("/").filter(Boolean);
+    if (!isVideoFile(segments[segments.length - 1] ?? "")) continue;
+    rows.push(
+      library.upsert({
+        provider: "torbox",
+        ref: torboxRef(kind, item.id, file.id),
+        name: segments[segments.length - 1]!,
+        size: file.size,
+        parsed: parseMediaPath(segments),
+        sourceHash: kind === "torrents" ? item.hash?.toLowerCase() : undefined,
+      }),
+    );
+  }
+  return rows;
 }
 
 /** Mirrors the video files of every finished TorBox download into the library. */
@@ -35,14 +56,7 @@ export async function syncTorbox(client: TorboxClient, library: Library, report:
     for (const item of list) {
       if (!(item.download_present || item.download_finished)) continue;
       items++;
-      for (const file of item.files ?? []) {
-        const path = file.name.includes("/") ? file.name : `${item.name}/${file.short_name ?? file.name}`;
-        const segments = path.split("/").filter(Boolean);
-        if (!isVideoFile(segments[segments.length - 1] ?? "")) continue;
-        const ref = torboxRef(kind, item.id, file.id);
-        library.upsert({ provider: "torbox", ref, name: segments[segments.length - 1]!, size: file.size, parsed: parseMediaPath(segments) });
-        seen.push(ref);
-      }
+      seen.push(...ingestItem(library, kind, item).map((f) => f.ref));
     }
     report(items, 0, `Listed ${kind}`);
   }

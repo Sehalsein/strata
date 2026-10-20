@@ -23,10 +23,10 @@ export const fakeTmdb: typeof fetch = (async (input: string | URL | Request) => 
     return json({ page: 1, results, total_pages: 1, total_results: results.length });
   }
   if (path === "/movie/10378") {
-    return json({ id: 10378, title: "Big Buck Bunny", release_date: "2008-05-30", runtime: 10, genres: [{ id: 16, name: "Animation" }], poster_path: "/bbb.jpg", credits: { cast: [], crew: [] }, recommendations: { page: 1, results: [], total_pages: 1, total_results: 0 } });
+    return json({ id: 10378, imdb_id: "tt1254207", title: "Big Buck Bunny", release_date: "2008-05-30", runtime: 10, genres: [{ id: 16, name: "Animation" }], poster_path: "/bbb.jpg", credits: { cast: [], crew: [] }, recommendations: { page: 1, results: [], total_pages: 1, total_results: 0 } });
   }
   if (path === "/tv/9001") {
-    return json({ id: 9001, name: "Test Show", first_air_date: "2020-01-01", genres: [], seasons: [{ season_number: 1, name: "Season 1", episode_count: 2 }] });
+    return json({ id: 9001, name: "Test Show", first_air_date: "2020-01-01", external_ids: { imdb_id: "tt9000001" }, genres: [], seasons: [{ season_number: 1, name: "Season 1", episode_count: 2 }] });
   }
   if (path === "/tv/9001/season/1") {
     return json({
@@ -51,10 +51,10 @@ export interface TestServer {
   dataDir: string;
 }
 
-export async function startTestServer(): Promise<TestServer> {
+export async function startTestServer(fetchImpl: typeof fetch = fakeTmdb): Promise<TestServer> {
   const dataDir = mkdtempSync(join(tmpdir(), "strata-test-"));
   process.env.TMDB_API_KEY = "test-key";
-  const services = await createServices({ dataDir, port: 0, host: "127.0.0.1" }, { fetch: fakeTmdb });
+  const services = await createServices({ dataDir, port: 0, host: "127.0.0.1" }, { fetch: fetchImpl });
   const app = createApp(services);
   const request = async (path: string, init: RequestInit & { json?: unknown; token?: string } = {}) => {
     const headers = new Headers(init.headers);
@@ -71,10 +71,13 @@ export async function startTestServer(): Promise<TestServer> {
 
 /** Generates small real media files with ffmpeg (cached between runs). */
 export async function makeFixtures(): Promise<string> {
-  const root = join(tmpdir(), "strata-fixtures-v1");
+  const root = join(tmpdir(), "strata-fixtures-v2");
+  mkdirSync(root, { recursive: true });
+  const srt = join(root, "subs.srt");
+  if (!existsSync(srt)) await Bun.write(srt, "1\n00:00:01,000 --> 00:00:04,000\nHello from Strata\n\n2\n00:00:20,000 --> 00:00:22,500\nSecond line\n");
   const files: [string, string[]][] = [
-    // MKV, H.264 + AC3: plays after a remux to HLS.
-    ["Movies/Big Buck Bunny (2008)/Big.Buck.Bunny.2008.1080p.BluRay.x264.mkv", ["-c:v", "libx264", "-preset", "ultrafast", "-g", "48", "-c:a", "ac3"]],
+    // MKV, H.264 + AC3 + an SRT track: plays after a remux to HLS.
+    ["Movies/Big Buck Bunny (2008)/Big.Buck.Bunny.2008.1080p.BluRay.x264.mkv", ["-i", srt, "-map", "0:v", "-map", "1:a", "-map", "2:s", "-c:v", "libx264", "-preset", "ultrafast", "-g", "48", "-c:a", "ac3", "-c:s", "srt", "-metadata:s:s:0", "language=eng"]],
     // MP4, H.264 + AAC: direct play.
     ["Shows/Test Show/Season 1/Test.Show.S01E01.720p.WEB.mp4", ["-c:v", "libx264", "-preset", "ultrafast", "-g", "48", "-c:a", "aac", "-movflags", "+faststart"]],
     // MKV with DTS: needs audio transcode.
@@ -90,5 +93,7 @@ export async function makeFixtures(): Promise<string> {
     );
     if ((await proc.exited) !== 0) throw new Error(`fixture ${rel}: ${await new Response(proc.stderr).text()}`);
   }
+  const sidecar = join(root, "Movies/Big Buck Bunny (2008)/Big.Buck.Bunny.2008.1080p.BluRay.x264.en.forced.srt");
+  if (!existsSync(sidecar)) await Bun.write(sidecar, "1\n00:00:02,000 --> 00:00:03,000\nForced sidecar\n");
   return root;
 }

@@ -55,7 +55,7 @@ describe("decide", () => {
 });
 
 describe("rankCandidates", () => {
-  const c = (over: Partial<Candidate>): Candidate => ({ id: "x", fileId: 1, provider: "local", name: "", size: 1, probed: false, ...over });
+  const c = (over: Partial<Candidate>): Candidate => ({ id: "x", fileId: 1, provider: "local", name: "", size: 1, probed: false, availability: "ready", ...over });
 
   test("source priority, then resolution, then quality", () => {
     const ranked = rankCandidates(

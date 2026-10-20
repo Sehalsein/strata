@@ -22,6 +22,21 @@ export function OverviewPage() {
       <PageHeader title="Overview" subtitle={<>Up {formatDuration(data.uptimeMs)}</>} actions={error ? <Badge tone="error">Connection lost — retrying</Badge> : <LiveDot />} />
 
       <div className="notices">
+        {data.update?.updateAvailable && (
+          <Notice
+            tone="info"
+            title="Update available"
+            action={
+              <a href="/settings#updates" className="btn btn-secondary btn-sm" onClick={linkClick}>
+                {data.update.state === "available" ? "Update now" : "View"}
+              </a>
+            }
+          >
+            Strata v{data.update.latestVersion} is ready to install (running v{data.version}).
+            {data.update.state === "waiting-for-idle" && " It installs when the last stream stops."}
+            {data.update.state === "downloading" && " Downloading…"}
+          </Notice>
+        )}
         {!data.ffmpeg && (
           <Notice tone="warn" title="ffmpeg not found">
             Files that can't direct-play (MKV, DTS/TrueHD audio, some codecs) need ffmpeg. Install it on the server and restart Strata — on a Mac: <code className="code-inline">brew install ffmpeg</code>

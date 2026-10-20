@@ -3,6 +3,11 @@ import { join } from "node:path";
 
 type Level = "debug" | "info" | "warn" | "error";
 
+/** Strips credentials from URLs/command lines before they reach logs or API responses. */
+export function redactSecrets(text: string): string {
+  return text.replace(/([?&](?:token|api_key|apikey|key)=)[^&\s"']+/gi, "$1***");
+}
+
 export interface LogEntry {
   time: string;
   level: Level;

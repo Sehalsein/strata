@@ -249,6 +249,11 @@ export class CatalogService {
     return cards.filter((c) => c !== null) as ContinueCard[];
   }
 
+  /** The aired episode after S{season}E{episode}, crossing into the next season. */
+  async nextEpisode(showId: number, season: number, episode: number): Promise<EpisodeRef | null> {
+    return this.episodeAfter(await this.tmdb.show(showId), season, episode);
+  }
+
   private async episodeAfter(show: TmdbShow, season: number, episode: number): Promise<EpisodeRef | null> {
     const today = new Date().toISOString().slice(0, 10);
     const current = await this.tmdb.season(show.id, season);

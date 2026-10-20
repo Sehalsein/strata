@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api";
 import { MediaFolders } from "../components/MediaFolders";
 import { SecretKeyForm } from "../components/SecretKeyForm";
+import { DiscoveryCard, NetworkCard, UpdatesCard } from "../components/SystemSettings";
 import { Card, ErrorText, Field, Flash, PageHeader, Spinner, useFlash, useResource } from "../components/ui";
 import type { Provider, Settings } from "../types";
 
@@ -18,7 +19,7 @@ export function SettingsPage({ onServerNameChange }: { onServerNameChange: (name
     if (data && !draft) setDraft(data.settings);
   }, [data, draft]);
 
-  // Jump to #keys when linked from the overview.
+  // Jump to #keys / #updates when linked from the overview.
   useEffect(() => {
     if (draft && location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView();
   }, [!!draft]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -78,7 +79,8 @@ export function SettingsPage({ onServerNameChange }: { onServerNameChange: (name
     <div className="page settings">
       <PageHeader title="Settings" subtitle="Changes apply to every client of this server." />
 
-      <form onSubmit={save} className="stack-lg">
+      {/* Cards hold their own nested forms (keys), so the save bar is the settings form. */}
+      <div className="stack-lg">
         <Card eyebrow="General" title="Server">
           <div className="form-grid">
             <Field label="Server name" hint="Shown in the apps when they find this server.">
@@ -92,6 +94,8 @@ export function SettingsPage({ onServerNameChange }: { onServerNameChange: (name
             </Field>
           </div>
         </Card>
+
+        <NetworkCard draft={draft} set={set} />
 
         <Card eyebrow="Library" title="Media folders">
           <MediaFolders value={draft.mediaFolders} onChange={(v) => set("mediaFolders", v)} />
@@ -159,6 +163,8 @@ export function SettingsPage({ onServerNameChange }: { onServerNameChange: (name
           </div>
         </Card>
 
+        <DiscoveryCard draft={draft} set={set} />
+
         <Card eyebrow="Playback" title="Transcoding">
           <div className="form-grid">
             <label className="switch-row">
@@ -185,22 +191,10 @@ export function SettingsPage({ onServerNameChange }: { onServerNameChange: (name
           </div>
         </Card>
 
-        <div className={`savebar ${dirty ? "is-visible" : ""}`} aria-hidden={!dirty && !flash}>
-          <ErrorText error={saveError} />
-          <Flash message={flash} />
-          {dirty && (
-            <>
-              <span className="muted small savebar-note">Unsaved changes</span>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => (setDraft(data.settings), setSaveError(null))}>
-                Discard
-              </button>
-              <button type="submit" className="btn btn-primary" disabled={saving}>
-                {saving ? "Saving…" : "Save changes"}
-              </button>
-            </>
-          )}
+        <div id="updates" className="anchor-target">
+          <UpdatesCard draft={draft} set={set} />
         </div>
-      </form>
+      </div>
 
       <section id="keys" className="keys-section">
         <Card eyebrow="Security" title="Provider keys">
@@ -239,6 +233,22 @@ export function SettingsPage({ onServerNameChange }: { onServerNameChange: (name
           </div>
         </Card>
       </section>
+
+      <form onSubmit={save} className={`savebar ${dirty ? "is-visible" : ""}`} aria-hidden={!dirty && !flash}>
+        <ErrorText error={saveError} />
+        <Flash message={flash} />
+        {dirty && (
+          <>
+            <span className="muted small savebar-note">Unsaved changes</span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => (setDraft(data.settings), setSaveError(null))}>
+              Discard
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+          </>
+        )}
+      </form>
     </div>
   );
 }

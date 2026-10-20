@@ -37,11 +37,17 @@ export const catalogRoutes = new Hono<Env>()
   .get("/titles/show/:id", async (c) => c.json(await c.var.services.catalog.show(profileOf(c), intParam(c, "id"))))
   .get("/titles/show/:id/seasons/:season", async (c) => c.json(await c.var.services.catalog.season(profileOf(c), intParam(c, "id"), intParam(c, "season"))))
 
-  .get("/sources", (c) => {
+  // Library sources are instant; `discover=1` adds releases from scrapers (a few seconds).
+  .get("/sources", async (c) => {
     const mediaType = z.enum(["movie", "episode"]).parse(c.req.query("mediaType"));
     const tmdbId = optionalInt(c.req.query("tmdbId"));
     if (tmdbId === undefined) throw new HTTPException(400, { message: "tmdbId is required" });
-    return c.json({ items: c.var.services.catalog.sources(mediaType, tmdbId, optionalInt(c.req.query("season")), optionalInt(c.req.query("episode"))) });
+    const season = optionalInt(c.req.query("season"));
+    const episode = optionalInt(c.req.query("episode"));
+    if (mediaType === "episode" && (season === undefined || episode === undefined)) throw new HTTPException(400, { message: "season and episode are required for episodes" });
+    const items = c.var.services.catalog.sources(mediaType, tmdbId, season, episode);
+    if (c.req.query("discover") === "1") items.push(...(await c.var.services.discovery.candidates({ mediaType, tmdbId, season, episode })));
+    return c.json({ items });
   })
 
   .post("/play", async (c) => {

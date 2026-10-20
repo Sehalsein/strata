@@ -33,6 +33,14 @@ export function profileOf(c: Context<Env>): number {
 }
 
 export async function body<S extends z.ZodTypeAny>(c: Context, schema: S): Promise<z.infer<S>> {
+  // Requiring application/json makes any cross-origin request preflighted, so a web
+  // page can't silently drive the API (e.g. claim first-run setup).
+  const type = c.req.header("content-type");
+  // A bodyless request lets the schema's defaults apply.
+  if (!type && !c.req.header("content-length") && !c.req.header("transfer-encoding")) return schema.parse(undefined);
+  if (!type?.toLowerCase().startsWith("application/json")) {
+    throw new HTTPException(415, { message: "Expected Content-Type: application/json" });
+  }
   let json: unknown;
   try {
     json = await c.req.json();

@@ -209,28 +209,35 @@ on the LAN automatically.
   into the data directory and checked against its hash.
 - **Headless CLI**:
   - `strata-server`: run in the foreground.
-  - `strata-server service install|uninstall`: register with launchd or systemd.
-  - `strata-server update`, `strata-server --data-dir <path>`.
-- **CI** (GitHub Actions, on tag `server-vX.Y.Z`):
-  1. Run tests.
-  2. Build the dashboard.
-  3. Cross-compile all binaries.
-  4. No Developer ID signing or notarization. Binaries fetched by `curl` or by the updater
-     are not quarantined. Darwin builds are re-signed ad hoc with `codesign --sign -`;
-     current macOS kills Bun's linker-signed output on launch. That means darwin builds
-     run on a macOS runner.
-  5. Write `manifest.json` (per-platform URL + SHA-256, min client version), signed with
-     ed25519.
-  6. Publish to GitHub Releases, along with `install.sh`.
-- **Updates**: the server polls the signed manifest for its channel (`stable`/`beta`).
-  1. Verify the signature and SHA-256.
-  2. Wait until no stream is active.
-  3. Back up the DB.
-  4. Swap the binary, keeping `.old`.
-  5. Exit, and the service manager restarts it.
-  If the new version fails to boot twice, it rolls back. The dashboard shows
-  "Update available" with an **Update now** button, or applies updates automatically if
-  configured to.
+  - `strata-server service install|uninstall|status|restart`: register with launchd (per-user
+    LaunchAgent) or systemd (user unit; `--system` for a system unit). The service runs a copy
+    at `~/.local/bin/strata-server` so self-update can replace it in place.
+  - `strata-server update [--check]`, `strata-server --data-dir <path>`.
+- **Release CI**: not built yet. Planned to follow dispatch-ai's desktop model: every merge
+  ships a nightly (`<next-patch>-nightly.<run>`), a version with no `server-v<version>` tag
+  ships a stable release; signed manifests and versioned binaries go to a public Cloudflare
+  R2 bucket (`server/`, `server/nightly/`), with `latest/` aliases for an `install.sh`. A
+  private GitHub repo can't serve as the feed without a token in every server.
+  - No Developer ID signing or notarization. Binaries fetched by `curl` or by the updater
+    are not quarantined. Darwin builds are re-signed ad hoc with `codesign --sign -`;
+    current macOS kills Bun's linker-signed output on launch. That means darwin builds
+    run on a macOS runner.
+  - The pieces exist already: `scripts/build.ts --version/--update-url`,
+    `scripts/release-manifest.ts` (writes and signs `manifest.json`), `scripts/keygen.ts`.
+- **Updates**: the feed base URL is baked in at build time (`STRATA_UPDATE_URL`); the channel
+  (`stable`/`nightly`) picks `<base>/manifest.json` or `<base>/nightly/manifest.json`, and an
+  `updateManifestUrl` setting can override it. Without either, updates report "not configured".
+  1. Verify the Ed25519 signature (key compiled in), the channel, and the SHA-256.
+  2. Run the new binary with `--version`; on macOS re-sign it ad hoc first.
+  3. Wait until no stream is active.
+  4. Back up the DB and write a `pending-update.json` marker.
+  5. Swap the binary, keeping `.old`.
+  6. Exit with code 75, and the service manager restarts it (in the foreground, the old process
+     supervises the new one).
+  If the new version fails to boot twice (the marker is cleared after 30 s of uptime), the
+  next start restores `.old` and the DB backup. Downgrades are refused, except nightly →
+  stable on the stable channel. The dashboard shows "Update available" with an **Update now**
+  button, or applies updates automatically if configured to.
 - **Client integration**: `/api/info` exposes the server version and API compatibility. The
   Apple client app blocks incompatible servers with a clear message.
 

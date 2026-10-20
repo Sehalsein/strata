@@ -1747,6 +1747,13 @@ input[type="checkbox"] {
   margin-top: 22px;
   scroll-margin-top: 80px;
 }
+.anchor-target {
+  scroll-margin-top: 80px;
+}
+.settings details > summary {
+  cursor: pointer;
+  margin-bottom: 10px;
+}
 
 /* ---------- Logs ---------- */
 

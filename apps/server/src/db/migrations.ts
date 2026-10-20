@@ -83,4 +83,8 @@ export const migrations: string[] = [
     PRIMARY KEY (profile_id, type, tmdb_id)
   );
   `,
+  /* 2 */ `
+  ALTER TABLE files ADD COLUMN source_hash TEXT;
+  CREATE INDEX files_source_hash ON files(source_hash);
+  `,
 ];
