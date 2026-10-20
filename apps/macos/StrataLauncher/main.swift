@@ -14,13 +14,24 @@ private let logURL = FileManager.default.homeDirectoryForCurrentUser
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var stateItem: NSMenuItem!
+    private var openItem: NSMenuItem!
     private var restartItem: NSMenuItem!
     private var server: Process?
     /// True when another Strata (e.g. started in a terminal) already had the port.
     private var attached = false
     private var quitting = false
 
+    private var signalSources: [DispatchSourceSignal] = []
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // A termination signal (kill, logout) quits like the menu does, stopping the server first.
+        for sig in [SIGTERM, SIGINT, SIGHUP] {
+            signal(sig, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            source.setEventHandler { NSApp.terminate(nil) }
+            source.resume()
+            signalSources.append(source)
+        }
         buildMenu()
         Task { await start(openDashboard: !UserDefaults.standard.bool(forKey: "openedOnce")) }
     }
@@ -43,6 +54,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func start(openDashboard: Bool) async {
         setState("Starting…", running: false)
         if await isServing() {
+            // Only attach to a real Strata server run by this user; anything else could be
+            // impersonating the dashboard to collect a password.
+            guard Self.portOwnedByStrata() else {
+                attached = true
+                setState("Port \(port) is used by another program", running: false)
+                openItem.isEnabled = false
+                return
+            }
             attached = true
             setState("Running (started elsewhere)", running: true)
         } else {
@@ -76,6 +95,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         process.executableURL = bundle.appendingPathComponent("Contents/MacOS/strata-server")
         process.arguments = ["serve", "--port", String(port)]
         var env = ProcessInfo.processInfo.environment
+        // The server stops itself if this app disappears without stopping it (crash, force quit).
+        env["STRATA_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         let ffmpegDir = bundle.appendingPathComponent("Contents/Resources/ffmpeg")
         if FileManager.default.fileExists(atPath: ffmpegDir.appendingPathComponent("ffmpeg").path) {
             env["STRATA_FFMPEG"] = ffmpegDir.appendingPathComponent("ffmpeg").path
@@ -93,7 +114,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         process.terminationHandler = { [weak self] proc in
             Task { @MainActor in
                 guard let self, !self.quitting else { return }
-                self.setState("Stopped (exit \(proc.terminationStatus)). See Show Logs.", running: false)
+                if Self.portListener() != nil, !Self.portOwnedByStrata() {
+                    self.setState("Port \(port) is used by another program", running: false)
+                    self.openItem.isEnabled = false
+                } else {
+                    self.setState("Stopped (exit \(proc.terminationStatus)). See Show Logs.", running: false)
+                }
             }
         }
         try process.run()
@@ -108,6 +134,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return json["name"] as? String == "strata"
     }
 
+    /// Whether the process listening on the port is a strata-server binary owned by this user.
+    private static func portOwnedByStrata() -> Bool {
+        guard let pid = portListener() else { return false }
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return false }
+        let path = String(cString: buffer)
+        guard URL(fileURLWithPath: path).lastPathComponent.hasPrefix("strata-server"),
+              let owner = (try? FileManager.default.attributesOfItem(atPath: path))?[.ownerAccountID] as? NSNumber
+        else { return false }
+        return owner.uint32Value == getuid()
+    }
+
+    /// The process listening on the port, if any.
+    private static func portListener() -> pid_t? {
+        let lsof = Process()
+        lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        lsof.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-t"]
+        let pipe = Pipe()
+        lsof.standardOutput = pipe
+        lsof.standardError = FileHandle.nullDevice
+        guard (try? lsof.run()) != nil else { return nil }
+        lsof.waitUntilExit()
+        let pids = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .split(separator: "\n").compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
+        return pids.first
+    }
+
     // MARK: Menu
 
     private func buildMenu() {
@@ -120,7 +173,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stateItem.isEnabled = false
         menu.addItem(stateItem)
         menu.addItem(.separator())
-        menu.addItem(item("Open Dashboard", #selector(openDashboard), "d"))
+        openItem = item("Open Dashboard", #selector(openDashboard), "d")
+        menu.addItem(openItem)
         menu.addItem(item("Show Logs", #selector(showLogs), "l"))
         restartItem = item("Restart Server", #selector(restart), "r")
         menu.addItem(restartItem)
@@ -136,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setState(_ text: String, running: Bool) {
+        NSLog("Strata: %@", text) // visible in Console.app
         stateItem.title = "Strata: \(text)"
         restartItem.isHidden = attached
         statusItem.button?.appearsDisabled = !running

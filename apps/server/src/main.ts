@@ -117,6 +117,19 @@ async function serve(argv: string[]) {
   };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
+
+  // Started by Strata.app: stop if the app goes away without stopping us (crash, force quit).
+  const parent = Number(process.env.STRATA_PARENT_PID);
+  if (parent > 1) {
+    setInterval(() => {
+      try {
+        process.kill(parent, 0);
+      } catch {
+        log.info("Strata.app is gone; stopping");
+        stop("SIGTERM");
+      }
+    }, 3_000).unref();
+  }
 }
 
 const argv = process.argv.slice(2);
