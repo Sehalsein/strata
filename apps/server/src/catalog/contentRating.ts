@@ -21,7 +21,13 @@ const MAX_AGE: Record<ContentLimit, number | null> = { none: null, teen: 14, kid
 const FAMILY_GENRES = new Set([10751, 10762, 16]); // Family, Kids (TV), Animation
 const HORROR = 27;
 
-/** Minimum age for a certification string, or null when it's not one we recognise. */
+/** Rating given but not one we recognise: treated as adult, so a limit hides it. */
+export const UNRECOGNISED = 99;
+
+/**
+ * Minimum age for a certification string; null when the title is unrated, and
+ * UNRECOGNISED for a rating we can't read (fail closed).
+ */
 export function certificationAge(raw: string, region: string): number | null {
   const cert = raw.trim().toUpperCase();
   if (!cert || cert === "NR" || cert === "NOT RATED" || cert === "UNRATED") return null;
@@ -29,16 +35,20 @@ export function certificationAge(raw: string, region: string): number | null {
     G: 0, PG: 10, "PG-13": 13, R: 17, "NC-17": 18,
     "TV-Y": 0, "TV-Y7": 7, "TV-Y7-FV": 7, "TV-G": 0, "TV-PG": 10, "TV-14": 14, "TV-MA": 17,
   };
-  const gb: Record<string, number> = { U: 0, UC: 0, PG: 10, "12A": 12, "12": 12, "15": 15, "18": 18, R18: 18, CAUTION: 10 };
+  const gb: Record<string, number> = { U: 0, UC: 0, PG: 10, "12A": 12, "12": 12, "15": 15, "18": 18, R18: 18 };
   const table = region === "GB" ? gb : us;
   if (cert in table) return table[cert]!;
   if (cert in us) return us[cert]!;
-  // Most other countries rate by age: "12", "FSK 16", "16+", "-12", "K-7", "A" (adults).
-  const number = cert.match(/(\d{1,2})/);
+  // Letter ratings used elsewhere (AU, NZ, KR, JP, SG…).
+  const letters: Record<string, number> = {
+    AL: 0, TP: 0, ALL: 0, E: 0, P: 0, C: 0, M: 15, MA: 17, "MA15+": 15, "R16": 16, R18: 18, "R18+": 18, "R-18": 18,
+    A: 18, X: 18, "X18+": 18, AO: 18, RP18: 18, NC16: 16, M18: 18, "R21": 21,
+  };
+  if (cert in letters) return letters[cert]!;
+  // Most other countries rate by age: "12", "FSK 16", "16+", "-12", "K-7", "PG-12".
+  const number = cert.match(/^[A-Z\-\s]{0,5}(\d{1,2})\s*\+?$/);
   if (number) return Number(number[1]);
-  if (cert === "A" || cert === "X" || cert === "R18+") return 18;
-  if (cert === "AL" || cert === "TP" || cert === "ALL" || cert === "U") return 0;
-  return null;
+  return UNRECOGNISED;
 }
 
 function movieCertification(m: TmdbMovie, region: string): string | null {
@@ -68,7 +78,9 @@ export class ContentFilter {
   /** Max age for a profile, or null when it has no limit. */
   maxAge(profileId: number): number | null {
     const row = this.db.select({ limit: profiles.contentLimit }).from(profiles).where(eq(profiles.id, profileId)).get();
-    return MAX_AGE[(row?.limit as ContentLimit) ?? "none"] ?? null;
+    const limit = row?.limit ?? "none";
+    // A value we don't know (shouldn't happen: writes are validated) means the strictest limit.
+    return limit in MAX_AGE ? MAX_AGE[limit as ContentLimit] : MAX_AGE.little;
   }
 
   async allowed(profileId: number, type: TitleType, tmdbId: number): Promise<boolean> {
