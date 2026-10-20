@@ -215,3 +215,15 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(StubProtocol.recorded.first?.url?.absoluteString, "http://strata.test:8420/api/stream/s/subtitles/s2.vtt")
     }
 }
+
+final class SameOriginTests: XCTestCase {
+    func testCredentialsOnlyForTheServer() {
+        let client = StrataClient(baseURL: URL(string: "http://192.168.1.20:8420")!, token: "t")
+        XCTAssertTrue(client.isSameOrigin(URL(string: "http://192.168.1.20:8420/api/stream/x/subtitles/s3.vtt")!))
+        XCTAssertFalse(client.isSameOrigin(URL(string: "http://evil.example:8420/sub.vtt")!))
+        XCTAssertFalse(client.isSameOrigin(URL(string: "https://192.168.1.20:8420/sub.vtt")!))
+        XCTAssertFalse(client.isSameOrigin(URL(string: "http://192.168.1.20:9000/sub.vtt")!))
+        let https = StrataClient(baseURL: URL(string: "https://strata.example.com")!, token: "t")
+        XCTAssertTrue(https.isSameOrigin(URL(string: "https://strata.example.com:443/a")!))
+    }
+}

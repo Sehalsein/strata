@@ -51,14 +51,20 @@ public struct TokenStorage: Sendable {
             Keychain.get("strata.token.\(id)") ?? UserDefaults.standard.string(forKey: "strata.token.fallback.\(id)")
         },
         write: { token, id in
+            let fallbackKey = "strata.token.fallback.\(id)"
+            guard let token else {
+                Keychain.set(nil, for: "strata.token.\(id)")
+                UserDefaults.standard.removeObject(forKey: fallbackKey)
+                return
+            }
             let status = Keychain.set(token, for: "strata.token.\(id)")
-            if let token {
-                UserDefaults.standard.set(token, forKey: "strata.token.fallback.\(id)")
-                if status != errSecSuccess {
-                    Log.auth.warning("Keychain write failed (\(status)); relying on UserDefaults fallback")
-                }
+            if status == errSecSuccess {
+                // The Keychain holds it; never keep a plaintext copy.
+                UserDefaults.standard.removeObject(forKey: fallbackKey)
             } else {
-                UserDefaults.standard.removeObject(forKey: "strata.token.fallback.\(id)")
+                // Only when the Keychain is unusable (e.g. an unsigned simulator build).
+                Log.auth.warning("Keychain write failed (\(status)); using UserDefaults fallback")
+                UserDefaults.standard.set(token, forKey: fallbackKey)
             }
         }
     )
@@ -188,7 +194,7 @@ public final class ServerStore {
             tokens.write(token, server.id)
             upsert(server)
             activate(server.id)
-            Log.auth.info("signIn ok server=\(server.id, privacy: .public) user=\(server.username, privacy: .public)")
+            Log.auth.info("signIn ok server=\(server.id, privacy: .public) user=\(server.username, privacy: .private)")
             return true
         } catch {
             let e = StrataError.wrap(error)
@@ -309,7 +315,7 @@ public final class ServerStore {
         server.addresses = [url] + server.addresses.filter { $0 != url }
         upsert(server)
         rebuildClient()
-        Log.auth.info("failed over to \(url.absoluteString, privacy: .public)")
+        Log.auth.info("failed over to \(url.absoluteString, privacy: .private)")
         return true
     }
 
@@ -403,18 +409,15 @@ public final class ServerStore {
     /// The Jellyfin-era keys are ignored; clear them out once.
     private static func cleanUpLegacyJellyfinState(_ defaults: UserDefaults) {
         guard !defaults.bool(forKey: legacyCleanupKey) else { return }
-        defaults.set(true, forKey: legacyCleanupKey)
-        struct LegacyAccount: Decodable { let userId: String }
-        if let data = defaults.data(forKey: "strata.accounts"),
-           let accounts = try? JSONDecoder().decode([LegacyAccount].self, from: data) {
-            for a in accounts { Keychain.set(nil, for: "strata.accessToken.\(a.userId)") }
-        }
-        Keychain.set(nil, for: "strata.accessToken")
+        // Every Jellyfin token, found by prefix so orphaned items go too. The flag is set
+        // only once this succeeds, so a failure retries on the next launch.
+        let removedTokens = Keychain.deleteAll(prefix: "strata.accessToken")
         for key in ["strata.userId", "strata.userName", "strata.serverURL", "strata.savedEndpoints", "strata.accounts"] {
             defaults.removeObject(forKey: key)
         }
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("strata.accessToken") {
             defaults.removeObject(forKey: key)
         }
+        if removedTokens { defaults.set(true, forKey: legacyCleanupKey) }
     }
 }

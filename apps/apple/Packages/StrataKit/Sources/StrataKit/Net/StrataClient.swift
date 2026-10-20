@@ -177,13 +177,23 @@ public final class StrataClient: Sendable {
     /// Fetches a WebVTT track. The server extracts embedded tracks on demand and answers
     /// 202 while that runs; this retries with backoff (honouring Retry-After) until the
     /// text arrives, `maxWait` passes, or the task is cancelled.
+    /// Whether `url` points at this client's server (scheme, host and port).
+    public func isSameOrigin(_ url: URL) -> Bool {
+        func port(_ u: URL) -> Int? { u.port ?? (u.scheme?.lowercased() == "https" ? 443 : u.scheme?.lowercased() == "http" ? 80 : nil) }
+        return url.scheme?.lowercased() == baseURL.scheme?.lowercased()
+            && url.host()?.lowercased() == baseURL.host()?.lowercased()
+            && port(url) == port(baseURL)
+    }
+
     public func subtitles(_ url: URL, maxWait: TimeInterval = 120) async throws -> String {
         let deadline = Date().addingTimeInterval(maxWait)
         var delay: TimeInterval = 1
         while true {
-            var req = URLRequest(url: resolve(url))
+            let target = resolve(url)
+            var req = URLRequest(url: target)
             req.setValue("text/vtt, */*", forHTTPHeaderField: "Accept")
-            if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+            // Credentials only ever go to this server, never to a URL elsewhere.
+            if let token, isSameOrigin(target) { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
             let (data, response) = try await rawData(req)
             let status = response.statusCode
             if status == 202 {
