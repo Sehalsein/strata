@@ -108,6 +108,7 @@ export class Discovery {
    */
   async acquire(target: DiscoveryTarget, hash: string): Promise<AcquireResult> {
     hash = hash.toLowerCase();
+    if (!isInfoHash(hash)) throw new Error("Invalid info-hash");
     const existing = this.pickFile(this.library.byHash(hash), target);
     if (existing) return { status: "ready", fileId: existing.id };
 
@@ -119,7 +120,9 @@ export class Discovery {
     let waitMs = 0;
     if (torrentId === undefined) {
       const release = (await this.releases(target)).find((r) => r.hash === hash);
-      ({ torrentId } = await client.createTorrent(`magnet:?xt=urn:btih:${hash}${release ? `&dn=${encodeURIComponent(release.title)}` : ""}`));
+      const magnet = new URLSearchParams({ xt: `urn:btih:${hash}` });
+      if (release) magnet.set("dn", release.title);
+      ({ torrentId } = await client.createTorrent(`magnet:?${magnet.toString().replace("urn%3Abtih%3A", "urn:btih:")}`));
       log.info(`Added ${release?.title ?? hash} to TorBox (#${torrentId})`);
       if (release?.cached) waitMs = READY_WAIT_MS;
     }
@@ -228,7 +231,7 @@ export class Discovery {
     if (!res.ok) throw new Error(`Torrentio ${res.status}`);
     const body = (await res.json()) as { streams?: TorrentioStream[] };
     return (body.streams ?? []).flatMap((s) => {
-      if (!s.infoHash) return [];
+      if (!s.infoHash || !isInfoHash(s.infoHash.toLowerCase())) return [];
       const lines = (s.title ?? "").split("\n");
       const title = lines[0]?.trim() || s.behaviorHints?.filename || "";
       const fileName = s.behaviorHints?.filename ?? (lines[1] && isVideoFile(lines[1].trim()) ? lines[1].trim() : undefined);
@@ -252,7 +255,7 @@ export class Discovery {
 
   private async torboxSearch(client: TorboxClient, imdbId: string, target: DiscoveryTarget): Promise<Release[]> {
     const torrents = await client.search(imdbId, target.season, target.episode);
-    return torrents.map((t) => {
+    return torrents.filter((t) => isInfoHash(t.hash?.toLowerCase() ?? "")).map((t) => {
       const parsed = parseFileName(t.raw_title);
       return {
         hash: t.hash.toLowerCase(),
@@ -274,6 +277,11 @@ interface TorrentioStream {
   infoHash?: string;
   fileIdx?: number;
   behaviorHints?: { filename?: string; bingeGroup?: string };
+}
+
+/** SHA-1 (v1) or SHA-256 (v2) BitTorrent info-hash, hex. */
+export function isInfoHash(value: string): boolean {
+  return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value);
 }
 
 /** Drops cams and releases for the wrong episode/season or the wrong kind of title. */

@@ -142,6 +142,13 @@ describe("discovery end to end", () => {
     expect(items.some((i) => i.id === `hash:${CACHED}`)).toBe(false);
   }, 60_000);
 
+  test("refuses hashes discovery didn't offer", async () => {
+    for (const candidateId of [`hash:${"d".repeat(40)}`, "hash:not-a-hash", "hash:abc&dn=x"]) {
+      const res = await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, candidateId } });
+      expect(res.status).toBe(404);
+    }
+  });
+
   test("an uncached release reports download progress", async () => {
     const res = await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, candidateId: `hash:${UNCACHED}` } });
     expect(res.status).toBe(202);

@@ -8,7 +8,7 @@ import { findCandidates, toCandidate, type Candidate } from "../sources/resolver
 import type { TorboxClient } from "../sources/torbox/client";
 import { parseTorboxRef } from "../sources/torbox/sync";
 import { decide, type ClientCaps } from "./decide";
-import { NotReadyError, type Discovery } from "../sources/discovery";
+import { NotReadyError, isInfoHash, type Discovery } from "../sources/discovery";
 import { embeddedTracks, findSidecars } from "./subtitles";
 import type { EpisodeRef } from "../catalog/service";
 import type { SessionManager, SessionTarget, PlaybackSession } from "./sessions";
@@ -158,7 +158,16 @@ export class PlaybackService {
     const target = { mediaType: req.mediaType, tmdbId: req.tmdbId, season: req.season, episode: req.episode };
     let hash: string | undefined;
     if (req.candidateId?.startsWith("hash:")) {
-      hash = req.candidateId.slice(5);
+      hash = req.candidateId.slice(5).toLowerCase();
+      if (!isInfoHash(hash)) throw new PlaybackError("Unknown source", 404);
+      // Only hashes already in the library, or ones discovery offered for this exact
+      // title, may be added to the owner's TorBox — never an arbitrary torrent.
+      if (this.library.byHash(hash).length === 0) {
+        if (!this.discovery.available) throw new PlaybackError("Discovery is turned off", 403);
+        const offered = (await this.discovery.releases(target)).find((r) => r.hash === hash);
+        if (!offered) throw new PlaybackError("Unknown source", 404);
+        if (!offered.cached && !this.settings().showUncached) throw new PlaybackError("That release isn't cached on TorBox", 409);
+      }
     } else {
       const candidates = findCandidates(this.library, this.settings(), req.mediaType, req.tmdbId, req.season, req.episode);
       const candidate = req.candidateId ? candidates.find((c) => c.id === req.candidateId) : candidates[0];
