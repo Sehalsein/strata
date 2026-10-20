@@ -90,7 +90,9 @@ public enum Metrics {
         true
         #endif
     }
-    @MainActor public static var gutter: CGFloat { isPad ? 32 : 20 }
+    /// Matches the system's layout margins, so content lines up with large titles,
+    /// toolbars and the tab bar.
+    @MainActor public static var gutter: CGFloat { isPad ? 20 : 16 }
     @MainActor public static var posterWidth: CGFloat { isPad ? 160 : 120 }
     @MainActor public static var landscapeWidth: CGFloat { isPad ? 320 : 264 }
     @MainActor public static var cardGap: CGFloat { isPad ? 20 : 12 }

@@ -27,7 +27,11 @@ struct ShowDetailView: View {
             }
         }
         .background(Theme.bg.ignoresSafeArea())
+        .fullBleedOnTV()
         .ignoresSafeArea(edges: .top)
+        #if os(tvOS)
+        .toolbar(.hidden, for: .tabBar)
+        #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -68,7 +72,7 @@ struct ShowDetailView: View {
             InfoGrid(rows: [
                 ("Status", show.status ?? ""),
                 ("Genres", show.genres.joined(separator: ", ")),
-                ("First aired", show.firstAirDate ?? ""),
+                ("First aired", Formatting.date(show.firstAirDate)?.formatted(date: .abbreviated, time: .omitted) ?? ""),
                 ("Rating", show.ratingText.map { "\($0) on TMDB" } ?? ""),
             ])
         }

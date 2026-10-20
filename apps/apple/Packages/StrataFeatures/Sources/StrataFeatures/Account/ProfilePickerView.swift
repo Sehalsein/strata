@@ -32,6 +32,7 @@ struct ProfilePickerView: View {
             case .loaded(let list):
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: Metrics.space8) {
+                        Spacer(minLength: 0)
                         ForEach(list) { profile in
                             Button {
                                 if profile.hasPin { pin = ""; pinError = nil; pinFor = profile } else { Task { await select(profile, pin: nil) } }
@@ -48,8 +49,10 @@ struct ProfilePickerView: View {
                             }
                             .buttonStyle(StrataCardStyle())
                         }
+                        Spacer(minLength: 0)
                     }
                     .padding(Metrics.space8)
+                    .containerRelativeFrame(.horizontal) { width, _ in width }
                 }
                 .scrollClipDisabled()
             }
@@ -94,7 +97,8 @@ struct ProfilePickerView: View {
             services.refreshClient()
             if isSheet { dismiss() }
         } catch {
-            pinError = StrataError.wrap(error).status == 403 ? "That PIN isn't right." : StrataError.wrap(error).message
+            pinError = StrataError.wrap(error).status == 403 ? "That PIN isn't right. Try again." : StrataError.wrap(error).message
+            self.pin = ""
             if pinFor == nil { pinFor = profile }
         }
     }

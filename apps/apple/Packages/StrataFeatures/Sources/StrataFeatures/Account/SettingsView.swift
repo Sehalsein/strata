@@ -59,6 +59,15 @@ struct SettingsView: View {
 
                 Section {
                     Button("Sign Out of \(services.store.active?.name ?? "Server")", role: .destructive) { confirmSignOut = true }
+                        .confirmationDialog("Sign out of \(services.store.active?.name ?? "this server")?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+                            Button("Sign Out", role: .destructive) {
+                                Task {
+                                    await services.store.signOut()
+                                    services.refreshClient()
+                                    dismiss()
+                                }
+                            }
+                        }
                 }
 
                 Section("About") {
@@ -76,15 +85,6 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showProfiles) { ProfilePickerView(isSheet: true) }
             .sheet(isPresented: $showAddServer) { ConnectView(isAddingServer: true) }
-            .confirmationDialog("Sign out of \(services.store.active?.name ?? "this server")?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-                Button("Sign Out", role: .destructive) {
-                    Task {
-                        await services.store.signOut()
-                        services.refreshClient()
-                        dismiss()
-                    }
-                }
-            }
         }
     }
 }

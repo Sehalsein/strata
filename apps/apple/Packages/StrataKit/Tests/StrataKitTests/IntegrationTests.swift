@@ -54,7 +54,7 @@ final class IntegrationTests: XCTestCase {
         } catch let e as StrataError {
             XCTAssertEqual(e.kind, .http)
             XCTAssertEqual(e.status, 503)
-            XCTAssertEqual(e.message, "TMDB API key is not configured")
+            XCTAssertEqual(e.message, "The movie catalog isn't set up yet. Add a TMDB key in the server dashboard.")
         }
         do {
             _ = try await client.search("bunny")

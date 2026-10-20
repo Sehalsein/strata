@@ -104,6 +104,19 @@ targets:
           "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]": AppStore com.sehalsein.strata
           "PROVISIONING_PROFILE_SPECIFIER[sdk=appletvos*]": AppStore tvOS com.sehalsein.strata
 
+  StrataTVUITests:
+    type: bundle.ui-testing
+    platform: tvOS
+    sources:
+      - UITests
+    dependencies:
+      - target: Strata
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sehalsein.strata.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Strata
+
   StrataWidgets:
     type: app-extension
     supportedDestinations: [iOS]
@@ -140,5 +153,7 @@ schemes:
       config: Debug
     test:
       config: Debug
+      targets:
+        - StrataTVUITests
     archive:
       config: Release

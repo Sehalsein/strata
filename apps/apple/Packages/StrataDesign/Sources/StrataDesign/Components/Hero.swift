@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Full-bleed backdrop with title, one metadata line, overview and glass
 /// actions. Used at the top of detail pages and the tvOS Home.
@@ -24,9 +27,8 @@ public struct HeroBillboard<Actions: View>: View {
     }
 
     #if os(tvOS)
-    private let height: CGFloat = 860
     private let titleFont = Font.stDisplayTV
-    private let overviewLines = 3
+    private let overviewLines = 4
     #else
     private var height: CGFloat { Metrics.isPad ? 620 : 520 }
     private let titleFont = Font.stDisplay
@@ -35,58 +37,109 @@ public struct HeroBillboard<Actions: View>: View {
 
     public var body: some View {
         ZStack(alignment: .bottomLeading) {
-            AsyncImage(url: backdropURL, transaction: Transaction(animation: .easeOut(duration: 0.3))) { phase in
-                if case .success(let image) = phase {
-                    image.resizable().scaledToFill()
-                } else {
-                    StrataPlaceholder(seed: id)
-                }
-            }
-            .frame(height: height)
-            .frame(maxWidth: .infinity)
-            .clipped()
-            .accessibilityHidden(true)
-
-            LinearGradient(stops: [
-                .init(color: Theme.bg.opacity(0), location: 0.25),
-                .init(color: Theme.scrim, location: 0.75),
-                .init(color: Theme.bg, location: 1),
-            ], startPoint: .top, endPoint: .bottom)
-
-            VStack(alignment: .leading, spacing: Metrics.space3) {
-                if let eyebrow { Text(eyebrow).eyebrowStyle(Theme.onArtwork.opacity(0.75)) }
-                Text(title)
-                    .font(titleFont)
-                    .titleTracking()
-                    .foregroundStyle(Theme.onArtwork)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.6)
-                    .accessibilityAddTraits(.isHeader)
-                if !meta.isEmpty || !badges.isEmpty {
-                    HStack(spacing: Metrics.space2) {
-                        if !meta.isEmpty {
-                            Text(meta.joined(separator: " · ")).font(.stCallout).foregroundStyle(Theme.onArtwork.opacity(0.8))
-                        }
-                        ForEach(badges, id: \.self) { SpecBadge($0) }
-                    }
-                }
-                if let overview, !overview.isEmpty {
-                    Text(overview)
-                        .font(.stCallout)
-                        .foregroundStyle(Theme.onArtwork.opacity(0.8))
-                        .lineLimit(overviewLines)
-                        .frame(maxWidth: 620, alignment: .leading)
-                }
-                GlassEffectContainer(spacing: Metrics.space2) {
-                    HStack(spacing: Metrics.space2) { actions() }
-                }
-                .padding(.top, Metrics.space2)
-            }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.bottom, Metrics.space8)
+            backdrop
+            scrims
+            #if os(tvOS)
+            tvInfo
+            #else
+            info
+            #endif
         }
+        #if os(tvOS)
+        // Like the TV app: the art fills the whole screen, safe areas included,
+        // and the page's other sections start below the fold.
+        .frame(height: UIScreen.main.bounds.height)
+        #else
         .frame(height: height)
+        #endif
     }
+
+    private var backdrop: some View {
+        AsyncImage(url: backdropURL, transaction: Transaction(animation: .easeOut(duration: 0.3))) { phase in
+            if case .success(let image) = phase {
+                image.resizable().scaledToFill()
+            } else {
+                StrataPlaceholder(seed: id)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private var scrims: some View {
+        #if os(tvOS)
+        // A left-side wash keeps the title legible over bright art; it sits under
+        // the bottom fade so the hero ends in plain `bg` with no seam.
+        LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .leading, endPoint: .center)
+        #endif
+        LinearGradient(stops: [
+            .init(color: Theme.bg.opacity(0), location: 0.35),
+            .init(color: Theme.scrim, location: 0.8),
+            .init(color: Theme.bg, location: 1),
+        ], startPoint: .top, endPoint: .bottom)
+    }
+
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: Metrics.space3) {
+            if let eyebrow { Text(eyebrow).eyebrowStyle(Theme.onArtwork.opacity(0.75)) }
+            Text(title)
+                .font(titleFont)
+                .titleTracking()
+                .foregroundStyle(Theme.onArtwork)
+                .lineLimit(2)
+                .minimumScaleFactor(0.6)
+                .accessibilityAddTraits(.isHeader)
+            if !meta.isEmpty || !badges.isEmpty {
+                HStack(spacing: Metrics.space2) {
+                    if !meta.isEmpty {
+                        Text(meta.joined(separator: " · ")).font(.stCallout).foregroundStyle(Theme.onArtwork.opacity(0.8))
+                    }
+                    ForEach(badges, id: \.self) { SpecBadge($0) }
+                }
+            }
+        }
+    }
+
+    private var actionRow: some View {
+        GlassEffectContainer(spacing: Metrics.space2) {
+            HStack(spacing: Metrics.space3) { actions() }
+        }
+    }
+
+    @ViewBuilder private var overviewText: some View {
+        if let overview, !overview.isEmpty {
+            Text(overview)
+                .font(.stCallout)
+                .foregroundStyle(Theme.onArtwork.opacity(0.8))
+                .lineLimit(overviewLines)
+        }
+    }
+
+    #if os(tvOS)
+    /// Title block over the actions, with the overview beside them.
+    private var tvInfo: some View {
+        VStack(alignment: .leading, spacing: Metrics.space6) {
+            titleBlock.frame(maxWidth: 1000, alignment: .leading)
+            HStack(alignment: .top, spacing: Metrics.space12) {
+                actionRow
+                overviewText.frame(maxWidth: 760, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.bottom, Metrics.space20)
+    }
+    #else
+    private var info: some View {
+        VStack(alignment: .leading, spacing: Metrics.space3) {
+            titleBlock
+            overviewText.frame(maxWidth: 620, alignment: .leading)
+            actionRow.padding(.top, Metrics.space2)
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.bottom, Metrics.space8)
+    }
+    #endif
 }
 
 /// One episode in a season list.

@@ -25,7 +25,11 @@ struct MovieDetailView: View {
             }
         }
         .background(Theme.bg.ignoresSafeArea())
+        .fullBleedOnTV()
         .ignoresSafeArea(edges: .top)
+        #if os(tvOS)
+        .toolbar(.hidden, for: .tabBar)
+        #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -82,7 +86,7 @@ struct MovieDetailView: View {
             InfoGrid(rows: [
                 ("Directed by", movie.directors.joined(separator: ", ")),
                 ("Genres", movie.genres.joined(separator: ", ")),
-                ("Released", movie.releaseDate ?? ""),
+                ("Released", Formatting.date(movie.releaseDate)?.formatted(date: .abbreviated, time: .omitted) ?? ""),
                 ("Rating", movie.ratingText.map { "\($0) on TMDB" } ?? ""),
             ])
         }
@@ -168,6 +172,11 @@ struct InfoGrid: View {
                 }
             }
             .padding(.horizontal, Metrics.gutter)
+            #if os(tvOS)
+            // Focusable so the remote can scroll down to it.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .focusable()
+            #endif
         }
     }
 }

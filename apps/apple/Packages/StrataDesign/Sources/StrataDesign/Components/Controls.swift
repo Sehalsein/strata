@@ -101,6 +101,8 @@ public struct SpecBadge: View {
     public var body: some View {
         Text(text)
             .font(.stSpec)
+            .lineLimit(1)
+            .fixedSize()
             .foregroundStyle(Theme.ink2)
             .padding(.horizontal, 6)
             .frame(minHeight: 20)

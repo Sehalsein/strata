@@ -9,15 +9,22 @@ public struct PlayerChrome: View {
     let onClose: () -> Void
     let onDetails: () -> Void
     let onPiP: (() -> Void)?
+    let onInteraction: () -> Void
 
-    public init(engine: PlayerEngine, onClose: @escaping () -> Void, onDetails: @escaping () -> Void, onPiP: (() -> Void)? = nil) {
+    /// `onInteraction` fires on any touch inside the controls, so the caller can keep
+    /// them visible while someone is using them (e.g. a track menu is open).
+    public init(engine: PlayerEngine, onClose: @escaping () -> Void, onDetails: @escaping () -> Void, onPiP: (() -> Void)? = nil, onInteraction: @escaping () -> Void = {}) {
         self.engine = engine
         self.onClose = onClose
         self.onDetails = onDetails
         self.onPiP = onPiP
+        self.onInteraction = onInteraction
     }
 
     private var isPlaying: Bool { engine.status == .playing }
+    #if os(tvOS)
+    @Namespace private var focusScope
+    #endif
 
     public var body: some View {
         ZStack {
@@ -41,8 +48,12 @@ public struct PlayerChrome: View {
             }
             .padding(.horizontal, Metrics.gutter)
             .padding(.vertical, Metrics.space4)
+            .simultaneousGesture(TapGesture().onEnded { onInteraction() })
         }
         .foregroundStyle(Theme.onArtwork)
+        #if os(tvOS)
+        .focusScope(focusScope)
+        #endif
     }
 
     private var topBar: some View {
@@ -100,6 +111,7 @@ public struct PlayerChrome: View {
                     HStack(spacing: Metrics.space2) {
                         PlayerIconButton("Back 10 seconds", systemImage: "gobackward.10") { Task { await engine.skip(-10) } }
                         PlayerIconButton(isPlaying ? "Pause" : "Play", systemImage: isPlaying ? "pause.fill" : "play.fill") { engine.togglePlay() }
+                            .prefersDefaultFocus(true, in: focusScope)
                         PlayerIconButton("Forward 10 seconds", systemImage: "goforward.10") { Task { await engine.skip(10) } }
                     }
                 }

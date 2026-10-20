@@ -54,6 +54,11 @@ public struct StrataPlaceholder: View {
                 bands.2
             }
         }
+        .overlay {
+            if title != nil {
+                LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
+            }
+        }
         .overlay(alignment: .bottomLeading) {
             if let title {
                 Text(title)

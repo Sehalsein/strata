@@ -52,6 +52,7 @@ struct BrowseView: View {
             .padding(.vertical, Metrics.space4)
         }
         .background(Theme.bg.ignoresSafeArea())
+        .fullBleedOnTV()
         #if !os(tvOS)
         .navigationTitle(title)
         .toolbar { ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() } }
@@ -107,6 +108,7 @@ struct BrowseListView: View {
             }
         }
         .background(Theme.bg.ignoresSafeArea())
+        .fullBleedOnTV()
         .navigationTitle(list.title)
         .task { items = await services.load { try await $0.browse(type, list: list) } }
     }
@@ -142,6 +144,7 @@ struct SearchView: View {
             }
         }
         .background(Theme.bg.ignoresSafeArea())
+        .fullBleedOnTV()
         .navigationTitle("Search")
         .searchable(text: $query, prompt: "Movies and shows")
         .task(id: query) {
@@ -180,6 +183,7 @@ struct MyListView: View {
             }
         }
         .background(Theme.bg.ignoresSafeArea())
+        .fullBleedOnTV()
         .navigationTitle("My List")
         .task {
             await services.client?.clearCache()

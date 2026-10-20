@@ -33,6 +33,16 @@ public extension View {
         font(.stEyebrow).textCase(.uppercase).tracking(1).foregroundStyle(color)
     }
 
+    /// On tvOS, lets scrolling content run under the side safe area so rails and
+    /// hero art bleed to the screen edge; `Metrics.gutter` (80) then provides the inset.
+    @ViewBuilder func fullBleedOnTV() -> some View {
+        #if os(tvOS)
+        ignoresSafeArea(.container, edges: .horizontal)
+        #else
+        self
+        #endif
+    }
+
     /// The rail header style for the current platform.
     @ViewBuilder func railHeaderStyle() -> some View {
         #if os(tvOS)

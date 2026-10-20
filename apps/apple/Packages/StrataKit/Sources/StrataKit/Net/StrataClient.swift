@@ -178,11 +178,13 @@ public final class StrataClient: Sendable {
     /// 202 while that runs; this retries with backoff (honouring Retry-After) until the
     /// text arrives, `maxWait` passes, or the task is cancelled.
     /// Whether `url` points at this client's server (scheme, host and port).
-    public func isSameOrigin(_ url: URL) -> Bool {
+    public func isSameOrigin(_ url: URL) -> Bool { Self.sameOrigin(url, baseURL) }
+
+    static func sameOrigin(_ a: URL, _ b: URL) -> Bool {
         func port(_ u: URL) -> Int? { u.port ?? (u.scheme?.lowercased() == "https" ? 443 : u.scheme?.lowercased() == "http" ? 80 : nil) }
-        return url.scheme?.lowercased() == baseURL.scheme?.lowercased()
-            && url.host()?.lowercased() == baseURL.host()?.lowercased()
-            && port(url) == port(baseURL)
+        return a.scheme?.lowercased() == b.scheme?.lowercased()
+            && a.host()?.lowercased() == b.host()?.lowercased()
+            && port(a) == port(b)
     }
 
     public func subtitles(_ url: URL, maxWait: TimeInterval = 120) async throws -> String {
@@ -271,7 +273,7 @@ public final class StrataClient: Sendable {
 
     private func rawData(_ req: URLRequest) async throws -> (Data, HTTPURLResponse) {
         do {
-            let (data, response) = try await session.data(for: req)
+            let (data, response) = try await session.data(for: req, delegate: RedirectGuard(origin: baseURL))
             guard let http = response as? HTTPURLResponse else {
                 throw StrataError(kind: .decoding, message: "The server sent an invalid response.")
             }
@@ -365,4 +367,19 @@ actor ResponseCache {
     }
 
     func clear() { entries.removeAll() }
+}
+
+/// Drops the bearer token when a redirect leaves the server's origin, so a
+/// redirect can never carry credentials to another host.
+final class RedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
+    let origin: URL
+    init(origin: URL) { self.origin = origin }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? {
+        guard let url = request.url, !StrataClient.sameOrigin(url, origin) else { return request }
+        var stripped = request
+        stripped.setValue(nil, forHTTPHeaderField: "Authorization")
+        return stripped
+    }
 }

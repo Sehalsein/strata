@@ -92,7 +92,7 @@ final class ClientTests: XCTestCase {
         } catch let e as StrataError {
             XCTAssertEqual(e.kind, .http)
             XCTAssertEqual(e.status, 404)
-            XCTAssertEqual(e.message, "TMDB /movie/1 failed: 404")
+            XCTAssertEqual(e.message, "That title isn't in the catalog.")
             XCTAssertTrue(e.isNotFound)
         }
     }

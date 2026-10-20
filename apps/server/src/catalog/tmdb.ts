@@ -157,7 +157,7 @@ export class Tmdb {
 
   private async get<T>(path: string, params: Record<string, string>, ttl: number): Promise<T> {
     const key = this.getKey();
-    if (!key) throw new TmdbError("TMDB API key is not configured", 503);
+    if (!key) throw new TmdbError("The movie catalog isn't set up yet. Add a TMDB key in the server dashboard.", 503);
     const query = { ...params, language: this.getLanguage() };
     const cacheKey = path + "?" + new URLSearchParams(Object.entries(query).sort()).toString();
 
@@ -172,7 +172,8 @@ export class Tmdb {
       if (!res.ok) {
         // Serve stale data rather than failing when TMDB is down or rate limiting.
         if (cached && res.status >= 429) return JSON.parse(cached.json) as T;
-        throw new TmdbError(`TMDB ${path} failed: ${res.status}`, res.status === 404 ? 404 : 502);
+        log.warn(`TMDB ${path} failed: ${res.status}`);
+        throw new TmdbError(res.status === 404 ? "That title isn't in the catalog." : "The movie catalog isn't responding. Try again in a moment.", res.status === 404 ? 404 : 502);
       }
       const text = await res.text();
       this.db

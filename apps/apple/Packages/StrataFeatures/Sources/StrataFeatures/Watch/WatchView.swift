@@ -16,6 +16,9 @@ struct WatchView: View {
     @State private var showDetails = false
     @State private var upNextDismissed = false
     @State private var pip = PiPController()
+    #if os(tvOS)
+    @FocusState private var surfaceFocused: Bool
+    #endif
 
     private var engine: PlayerEngine { services.engine }
 
@@ -24,17 +27,39 @@ struct WatchView: View {
             Color.black.ignoresSafeArea()
             PlayerSurface(player: engine.player, gravity: engine.videoGravity, pip: pip)
                 .ignoresSafeArea()
-                #if !os(tvOS)
-                .onTapGesture { toggleChrome() }
-                .onTapGesture(count: 2) { engine.toggleVideoGravity() }
-                #endif
+                .allowsHitTesting(false)
+
+            #if !os(tvOS)
+            // The video's UIView swallows touches, so taps land on this layer instead.
+            Color.clear
+                .contentShape(Rectangle())
+                .ignoresSafeArea()
+                .gesture(
+                    TapGesture(count: 2).onEnded { engine.toggleVideoGravity() }
+                        .exclusively(before: TapGesture().onEnded { toggleChrome() })
+                )
+            #else
+            // Remote presses go to the focused view; with the controls hidden this
+            // full-screen surface holds focus so select / play-pause / swipes still land.
+            // Removed while the controls show, so focus moves to their default (play/pause).
+            if !chromeVisible {
+                Color.clear
+                    .ignoresSafeArea()
+                    .focusable()
+                    .focused($surfaceFocused)
+                    .onTapGesture { showChrome() }
+                    .onAppear { surfaceFocused = true }
+            }
+            #endif
 
             SubtitleOverlay(engine: engine, raised: chromeVisible)
 
             stateOverlay
 
             if chromeVisible {
-                PlayerChrome(engine: engine, onClose: close, onDetails: { showDetails = true }, onPiP: pip.isAvailable ? { pip.toggle() } : nil)
+                PlayerChrome(engine: engine, onClose: close, onDetails: { showDetails = true },
+                             onPiP: pip.isAvailable ? { pip.toggle() } : nil,
+                             onInteraction: { scheduleHide(after: 8) })
                     .transition(.opacity)
             }
 
@@ -65,7 +90,7 @@ struct WatchView: View {
         .onExitCommand {
             if chromeVisible { chromeVisible = false } else { close() }
         }
-        .onMoveCommand { _ in showChrome() }
+        .onMoveCommand { _ in if !chromeVisible { showChrome() } }
         #endif
         .sheet(isPresented: $showDetails) {
             StreamDetailsPanel(session: engine.session).presentationDetents([.medium])
@@ -152,50 +177,27 @@ struct WatchView: View {
         if autoHide { scheduleHide() } else { hideTask?.cancel() }
     }
 
-    private func scheduleHide() {
+    private func scheduleHide(after seconds: Double = 3.5) {
         hideTask?.cancel()
         hideTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(3.5))
+            try? await Task.sleep(for: .seconds(seconds))
             guard !Task.isCancelled, engine.status == .playing, !showDetails else { return }
             chromeVisible = false
         }
     }
 }
 
-/// The video layer, with Picture in Picture attached once it's laid out.
+/// The video layer, with Picture in Picture attached once it's on screen.
 private struct PlayerSurface: View {
     let player: AVPlayer
     let gravity: AVLayerVideoGravity
     let pip: PiPController
 
     var body: some View {
+        #if os(iOS)
+        AVPlayerContainer(player: player, gravity: gravity) { layer in pip.attach(playerLayer: layer) }
+        #else
         AVPlayerContainer(player: player, gravity: gravity)
-            #if os(iOS)
-            .background(PiPAttachment(pip: pip).frame(width: 0, height: 0))
-            #endif
+        #endif
     }
 }
-
-#if os(iOS)
-private struct PiPAttachment: UIViewRepresentable {
-    let pip: PiPController
-
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        DispatchQueue.main.async {
-            var root: UIView? = view
-            while let parent = root?.superview { root = parent }
-            if let host = root.flatMap(Self.findHost) { pip.attach(playerLayer: host.playerLayer) }
-        }
-        return view
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {}
-
-    private static func findHost(in view: UIView) -> PlayerLayerHostView? {
-        if let host = view as? PlayerLayerHostView { return host }
-        for sub in view.subviews { if let found = findHost(in: sub) { return found } }
-        return nil
-    }
-}
-#endif

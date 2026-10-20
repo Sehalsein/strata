@@ -35,6 +35,9 @@ struct HomeView: View {
                     ForEach(list) { shelf in ShelfRail(shelf: shelf) }
                 }
             }
+            #if !os(tvOS)
+            .padding(.top, Metrics.space4)
+            #endif
             .padding(.bottom, Metrics.space12)
         }
         #if os(tvOS)
@@ -45,6 +48,7 @@ struct HomeView: View {
         .refreshable { await load(force: true) }
         #endif
         .background(Theme.bg.ignoresSafeArea())
+        .fullBleedOnTV()
         .task { await load(force: false) }
     }
 
@@ -119,6 +123,8 @@ struct PosterCardLabel: View {
         }
         .frame(width: Metrics.posterWidth)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([card.title, card.yearText, card.providerKinds.first.map { "on \($0.label)" }].compactMap { $0 }.joined(separator: ", "))
     }
 }
 

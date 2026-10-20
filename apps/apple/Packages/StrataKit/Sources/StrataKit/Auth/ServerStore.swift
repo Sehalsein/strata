@@ -123,6 +123,9 @@ public final class ServerStore {
             // A server whose token is gone can't be used; drop it.
             servers = saved.filter { !$0.addresses.isEmpty && tokens.read($0.id) != nil }
         }
+        // Re-save each token so one stored before the Keychain-only change loses its
+        // plaintext UserDefaults copy (the write clears it once the Keychain holds the token).
+        for server in servers { if let token = tokens.read(server.id) { tokens.write(token, server.id) } }
         activeID = defaults.string(forKey: Self.activeKey).flatMap { id in servers.contains { $0.id == id } ? id : nil } ?? servers.first?.id
         rebuildClient()
         Log.auth.info("ServerStore hydrated: \(self.servers.count, privacy: .public) server(s), active=\(self.activeID ?? "none", privacy: .public)")
