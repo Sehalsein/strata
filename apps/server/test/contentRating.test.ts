@@ -21,6 +21,14 @@ describe("certification ages", () => {
     expect(certificationAge("Caution", "GB")).toBe(UNRECOGNISED);
     expect(certificationAge("Restricted to 18 and over in cinemas only", "US")).toBe(UNRECOGNISED);
     expect(certificationAge("M", "AU")).toBe(15);
-    expect(certificationAge("AO", "US")).toBe(18);
+    expect(certificationAge("AO", "US")).toBe(UNRECOGNISED); // a games rating, not film: hidden
+  });
+
+  test("letter ratings only count for their own country", () => {
+    expect(certificationAge("C", "MX")).toBe(18);
+    expect(certificationAge("A", "IN")).toBe(18);
+    expect(certificationAge("A", "MX")).toBe(0);
+    // A bare letter outside its country is unknown, so it's hidden rather than guessed.
+    for (const letter of ["C", "P", "E", "A", "M"]) expect(certificationAge(letter, "ZZ")).toBe(UNRECOGNISED);
   });
 });

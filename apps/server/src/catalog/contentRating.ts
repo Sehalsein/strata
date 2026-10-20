@@ -21,6 +21,19 @@ const MAX_AGE: Record<ContentLimit, number | null> = { none: null, teen: 14, kid
 const FAMILY_GENRES = new Set([10751, 10762, 16]); // Family, Kids (TV), Animation
 const HORROR = 27;
 
+const LETTERS_BY_REGION: Record<string, Record<string, number>> = {
+  AU: { G: 0, PG: 10, M: 15, "MA15+": 15, "R18+": 18, "X18+": 18, RC: 99 },
+  NZ: { G: 0, PG: 10, M: 16, R13: 13, R15: 15, R16: 16, R18: 18, R: 18 },
+  SG: { G: 0, PG: 10, PG13: 13, NC16: 16, M18: 18, R21: 21 },
+  MX: { AA: 0, A: 0, B: 12, B15: 15, C: 18, D: 18 },
+  JP: { G: 0, PG12: 12, "R15+": 15, "R18+": 18 },
+  KR: { ALL: 0, "12": 12, "15": 15, "18": 18, "청소년관람불가": 18 },
+  FR: { U: 0, TP: 0 },
+  ES: { A: 0, APTA: 0 },
+  IN: { U: 0, UA: 12, A: 18, S: 18 },
+  BR: { L: 0, AL: 0 },
+};
+
 /** Rating given but not one we recognise: treated as adult, so a limit hides it. */
 export const UNRECOGNISED = 99;
 
@@ -39,12 +52,10 @@ export function certificationAge(raw: string, region: string): number | null {
   const table = region === "GB" ? gb : us;
   if (cert in table) return table[cert]!;
   if (cert in us) return us[cert]!;
-  // Letter ratings used elsewhere (AU, NZ, KR, JP, SG…).
-  const letters: Record<string, number> = {
-    AL: 0, TP: 0, ALL: 0, E: 0, P: 0, C: 0, M: 15, MA: 17, "MA15+": 15, "R16": 16, R18: 18, "R18+": 18, "R-18": 18,
-    A: 18, X: 18, "X18+": 18, AO: 18, RP18: 18, NC16: 16, M18: 18, "R21": 21,
-  };
-  if (cert in letters) return letters[cert]!;
+  // Letter ratings mean different things per country ("C" is all ages in some places,
+  // adults-only in Mexico), so they're only read for the region they belong to.
+  const letters = LETTERS_BY_REGION[region];
+  if (letters && cert in letters) return letters[cert]!;
   // Most other countries rate by age: "12", "FSK 16", "16+", "-12", "K-7", "PG-12".
   const number = cert.match(/^[A-Z\-\s]{0,5}(\d{1,2})\s*\+?$/);
   if (number) return Number(number[1]);
