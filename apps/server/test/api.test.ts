@@ -82,6 +82,10 @@ describe("setup and auth", () => {
     expect(await info({})).toBe(false);
     // Behind a proxy every client looks local, so proxied requests never qualify.
     expect(await info({ ip: "127.0.0.1", headers: { "X-Forwarded-For": "203.0.113.9" } })).toBe(false);
+    // A web page (it sends Origin) or a DNS-rebound domain in Host can't join for someone.
+    expect(await info({ ip: "192.168.2.40", headers: { Origin: "http://evil.example" } })).toBe(false);
+    expect(await info({ ip: "192.168.2.40", headers: { Host: "rebind.evil.example:8420" } })).toBe(false);
+    expect(await info({ ip: "192.168.2.40", headers: { Host: "strata.local:8420" } })).toBe(true);
 
     expect((await server.request("/api/auth/join", { method: "POST", ip: "203.0.113.9", json: {} })).status).toBe(403);
     const joined = await server.request("/api/auth/join", { method: "POST", ip: "192.168.2.40", json: { deviceName: "Living Room" } });
@@ -98,6 +102,11 @@ describe("setup and auth", () => {
     expect((await server.request("/api/home", { token: viewer })).status).toBe(200);
     expect((await server.request("/api/admin/settings", { token: viewer })).status).toBe(403);
     expect((await json(await server.request("/api/me", { token: viewer }))).user.isAdmin).toBe(false);
+
+    // Rate limited per address.
+    let last = 200;
+    for (let i = 0; i < 12; i++) last = (await server.request("/api/auth/join", { method: "POST", ip: "192.168.2.77", json: {} })).status;
+    expect(last).toBe(429);
 
     // The admin can switch it off.
     await server.request("/api/admin/settings", { method: "PATCH", token, json: { localJoin: false } });

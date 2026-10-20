@@ -5,7 +5,7 @@ import { z } from "zod";
 import { profiles } from "../../db/schema";
 import { API_VERSION, VERSION } from "../../version";
 import { body, intParam, requireAdmin, requireAuth, type Env } from "../context";
-import { isLocalRequest } from "../localNetwork";
+import { allowJoin, isLocalRequest } from "../localNetwork";
 
 const credentials = z.object({
   username: z.string().trim().min(1).max(64),
@@ -50,6 +50,7 @@ export const authRoutes = new Hono<Env>()
     const s = c.var.services;
     const userId = canJoinLocally(c) ? s.auth.householdUserId() : undefined;
     if (!userId) throw new HTTPException(403, { message: "Sign in with your account to connect from outside your home network." });
+    if (!allowJoin(c)) throw new HTTPException(429, { message: "Too many devices joined from here recently. Try again in a few minutes." });
     return c.json({ token: s.auth.issue(userId, deviceName ?? "Device", { viewerOnly: true }) });
   })
 

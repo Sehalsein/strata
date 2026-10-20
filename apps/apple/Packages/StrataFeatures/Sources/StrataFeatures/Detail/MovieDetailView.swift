@@ -185,10 +185,10 @@ struct VideosRail: View {
         #if !os(tvOS)
         if !videos.isEmpty {
             Rail("Trailers & Extras") {
-                ForEach(videos) { video in
-                    Link(destination: video.url) {
+                ForEach(videos.filter { $0.watchURL != nil }) { video in
+                    Link(destination: video.watchURL!) {
                         VStack(alignment: .leading, spacing: Metrics.space2) {
-                            ArtworkImage(url: video.thumbnailUrl, aspectRatio: 16 / 9, seed: video.key)
+                            ArtworkImage(url: video.safeThumbnailURL, aspectRatio: 16 / 9, seed: video.key)
                                 .overlay {
                                     Image(systemName: "play.fill")
                                         .font(.stHeadline)

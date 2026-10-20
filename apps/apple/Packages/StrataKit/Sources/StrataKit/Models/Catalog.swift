@@ -137,6 +137,20 @@ public struct TitleVideo: Codable, Sendable, Hashable, Identifiable {
     public var url: URL
     public var thumbnailUrl: URL?
     public var id: String { key }
+
+    /// Built here from the video id rather than trusting the server's `url`, so a link
+    /// in the catalog can only ever open YouTube.
+    public var watchURL: URL? {
+        var parts = URLComponents(string: "https://www.youtube.com/watch")
+        parts?.queryItems = [URLQueryItem(name: "v", value: key)]
+        return parts?.url
+    }
+
+    /// The thumbnail, only from YouTube's image host.
+    public var safeThumbnailURL: URL? {
+        guard let thumbnailUrl, thumbnailUrl.scheme == "https", thumbnailUrl.host() == "i.ytimg.com" else { return nil }
+        return thumbnailUrl
+    }
 }
 
 public struct CollectionRef: Codable, Sendable, Hashable, Identifiable {

@@ -98,7 +98,7 @@ export function NetworkCard({ draft, set }: { draft: Settings; set: SetFn }) {
           checked={draft.localJoin}
           onChange={(v) => set("localJoin", v)}
           label="No password at home"
-          hint="Devices on your home network skip sign-in and go straight to picking a profile (PINs still apply). They can watch but can't change settings. Away from home, devices sign in with your account."
+          hint="Devices on your home network skip sign-in and go straight to picking a profile (PINs still apply). They can watch but can't change settings. Away from home, devices sign in with your account. Turn this off before exposing the server through a tunnel or port forward that hides visitors' addresses."
         />
       </div>
     </Card>
