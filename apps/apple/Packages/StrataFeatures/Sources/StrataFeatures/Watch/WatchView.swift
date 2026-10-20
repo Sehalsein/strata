@@ -38,6 +38,13 @@ struct WatchView: View {
                     TapGesture(count: 2).onEnded { engine.toggleVideoGravity() }
                         .exclusively(before: TapGesture().onEnded { toggleChrome() })
                 )
+                // Pinch out to fill the screen, in to see the whole picture (as in Apple's player).
+                .simultaneousGesture(
+                    MagnifyGesture().onEnded { value in
+                        if value.magnification > 1.1 { engine.videoGravity = .resizeAspectFill }
+                        else if value.magnification < 0.9 { engine.videoGravity = .resizeAspect }
+                    }
+                )
             #else
             // Remote presses go to the focused view; with the controls hidden this
             // full-screen surface holds focus so select / play-pause / swipes still land.
@@ -124,7 +131,12 @@ struct WatchView: View {
     @ViewBuilder private var stateOverlay: some View {
         switch engine.status {
         case .loading:
+            // With the controls up, their play button shows the spinner instead (iOS).
+            #if os(tvOS)
             ProgressView().controlSize(.large).tint(.white)
+            #else
+            if !chromeVisible { ProgressView().controlSize(.large).tint(.white) }
+            #endif
         case .preparing(let download):
             VStack(spacing: Metrics.space4) {
                 Image(systemName: "arrow.down.circle").font(.system(size: 44)).foregroundStyle(Theme.warning)

@@ -1,6 +1,7 @@
 import Foundation
 import AVKit
 import Observation
+import StrataKit
 
 @MainActor
 @Observable
@@ -18,9 +19,13 @@ public final class PiPController: NSObject, AVPictureInPictureControllerDelegate
     /// is hosted on screen.
     public func attach(playerLayer: AVPlayerLayer) {
         isAvailable = AVPictureInPictureController.isPictureInPictureSupported()
+        // The iPhone simulator reports no PiP support, so the button is hidden there.
+        Log.player.debug("pip attach supported=\(self.isAvailable, privacy: .public)")
         guard isAvailable else { return }
         let c = AVPictureInPictureController(playerLayer: playerLayer)
         c?.delegate = self
+        // Leaving the app mid-playback continues in Picture in Picture.
+        c?.canStartPictureInPictureAutomaticallyFromInline = true
         self.controller = c
     }
 

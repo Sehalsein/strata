@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import StrataDesign
 import StrataKit
 
@@ -71,6 +72,11 @@ public struct PlayerChrome: View {
             GlassEffectContainer(spacing: Metrics.space2) {
                 HStack(spacing: Metrics.space2) {
                     #if !os(tvOS)
+                    // Fit shows the whole picture; fill crops to the screen (also pinch or double-tap).
+                    PlayerIconButton(isFilled ? "Fit to Screen" : "Fill Screen",
+                                     systemImage: isFilled ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") {
+                        engine.toggleVideoGravity()
+                    }
                     if let onPiP { PlayerIconButton("Picture in Picture", systemImage: "pip.enter", action: onPiP) }
                     AirPlayRoutePicker()
                         .frame(width: 30, height: 30)
@@ -88,13 +94,25 @@ public struct PlayerChrome: View {
         GlassEffectContainer(spacing: Metrics.space6) {
             HStack(spacing: Metrics.space6) {
                 PlayerIconButton("Back 10 seconds", systemImage: "gobackward.10") { Task { await engine.skip(-10) } }
-                PlayerIconButton(isPlaying ? "Pause" : "Play", systemImage: isPlaying ? "pause.fill" : "play.fill", size: .large) { engine.togglePlay() }
+                if isWaiting {
+                    // One spinner, in the play button's place, while loading or buffering.
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                        .frame(width: 76, height: 76)
+                        .glassEffect(.regular, in: .circle)
+                        .accessibilityLabel("Loading")
+                } else {
+                    PlayerIconButton(isPlaying ? "Pause" : "Play", systemImage: isPlaying ? "pause.fill" : "play.fill", size: .large) { engine.togglePlay() }
+                }
                 PlayerIconButton("Forward 10 seconds", systemImage: "goforward.10") { Task { await engine.skip(10) } }
             }
         }
-        .opacity(engine.isBuffering ? 0.6 : 1)
-        .overlay { if engine.isBuffering { ProgressView().controlSize(.large).tint(.white) } }
     }
+
+    private var isFilled: Bool { engine.videoGravity == .resizeAspectFill }
+
+    private var isWaiting: Bool { engine.isBuffering || engine.status == .loading }
     #endif
 
     private var bottomBar: some View {
