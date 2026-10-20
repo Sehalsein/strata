@@ -1,0 +1,12 @@
+{
+  "user": {
+    "id": 1,
+    "username": "sehal",
+    "isAdmin": true
+  },
+  "profile": {
+    "id": 1,
+    "name": "sehal",
+    "avatar": null
+  }
+}

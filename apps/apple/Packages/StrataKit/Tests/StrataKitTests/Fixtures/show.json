@@ -1,0 +1,39 @@
+{
+  "type": "show",
+  "tmdbId": 9001,
+  "imdbId": "tt9000001",
+  "title": "Test Show",
+  "tagline": null,
+  "overview": "",
+  "year": 2020,
+  "firstAirDate": "2020-01-01",
+  "lastAirDate": null,
+  "status": null,
+  "genres": [],
+  "rating": null,
+  "certification": null,
+  "posterUrl": null,
+  "backdropUrl": null,
+  "cast": [],
+  "trailer": null,
+  "seasons": [
+    {
+      "season": 1,
+      "name": "Season 1",
+      "episodeCount": 2,
+      "airDate": null,
+      "posterUrl": null,
+      "availableEpisodes": 2
+    }
+  ],
+  "recommendations": [],
+  "available": [
+    "local"
+  ],
+  "upNext": {
+    "season": 1,
+    "episode": 1,
+    "positionMs": 120000
+  },
+  "inWatchlist": false
+}

@@ -4,44 +4,80 @@ import Combine
 import Observation
 import StrataKit
 
+/// What the player shows for the current title (Now Playing, chrome, Live Activity).
+public struct PlaybackMeta: Sendable, Hashable {
+    public var title: String
+    /// e.g. the show name + "S1 · E2", or the year for a movie.
+    public var subtitle: String?
+    public var artworkURL: URL?
+
+    public init(title: String, subtitle: String? = nil, artworkURL: URL? = nil) {
+        self.title = title
+        self.subtitle = subtitle
+        self.artworkURL = artworkURL
+    }
+}
+
+/// Drives AVPlayer against a Strata server session.
+///
+/// Every time exposed here (`position`, `duration`, `seek(to:)`, chapters, subtitle cues) is
+/// **media time** — seconds into the title — regardless of where the current HLS stream starts.
 @MainActor
 @Observable
 public final class PlayerEngine {
-    public enum Status: Equatable { case idle, loading, ready, playing, paused, ended, failed(String) }
-
-    public private(set) var status: Status = .idle
-    public private(set) var position: TimeInterval = 0
-    public private(set) var duration: TimeInterval = 0
-    public private(set) var isMuted: Bool = false
-    public var rate: Float = 1.0 { didSet { applyRate() } }
-    public private(set) var item: BaseItem?
-    public private(set) var plan: StreamPlan?
-
-    /// Subtitle/audio tracks discovered from the active media source.
-    public private(set) var audioTracks: [MediaStream] = []
-    public private(set) var subtitleTracks: [MediaStream] = []
-    public private(set) var activeAudioIndex: Int?
-    public private(set) var activeSubtitleIndex: Int?
-    public var captionsEnabled: Bool { activeSubtitleIndex != nil }
-
-    /// Intro / credits segments (from Jellyfin MediaSegments / intro-skipper).
-    public private(set) var segments: [MediaSegment] = []
-
-    /// The skip prompt to show right now, if the playhead is inside a skippable
-    /// intro or credits segment. Recomputed as `position` advances.
-    public var activeSkip: SkipPrompt? {
-        for seg in segments where seg.type == .intro || seg.type == .outro {
-            if seg.contains(position) {
-                return SkipPrompt(kind: seg.type, end: seg.end)
-            }
-        }
-        return nil
+    public enum Status: Equatable {
+        case idle
+        /// Asking the server for a stream / waiting for the first frames.
+        case loading
+        /// The release is still downloading on TorBox; the engine polls until it's ready.
+        case preparing(DownloadingStatus)
+        case ready, playing, paused, ended
+        case failed(String)
     }
 
-    public struct SkipPrompt: Equatable {
-        public let kind: MediaSegment.Kind
-        public let end: TimeInterval
-        public var title: String { kind == .intro ? "Skip Intro" : "Skip Credits" }
+    public private(set) var status: Status = .idle
+    /// Media time, seconds.
+    public private(set) var position: TimeInterval = 0
+    /// Full title duration from the server (HLS EVENT playlists grow, so the item's own duration isn't used).
+    public private(set) var duration: TimeInterval = 0
+    /// AVPlayer is waiting for data (initial load, stall, or a seek restart).
+    public private(set) var isBuffering = false
+    public private(set) var isMuted = false
+    public var rate: Float = 1.0 { didSet { applyRate() } }
+
+    public private(set) var target: PlaybackTarget?
+    public private(set) var meta: PlaybackMeta?
+    /// The current server session: mode, candidate (source file), reasons, URLs.
+    public private(set) var session: PlayResponse?
+
+    public private(set) var audioTracks: [AudioTrack] = []
+    public private(set) var subtitleTracks: [SubtitleTrack] = []
+    /// ffprobe index of the playing audio track.
+    public private(set) var activeAudioIndex: Int?
+    /// Id of the shown subtitle track (`SubtitleTrack.id`), nil when off.
+    public private(set) var activeSubtitleId: String?
+    public var captionsEnabled: Bool { activeSubtitleId != nil }
+    public var activeSubtitle: SubtitleTrack? { subtitleTracks.first { $0.id == activeSubtitleId } }
+    public private(set) var isLoadingSubtitles = false
+    public private(set) var subtitleError: String?
+    /// Parsed cues of the active track, in media time.
+    public private(set) var subtitleCues: [VTTCue] = []
+    /// Text to draw right now (overlapping cues joined by a newline), nil when nothing shows.
+    public var activeCueText: String? {
+        guard !subtitleCues.isEmpty else { return nil }
+        let t = position
+        let texts = subtitleCues.lazy.filter { t >= $0.start && t <= $0.end }.map(\.text)
+        let joined = texts.joined(separator: "\n")
+        return joined.isEmpty ? nil : joined
+    }
+
+    public private(set) var chapters: [Chapter] = []
+    public var currentChapter: Chapter? { chapters.last { $0.start <= position } }
+    /// What Up Next should offer (episodes only).
+    public private(set) var nextEpisode: NextEpisode?
+    public var nextTarget: PlaybackTarget? {
+        guard let target, let next = nextEpisode else { return nil }
+        return target.with(season: next.season, episode: next.episode)
     }
 
     /// When the sleep timer will pause playback, if armed.
@@ -54,24 +90,11 @@ public final class PlayerEngine {
         public var label: String { self == .off ? "Off" : "\(rawValue) min" }
     }
 
-    /// `.resizeAspect` (default) preserves the source aspect ratio with letterbox/
-    /// pillarbox bars — same as Apple's Photos and TV apps. `.resizeAspectFill`
-    /// fills the entire frame with cropping. Persisted across launches.
+    /// `.resizeAspect` (default) letterboxes; `.resizeAspectFill` crops to fill. Persisted.
     public var videoGravity: AVLayerVideoGravity {
-        didSet {
-            UserDefaults.standard.set(videoGravity.rawValue, forKey: Self.videoGravityKey)
-        }
+        didSet { UserDefaults.standard.set(videoGravity.rawValue, forKey: Self.videoGravityKey) }
     }
     private static let videoGravityKey = "strata.videoGravity"
-
-    public func toggleVideoGravity() {
-        videoGravity = (videoGravity == .resizeAspect) ? .resizeAspectFill : .resizeAspect
-    }
-
-    public func setVideoGravity(_ gravity: AVLayerVideoGravity) {
-        guard gravity != videoGravity else { return }
-        videoGravity = gravity
-    }
 
     public let player: AVPlayer = {
         let p = AVPlayer()
@@ -81,115 +104,191 @@ public final class PlayerEngine {
         return p
     }()
 
-    public weak var client: JellyfinClientHolder?
-
-    public var images: ImageURLBuilder?
-    public var session: Session?
-
-    private var reporter: PlaybackReporter?
-    private var timeObserverToken: Any?
-    private var statusObservation: NSKeyValueObservation?
-    private var rateObservation: NSKeyValueObservation?
-    private var endObserver: NSObjectProtocol?
+    public private(set) var client: StrataClient?
     private var nowPlaying: NowPlayingBridge?
 
-    private var jellyfin: JellyfinClient?
+    // Session plumbing
+    private var timeline = MediaTimeline(startOffset: 0, duration: 0, isHLS: false)
+    private var loadTask: Task<Void, Never>?
+    private var restartTask: Task<Void, Never>?
+    private var subtitleTask: Task<Void, Never>?
+    /// Bumped on every new load/unload; stale async work checks it before touching state.
+    private var generation = 0
+    /// Media time being restarted to; the timeline isn't trusted until the new item plays.
+    private var restartTarget: TimeInterval?
+    private var lastReportAt = Date.distantPast
+    private var lastReportedMs: Int?
+    /// Set once the first item became ready; before that there's no real position to report
+    /// (reporting 0 would wipe the saved resume point).
+    private var didStartPlayback = false
+
+    // Observers
+    private var timeObserverToken: Any?
+    private var statusObservation: NSKeyValueObservation?
+    private var timeControlObservation: NSKeyValueObservation?
+    private var endObserver: NSObjectProtocol?
+
+    /// Progress is reported this often while playing.
+    public var progressInterval: TimeInterval = 10
+    /// How long rapid scrubs are coalesced before an HLS restart.
+    public var restartDebounce: TimeInterval = 0.4
+    /// How often a downloading release is polled.
+    public var preparePollInterval: TimeInterval = 5
 
     public init() {
         if let raw = UserDefaults.standard.string(forKey: Self.videoGravityKey) {
-            self.videoGravity = AVLayerVideoGravity(rawValue: raw)
+            videoGravity = AVLayerVideoGravity(rawValue: raw)
         } else {
-            self.videoGravity = .resizeAspect
+            videoGravity = .resizeAspect
         }
     }
 
-    public func configure(client: JellyfinClient, nowPlaying: NowPlayingBridge? = nil) {
-        self.jellyfin = client
-        self.session = client.session
-        self.images = client.session.map { ImageURLBuilder(session: $0) }
-        self.nowPlaying = nowPlaying
+    public func configure(client: StrataClient, nowPlaying: NowPlayingBridge? = nil) {
+        self.client = client
+        if let nowPlaying { self.nowPlaying = nowPlaying }
     }
 
-    public func load(item: BaseItem) async {
-        guard let jellyfin else { status = .failed("No client configured"); return }
-        // A reload of the *same* item (an audio/subtitle switch re-plans the
-        // stream) must keep the viewer's chosen audio track; a genuinely new
-        // item falls back to the source's default below.
-        let isReload = self.item?.id == item.id
-        await teardownCurrentItem()
-        self.item = item
+    // MARK: - Loading
+
+    /// Starts playing `target`. `startMs` nil resumes from the server's saved progress;
+    /// `candidateId` picks a specific source (else the server's best). Returns once playback
+    /// has started, failed, or the load was superseded (`unload()` / another `load`).
+    public func load(target: PlaybackTarget, meta: PlaybackMeta, candidateId: String? = nil, startMs: Int? = nil) async {
+        guard let client else { status = .failed("Not connected to a server."); return }
+        await teardown(reportFinal: true)
+        generation += 1
+        let gen = generation
+        self.target = target
+        self.meta = meta
         status = .loading
-        do {
-            let planner = StreamPlanner(client: jellyfin)
-            let plan = try await planner.plan(itemId: item.id,
-                                              audioStreamIndex: activeAudioIndex,
-                                              subtitleStreamIndex: activeSubtitleIndex)
-            self.plan = plan
-            // Build URL and player item
-            let url = plan.preferHLS ? plan.hlsURL : plan.directURL
-            let asset = AVURLAsset(url: url)
-            let playerItem = AVPlayerItem(asset: asset)
-            player.replaceCurrentItem(with: playerItem)
+        position = startMs.map { TimeInterval($0) / 1000 } ?? 0
+        nowPlaying?.update(meta: meta, position: position, duration: duration, rate: 0)
 
-            // Surface tracks from the bundled item when present; only
-            // re-fetch when mediaSources are missing (some list-view
-            // models drop them to keep payloads small). The re-fetch
-            // used to be unconditional and blocked play() on a second
-            // round-trip after StreamPlanner already returned.
-            let bundledSource = item.mediaSources?.first { $0.id == plan.mediaSourceId }
-            let source: MediaSource?
-            if let bundledSource, (bundledSource.mediaStreams?.isEmpty == false) {
-                source = bundledSource
-            } else {
-                source = (try? await jellyfin.getItem(item.id))?.mediaSources?.first { $0.id == plan.mediaSourceId }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let res = try await self.requestPlay(client: client, target: target, candidateId: candidateId, startMs: startMs, audioIndex: nil, gen: gen)
+                try await self.start(res, gen: gen, newTitle: true, autoplay: true)
+            } catch {
+                guard gen == self.generation, !(error is CancellationError) else { return }
+                let e = StrataError.wrap(error)
+                if e.kind != .cancelled { self.status = .failed(e.message) }
             }
-            audioTracks = (source?.mediaStreams ?? []).filter { $0.type == .audio }
-            subtitleTracks = (source?.mediaStreams ?? []).filter { $0.type == .subtitle }
-            // Keep the viewer's audio choice across a same-item reload; otherwise
-            // pick the source's default (or first) track. Without this guard the
-            // reload triggered by selectAudio(_:) would snap straight back to the
-            // default, leaving the picker's checkmark out of sync with playback.
-            let keepsAudio = isReload && audioTracks.contains { $0.index == activeAudioIndex }
-            if !keepsAudio {
-                activeAudioIndex = audioTracks.first(where: { $0.isDefault ?? false })?.index ?? audioTracks.first?.index
+        }
+        loadTask = task
+        await task.value
+    }
+
+    /// Plays the next episode (from `nextEpisode`), from the start.
+    public func playNext(meta: PlaybackMeta? = nil) async {
+        guard let next = nextEpisode, let nextTarget else { return }
+        let m = meta ?? PlaybackMeta(title: next.name, subtitle: next.code, artworkURL: next.stillUrl ?? self.meta?.artworkURL)
+        await load(target: nextTarget, meta: m, startMs: 0)
+    }
+
+    /// Calls `/api/play`, polling while the release downloads (status `.preparing`).
+    private func requestPlay(client: StrataClient, target: PlaybackTarget, candidateId: String?, startMs: Int?, audioIndex: Int?, gen: Int) async throws -> PlayResponse {
+        while true {
+            try Task.checkCancellation()
+            switch try await client.play(target, candidateId: candidateId, startMs: startMs, audioStreamIndex: audioIndex) {
+            case .started(let res):
+                return res
+            case .downloading(let progress):
+                guard gen == generation else { throw CancellationError() }
+                status = .preparing(progress)
+                try await Task.sleep(nanoseconds: UInt64(preparePollInterval * 1_000_000_000))
             }
-            // Subtitles default to off until user enables.
-
-            duration = item.runtimeSeconds ?? 0
-            attachObservers(playerItem: playerItem)
-
-            if let resume = item.resumePositionSeconds, resume > 5 {
-                await seek(to: resume)
-            }
-
-            // Intro/credits markers — fire-and-forget so they never delay
-            // playback. Empty (no plugin / unanalysed) simply shows no button.
-            Task { [weak self] in
-                let segs = (try? await jellyfin.mediaSegments(itemId: item.id)) ?? []
-                await MainActor.run { self?.segments = segs }
-            }
-
-            let r = PlaybackReporter(client: jellyfin, itemId: item.id, plan: plan)
-            reporter = r
-            // Fire-and-forget: server bookkeeping doesn't belong on the
-            // critical play() path. Awaiting it adds a serial round-trip
-            // between the AVPlayerItem being ready and the call to play().
-            Task { await r.start() }
-            status = .ready
-            nowPlaying?.update(item: item, position: position, duration: duration, rate: rate)
-            player.play()
-            applyRate()
-        } catch {
-            status = .failed((error as? JellyfinClient.RequestError)?.message ?? error.localizedDescription)
         }
     }
 
-    public func play() { player.play(); status = .playing }
+    /// Installs a play response as the current item. `newTitle` resets tracks/subtitles;
+    /// otherwise (seek restart / audio switch) the subtitle selection and cues carry over.
+    private func start(_ res: PlayResponse, gen: Int, newTitle: Bool, autoplay: Bool) async throws {
+        guard gen == generation else { throw CancellationError() }
+        let previous = session
+        removeObservers()
+
+        session = res
+        timeline = MediaTimeline(res)
+        duration = res.duration
+        audioTracks = res.audioTracks
+        activeAudioIndex = res.selectedAudio?.index
+        chapters = res.chapters
+        nextEpisode = res.nextEpisode
+        let keptSubtitle = newTitle ? nil : activeSubtitleId
+        subtitleTracks = res.subtitleTracks
+        if newTitle {
+            subtitleCues = []
+            activeSubtitleId = nil
+            subtitleError = nil
+        }
+
+        let item = AVPlayerItem(url: res.url)
+        // Start buffering a little ahead; long forward buffers waste server work on a remux.
+        item.preferredForwardBufferDuration = res.mode.isHLS ? 30 : 0
+        player.replaceCurrentItem(with: item)
+        attachObservers(item)
+        isBuffering = true
+        if let previous, previous.sessionId != res.sessionId { stopSession(previous.sessionId) }
+
+        try await waitUntilReady(item)
+        guard gen == generation else { throw CancellationError() }
+        if let seek = MediaTimeline.initialSeek(res) {
+            await player.seek(to: CMTime(seconds: seek, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+        guard gen == generation else { throw CancellationError() }
+        restartTarget = nil
+        didStartPlayback = true
+        position = timeline.mediaTime(streamTime: player.currentTime().seconds)
+        status = .ready
+        if autoplay {
+            player.playImmediately(atRate: rate)
+            status = .playing
+        } else {
+            status = .paused
+        }
+
+        if newTitle {
+            autoSelectForcedSubtitles()
+        } else if let keptSubtitle, subtitleTracks.contains(where: { $0.id == keptSubtitle }) {
+            // Cues are media time and the file is the same; keep them, just track the new URL.
+            activeSubtitleId = keptSubtitle
+        } else if keptSubtitle != nil {
+            activeSubtitleId = nil
+            subtitleCues = []
+        }
+        nowPlaying?.update(meta: meta, position: position, duration: duration, rate: player.rate)
+        reportProgress(force: true)
+    }
+
+    /// Waits for the item to become playable. Polls rather than bridging KVO into an
+    /// async sequence: `publisher(for:).values` never yielded here, leaving loads stuck.
+    private func waitUntilReady(_ item: AVPlayerItem, timeout: TimeInterval = 45) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            switch item.status {
+            case .readyToPlay: return
+            case .failed: throw StrataError(kind: .network, message: Self.describe(item.error))
+            default: break
+            }
+            guard Date() < deadline else { throw StrataError(kind: .network, message: "The stream didn't start in time. Try again.") }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+    }
+
+    // MARK: - Transport
+
+    public func play() {
+        guard player.currentItem != nil else { return }
+        if status == .ended { Task { await seek(to: 0) } }
+        player.playImmediately(atRate: rate)
+        status = .playing
+    }
 
     public func pause() {
         player.pause()
-        status = .paused
-        Task { await reporter?.tick(positionSeconds: position, isPaused: true) }
+        if player.currentItem != nil { status = .paused }
+        reportProgress(force: true)
     }
 
     public func togglePlay() {
@@ -201,17 +300,85 @@ public final class PlayerEngine {
     }
 
     public func skip(_ delta: TimeInterval) async {
-        await seek(to: position + delta)
+        await seek(to: (restartTarget ?? position) + delta)
     }
 
-    /// Jump to the end of the intro/credits segment the playhead is currently in.
-    public func skipActiveSegment() async {
-        guard let prompt = activeSkip else { return }
-        await seek(to: prompt.end)
+    /// Seeks to a media time. Inside what the current stream can reach it's an ordinary
+    /// seek; otherwise (HLS, outside the encoded range) the server restarts the stream
+    /// there — rapid scrubs are coalesced.
+    public func seek(to seconds: TimeInterval) async {
+        guard session != nil, let item = player.currentItem else { return }
+        let target = timeline.clamp(seconds)
+        let seekable = item.seekableTimeRanges.map(\.timeRangeValue).compactMap { r -> ClosedRange<TimeInterval>? in
+            let start = r.start.seconds, end = r.end.seconds
+            guard start.isFinite, end.isFinite, end >= start else { return nil }
+            return start...end
+        }
+        switch restartTarget == nil ? timeline.plan(seekTo: target, seekable: seekable) : .restart(media: target) {
+        case .inPlace(let stream):
+            restartTask?.cancel()
+            position = target
+            let tolerance = timeline.isHLS ? CMTime(seconds: 0.5, preferredTimescale: 600) : .zero
+            await player.seek(to: CMTime(seconds: stream, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance)
+            if status == .ended { status = .paused }
+            reportProgress(force: true)
+        case .restart(let media):
+            position = media
+            restartTarget = media
+            scheduleRestart(at: media, audioIndex: activeAudioIndex)
+        }
     }
 
-    /// Arm (or, with `.off`, disarm) the sleep timer. Pauses playback when it
-    /// fires. Survives auto-advance to the next episode; cleared on `unload()`.
+    private func scheduleRestart(at media: TimeInterval, audioIndex: Int?, debounce: Bool = true) {
+        restartTask?.cancel()
+        let gen = generation
+        let wasPlaying = status == .playing || status == .ended || status == .ready
+        restartTask = Task { [weak self] in
+            guard let self else { return }
+            if debounce {
+                try? await Task.sleep(nanoseconds: UInt64(self.restartDebounce * 1_000_000_000))
+            }
+            guard !Task.isCancelled, gen == self.generation, let client = self.client, let target = self.target, let current = self.session else { return }
+            self.player.pause()
+            self.isBuffering = true
+            do {
+                let res = try await self.requestPlay(client: client, target: target, candidateId: current.candidate.id,
+                                                     startMs: Int((media * 1000).rounded()), audioIndex: audioIndex, gen: gen)
+                guard !Task.isCancelled else { return }
+                try await self.start(res, gen: gen, newTitle: false, autoplay: wasPlaying)
+            } catch {
+                guard gen == self.generation, !(error is CancellationError), !Task.isCancelled else { return }
+                let e = StrataError.wrap(error)
+                if e.kind != .cancelled {
+                    self.restartTarget = nil
+                    self.status = .failed(e.message)
+                }
+            }
+        }
+    }
+
+    public func toggleMute() {
+        isMuted.toggle()
+        player.isMuted = isMuted
+    }
+
+    /// Cycle through 1.0 → 1.25 → 1.5 → 2.0 → 1.0.
+    public func cycleSpeed() {
+        let cycle: [Float] = [1.0, 1.25, 1.5, 2.0]
+        rate = cycle.first(where: { $0 > rate }) ?? 1.0
+    }
+
+    public func toggleVideoGravity() {
+        videoGravity = (videoGravity == .resizeAspect) ? .resizeAspectFill : .resizeAspect
+    }
+
+    public func setVideoGravity(_ gravity: AVLayerVideoGravity) {
+        guard gravity != videoGravity else { return }
+        videoGravity = gravity
+    }
+
+    /// Arm (or, with `.off`, disarm) the sleep timer. Pauses playback when it fires.
+    /// Survives moving to the next episode; cleared on `unload()`.
     public func setSleepTimer(_ option: SleepOption) {
         sleepTask?.cancel()
         guard option != .off else {
@@ -228,120 +395,206 @@ public final class PlayerEngine {
         }
     }
 
-    public func seek(to seconds: TimeInterval) async {
-        let cm = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
-        await player.seek(to: cm, toleranceBefore: .zero, toleranceAfter: .zero)
-        position = seconds
+    // MARK: - Tracks
+
+    /// Switches audio by restarting the stream at the current position with that track.
+    public func selectAudio(_ track: AudioTrack) async {
+        guard session != nil, track.index != activeAudioIndex else { return }
+        activeAudioIndex = track.index
+        let at = restartTarget ?? position
+        restartTarget = at
+        scheduleRestart(at: at, audioIndex: track.index, debounce: false)
+        await restartTask?.value
     }
 
-    public func toggleMute() {
-        isMuted.toggle()
-        player.isMuted = isMuted
+    /// Shows a subtitle track (nil turns subtitles off). Text tracks are fetched as WebVTT
+    /// (the server may take a moment to extract embedded ones); bitmap tracks can't be shown.
+    public func selectSubtitle(_ track: SubtitleTrack?) async {
+        subtitleTask?.cancel()
+        subtitleError = nil
+        guard let track else {
+            activeSubtitleId = nil
+            subtitleCues = []
+            isLoadingSubtitles = false
+            return
+        }
+        guard let url = track.url else {
+            subtitleError = "\(track.displayTitle) is an image-based subtitle and can't be shown yet."
+            return
+        }
+        guard let client else { return }
+        activeSubtitleId = track.id
+        subtitleCues = []
+        isLoadingSubtitles = true
+        let gen = generation
+        let task = Task { [weak self] in
+            do {
+                let text = try await client.subtitles(url)
+                let cues = WebVTT.parse(text).sorted { $0.start < $1.start }
+                guard let self, !Task.isCancelled, gen == self.generation, self.activeSubtitleId == track.id else { return }
+                self.subtitleCues = cues
+                self.isLoadingSubtitles = false
+            } catch {
+                guard let self, !Task.isCancelled, gen == self.generation, self.activeSubtitleId == track.id else { return }
+                self.isLoadingSubtitles = false
+                self.activeSubtitleId = nil
+                self.subtitleError = StrataError.wrap(error).message
+            }
+        }
+        subtitleTask = task
+        await task.value
     }
 
-    /// Cycle through 1.0 → 1.25 → 1.5 → 2.0 → 1.0.
-    public func cycleSpeed() {
-        let cycle: [Float] = [1.0, 1.25, 1.5, 2.0]
-        let next = cycle.first(where: { $0 > rate }) ?? cycle.first ?? 1.0
-        rate = next
+    /// Forced subtitles in the audio's language turn on by themselves (foreign-dialogue tracks).
+    private func autoSelectForcedSubtitles() {
+        let audioLang = LanguageName.normalized(audioTracks.first { $0.index == activeAudioIndex }?.language)
+        guard let forced = subtitleTracks.first(where: { t in
+            t.forced && t.isTextBased && (audioLang == nil || LanguageName.normalized(t.language) == audioLang)
+        }) else { return }
+        Task { await selectSubtitle(forced) }
     }
 
-    /// Pick a new audio stream — triggers reload of the stream plan with the
-    /// updated audio index so Jellyfin can switch tracks server-side.
-    public func selectAudio(_ stream: MediaStream) async {
-        guard let item, stream.index != activeAudioIndex else { return }
-        activeAudioIndex = stream.index
-        let resumeAt = position
-        await load(item: item)
-        await seek(to: resumeAt)
-    }
+    // MARK: - Unload
 
-    public func selectSubtitle(_ stream: MediaStream?) async {
-        guard let item else { return }
-        activeSubtitleIndex = stream?.index
-        let resumeAt = position
-        await load(item: item)
-        await seek(to: resumeAt)
-    }
-
+    /// Stops playback: reports the final position, ends the server session, clears state.
     public func unload() async {
         sleepTask?.cancel()
         sleepTimerEnds = nil
-        await teardownCurrentItem()
+        await teardown(reportFinal: true)
+        generation += 1
+        target = nil
+        meta = nil
         status = .idle
+        nowPlaying?.update(meta: nil, position: 0, duration: 0, rate: 0)
     }
+
+    private func teardown(reportFinal: Bool) async {
+        loadTask?.cancel()
+        loadTask = nil
+        restartTask?.cancel()
+        restartTask = nil
+        subtitleTask?.cancel()
+        subtitleTask = nil
+        if reportFinal { reportProgress(force: true) }
+        if let session { stopSession(session.sessionId) }
+        removeObservers()
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        session = nil
+        timeline = MediaTimeline(startOffset: 0, duration: 0, isHLS: false)
+        restartTarget = nil
+        position = 0
+        duration = 0
+        isBuffering = false
+        audioTracks = []
+        subtitleTracks = []
+        activeAudioIndex = nil
+        activeSubtitleId = nil
+        subtitleCues = []
+        subtitleError = nil
+        isLoadingSubtitles = false
+        chapters = []
+        nextEpisode = nil
+        lastReportedMs = nil
+        lastReportAt = .distantPast
+        didStartPlayback = false
+    }
+
+    private func stopSession(_ id: String) {
+        guard let client else { return }
+        Task.detached { try? await client.stopPlayback(sessionId: id) }
+    }
+
+    // MARK: - Progress
+
+    private func reportProgress(force: Bool) {
+        guard let client, let target, let session, didStartPlayback else { return }
+        let ms = timeline.ms(restartTarget ?? position)
+        guard force || Date().timeIntervalSince(lastReportAt) >= progressInterval else { return }
+        guard ms != lastReportedMs || force else { return }
+        lastReportAt = Date()
+        lastReportedMs = ms
+        let durationMs = session.durationMs
+        let sessionId = session.sessionId
+        Task.detached {
+            do {
+                try await client.reportProgress(target, positionMs: ms, durationMs: durationMs, sessionId: sessionId)
+            } catch {
+                Log.player.warning("progress report failed: \(StrataError.wrap(error).message, privacy: .public)")
+            }
+        }
+    }
+
+    // MARK: - Observers
 
     private func applyRate() {
         if status == .playing { player.rate = rate }
     }
 
-    private func attachObservers(playerItem: AVPlayerItem) {
-        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+    private func attachObservers(_ item: AVPlayerItem) {
+        let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
         timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
-                guard let self else { return }
-                self.position = CMTimeGetSeconds(time)
-                if self.duration <= 0, let d = self.player.currentItem?.duration.seconds, d.isFinite {
-                    self.duration = d
-                }
-                self.nowPlaying?.update(item: self.item, position: self.position, duration: self.duration, rate: self.rate)
-                Task { [weak self] in
-                    guard let self else { return }
-                    await self.reporter?.tick(positionSeconds: self.position, isPaused: self.status == .paused)
-                }
+                guard let self, self.restartTarget == nil, self.session != nil else { return }
+                self.position = self.timeline.mediaTime(streamTime: time.seconds)
+                self.nowPlaying?.update(meta: self.meta, position: self.position, duration: self.duration, rate: self.player.rate)
+                if self.status == .playing { self.reportProgress(force: false) }
             }
         }
-        statusObservation = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
-            Task { @MainActor in
-                guard let self else { return }
-                switch item.status {
-                case .readyToPlay:
-                    let d = item.duration.seconds
-                    if d.isFinite, d > 0 { self.duration = d }
-                    if self.status == .loading { self.status = .ready }
-                case .failed:
-                    self.status = .failed(item.error?.localizedDescription ?? "Failed to load")
-                default: break
-                }
-            }
-        }
-        rateObservation = player.observe(\.rate, options: [.new]) { [weak self] p, _ in
-            Task { @MainActor in
-                guard let self else { return }
-                if p.rate > 0 { self.status = .playing }
-                else if self.status == .playing { self.status = .paused }
-            }
-        }
-        endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime,
-            object: playerItem, queue: .main
-        ) { [weak self] _ in
+        statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            let failed = item.status == .failed
+            let message = Self.describe(item.error)
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, failed, self.player.currentItem === item else { return }
+                self.status = .failed(message)
+                self.isBuffering = false
+            }
+        }
+        timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
+            let tcs = p.timeControlStatus
+            Task { @MainActor [weak self] in
+                guard let self, self.session != nil else { return }
+                self.isBuffering = tcs == .waitingToPlayAtSpecifiedRate || self.restartTarget != nil
+                switch tcs {
+                case .playing:
+                    if self.restartTarget == nil { self.status = .playing }
+                case .paused:
+                    if self.status == .playing, self.restartTarget == nil {
+                        self.status = .paused
+                        self.reportProgress(force: true)
+                    }
+                default:
+                    break
+                }
+            }
+        }
+        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.restartTarget == nil else { return }
                 self.status = .ended
-                await self.reporter?.stop(positionSeconds: self.duration)
+                self.position = self.duration
+                self.reportProgress(force: true)
             }
         }
     }
 
-    private func teardownCurrentItem() async {
+    private func removeObservers() {
         if let token = timeObserverToken {
             player.removeTimeObserver(token)
             timeObserverToken = nil
         }
         statusObservation = nil
-        rateObservation = nil
+        timeControlObservation = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
-        await reporter?.stop(positionSeconds: position)
-        reporter = nil
-        player.replaceCurrentItem(with: nil)
-        position = 0
-        duration = 0
-        segments = []
+    }
+
+    nonisolated private static func describe(_ error: Error?) -> String {
+        guard let error else { return "Playback failed." }
+        let ns = error as NSError
+        if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError, underlying.domain == NSURLErrorDomain {
+            return StrataError.wrap(URLError(URLError.Code(rawValue: underlying.code))).message
+        }
+        return ns.localizedFailureReason ?? ns.localizedDescription
     }
 }
-
-/// Allows the engine to hold a weak reference to a wrapper around `JellyfinClient`
-/// — used by future caching layers; safe placeholder for now.
-public protocol JellyfinClientHolder: AnyObject {}

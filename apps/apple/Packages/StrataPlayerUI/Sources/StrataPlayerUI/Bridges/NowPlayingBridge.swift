@@ -11,31 +11,34 @@ import AppKit
 /// Control Center, headphones, and CarPlay reflect what's playing.
 @MainActor
 public final class NowPlayingBridge {
-    private let images: ImageURLBuilder
     private var artworkURL: URL?
+    private var artwork: MPMediaItemArtwork?
 
-    public init(images: ImageURLBuilder) {
-        self.images = images
-    }
+    public init() {}
 
-    public func update(item: BaseItem?, position: TimeInterval, duration: TimeInterval, rate: Float) {
-        guard let item else {
+    /// `position`/`duration` are media time. Pass `meta: nil` to clear Now Playing.
+    public func update(meta: PlaybackMeta?, position: TimeInterval, duration: TimeInterval, rate: Float) {
+        guard let meta else {
+            artworkURL = nil
+            artwork = nil
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             return
         }
         var info: [String: Any] = [
-            MPMediaItemPropertyTitle: item.displayTitle,
-            MPMediaItemPropertyAlbumTitle: item.seriesName ?? "Strata",
+            MPMediaItemPropertyTitle: meta.title,
+            MPMediaItemPropertyAlbumTitle: meta.subtitle ?? "Strata",
             MPNowPlayingInfoPropertyPlaybackRate: NSNumber(value: rate),
             MPNowPlayingInfoPropertyElapsedPlaybackTime: NSNumber(value: position)
         ]
         if duration > 0 {
             info[MPMediaItemPropertyPlaybackDuration] = NSNumber(value: duration)
         }
+        if let artwork { info[MPMediaItemPropertyArtwork] = artwork }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
 
-        let candidate = images.backdrop(itemId: item.id) ?? images.primary(itemId: item.id)
+        let candidate = meta.artworkURL
         if candidate != artworkURL {
+            artwork = nil
             artworkURL = candidate
             if let candidate { Task { await loadArtwork(from: candidate) } }
         }
@@ -51,6 +54,8 @@ public final class NowPlayingBridge {
             #endif
             let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
             await MainActor.run {
+                guard url == self.artworkURL else { return }
+                self.artwork = artwork
                 var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
                 info[MPMediaItemPropertyArtwork] = artwork
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = info

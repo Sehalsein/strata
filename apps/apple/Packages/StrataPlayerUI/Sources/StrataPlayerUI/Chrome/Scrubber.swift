@@ -2,136 +2,140 @@ import SwiftUI
 import StrataDesign
 import StrataKit
 
-/// Editorial scrubber with chapter ticks and an optional trickplay preview.
-/// The thumbnail provider is injected so this view stays free of network
-/// concerns — the host (`TransportBar`) wires it up.
+/// Seek bar in media time: buffered and played ranges, chapter ticks, and a
+/// time/chapter preview while scrubbing. Touch drags on iPhone/iPad; on tvOS
+/// it's focusable and scrubs with the remote (left/right, select to commit).
 public struct Scrubber: View {
-    public let position: TimeInterval
-    public let duration: TimeInterval
-    public let chapters: [Chapter]
-    public let trickplayProvider: TrickplayProvider?
-    public let onScrub: (TimeInterval) -> Void
+    let position: TimeInterval
+    let duration: TimeInterval
+    let chapters: [Chapter]
+    let onScrub: (TimeInterval) -> Void
 
-    @State private var dragValue: Double?
-    @State private var isHovering = false
-    @State private var hoverPosition: TimeInterval?
+    @State private var scrubValue: TimeInterval?
+    #if os(tvOS)
+    @FocusState private var focused: Bool
+    #endif
 
-    public init(position: TimeInterval,
-                duration: TimeInterval,
-                chapters: [Chapter] = [],
-                trickplayProvider: TrickplayProvider? = nil,
-                onScrub: @escaping (TimeInterval) -> Void) {
+    public init(position: TimeInterval, duration: TimeInterval, chapters: [Chapter] = [], onScrub: @escaping (TimeInterval) -> Void) {
         self.position = position
         self.duration = duration
         self.chapters = chapters
-        self.trickplayProvider = trickplayProvider
         self.onScrub = onScrub
     }
 
+    private var shown: TimeInterval { scrubValue ?? position }
+    private var fraction: Double { duration > 0 ? min(max(shown / duration, 0), 1) : 0 }
+    private var isActive: Bool {
+        #if os(tvOS)
+        focused || scrubValue != nil
+        #else
+        scrubValue != nil
+        #endif
+    }
+
+    #if os(tvOS)
+    private let trackHeight: CGFloat = 10
+    #else
+    private let trackHeight: CGFloat = 6
+    #endif
+
     public var body: some View {
-        let value = dragValue ?? (duration > 0 ? position / duration : 0)
-        GeometryReader { geo in
-            let w = geo.size.width
-            let knobX = max(0, min(w, CGFloat(value) * w))
-            ZStack(alignment: .leading) {
-                // track
-                Rectangle().fill(Strata.Tokens.paper.opacity(0.16))
-                    .frame(height: isHovering ? 4 : 2)
-                // played
-                Rectangle().fill(Strata.Tokens.accent2)
-                    .frame(width: knobX, height: isHovering ? 4 : 2)
-                // chapter ticks
-                ForEach(chapters.indices, id: \.self) { i in
-                    let chapter = chapters[i]
-                    let seconds = TimeInterval(chapter.startPositionTicks) / 10_000_000
-                    if duration > 0, seconds > 0, seconds < duration {
-                        Rectangle()
-                            .fill(Strata.Tokens.paper.opacity(0.6))
-                            .frame(width: 1, height: 8)
-                            .offset(x: CGFloat(seconds / duration) * w)
-                    }
-                }
-                // knob
-                Rectangle().fill(Strata.Tokens.paper)
-                    .frame(width: 2, height: 14)
-                    .offset(x: knobX - 1)
-                    .opacity(isHovering || dragValue != nil ? 1 : 0)
-                // trickplay preview
-                if let hover = hoverPosition, let trickplayProvider, duration > 0 {
-                    TrickplayPreview(seconds: hover, chapter: chapter(at: hover), provider: trickplayProvider)
-                        .offset(x: CGFloat(hover / duration) * w - 60, y: -120)
-                }
-            }
-            .contentShape(Rectangle().inset(by: -8))
-            #if !os(tvOS)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { g in
-                        let raw = max(0, min(w, g.location.x))
-                        let progress = Double(raw / max(w, 1))
-                        self.dragValue = progress
-                        if duration > 0 { self.hoverPosition = progress * duration }
-                    }
-                    .onEnded { _ in
-                        if let v = dragValue, duration > 0 {
-                            onScrub(v * duration)
+        VStack(alignment: .leading, spacing: Metrics.space2) {
+            GeometryReader { geo in
+                let w = geo.size.width
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.25))
+                    Capsule().fill(Theme.apricot).frame(width: max(trackHeight, w * fraction))
+                    ForEach(Array(chapters.enumerated()), id: \.offset) { _, chapter in
+                        if duration > 0, chapter.start > 0, chapter.start < duration {
+                            Rectangle().fill(.white.opacity(0.6))
+                                .frame(width: 2, height: trackHeight + 4)
+                                .offset(x: w * chapter.start / duration - 1)
                         }
-                        dragValue = nil
-                        hoverPosition = nil
                     }
-            )
-            #endif
-            #if os(macOS)
-            .onContinuousHover { phase in
-                switch phase {
-                case .active(let point):
-                    isHovering = true
-                    if duration > 0 {
-                        let progress = max(0, min(1, Double(point.x / max(w, 1))))
-                        hoverPosition = progress * duration
+                    Circle().fill(Theme.onArtwork)
+                        .frame(width: trackHeight * 2.6, height: trackHeight * 2.6)
+                        .shadow(color: .black.opacity(0.3), radius: 4)
+                        .offset(x: w * fraction - trackHeight * 1.3)
+                        .opacity(isActive ? 1 : 0)
+                    if let scrubValue {
+                        preview(scrubValue)
+                            .fixedSize()
+                            .offset(x: min(max(0, w * fraction - 50), w - 100), y: -44)
                     }
-                case .ended:
-                    isHovering = false
-                    hoverPosition = nil
+                }
+                .frame(height: trackHeight)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                #if !os(tvOS)
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { g in
+                            guard duration > 0 else { return }
+                            scrubValue = Double(max(0, min(w, g.location.x)) / max(w, 1)) * duration
+                        }
+                        .onEnded { _ in
+                            if let scrubValue { onScrub(scrubValue) }
+                            scrubValue = nil
+                        }
+                )
+                #endif
+            }
+            .frame(height: trackHeight * 3)
+            #if os(tvOS)
+            .focusable()
+            .focused($focused)
+            .onMoveCommand { direction in
+                guard duration > 0 else { return }
+                let step: TimeInterval = 10
+                let base = scrubValue ?? position
+                switch direction {
+                case .left: scrubValue = max(0, base - step)
+                case .right: scrubValue = min(duration, base + step)
+                default: break
                 }
             }
-            #endif
-        }
-        .frame(height: 18)
-    }
-
-    private func chapter(at seconds: TimeInterval) -> Chapter? {
-        chapters.last(where: { TimeInterval($0.startPositionTicks) / 10_000_000 <= seconds })
-    }
-}
-
-private struct TrickplayPreview: View {
-    let seconds: TimeInterval
-    let chapter: Chapter?
-    let provider: TrickplayProvider
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            TrickplayThumbnail(seconds: seconds, provider: provider)
-                .frame(width: 160, height: 90)
-                .strataCard()
-                .strataBorder(Strata.Tokens.paperHair)
-            if let chapter, let name = chapter.name {
-                Text(name.uppercased())
-                    .font(.mono(9))
-                    .tracking(1.4)
-                    .foregroundStyle(Strata.Tokens.paperDim)
+            .onTapGesture {
+                if let scrubValue { onScrub(scrubValue) }
+                scrubValue = nil
             }
-            Text(format(seconds))
-                .font(.mono(10))
-                .foregroundStyle(Strata.Tokens.paper)
+            .onChange(of: focused) { _, isFocused in if !isFocused { scrubValue = nil } }
+            #endif
+
+            HStack {
+                Text(Self.format(shown))
+                Spacer()
+                Text("−" + Self.format(max(0, duration - shown)))
+            }
+            .font(.stTimecode)
+            .foregroundStyle(Theme.onArtwork.opacity(0.8))
         }
-        .allowsHitTesting(false)
+        .accessibilityElement()
+        .accessibilityLabel("Playback position")
+        .accessibilityValue("\(Self.format(position)) of \(Self.format(duration))")
+        .accessibilityAdjustableAction { direction in
+            onScrub(direction == .increment ? min(duration, position + 10) : max(0, position - 10))
+        }
     }
 
-    private func format(_ t: TimeInterval) -> String {
+    private func preview(_ seconds: TimeInterval) -> some View {
+        VStack(spacing: 2) {
+            if let title = chapters.last(where: { $0.start <= seconds })?.title {
+                Text(title).font(.stFootnote).lineLimit(1)
+            }
+            Text(Self.format(seconds)).font(.stTimecode)
+        }
+        .foregroundStyle(Theme.onArtwork)
+        .padding(.horizontal, Metrics.space3)
+        .padding(.vertical, Metrics.space2)
+        .glassEffect(.regular, in: .capsule)
+        .frame(width: 100)
+    }
+
+    public static func format(_ t: TimeInterval) -> String {
+        guard t.isFinite, t >= 0 else { return "0:00" }
         let total = Int(t)
-        let m = (total % 3600) / 60, s = total % 60, h = total / 3600
-        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%02d:%02d", m, s)
+        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
     }
 }

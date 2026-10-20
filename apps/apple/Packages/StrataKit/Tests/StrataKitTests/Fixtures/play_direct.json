@@ -1,0 +1,46 @@
+{
+  "sessionId": "0cc026ea414e93ae34913ef5c3049cfd",
+  "mode": "direct",
+  "url": "/api/stream/0cc026ea414e93ae34913ef5c3049cfd/file",
+  "startOffsetMs": 0,
+  "seekToMs": 5000,
+  "durationMs": 30000,
+  "candidate": {
+    "id": "file:2",
+    "fileId": 2,
+    "provider": "local",
+    "name": "Test.Show.S01E01.720p.WEB.mp4",
+    "size": 6886651,
+    "resolution": 480,
+    "source": "web",
+    "videoCodec": "h264",
+    "hdr": null,
+    "audio": [
+      {
+        "codec": "aac",
+        "channels": 1
+      }
+    ],
+    "durationMs": 30000,
+    "probed": true,
+    "availability": "ready"
+  },
+  "audioTracks": [
+    {
+      "index": 1,
+      "codec": "aac",
+      "channels": 1,
+      "selected": true
+    }
+  ],
+  "subtitleTracks": [],
+  "chapters": [],
+  "reasons": [],
+  "nextEpisode": {
+    "season": 1,
+    "episode": 2,
+    "name": "Second",
+    "stillUrl": null,
+    "available": true
+  }
+}

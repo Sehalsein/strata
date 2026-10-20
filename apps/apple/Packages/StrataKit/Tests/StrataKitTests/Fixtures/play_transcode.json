@@ -1,0 +1,106 @@
+{
+  "sessionId": "a83f4d9d1b7e1f6bf8b6b7a81fd81607",
+  "mode": "transcode",
+  "url": "/api/stream/a83f4d9d1b7e1f6bf8b6b7a81fd81607/stream.m3u8",
+  "startOffsetMs": 1800000,
+  "seekToMs": 0,
+  "durationMs": 5960000,
+  "candidate": {
+    "id": "file:1",
+    "fileId": 1,
+    "provider": "local",
+    "name": "Big.Buck.Bunny.2008.1080p.BluRay.x264.mkv",
+    "size": 6981110,
+    "resolution": 480,
+    "source": "bluray",
+    "videoCodec": "h264",
+    "hdr": null,
+    "audio": [
+      {
+        "codec": "ac3",
+        "channels": 1
+      }
+    ],
+    "durationMs": 30000,
+    "probed": true,
+    "availability": "ready"
+  },
+  "audioTracks": [
+    {
+      "index": 1,
+      "codec": "truehd",
+      "channels": 8,
+      "language": "eng",
+      "title": "TrueHD Atmos 7.1",
+      "selected": false
+    },
+    {
+      "index": 2,
+      "codec": "eac3",
+      "channels": 6,
+      "language": "eng",
+      "selected": true
+    },
+    {
+      "index": 3,
+      "codec": "aac",
+      "channels": 2,
+      "language": "jpn",
+      "selected": false
+    }
+  ],
+  "subtitleTracks": [
+    {
+      "id": "s2",
+      "codec": "subrip",
+      "language": "eng",
+      "forced": false,
+      "isDefault": false,
+      "external": false,
+      "url": "/api/stream/a83f4d9d1b7e1f6bf8b6b7a81fd81607/subtitles/s2.vtt"
+    },
+    {
+      "id": "x0",
+      "codec": "srt",
+      "language": "en",
+      "forced": true,
+      "isDefault": false,
+      "external": true,
+      "url": "/api/stream/a83f4d9d1b7e1f6bf8b6b7a81fd81607/subtitles/x0.vtt"
+    },
+    {
+      "id": "s7",
+      "codec": "hdmv_pgs_subtitle",
+      "language": "fre",
+      "title": "Fran\u00e7ais",
+      "forced": false,
+      "isDefault": true,
+      "external": false,
+      "url": null
+    }
+  ],
+  "chapters": [
+    {
+      "startMs": 0,
+      "title": "Opening"
+    },
+    {
+      "startMs": 600000
+    },
+    {
+      "startMs": 1800000,
+      "title": "Finale"
+    }
+  ],
+  "reasons": [
+    "2160p exceeds 1080p",
+    "audio truehd \u2192 eac3"
+  ],
+  "nextEpisode": {
+    "season": 2,
+    "episode": 1,
+    "name": "Premiere",
+    "stillUrl": "https://image.tmdb.org/t/p/w780/still.jpg",
+    "available": false
+  }
+}

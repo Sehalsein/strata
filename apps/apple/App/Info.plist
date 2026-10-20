@@ -2,8 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>ATSApplicationFontsPath</key>
-	<string>Fonts</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -41,24 +39,21 @@
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
 	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_strata._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Strata looks for your Strata servers on the local network.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>com.strata.viewing</string>
 		<string>com.strata.watching</string>
-	</array>
-	<key>UIAppFonts</key>
-	<array>
-		<string>Fraunces[opsz,wght,SOFT,WONK].ttf</string>
-		<string>IBMPlexSans-Regular.ttf</string>
-		<string>IBMPlexSans-Medium.ttf</string>
-		<string>IBMPlexSans-SemiBold.ttf</string>
-		<string>IBMPlexSans-Bold.ttf</string>
-		<string>JetBrainsMono-Regular.ttf</string>
-		<string>JetBrainsMono-Medium.ttf</string>
-		<string>JetBrainsMono-SemiBold.ttf</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>

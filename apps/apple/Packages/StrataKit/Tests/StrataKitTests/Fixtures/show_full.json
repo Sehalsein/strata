@@ -1,0 +1,50 @@
+{
+  "type": "show",
+  "tmdbId": 9001,
+  "imdbId": "tt9000001",
+  "title": "Test Show",
+  "tagline": null,
+  "overview": "",
+  "year": 2020,
+  "firstAirDate": "2020-01-01",
+  "lastAirDate": "2023-06-01",
+  "status": "Ended",
+  "genres": [],
+  "rating": 8.1,
+  "certification": "TV-14",
+  "posterUrl": null,
+  "backdropUrl": null,
+  "cast": [
+    {
+      "id": 7,
+      "name": "Actor",
+      "character": "Lead",
+      "profileUrl": null
+    }
+  ],
+  "trailer": null,
+  "seasons": [
+    {
+      "season": 0,
+      "name": "Specials",
+      "episodeCount": 3,
+      "airDate": null,
+      "posterUrl": null,
+      "availableEpisodes": 0
+    },
+    {
+      "season": 1,
+      "name": "Season 1",
+      "episodeCount": 2,
+      "airDate": null,
+      "posterUrl": null,
+      "availableEpisodes": 2
+    }
+  ],
+  "recommendations": [],
+  "available": [
+    "local"
+  ],
+  "upNext": null,
+  "inWatchlist": false
+}

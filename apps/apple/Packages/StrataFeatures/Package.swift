@@ -1,9 +1,9 @@
-// swift-tools-version: 5.10
+// swift-tools-version:6.2
 import PackageDescription
 
 let package = Package(
     name: "StrataFeatures",
-    platforms: [.iOS(.v17), .macOS(.v14), .tvOS(.v17)],
+    platforms: [.iOS(.v26), .macOS(.v26), .tvOS(.v26)],
     products: [
         .library(name: "StrataFeatures", targets: ["StrataFeatures"]),
     ],
@@ -15,7 +15,8 @@ let package = Package(
     targets: [
         .target(
             name: "StrataFeatures",
-            dependencies: ["StrataKit", "StrataDesign", "StrataPlayerUI"]
+            dependencies: ["StrataKit", "StrataDesign", "StrataPlayerUI"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]
 )

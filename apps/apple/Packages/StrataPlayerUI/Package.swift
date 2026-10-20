@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "StrataPlayerUI",
-    platforms: [.iOS(.v17), .macOS(.v14), .tvOS(.v17)],
+    platforms: [.iOS("26.0"), .macOS("26.0"), .tvOS("26.0")],
     products: [
         .library(name: "StrataPlayerUI", targets: ["StrataPlayerUI"]),
     ],
@@ -16,5 +16,6 @@ let package = Package(
             name: "StrataPlayerUI",
             dependencies: ["StrataKit", "StrataDesign"]
         ),
+        .testTarget(name: "StrataPlayerUITests", dependencies: ["StrataPlayerUI"]),
     ]
 )

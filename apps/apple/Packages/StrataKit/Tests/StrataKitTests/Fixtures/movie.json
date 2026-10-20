@@ -1,0 +1,47 @@
+{
+  "type": "movie",
+  "tmdbId": 10378,
+  "imdbId": "tt1254207",
+  "title": "Big Buck Bunny",
+  "tagline": null,
+  "overview": "",
+  "year": 2008,
+  "releaseDate": "2008-05-30",
+  "runtimeMinutes": 10,
+  "genres": [
+    "Animation"
+  ],
+  "rating": null,
+  "certification": null,
+  "posterUrl": "https://image.tmdb.org/t/p/w500/bbb.jpg",
+  "backdropUrl": null,
+  "cast": [],
+  "directors": [],
+  "trailer": null,
+  "collection": null,
+  "recommendations": [],
+  "available": [
+    "local"
+  ],
+  "sources": [
+    {
+      "id": "file:1",
+      "fileId": 1,
+      "provider": "local",
+      "name": "Big.Buck.Bunny.2008.1080p.BluRay.x264.mkv",
+      "size": 6981110,
+      "resolution": 1080,
+      "source": "bluray",
+      "videoCodec": "h264",
+      "hdr": null,
+      "probed": false,
+      "availability": "ready"
+    }
+  ],
+  "progress": {
+    "positionMs": 15000,
+    "durationMs": 30000,
+    "completed": true
+  },
+  "inWatchlist": true
+}

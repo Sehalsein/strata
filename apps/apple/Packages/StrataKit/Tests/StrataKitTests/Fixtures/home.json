@@ -1,0 +1,118 @@
+{
+  "shelves": [
+    {
+      "id": "continue",
+      "title": "Continue Watching",
+      "kind": "continue",
+      "items": [
+        {
+          "type": "show",
+          "tmdbId": 9001,
+          "title": "Test Show",
+          "year": 2020,
+          "posterUrl": null,
+          "backdropUrl": null,
+          "available": [
+            "local"
+          ],
+          "episode": {
+            "season": 1,
+            "episode": 1,
+            "name": "Pilot",
+            "stillUrl": null
+          },
+          "positionMs": 120000,
+          "durationMs": 1500000
+        }
+      ]
+    },
+    {
+      "id": "watchlist",
+      "title": "My List",
+      "kind": "titles",
+      "items": [
+        {
+          "type": "movie",
+          "tmdbId": 10378,
+          "title": "Big Buck Bunny",
+          "year": 2008,
+          "posterUrl": "https://image.tmdb.org/t/p/w342/bbb.jpg",
+          "backdropUrl": null,
+          "available": [
+            "local"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "libraryMovies",
+      "title": "Recently Added Movies",
+      "kind": "titles",
+      "items": [
+        {
+          "type": "movie",
+          "tmdbId": 10378,
+          "title": "Big Buck Bunny",
+          "year": 2008,
+          "posterUrl": "https://image.tmdb.org/t/p/w342/bbb.jpg",
+          "backdropUrl": null,
+          "available": [
+            "local"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "libraryShows",
+      "title": "Recently Added Shows",
+      "kind": "titles",
+      "items": [
+        {
+          "type": "show",
+          "tmdbId": 9001,
+          "title": "Test Show",
+          "year": 2020,
+          "posterUrl": "https://image.tmdb.org/t/p/w342/ts.jpg",
+          "backdropUrl": null,
+          "available": [
+            "local"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "trendingMovies",
+      "title": "Trending Movies",
+      "kind": "titles",
+      "items": [
+        {
+          "type": "movie",
+          "tmdbId": 10378,
+          "title": "Big Buck Bunny",
+          "year": 2008,
+          "posterUrl": null,
+          "backdropUrl": null,
+          "available": [
+            "local"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "trendingShows",
+      "title": "Trending Shows",
+      "kind": "titles",
+      "items": [
+        {
+          "type": "show",
+          "tmdbId": 10378,
+          "title": "Big Buck Bunny",
+          "year": 2008,
+          "posterUrl": null,
+          "backdropUrl": null,
+          "available": []
+        }
+      ]
+    }
+  ]
+}

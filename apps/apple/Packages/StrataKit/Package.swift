@@ -3,12 +3,12 @@ import PackageDescription
 
 let package = Package(
     name: "StrataKit",
-    platforms: [.iOS(.v17), .macOS(.v14), .tvOS(.v17)],
+    platforms: [.iOS("26.0"), .macOS("26.0"), .tvOS("26.0")],
     products: [
         .library(name: "StrataKit", targets: ["StrataKit"]),
     ],
     targets: [
         .target(name: "StrataKit"),
-        .testTarget(name: "StrataKitTests", dependencies: ["StrataKit"]),
+        .testTarget(name: "StrataKitTests", dependencies: ["StrataKit"], resources: [.copy("Fixtures")]),
     ]
 )

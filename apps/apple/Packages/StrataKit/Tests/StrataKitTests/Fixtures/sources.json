@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "id": "file:1",
+      "fileId": 1,
+      "provider": "local",
+      "name": "Big.Buck.Bunny.2008.1080p.BluRay.x264.mkv",
+      "size": 6981110,
+      "resolution": 1080,
+      "source": "bluray",
+      "videoCodec": "h264",
+      "hdr": null,
+      "probed": false,
+      "availability": "ready"
+    }
+  ]
+}

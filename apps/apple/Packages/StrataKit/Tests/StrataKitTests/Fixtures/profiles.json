@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "name": "sehal",
+    "avatar": null,
+    "hasPin": false
+  },
+  {
+    "id": 2,
+    "name": "Kids",
+    "avatar": null,
+    "hasPin": true
+  }
+]

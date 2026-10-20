@@ -17,9 +17,8 @@ Packages/*/Package.resolved
 ## Widget target derived outputs
 StrataWidgets/.build/
 
-## Fonts (not committed — bundle locally before building)
-Resources/Fonts/*.ttf
-Resources/Fonts/*.otf
+## URL cache written by `swift test` runs
+Packages/*/strata-url-cache/
 
 ## macOS noise
 .DS_Store

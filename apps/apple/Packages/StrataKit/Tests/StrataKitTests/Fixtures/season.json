@@ -1,0 +1,41 @@
+{
+  "season": 1,
+  "name": "Season 1",
+  "overview": "",
+  "airDate": null,
+  "posterUrl": null,
+  "episodes": [
+    {
+      "season": 1,
+      "episode": 1,
+      "name": "Pilot",
+      "overview": "",
+      "airDate": "2020-01-01",
+      "runtimeMinutes": null,
+      "stillUrl": null,
+      "rating": null,
+      "available": [
+        "local"
+      ],
+      "progress": {
+        "positionMs": 120000,
+        "durationMs": 1500000,
+        "completed": false
+      }
+    },
+    {
+      "season": 1,
+      "episode": 2,
+      "name": "Second",
+      "overview": "",
+      "airDate": "2020-01-08",
+      "runtimeMinutes": null,
+      "stillUrl": null,
+      "rating": null,
+      "available": [
+        "local"
+      ],
+      "progress": null
+    }
+  ]
+}

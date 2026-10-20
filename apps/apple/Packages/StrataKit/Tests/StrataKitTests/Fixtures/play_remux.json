@@ -1,0 +1,61 @@
+{
+  "sessionId": "a83f4d9d1b7e1f6bf8b6b7a81fd81607",
+  "mode": "remux",
+  "url": "/api/stream/a83f4d9d1b7e1f6bf8b6b7a81fd81607/stream.m3u8",
+  "startOffsetMs": 12000,
+  "seekToMs": 0,
+  "durationMs": 30000,
+  "candidate": {
+    "id": "file:1",
+    "fileId": 1,
+    "provider": "local",
+    "name": "Big.Buck.Bunny.2008.1080p.BluRay.x264.mkv",
+    "size": 6981110,
+    "resolution": 480,
+    "source": "bluray",
+    "videoCodec": "h264",
+    "hdr": null,
+    "audio": [
+      {
+        "codec": "ac3",
+        "channels": 1
+      }
+    ],
+    "durationMs": 30000,
+    "probed": true,
+    "availability": "ready"
+  },
+  "audioTracks": [
+    {
+      "index": 1,
+      "codec": "ac3",
+      "channels": 1,
+      "selected": true
+    }
+  ],
+  "subtitleTracks": [
+    {
+      "id": "s2",
+      "codec": "subrip",
+      "language": "eng",
+      "forced": false,
+      "isDefault": false,
+      "external": false,
+      "url": "/api/stream/a83f4d9d1b7e1f6bf8b6b7a81fd81607/subtitles/s2.vtt"
+    },
+    {
+      "id": "x0",
+      "codec": "srt",
+      "language": "en",
+      "forced": true,
+      "isDefault": false,
+      "external": true,
+      "url": "/api/stream/a83f4d9d1b7e1f6bf8b6b7a81fd81607/subtitles/x0.vtt"
+    }
+  ],
+  "chapters": [],
+  "reasons": [
+    "container mkv → HLS"
+  ],
+  "nextEpisode": null
+}

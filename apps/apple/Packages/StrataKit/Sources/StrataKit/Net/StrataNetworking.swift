@@ -16,7 +16,7 @@ public enum StrataNetworking {
         URLCache.shared = cache
     }
 
-    /// Session for all Jellyfin API calls. Explicit `timeoutIntervalForRequest`
+    /// Session for all Strata API calls. Explicit `timeoutIntervalForRequest`
     /// means a flaky connection fails in ~20s instead of hanging on the 60s
     /// system default; the shared cache enables conditional revalidation.
     public static let apiSession: URLSession = {

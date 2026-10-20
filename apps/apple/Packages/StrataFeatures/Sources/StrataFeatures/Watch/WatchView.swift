@@ -1,516 +1,201 @@
 import SwiftUI
+import AVFoundation
 import StrataKit
 import StrataDesign
 import StrataPlayerUI
-import AVFoundation
 
-public struct WatchView: View {
+/// Full-screen player: video, subtitles, glass chrome that hides after 3s,
+/// the TorBox "downloading" state, and Up Next for episodes.
+struct WatchView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
-    public let request: WatchRequest
+    let request: WatchRequest
 
-    @State private var hideChrome = false
-    @State private var hideTimer: Task<Void, Never>?
-    @State private var showStreamDetails = false
+    @State private var chromeVisible = true
+    @State private var hideTask: Task<Void, Never>?
+    @State private var showDetails = false
+    @State private var upNextDismissed = false
     @State private var pip = PiPController()
-    @State private var upNext: BaseItem?
-    /// The next episode is fetched at load time but the card stays hidden until
-    /// the playhead nears the end — this gate keeps it out of the way at the
-    /// start of the episode.
-    @State private var showUpNext = false
-    @State private var upNextCountdown: Int = 30
-    @State private var upNextTimer: Task<Void, Never>?
-    @State private var trickplayProvider: TrickplayProvider?
-    @State private var pinchPreviewScale: CGFloat = 1.0
-    @State private var pinchBaselineGravity: AVLayerVideoGravity = .resizeAspect
-    @State private var showGravityIndicator = false
-    @State private var gravityIndicatorTask: Task<Void, Never>?
-    #if os(tvOS)
-    @FocusState private var chromeFocused: Bool
-    #endif
 
-    public init(request: WatchRequest) {
-        self.request = request
-    }
+    private var engine: PlayerEngine { services.engine }
 
-    public var body: some View {
+    var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            PlayerHost(
-                player: services.engine.player,
-                gravity: services.engine.videoGravity,
-                pip: pip
-            )
-            .ignoresSafeArea()
-            #if !os(tvOS)
-            .gesture(
-                MagnificationGesture()
-                    .onChanged { value in
-                        if pinchPreviewScale == 1.0 {
-                            pinchBaselineGravity = services.engine.videoGravity
-                        }
-                        pinchPreviewScale = value
-                        let target: AVLayerVideoGravity
-                        if value > 1.15 {
-                            target = .resizeAspectFill
-                        } else if value < 0.9 {
-                            target = .resizeAspect
-                        } else {
-                            target = pinchBaselineGravity
-                        }
-                        if services.engine.videoGravity != target {
-                            services.engine.setVideoGravity(target)
-                            flashGravityIndicator()
-                        }
-                    }
-                    .onEnded { _ in
-                        pinchPreviewScale = 1.0
-                    }
-            )
-            .onTapGesture(count: 2) {
-                services.engine.toggleVideoGravity()
-                flashGravityIndicator()
-            }
-            #endif
-            // Using AVPlayerViewController / AVPlayerView for video display;
-            // they provide their own transport controls, subtitle picker,
-            // AirPlay/PiP buttons, and aspect controls. Custom TransportBar
-            // and SubtitleOverlay are intentionally not rendered to avoid
-            // competing with the system UI.
+            PlayerSurface(player: engine.player, gravity: engine.videoGravity, pip: pip)
+                .ignoresSafeArea()
+                #if !os(tvOS)
+                .onTapGesture { toggleChrome() }
+                .onTapGesture(count: 2) { engine.toggleVideoGravity() }
+                #endif
 
-            if showStreamDetails {
-                VStack {
-                    HStack {
-                        Spacer()
-                        StreamDetailsPanel(plan: services.engine.plan, item: services.engine.item)
-                            .padding(20)
-                    }
-                    Spacer()
-                }
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
+            SubtitleOverlay(engine: engine, raised: chromeVisible)
 
-            if showUpNext, let next = upNext {
-                VStack {
-                    Spacer()
-                    UpNextCard(
-                        next: next,
-                        images: services.images,
-                        countdown: upNextCountdown,
-                        onPlay: { Task { await playNext(next) } },
-                        onDismiss: { cancelUpNext() }
-                    )
-                    .padding(.bottom, 120)
-                    .padding(.horizontal, 20)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
+            stateOverlay
 
-            // Floating "Skip Intro / Skip Credits" button — appears only while
-            // the playhead sits inside an intro/credits segment.
-            if let skip = services.engine.activeSkip {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        SkipSegmentButton(title: skip.title) {
-                            Task { await services.engine.skipActiveSegment() }
-                        }
-                    }
-                }
-                .padding(.trailing, 28)
-                .padding(.bottom, 150)
-                .transition(.opacity)
-            }
-
-            // Sleep timer — surfaced with the rest of the chrome so it doesn't
-            // clutter the frame during playback. tvOS drives chrome through the
-            // focus engine, so the menu is phone/desktop only.
-            #if !os(tvOS)
-            if !hideChrome {
-                VStack {
-                    HStack(spacing: 12) {
-                        Spacer()
-                        if services.engine.audioTracks.count > 1 {
-                            AudioTrackMenu(
-                                tracks: services.engine.audioTracks,
-                                activeIndex: services.engine.activeAudioIndex,
-                                onSelect: { stream in
-                                    Task { await services.engine.selectAudio(stream) }
-                                }
-                            )
-                        }
-                        SleepTimerMenu(
-                            current: services.engine.sleepTimerEnds,
-                            onSelect: { services.engine.setSleepTimer($0) }
-                        )
-                    }
-                    Spacer()
-                }
-                .padding(.trailing, 24)
-                .padding(.top, 60)
-                .transition(.opacity)
-            }
-            #endif
-
-            if case .loading = services.engine.status {
-                ProgressView().tint(Strata.Tokens.paper).scaleEffect(1.4)
-            }
-            if case let .failed(message) = services.engine.status {
-                GlassPanel(strong: true) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("PLAYBACK FAILED").strataSpec()
-                        Text(message).font(.plex(13)).foregroundStyle(Strata.Tokens.paper)
-                        SecondaryButton("Close", systemImage: "xmark") { dismiss() }
-                    }
-                }
-                .frame(maxWidth: 420)
-                .padding()
-            }
-
-            PlayerKeyCommands(
-                engine: services.engine,
-                onToggleCaptions: { Task { await toggleCaptions() } },
-                onToggleFullscreen: {},
-                onTogglePiP: { pip.toggle() }
-            )
-
-            if showGravityIndicator {
-                GravityIndicator(gravity: services.engine.videoGravity)
+            if chromeVisible {
+                PlayerChrome(engine: engine, onClose: close, onDetails: { showDetails = true }, onPiP: pip.isAvailable ? { pip.toggle() } : nil)
                     .transition(.opacity)
             }
-        }
-        .contentShape(Rectangle())
-        #if os(tvOS)
-        .onPlayPauseCommand {
-            services.engine.togglePlay()
-            wakeChrome()
-        }
-        .onMoveCommand { _ in wakeChrome() }
-        .onExitCommand {
-            if !hideChrome {
-                withAnimation(.easeOut(duration: 0.25)) { hideChrome = true }
-            } else {
-                dismiss()
+
+            if let next = engine.nextEpisode, showUpNext {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        UpNextCard(next: next, countdown: max(0, Int(engine.duration - engine.position)), onPlay: playNext) {
+                            upNextDismissed = true
+                        }
+                    }
+                }
+                .padding(Metrics.gutter)
+                .padding(.bottom, chromeVisible ? 140 : 0)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .onChange(of: chromeFocused) { _, focused in
-            if focused {
-                hideTimer?.cancel()
-            } else {
-                scheduleAutoHide()
-            }
-        }
-        #else
-        .onTapGesture {
-            withAnimation(.easeOut(duration: 0.25)) { hideChrome.toggle() }
-            scheduleAutoHide()
-        }
-        #endif
-        .task { await loadIfNeeded() }
-        .onChange(of: services.engine.position) { _, pos in
-            checkUpNext(at: pos)
-            #if canImport(ActivityKit) && os(iOS)
-            StrataPlayerUI.LiveActivityBridge.shared.update(
-                position: pos,
-                duration: services.engine.duration,
-                isPaused: services.engine.status == .paused
-            )
-            #endif
-        }
-        .onDisappear {
-            Task { await services.engine.unload() }
-            hideTimer?.cancel()
-            upNextTimer?.cancel()
-            #if canImport(ActivityKit) && os(iOS)
-            StrataPlayerUI.LiveActivityBridge.shared.end()
-            #endif
-        }
-        .handoffForWatching(itemId: request.itemId, position: services.engine.position)
+        .animation(.easeOut(duration: 0.25), value: chromeVisible)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showUpNext)
+        .preferredColorScheme(.dark)
         #if os(iOS)
-        .statusBarHidden(true)
+        .statusBarHidden(!chromeVisible)
         .persistentSystemOverlays(.hidden)
         #endif
-    }
-
-    private func loadIfNeeded() async {
-        guard let client = services.client else { return }
-        if let current = services.engine.item, current.id == request.itemId { return }
-        services.engine.configure(client: client, nowPlaying: services.nowPlaying)
-        if let item = try? await client.getItem(request.itemId) {
-            await services.engine.load(item: item)
-            if let start = request.startSeconds, start > 5 {
-                await services.engine.seek(to: start)
+        #if os(tvOS)
+        .onPlayPauseCommand { engine.togglePlay(); showChrome() }
+        .onExitCommand {
+            if chromeVisible { chromeVisible = false } else { close() }
+        }
+        .onMoveCommand { _ in showChrome() }
+        #endif
+        .sheet(isPresented: $showDetails) {
+            StreamDetailsPanel(session: engine.session).presentationDetents([.medium])
+        }
+        .task {
+            if let client = services.client { engine.configure(client: client) }
+            await engine.load(target: request.target, meta: request.meta, candidateId: request.candidateId, startMs: request.startMs)
+            scheduleHide()
+        }
+        .onChange(of: engine.status) { _, status in
+            if status == .ended {
+                if engine.nextEpisode?.available == true, !upNextDismissed { playNext() } else { close() }
             }
-            scheduleAutoHide()
-            await prepareNextEpisode(after: item)
-            #if canImport(ActivityKit) && os(iOS)
-            await MainActor.run {
-                StrataPlayerUI.LiveActivityBridge.shared.start(
-                    itemId: item.id,
-                    title: item.displayTitle,
-                    subtitle: item.seriesName,
-                    artworkURL: services.images?.backdrop(itemId: item.id) ?? services.images?.primary(itemId: item.id),
-                    duration: services.engine.duration
-                )
-            }
-            #endif
+            if status == .paused { showChrome(autoHide: false) } else if status == .playing { scheduleHide() }
+        }
+        .onDisappear {
+            hideTask?.cancel()
+            Task { await engine.unload() }
         }
     }
 
-    private func toggleCaptions() async {
-        if services.engine.activeSubtitleIndex == nil {
-            if let first = services.engine.subtitleTracks.first {
-                await services.engine.selectSubtitle(first)
+    /// Show Up Next in the last 30s of an episode with an available next one.
+    private var showUpNext: Bool {
+        guard !upNextDismissed, engine.nextEpisode?.available == true, engine.duration > 60 else { return false }
+        return engine.duration - engine.position <= 30 && engine.status == .playing
+    }
+
+    @ViewBuilder private var stateOverlay: some View {
+        switch engine.status {
+        case .loading:
+            ProgressView().controlSize(.large).tint(.white)
+        case .preparing(let download):
+            VStack(spacing: Metrics.space4) {
+                Image(systemName: "arrow.down.circle").font(.system(size: 44)).foregroundStyle(Theme.warning)
+                Text("Downloading on TorBox").font(.stTitle2).foregroundStyle(Theme.onArtwork)
+                ProgressBar(download.progress, track: .white.opacity(0.2)).frame(width: 280)
+                Text([download.percentText, download.etaText].compactMap { $0 }.joined(separator: " · "))
+                    .font(.stFootnote).foregroundStyle(Theme.onArtwork.opacity(0.7))
+                Text("It will start playing as soon as it's ready.").font(.stCallout).foregroundStyle(Theme.onArtwork.opacity(0.7))
+                GlassButton("Close", action: close)
             }
-        } else {
-            await services.engine.selectSubtitle(nil)
-        }
-    }
-
-    private func prepareNextEpisode(after item: BaseItem) async {
-        guard item.type == .episode, let client = services.client else { return }
-        upNext = try? await client.nextEpisode(after: item)
-    }
-
-    private func checkUpNext(at position: TimeInterval) {
-        let duration = services.engine.duration
-        guard duration > 0, upNext != nil, upNextTimer == nil else { return }
-        let remaining = duration - position
-        guard remaining < 30, remaining > 0 else { return }
-        withAnimation(.easeOut(duration: 0.3)) { showUpNext = true }
-        upNextCountdown = max(0, Int(remaining))
-        upNextTimer = Task { @MainActor in
-            while !Task.isCancelled, let _ = upNext {
-                if services.engine.duration > 0 {
-                    upNextCountdown = max(0, Int(services.engine.duration - services.engine.position))
-                    if upNextCountdown <= 0 {
-                        if let next = upNext { await playNext(next) }
-                        break
-                    }
-                }
-                try? await Task.sleep(nanoseconds: 500_000_000)
-            }
-        }
-    }
-
-    private func cancelUpNext() {
-        upNextTimer?.cancel()
-        upNextTimer = nil
-        withAnimation(.easeOut(duration: 0.25)) { showUpNext = false }
-        upNext = nil
-    }
-
-    private func playNext(_ next: BaseItem) async {
-        upNextTimer?.cancel()
-        upNextTimer = nil
-        showUpNext = false
-        upNext = nil
-        await services.engine.load(item: next)
-        await prepareNextEpisode(after: next)
-    }
-
-    private func scheduleAutoHide() {
-        hideTimer?.cancel()
-        hideTimer = Task {
-            try? await Task.sleep(nanoseconds: 3_500_000_000)
-            if Task.isCancelled { return }
-            await MainActor.run {
-                #if os(tvOS)
-                if chromeFocused { return }
-                #endif
-                withAnimation(.easeOut(duration: 0.35)) { hideChrome = true }
-            }
-        }
-    }
-
-    #if os(tvOS)
-    private func wakeChrome() {
-        if hideChrome {
-            withAnimation(.easeOut(duration: 0.25)) { hideChrome = false }
-        }
-        scheduleAutoHide()
-    }
-    #endif
-
-    private func flashGravityIndicator() {
-        gravityIndicatorTask?.cancel()
-        withAnimation(.easeOut(duration: 0.18)) { showGravityIndicator = true }
-        gravityIndicatorTask = Task {
-            try? await Task.sleep(nanoseconds: 900_000_000)
-            if Task.isCancelled { return }
-            await MainActor.run {
-                withAnimation(.easeIn(duration: 0.25)) { showGravityIndicator = false }
-            }
-        }
-    }
-}
-
-/// Floating editorial "Skip Intro / Skip Credits" pill, mirroring the
-/// bottom-trailing placement users know from Netflix / Apple TV.
-private struct SkipSegmentButton: View {
-    let title: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(.mono(13, weight: .semibold))
-                    .tracking(1.5)
-                Image(systemName: "forward.end.fill")
-                    .font(.system(size: 11, weight: .bold))
-            }
-            .foregroundStyle(Strata.Tokens.bg)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .background(Capsule().fill(Strata.Tokens.paper))
-            .overlay(Capsule().stroke(Strata.Tokens.bg.opacity(0.15), lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-    }
-}
-
-#if !os(tvOS)
-/// Audio-track picker. Surfaced only when the source carries more than one
-/// audio stream. Picking a track re-plans the stream server-side — Jellyfin
-/// pins the chosen `AudioStreamIndex` — and the engine resumes at the current
-/// position, so a transcoded title (which delivers a single muxed track and
-/// therefore hides the system picker) can still switch languages/commentary.
-private struct AudioTrackMenu: View {
-    let tracks: [MediaStream]
-    let activeIndex: Int?
-    let onSelect: (MediaStream) -> Void
-
-    var body: some View {
-        Menu {
-            ForEach(tracks, id: \.index) { stream in
-                Button {
-                    onSelect(stream)
-                } label: {
-                    HStack {
-                        Text(label(for: stream))
-                        if stream.index == activeIndex { Image(systemName: "checkmark") }
+            .padding(Metrics.space8)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Metrics.radiusLG, style: .continuous))
+        case .failed(let message):
+            VStack(spacing: Metrics.space4) {
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 40)).foregroundStyle(Theme.danger)
+                Text("Can't play this").font(.stTitle2).foregroundStyle(Theme.onArtwork)
+                Text(message).font(.stCallout).foregroundStyle(Theme.onArtwork.opacity(0.75)).multilineTextAlignment(.center).frame(maxWidth: 420)
+                GlassEffectContainer(spacing: Metrics.space2) {
+                    HStack(spacing: Metrics.space2) {
+                        PlayButton("Try Again", systemImage: "arrow.clockwise") {
+                            Task { await engine.load(target: request.target, meta: request.meta, candidateId: request.candidateId, startMs: request.startMs) }
+                        }
+                        GlassButton("Close", action: close)
                     }
                 }
             }
-        } label: {
-            Image(systemName: "waveform")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Strata.Tokens.paper)
-                .frame(width: 40, height: 40)
-                .background(Circle().fill(.black.opacity(0.45)))
+            .padding(Metrics.space8)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Metrics.radiusLG, style: .continuous))
+        default:
+            EmptyView()
         }
-        .accessibilityLabel("Audio track")
     }
 
-    private func label(for stream: MediaStream) -> String {
-        stream.displayTitle ?? stream.title ?? stream.language ?? "Track \(stream.index)"
+    private func playNext() {
+        upNextDismissed = false
+        guard let next = engine.nextEpisode else { return }
+        let meta = PlaybackMeta(title: request.meta.title, subtitle: "S\(next.season) · E\(next.episode) · \(next.name)", artworkURL: next.stillUrl ?? request.meta.artworkURL)
+        Task { await engine.playNext(meta: meta) }
+    }
+
+    private func close() {
+        hideTask?.cancel()
+        services.watching = nil
+        dismiss()
+    }
+
+    private func toggleChrome() {
+        if chromeVisible { chromeVisible = false } else { showChrome() }
+    }
+
+    private func showChrome(autoHide: Bool = true) {
+        chromeVisible = true
+        if autoHide { scheduleHide() } else { hideTask?.cancel() }
+    }
+
+    private func scheduleHide() {
+        hideTask?.cancel()
+        hideTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3.5))
+            guard !Task.isCancelled, engine.status == .playing, !showDetails else { return }
+            chromeVisible = false
+        }
     }
 }
 
-/// Sleep-timer menu button. Filled icon while armed.
-private struct SleepTimerMenu: View {
-    let current: Date?
-    let onSelect: (PlayerEngine.SleepOption) -> Void
-
-    var body: some View {
-        Menu {
-            ForEach(PlayerEngine.SleepOption.allCases) { option in
-                Button(option.label) { onSelect(option) }
-            }
-        } label: {
-            Image(systemName: current == nil ? "moon.zzz" : "moon.zzz.fill")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Strata.Tokens.paper)
-                .frame(width: 40, height: 40)
-                .background(Circle().fill(.black.opacity(0.45)))
-        }
-        .accessibilityLabel("Sleep timer")
-    }
-}
-#endif
-
-/// Brief centered HUD that confirms the new aspect mode after a pinch or
-/// double-tap — same idea as the volume / brightness indicators in Apple
-/// Photos.
-private struct GravityIndicator: View {
-    let gravity: AVLayerVideoGravity
-
-    private var label: String {
-        gravity == .resizeAspectFill ? "Zoomed to Fill" : "Fit to Screen"
-    }
-    private var systemImage: String {
-        gravity == .resizeAspectFill
-        ? "rectangle.arrowtriangle.2.outward"
-        : "rectangle.arrowtriangle.2.inward"
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .semibold))
-            Text(label)
-                .font(.mono(11, weight: .semibold))
-                .tracking(1.5)
-                .textCase(.uppercase)
-        }
-        .foregroundStyle(Strata.Tokens.paper)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .background(.black.opacity(0.65))
-        .clipShape(Capsule())
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .allowsHitTesting(false)
-    }
-}
-
-/// Wraps `AVPlayerContainer` so we can attach the PiP controller after the
-/// layer is laid out.
-private struct PlayerHost: View {
+/// The video layer, with Picture in Picture attached once it's laid out.
+private struct PlayerSurface: View {
     let player: AVPlayer
     let gravity: AVLayerVideoGravity
     let pip: PiPController
+
     var body: some View {
         AVPlayerContainer(player: player, gravity: gravity)
-            .background(
-                PiPAttachmentView(pip: pip)
-                    .frame(width: 0, height: 0)
-            )
+            #if os(iOS)
+            .background(PiPAttachment(pip: pip).frame(width: 0, height: 0))
+            #endif
     }
 }
 
-#if canImport(UIKit) && !targetEnvironment(macCatalyst)
-import UIKit
-
-private struct PiPAttachmentView: UIViewRepresentable {
+#if os(iOS)
+private struct PiPAttachment: UIViewRepresentable {
     let pip: PiPController
+
     func makeUIView(context: Context) -> UIView {
-        let v = UIView()
+        let view = UIView()
         DispatchQueue.main.async {
-            if let host = v.superview?.subviews.compactMap({ $0 as? PlayerLayerHostView }).first {
-                pip.attach(playerLayer: host.playerLayer)
-            }
+            var root: UIView? = view
+            while let parent = root?.superview { root = parent }
+            if let host = root.flatMap(Self.findHost) { pip.attach(playerLayer: host.playerLayer) }
         }
-        return v
+        return view
     }
-    func updateUIView(_ uiView: UIView, context: Context) {}
-}
-#elseif canImport(AppKit)
-import AppKit
 
-private struct PiPAttachmentView: NSViewRepresentable {
-    let pip: PiPController
-    func makeNSView(context: Context) -> NSView {
-        let v = NSView()
-        DispatchQueue.main.async {
-            if let host = v.superview?.subviews.compactMap({ $0 as? PlayerLayerHostNSView }).first {
-                pip.attach(playerLayer: host.playerLayer)
-            }
-        }
-        return v
+    func updateUIView(_ uiView: UIView, context: Context) {}
+
+    private static func findHost(in view: UIView) -> PlayerLayerHostView? {
+        if let host = view as? PlayerLayerHostView { return host }
+        for sub in view.subviews { if let found = findHost(in: sub) { return found } }
+        return nil
     }
-    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 #endif

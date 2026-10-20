@@ -1,204 +1,173 @@
 import SwiftUI
 import StrataKit
 import StrataDesign
-import os
+import StrataPlayerUI
 
-public struct MovieDetailView: View {
+struct MovieDetailView: View {
     @Environment(AppServices.self) private var services
-    @Binding var path: [Route]
-    public let id: String
+    let tmdbId: Int
+    @State private var detail: Loadable<MovieDetail> = .loading
+    @State private var inWatchlist = false
+    @State private var showSources = false
 
-    @State private var state: Loadable<BaseItem> = .idle
-    @State private var similar: [BaseItem] = []
-    @State private var isFavorite: Bool = false
-
-    public init(id: String, path: Binding<[Route]>) {
-        self.id = id
-        self._path = path
-    }
-
-    public var body: some View {
-        ZStack {
-            AmbientBackdrop(key: id, intensity: 1.0)
-            AsyncContent(state, retry: { Task { await load() } }) { item in
-                detail(item: item)
-                    .handoffForViewing(item: item)
+    var body: some View {
+        ScrollView {
+            switch detail {
+            case .loading:
+                ProgressView().frame(maxWidth: .infinity, minHeight: 500)
+            case .failed(let message):
+                MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load this movie", message: message, actionTitle: "Try Again") {
+                    Task { await load() }
+                }
+                .frame(minHeight: 500)
+            case .loaded(let movie):
+                content(movie)
             }
         }
+        .background(Theme.bg.ignoresSafeArea())
+        .ignoresSafeArea(edges: .top)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .task { await load() }
     }
 
-    private func detail(item: BaseItem) -> some View {
-        #if os(tvOS)
-        let heroHeight: CGFloat = 620
-        let textGutter: CGFloat = 80
-        #else
-        let heroHeight: CGFloat = 460
-        let textGutter: CGFloat = 20
-        #endif
-        return ScrollView {
-            GeometryReader { geo in
-                ZStack(alignment: .bottomLeading) {
-                    if let url = services.images?.backdrop(itemId: id) {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let img):
-                                img.resizable().scaledToFill()
-                                    .frame(width: geo.size.width, height: heroHeight)
-                                    .clipped()
-                                    .overlay(
-                                        LinearGradient(
-                                            colors: [.clear, Strata.Tokens.bg],
-                                            startPoint: .top, endPoint: .bottom
-                                        )
-                                    )
-                            default:
-                                Rectangle().fill(Strata.Tokens.bg2)
-                                    .frame(width: geo.size.width, height: heroHeight)
-                            }
-                        }
-                        .frame(width: geo.size.width, height: heroHeight)
-                        .clipped()
-                    }
-                    VStack(alignment: .leading, spacing: 12) {
-                        OpusBadge(key: id)
-                        Text(item.displayTitle)
-                            .font(.fraunces(heroTitleSize(for: geo.size.width, text: item.displayTitle),
-                                            opticalSize: 144, soft: 30))
-                            .foregroundStyle(Strata.Tokens.paper)
-                            .minimumScaleFactor(0.5)
-                            .lineLimit(3)
-                            .fixedSize(horizontal: false, vertical: true)
-                        MetadataRow(item: item)
-                        if let tag = item.taglines?.first {
-                            Text(tag)
-                                .font(.fraunces(20, opticalSize: 36, soft: 100))
-                                .italic()
-                                .foregroundStyle(Strata.Tokens.paperDim)
-                                .padding(.top, 4)
-                                .lineLimit(2)
-                                .minimumScaleFactor(0.7)
-                        }
-                    }
-                    .padding(.horizontal, textGutter)
-                    .padding(.bottom, 20)
-                    .padding(.top, 28)
-                    .frame(width: geo.size.width, alignment: .leading)
+    @ViewBuilder private func content(_ movie: MovieDetail) -> some View {
+        VStack(alignment: .leading, spacing: Metrics.railGap) {
+            HeroBillboard(id: movie.id,
+                          backdropURL: movie.backdropUrl,
+                          eyebrow: movie.availabilityLabel ?? "Movie",
+                          title: movie.title,
+                          meta: [movie.yearText, movie.runtimeText, movie.certification].compactMap { $0 },
+                          badges: movie.sources.first?.specLabels.prefix(3).map { $0 } ?? [],
+                          overview: movie.overview) {
+                PlayButton(movie.resumeMs != nil ? "Resume" : "Play") { play(movie, candidateId: nil) }
+                    .glassEffectID("play", in: namespace)
+                GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV) {
+                    Task { await toggleWatchlist(movie) }
                 }
-                .frame(width: geo.size.width, height: heroHeight)
+                GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: true) { showSources = true }
+                if let trailer = movie.trailer?.youtubeURL {
+                    #if !os(tvOS)
+                    Link(destination: trailer) { Image(systemName: "play.rectangle").font(.stHeadline).frame(minHeight: 30) }
+                        .buttonStyle(.glass)
+                        .controlSize(.large)
+                        .accessibilityLabel("Trailer")
+                    #endif
+                }
             }
-            .frame(height: heroHeight)
 
-            VStack(alignment: .leading, spacing: sectionSpacing) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        PrimaryButton(playLabel(item), systemImage: "play.fill") {
-                            services.coordinator.requestWatch(id, start: item.resumePositionSeconds)
-                        }
-                        if let resume = item.resumePositionSeconds {
-                            SecondaryButton("Restart", systemImage: "arrow.counterclockwise") {
-                                services.coordinator.requestWatch(id, start: 0)
-                            }
-                            Text("RESUME \(format(resume))").strataSpec()
-                        }
-                        WatchlistButton(itemId: id, isFavorite: $isFavorite, client: services.client)
-                    }
+            if let progress = movie.progress, progress.isResumable {
+                HStack(spacing: Metrics.space3) {
+                    ProgressBar(progress.fraction).frame(maxWidth: 240)
+                    Text(Formatting.remaining(ms: progress.remainingMs) ?? "").font(.stFootnote).foregroundStyle(Theme.ink3)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if let overview = item.overviewText {
-                    Text(overview)
-                        .font(.plex(15))
-                        .foregroundStyle(Strata.Tokens.paper.opacity(0.86))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 720, alignment: .leading)
-                }
-                if let genres = item.genres, !genres.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(Array(genres.prefix(6).enumerated()), id: \.offset) { _, g in
-                                Button { path.append(.genre(name: g, forShows: false)) } label: {
-                                    Chip(g, variant: .outline)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-                if let people = item.people, !people.isEmpty {
-                    CastShelf(people: people, images: services.images) { person in
-                        if let name = person.name, !name.isEmpty {
-                            path.append(.search(query: name))
-                        }
-                    }
-                }
-                if !similar.isEmpty {
-                    SimilarShelf(items: similar, images: services.images) { picked in
-                        path.append(.unified(id: picked.id))
-                    }
-                }
-                MovieInfoSection(item: item)
+                .padding(.horizontal, Metrics.gutter)
             }
-            .padding(.horizontal, textGutter)
-            .padding(.top, 12)
-            .padding(.bottom, CGFloat.strataScrollBottom)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .environment(\.pageGutter, textGutter)
+
+            if let tagline = movie.tagline {
+                Text(tagline).font(.stCallout.italic()).foregroundStyle(Theme.ink2).padding(.horizontal, Metrics.gutter)
+            }
+
+            CastRail(cast: movie.cast)
+
+            if !movie.recommendations.isEmpty {
+                Rail("More Like This") {
+                    ForEach(movie.recommendations) { card in
+                        NavigationLink(value: card.route) { PosterCardLabel(card: card) }.buttonStyle(StrataCardStyle())
+                    }
+                }
+            }
+
+            InfoGrid(rows: [
+                ("Directed by", movie.directors.joined(separator: ", ")),
+                ("Genres", movie.genres.joined(separator: ", ")),
+                ("Released", movie.releaseDate ?? ""),
+                ("Rating", movie.ratingText.map { "\($0) on TMDB" } ?? ""),
+            ])
         }
-        // Bleed the hero into the top safe area, but keep the bottom inset so
-        // content clears the tab bar / home indicator instead of hiding under
-        // it. (tvOS has no tab bar at the bottom, so let it bleed fully.)
-        #if os(tvOS)
-        .ignoresSafeArea()
-        #else
-        .ignoresSafeArea(edges: .top)
-        #endif
-    }
-
-    private var sectionSpacing: CGFloat {
-        #if os(tvOS)
-        40
-        #else
-        24
-        #endif
-    }
-
-    private func playLabel(_ item: BaseItem) -> String {
-        item.resumePositionSeconds == nil ? "Play" : "Resume"
-    }
-
-    /// Pick a hero title size that fits the device. The longer the title and
-    /// the narrower the screen, the smaller the font. `minimumScaleFactor`
-    /// + `lineLimit(3)` does the final adaptive squeeze.
-    private func heroTitleSize(for width: CGFloat, text: String) -> CGFloat {
-        if width < 420 {
-            return text.count > 18 ? 34 : 42
+        .padding(.bottom, Metrics.space12)
+        .sheet(isPresented: $showSources) {
+            SourcePickerSheet(target: movie.target, title: movie.title) { candidate in
+                play(movie, candidateId: candidate.id)
+            }
         }
-        if width < 720 { return 48 }
-        return 56
     }
 
-    private func format(_ t: TimeInterval) -> String {
-        guard t.isFinite else { return "0:00" }
-        let clamped = max(0, min(t, 24 * 3600))
-        let mins = Int(clamped / 60)
-        let secs = Int(clamped.truncatingRemainder(dividingBy: 60))
-        return String(format: "%d:%02d", mins, secs)
+    @Namespace private var namespace
+
+    private func play(_ movie: MovieDetail, candidateId: String?) {
+        services.play(WatchRequest(target: movie.target,
+                                   meta: PlaybackMeta(title: movie.title, subtitle: movie.yearText, artworkURL: movie.backdropUrl ?? movie.posterUrl),
+                                   candidateId: candidateId))
     }
 
     private func load() async {
-        guard let client = services.client else {
-            state = .failed("Not signed in")
-            return
+        let result = await services.load { try await $0.movie(tmdbId) }
+        if case .loading = result { return }
+        detail = result
+        if let movie = result.value { inWatchlist = movie.inWatchlist }
+    }
+
+    private func toggleWatchlist(_ movie: MovieDetail) async {
+        inWatchlist.toggle()
+        let on = inWatchlist
+        if case .failed = await services.load({ try await $0.setWatchlist(.movie, tmdbId: movie.tmdbId, on) }) { inWatchlist = !on }
+    }
+}
+
+struct CastRail: View {
+    let cast: [CastMember]
+
+    var body: some View {
+        if !cast.isEmpty {
+            Rail("Cast") {
+                ForEach(cast.prefix(15)) { person in
+                    VStack(spacing: Metrics.space2) {
+                        AsyncImage(url: person.profileUrl) { phase in
+                            if case .success(let image) = phase { image.resizable().scaledToFill() } else {
+                                Theme.surface2.overlay { Text(person.name.prefix(1)).font(.stTitle2).foregroundStyle(Theme.ink3) }
+                            }
+                        }
+                        .frame(width: avatar, height: avatar)
+                        .clipShape(Circle())
+                        Text(person.name).font(.stFootnote.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                        if let character = person.character { Text(character).font(.caption).foregroundStyle(Theme.ink3).lineLimit(1) }
+                    }
+                    .frame(width: avatar + 16)
+                    #if os(tvOS)
+                    .focusable()
+                    #endif
+                }
+            }
         }
-        if state.value == nil { state = .loading }
-        // Similar items are secondary — load them alongside the main item so a
-        // slow recommendations call never holds up the page.
-        async let similarTask: [BaseItem] = (try? await client.getSimilarItems(itemId: id, limit: 12)) ?? []
-        let result = await loadable { try await client.getItem(id) }
-        state = result
-        if case .loaded(let fetched) = result {
-            isFavorite = fetched.userData?.isFavorite ?? false
+    }
+
+    #if os(tvOS)
+    private let avatar: CGFloat = 140
+    #else
+    private var avatar: CGFloat { Metrics.isPad ? 96 : 72 }
+    #endif
+}
+
+struct InfoGrid: View {
+    let rows: [(String, String)]
+
+    var body: some View {
+        let filled = rows.filter { !$0.1.isEmpty }
+        if !filled.isEmpty {
+            VStack(alignment: .leading, spacing: Metrics.space3) {
+                Text("Information").railHeaderStyle()
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Metrics.space6, verticalSpacing: Metrics.space2) {
+                    ForEach(filled, id: \.0) { row in
+                        GridRow {
+                            Text(row.0).font(.stFootnote).foregroundStyle(Theme.ink3)
+                            Text(row.1).font(.stCallout).foregroundStyle(Theme.ink2)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, Metrics.gutter)
         }
-        similar = await similarTask
     }
 }

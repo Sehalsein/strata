@@ -1,0 +1,8 @@
+{
+  "name": "strata",
+  "serverName": "Strata",
+  "id": "01ae1b75-651f-4bb9-b05a-29f9f82dd8fd",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "setupRequired": true
+}

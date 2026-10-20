@@ -2,9 +2,8 @@ name: Strata
 options:
   bundleIdPrefix: com.strata
   deploymentTarget:
-    iOS: "17.0"
-    macOS: "14.0"
-    tvOS: "17.0"
+    iOS: "26.0"
+    tvOS: "26.0"
   createIntermediateGroups: true
   generateEmptyDirectories: true
 
@@ -31,11 +30,9 @@ packages:
 targets:
   Strata:
     type: application
-    supportedDestinations: [iOS, macOS, tvOS]
+    supportedDestinations: [iOS, tvOS]
     sources:
       - App
-      - path: Resources/Fonts
-        buildPhase: resources
       - path: Resources/Assets.xcassets
         buildPhase: resources
     info:
@@ -60,6 +57,9 @@ targets:
         LSApplicationCategoryType: public.app-category.entertainment
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        NSBonjourServices: [_strata._tcp]
+        NSLocalNetworkUsageDescription: Strata looks for your Strata servers on the local network.
         NSUserActivityTypes:
           - com.strata.viewing
           - com.strata.watching
@@ -67,16 +67,6 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.sehalsein.strata
             CFBundleURLSchemes: [strata]
-        UIAppFonts:
-          - Fraunces[opsz,wght,SOFT,WONK].ttf
-          - IBMPlexSans-Regular.ttf
-          - IBMPlexSans-Medium.ttf
-          - IBMPlexSans-SemiBold.ttf
-          - IBMPlexSans-Bold.ttf
-          - JetBrainsMono-Regular.ttf
-          - JetBrainsMono-Medium.ttf
-          - JetBrainsMono-SemiBold.ttf
-        ATSApplicationFontsPath: Fonts
     dependencies:
       - package: StrataKit
         product: StrataKit
@@ -104,11 +94,9 @@ targets:
         Debug:
           CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: App/Strata-iOS.entitlements
           CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: App/Strata-iOS.entitlements
-          CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: App/Strata.entitlements
         Release:
           CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: App/Strata-iOS.entitlements
           CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: App/Strata-iOS.entitlements
-          CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: App/Strata.entitlements
           "CODE_SIGN_STYLE[sdk=iphoneos*]": Manual
           "CODE_SIGN_STYLE[sdk=appletvos*]": Manual
           "CODE_SIGN_IDENTITY[sdk=iphoneos*]": Apple Distribution

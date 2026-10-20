@@ -1,0 +1,81 @@
+{
+  "type": "movie",
+  "tmdbId": 10378,
+  "imdbId": "tt1254207",
+  "title": "Big Buck Bunny",
+  "tagline": "A rabbit with a grudge",
+  "overview": "A giant rabbit takes revenge.",
+  "year": 2008,
+  "releaseDate": "2008-05-30",
+  "runtimeMinutes": 10,
+  "genres": [
+    "Animation"
+  ],
+  "rating": 6.4,
+  "certification": "PG",
+  "posterUrl": "https://image.tmdb.org/t/p/w500/bbb.jpg",
+  "backdropUrl": "https://image.tmdb.org/t/p/w1280/bbb-bg.jpg",
+  "cast": [
+    {
+      "id": 1,
+      "name": "Bunny",
+      "character": "Big Buck",
+      "profileUrl": "https://image.tmdb.org/t/p/w185/b.jpg"
+    },
+    {
+      "id": 2,
+      "name": "Frank",
+      "character": null,
+      "profileUrl": null
+    }
+  ],
+  "directors": [
+    "Sacha Goedegebure"
+  ],
+  "trailer": {
+    "site": "youtube",
+    "key": "aqz-KE-bpKQ",
+    "name": "Official Trailer"
+  },
+  "collection": {
+    "id": 99,
+    "name": "Blender Open Movies"
+  },
+  "recommendations": [
+    {
+      "type": "movie",
+      "tmdbId": 45745,
+      "title": "Sintel",
+      "year": 2010,
+      "overview": "",
+      "posterUrl": null,
+      "backdropUrl": null,
+      "rating": 7.0,
+      "available": []
+    }
+  ],
+  "available": [
+    "local"
+  ],
+  "sources": [
+    {
+      "id": "file:1",
+      "fileId": 1,
+      "provider": "local",
+      "name": "Big.Buck.Bunny.2008.1080p.BluRay.x264.mkv",
+      "size": 6981110,
+      "resolution": 1080,
+      "source": "bluray",
+      "videoCodec": "h264",
+      "hdr": null,
+      "probed": false,
+      "availability": "ready"
+    }
+  ],
+  "progress": {
+    "positionMs": 600000,
+    "durationMs": 5960000,
+    "completed": false
+  },
+  "inWatchlist": true
+}

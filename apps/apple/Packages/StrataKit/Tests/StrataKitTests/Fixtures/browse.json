@@ -1,0 +1,15 @@
+{
+  "items": [
+    {
+      "type": "movie",
+      "tmdbId": 10378,
+      "title": "Big Buck Bunny",
+      "year": 2008,
+      "posterUrl": null,
+      "backdropUrl": null,
+      "available": [
+        "local"
+      ]
+    }
+  ]
+}
