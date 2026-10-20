@@ -7,7 +7,8 @@ import { profiles } from "../../db/schema";
 import { API_VERSION, VERSION } from "../../version";
 import { body, intParam, requireAdmin, requireAuth, type Env } from "../context";
 import { CONTENT_LIMITS } from "../../catalog/contentRating";
-import { allowJoin, isLocalRequest } from "../localNetwork";
+import { allowJoin, isLocalRequest, isLoopbackRequest } from "../localNetwork";
+import { launchSecret } from "../../platform/launcher";
 
 const credentials = z.object({
   username: z.string().trim().min(1).max(64),
@@ -59,11 +60,13 @@ export const authRoutes = new Hono<Env>()
 
   // Strata.app proves the server answering is the one it started before opening the
   // dashboard: HMAC of the app's random challenge with a secret only the two share.
+  // Only from this Mac (loopback), never proxied; the proof covers the port too.
   .get("/launcher/proof", (c) => {
-    const secret = process.env.STRATA_LAUNCH_SECRET;
+    const secret = launchSecret();
     const challenge = c.req.header("x-strata-challenge") ?? "";
-    if (!secret || !/^[0-9a-f]{32,128}$/.test(challenge)) throw new HTTPException(404, { message: "Not found" });
-    return c.json({ proof: createHmac("sha256", secret).update(challenge).digest("hex") });
+    if (!secret || !isLoopbackRequest(c) || !/^[0-9a-f]{32,128}$/.test(challenge)) throw new HTTPException(404, { message: "Not found" });
+    const port = new URL(c.req.url).port || "80";
+    return c.json({ proof: createHmac("sha256", secret).update(`${challenge}|${port}`).digest("hex") });
   })
 
   // Home-network devices skip the password and go straight to "Who's watching?";

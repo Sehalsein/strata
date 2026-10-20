@@ -31,6 +31,13 @@ export function isLocalHost(raw: string | undefined): boolean {
   return /\.(local|lan|home|internal|home\.arpa)$/.test(host);
 }
 
+/** Straight from this machine: a loopback peer address and no proxy headers. */
+export function isLoopbackRequest(c: Context<Env>): boolean {
+  if (PROXY_HEADERS.some((h) => c.req.header(h) !== undefined)) return false;
+  const address = c.env?.requestIP?.(c.req.raw)?.address?.toLowerCase();
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
 export function isLocalAddress(raw: string): boolean {
   const address = raw.toLowerCase().replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/, "");
   const v4 = address.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);

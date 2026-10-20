@@ -132,13 +132,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var request = URLRequest(url: dashboardURL.appendingPathComponent("api/launcher/proof"))
         request.timeoutInterval = 2
         request.setValue(challenge, forHTTPHeaderField: "X-Strata-Challenge")
-        guard let (data, _) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200, data.count < 1_024,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let proof = json["proof"] as? String
+              let proofHex = json["proof"] as? String,
+              let proof = Data(hexString: proofHex), proof.count == SHA256.byteCount
         else { return false }
-        let expected = HMAC<SHA256>.authenticationCode(for: Data(challenge.utf8), using: SymmetricKey(data: Data(launchSecret.utf8)))
-            .map { String(format: "%02x", $0) }.joined()
-        return proof == expected
+        // The proof covers the port too; checked in constant time.
+        return HMAC<SHA256>.isValidAuthenticationCode(proof, authenticating: Data("\(challenge)|\(port)".utf8),
+                                                     using: SymmetricKey(data: Data(launchSecret.utf8)))
     }
 
     private func isServing() async -> Bool {
@@ -227,6 +229,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         image.isTemplate = true
         return image
+    }
+}
+
+extension Data {
+    init?(hexString: String) {
+        guard hexString.count.isMultiple(of: 2) else { return nil }
+        var bytes = [UInt8]()
+        var index = hexString.startIndex
+        while index < hexString.endIndex {
+            let next = hexString.index(index, offsetBy: 2)
+            guard let byte = UInt8(hexString[index..<next], radix: 16) else { return nil }
+            bytes.append(byte)
+            index = next
+        }
+        self.init(bytes)
     }
 }
 
