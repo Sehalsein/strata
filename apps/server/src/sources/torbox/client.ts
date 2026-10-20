@@ -152,7 +152,8 @@ export class TorboxClient {
       // Non-JSON error pages fall through to the status check.
     }
     if (!res.ok || body.success === false) {
-      throw new TorboxError(`TorBox ${path}: ${body.detail ?? body.error ?? res.statusText}`, res.status === 401 || res.status === 403 ? 401 : 502);
+      const status = res.status === 401 || res.status === 403 ? 401 : res.status === 404 ? 404 : 502;
+      throw new TorboxError(`TorBox ${path}: ${body.detail ?? body.error ?? res.statusText}`, status);
     }
     return body.data as T;
   }

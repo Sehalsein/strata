@@ -103,14 +103,13 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   jobs.register("cleanTorbox", async () => {
     const client = torbox();
     if (!client) return { skipped: "TorBox not configured" };
-    // Never pull a torrent out from under something that's streaming it.
-    const streaming = new Set(
-      sessions.list().flatMap((s) => {
+    // Never pull a torrent out from under something that's streaming it (checked per torrent).
+    const streaming = (id: number) =>
+      sessions.list().some((s) => {
         const ref = library.get(s.fileId)?.ref;
-        return ref?.startsWith("torrents:") ? [parseTorboxRef(ref).itemId] : [];
-      }),
-    );
-    return housekeeping.clean(client, settings.get().torboxCleanupDays, (id) => streaming.has(id));
+        return !!ref?.startsWith("torrents:") && parseTorboxRef(ref).itemId === id;
+      });
+    return housekeeping.clean(client, settings.get().torboxCleanupDays, streaming);
   });
   jobs.register("detectFfmpeg", async () => {
     ffmpegInfo = await detectFfmpeg(paths.root);

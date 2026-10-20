@@ -124,9 +124,16 @@ export class Discovery {
       const release = (await this.releases(target)).find((r) => r.hash === hash);
       const magnet = new URLSearchParams({ xt: `urn:btih:${hash}` });
       if (release) magnet.set("dn", release.title);
-      ({ torrentId } = await client.createTorrent(`magnet:?${magnet.toString().replace("urn%3Abtih%3A", "urn:btih:")}`));
-      log.info(`Added ${release?.title ?? hash} to TorBox (#${torrentId})`);
-      this.onAdded(torrentId, hash, release?.title);
+      // Already in the account (added in TorBox itself, not synced yet)? Use it, and don't
+      // record it as ours: housekeeping must never remove the user's own torrents.
+      const owned = (await client.list("torrents")).find((t) => t.hash?.toLowerCase() === hash);
+      if (owned) {
+        torrentId = owned.id;
+      } else {
+        ({ torrentId } = await client.createTorrent(`magnet:?${magnet.toString().replace("urn%3Abtih%3A", "urn:btih:")}`));
+        log.info(`Added ${release?.title ?? hash} to TorBox (#${torrentId})`);
+        this.onAdded(torrentId, hash, release?.title);
+      }
       if (release?.cached) waitMs = READY_WAIT_MS;
     }
 

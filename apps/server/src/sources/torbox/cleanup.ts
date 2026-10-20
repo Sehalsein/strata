@@ -3,7 +3,7 @@ import type { Db } from "../../db";
 import { torboxAdded } from "../../db/schema";
 import type { Library } from "../../library";
 import { logger } from "../../log";
-import type { TorboxClient } from "./client";
+import { TorboxError, type TorboxClient } from "./client";
 
 const log = logger("torbox");
 const DAY = 24 * 60 * 60_000;
@@ -42,25 +42,45 @@ export class TorboxHousekeeping {
     return this.db.select({ n: sql<number>`count(*)` }).from(torboxAdded).get()?.n ?? 0;
   }
 
-  /** Removes stale releases. `inUse` skips torrents something is streaming right now. */
+  /**
+   * Removes stale releases. `inUse` is asked right before each removal (not once up
+   * front), so something that starts streaming mid-run is kept.
+   */
   async clean(client: TorboxClient, days: number, inUse: (torrentId: number) => boolean) {
     if (days <= 0) return { removed: 0, skipped: "cleanup is off" };
     let removed = 0;
-    for (const row of this.stale(days)) {
-      if (inUse(row.torrentId)) continue;
+    for (const candidate of this.stale(days)) {
+      // Re-read: a play recorded since the list was made keeps it.
+      const row = this.stale(days).find((r) => r.torrentId === candidate.torrentId);
+      if (!row || inUse(row.torrentId)) continue;
+      // Confirm the id is still the torrent we added (same hash) before deleting anything.
+      let remote: { hash?: string } | null;
       try {
-        await client.deleteTorrent(row.torrentId);
+        remote = await client.torrent(row.torrentId);
       } catch (err) {
-        // Already gone from TorBox (deleted there by hand) is fine; anything else, try next time.
-        if (!String(err).includes("404")) {
-          log.warn(`Couldn't remove TorBox #${row.torrentId}`, err);
+        if (err instanceof TorboxError && err.status === 404) remote = null;
+        else {
+          log.warn(`Couldn't check TorBox #${row.torrentId}`, err);
           continue;
         }
       }
+      if (remote?.hash?.toLowerCase() === row.hash) {
+        try {
+          await client.deleteTorrent(row.torrentId);
+        } catch (err) {
+          if (!(err instanceof TorboxError && err.status === 404)) {
+            log.warn(`Couldn't remove TorBox #${row.torrentId}`, err);
+            continue;
+          }
+        }
+        this.library.markMissing("torbox", [], `torrents:${row.torrentId}:`);
+        removed++;
+        log.info(`Removed ${row.name ?? row.hash} from TorBox (#${row.torrentId}), unplayed for ${days}+ days`);
+      } else {
+        // Gone, or the id now belongs to something else (e.g. another account's key): forget it.
+        log.info(`Forgetting TorBox #${row.torrentId}: no longer the release Strata added`);
+      }
       this.db.delete(torboxAdded).where(eq(torboxAdded.torrentId, row.torrentId)).run();
-      this.library.markMissing("torbox", [], `torrents:${row.torrentId}:`);
-      removed++;
-      log.info(`Removed ${row.name ?? row.hash} from TorBox (#${row.torrentId}), unplayed for ${days}+ days`);
     }
     return { removed };
   }
