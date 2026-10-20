@@ -9,6 +9,7 @@ import { LoginPage } from "./pages/Login";
 import { LogsPage } from "./pages/Logs";
 import { OverviewPage } from "./pages/Overview";
 import { ProfilesPage } from "./pages/Profiles";
+import { DevicesPage } from "./pages/Devices";
 import { SettingsPage } from "./pages/Settings";
 import { SetupWizard, wizardInProgress } from "./pages/Setup";
 
@@ -106,6 +107,7 @@ function AuthedApp({ info, onSignOut, onServerNameChange }: { info: ServerInfo |
   else if (path.startsWith("/library")) page = <LibraryPage />;
   else if (path.startsWith("/settings")) page = <SettingsPage onServerNameChange={onServerNameChange} />;
   else if (path.startsWith("/profiles")) page = <ProfilesPage />;
+  else if (path.startsWith("/devices")) page = <DevicesPage />;
   else if (path.startsWith("/logs")) page = <LogsPage />;
   else
     page = (

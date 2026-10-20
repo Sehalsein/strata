@@ -126,6 +126,15 @@ export class TorboxClient {
     return body.data?.torrents ?? [];
   }
 
+  /** Removes a torrent from the account. */
+  async deleteTorrent(torrentId: number): Promise<void> {
+    await this.call("/torrents/controltorrent", {}, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ torrent_id: torrentId, operation: "delete" }),
+    });
+  }
+
   /** A short-lived direct download URL for one file. */
   requestLink(kind: TorboxKind, itemId: number, fileId: number) {
     return this.call<string>(`/${kind}/requestdl`, { token: this.apiKey, [ID_PARAM[kind]]: String(itemId), file_id: String(fileId), zip_link: "false" });

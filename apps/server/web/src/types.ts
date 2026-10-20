@@ -36,6 +36,7 @@ export interface Settings {
   maxReleaseSizeGb: number;
   bonjourEnabled: boolean;
   localJoin: boolean;
+  torboxCleanupDays: number;
   updateChannel: UpdateChannel;
   autoUpdate: boolean;
   updateManifestUrl: string;
@@ -189,4 +190,16 @@ export interface LogEntry {
   level: "debug" | "info" | "warn" | "error";
   scope: string;
   message: string;
+}
+
+export interface Device {
+  /** Session token hash: identifies the device, can't be used to sign in. */
+  id: string;
+  deviceName: string | null;
+  profileName: string | null;
+  createdAt: number;
+  lastSeenAt: number;
+  /** Joined without a password (home network or a TV code): can watch, not administer. */
+  viewerOnly: boolean;
+  isCurrent: boolean;
 }

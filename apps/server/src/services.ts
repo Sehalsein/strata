@@ -13,12 +13,13 @@ import { SessionManager } from "./playback/sessions";
 import { detectFfmpeg, type FfmpegInfo } from "./platform/ffmpeg";
 import { KeepAwake } from "./platform/keepAwake";
 import { ProgressStore } from "./progress";
+import { TorboxHousekeeping } from "./sources/torbox/cleanup";
 import { DeviceLinks } from "./deviceLink";
 import { SecretBox } from "./secrets";
 import { SettingsStore } from "./settings";
 import { scanLocal } from "./sources/local/scanner";
 import { TorboxClient } from "./sources/torbox/client";
-import { syncTorbox } from "./sources/torbox/sync";
+import { parseTorboxRef, syncTorbox } from "./sources/torbox/sync";
 import { Discovery } from "./sources/discovery";
 import { SubtitleService } from "./playback/subtitles";
 import { Bonjour } from "./platform/bonjour";
@@ -84,8 +85,9 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   const catalog = new CatalogService(tmdb, library, progress, () => settings.get());
   const sessions = new SessionManager(paths.transcode, ffmpeg, new KeepAwake(), () => settings.get().maxTranscodes, () => settings.get().hardwareAcceleration);
   const subtitles = new SubtitleService(join(paths.root, "cache", "subtitles"), ffmpeg);
-  const discovery = new Discovery(tmdb, library, () => settings.get(), torbox, fetchImpl);
-  const playback = new PlaybackService(library, sessions, progress, () => settings.get(), ffmpeg, torbox, discovery, (id, s, e) => catalog.nextEpisode(id, s, e));
+  const housekeeping = new TorboxHousekeeping(db, library);
+  const discovery = new Discovery(tmdb, library, () => settings.get(), torbox, fetchImpl, (id, hash, name) => housekeeping.recordAdded(id, hash, name));
+  const playback = new PlaybackService(library, sessions, progress, () => settings.get(), ffmpeg, torbox, discovery, (id, s, e) => catalog.nextEpisode(id, s, e), (id) => housekeeping.recordPlayed(id));
 
   const jobs = new Jobs();
   jobs.register("scanLocal", (report) => scanLocal(library, settings.get().mediaFolders, report));
@@ -95,6 +97,18 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     return syncTorbox(client, library, report);
   });
   jobs.register("matchPending", (report) => library.matchPending((d, t) => report(d, t, "Matching titles")));
+  jobs.register("cleanTorbox", async () => {
+    const client = torbox();
+    if (!client) return { skipped: "TorBox not configured" };
+    // Never pull a torrent out from under something that's streaming it.
+    const streaming = new Set(
+      sessions.list().flatMap((s) => {
+        const ref = library.get(s.fileId)?.ref;
+        return ref?.startsWith("torrents:") ? [parseTorboxRef(ref).itemId] : [];
+      }),
+    );
+    return housekeeping.clean(client, settings.get().torboxCleanupDays, (id) => streaming.has(id));
+  });
   jobs.register("detectFfmpeg", async () => {
     ffmpegInfo = await detectFfmpeg(paths.root);
     return { found: !!ffmpegInfo };
@@ -130,6 +144,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   if (process.env.STRATA_NO_JOBS !== "1") {
     applySchedule();
     jobs.schedule("checkUpdates", 6 * 60 * MINUTE, 60_000);
+    jobs.schedule("cleanTorbox", 24 * 60 * MINUTE, 10 * MINUTE);
   }
 
   const shutdown = () => {

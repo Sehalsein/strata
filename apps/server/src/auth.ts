@@ -82,6 +82,23 @@ export class Auth {
     return { tokenHash, profileId: row.profileId, user: { id: row.id, username: row.username, isAdmin: row.isAdmin && !row.viewerOnly } };
   }
 
+  /** Signed-in devices, newest activity first. `id` is the token hash (not the token). */
+  devices() {
+    return this.db
+      .select({
+        id: sessions.tokenHash,
+        deviceName: sessions.deviceName,
+        profileName: profiles.name,
+        createdAt: sessions.createdAt,
+        lastSeenAt: sessions.lastSeenAt,
+        viewerOnly: sessions.viewerOnly,
+      })
+      .from(sessions)
+      .leftJoin(profiles, eq(profiles.id, sessions.profileId))
+      .orderBy(sql`${sessions.lastSeenAt} DESC`)
+      .all();
+  }
+
   logout(tokenHash: string) {
     this.db.delete(sessions).where(eq(sessions.tokenHash, tokenHash)).run();
   }

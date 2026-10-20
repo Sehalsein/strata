@@ -27,6 +27,12 @@ const NAV: { href: string; label: string; icon: ReactNode; match: (p: string) =>
     icon: <path d="M10 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM4 17c.8-3 3.2-4.5 6-4.5s5.2 1.5 6 4.5" />,
   },
   {
+    href: "/devices",
+    label: "Devices",
+    match: (p) => p.startsWith("/devices"),
+    icon: <path d="M3 5h10v8H3zM6 16h4M15 7h3v9h-3z" />,
+  },
+  {
     href: "/logs",
     label: "Logs",
     match: (p) => p.startsWith("/logs"),

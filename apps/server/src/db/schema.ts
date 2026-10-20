@@ -78,6 +78,15 @@ export const files = sqliteTable(
 );
 
 /** One row per movie/show that has at least one matched file. Powers library shelves. */
+/** TorBox torrents Strata added itself (discovery); only these are ever cleaned up. */
+export const torboxAdded = sqliteTable("torbox_added", {
+  torrentId: integer("torrent_id").primaryKey(),
+  hash: text("hash").notNull(),
+  name: text("name"),
+  addedAt: integer("added_at").notNull().default(now),
+  lastPlayedAt: integer("last_played_at"),
+});
+
 export const mediaItems = sqliteTable(
   "media_items",
   {

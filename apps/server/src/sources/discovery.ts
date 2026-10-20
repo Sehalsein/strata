@@ -54,6 +54,8 @@ export class Discovery {
     private readonly settings: () => Settings,
     private readonly torbox: () => TorboxClient | null,
     private readonly fetchImpl: typeof fetch = fetch,
+    /** Told about every torrent discovery adds, so housekeeping can remove it later. */
+    private readonly onAdded: (torrentId: number, hash: string, name?: string) => void = () => {},
   ) {}
 
   get available(): boolean {
@@ -124,6 +126,7 @@ export class Discovery {
       if (release) magnet.set("dn", release.title);
       ({ torrentId } = await client.createTorrent(`magnet:?${magnet.toString().replace("urn%3Abtih%3A", "urn:btih:")}`));
       log.info(`Added ${release?.title ?? hash} to TorBox (#${torrentId})`);
+      this.onAdded(torrentId, hash, release?.title);
       if (release?.cached) waitMs = READY_WAIT_MS;
     }
 

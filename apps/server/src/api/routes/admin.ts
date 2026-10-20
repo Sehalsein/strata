@@ -19,6 +19,20 @@ import { body, intParam, optionalInt, requireAdmin, requireAuth, type Env } from
 export const adminRoutes = new Hono<Env>()
   .use(requireAuth, requireAdmin)
 
+  .get("/devices", (c) => {
+    const current = c.var.session.tokenHash;
+    return c.json({ items: c.var.services.auth.devices().map((d) => ({ ...d, isCurrent: d.id === current })) });
+  })
+
+  // Signs a device out: its token stops working and the app returns to Connect.
+  .delete("/devices/:id", (c) => {
+    const id = c.req.param("id");
+    if (id === c.var.session.tokenHash) throw new HTTPException(409, { message: "That's this browser. Use Sign out instead." });
+    if (!/^[0-9a-f]{64}$/.test(id)) throw new HTTPException(404, { message: "No such device" });
+    c.var.services.auth.logout(id);
+    return c.json({ ok: true });
+  })
+
   .get("/status", async (c) => {
     const s = c.var.services;
     const sessionDto = sessionDtoFor(s);

@@ -50,9 +50,14 @@ export async function probe(ffprobe: string, input: string, timeoutMs = 45_000, 
   if (/^https?:/.test(input)) args.push("-rw_timeout", String(networkTimeoutMs * 1000));
   args.push(input);
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
-  const timer = setTimeout(() => proc.kill(), timeoutMs);
+  let killed = false;
+  const timer = setTimeout(() => {
+    killed = true;
+    proc.kill();
+  }, timeoutMs);
   const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
   clearTimeout(timer);
+  if (killed) throw new Error(`ffprobe timed out after ${Math.round(timeoutMs / 1000)}s`);
   if (code !== 0) throw new Error(redactSecrets(`ffprobe failed (${code}): ${err.trim().split("\n").pop() ?? "unknown error"}`));
   return summarize(JSON.parse(out), input);
 }

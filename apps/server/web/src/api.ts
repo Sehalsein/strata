@@ -13,6 +13,7 @@ import type {
   TmdbResult,
   TorboxAccount,
   UpdateStatus,
+  Device,
 } from "./types";
 
 const TOKEN_KEY = "strata.token";
@@ -127,6 +128,8 @@ export const api = {
   applyUpdate: () => request<UpdateStatus>("POST", "/admin/update/apply"),
 
   stopSession: (id: string) => request<{ ok: true }>("DELETE", `/admin/sessions/${encodeURIComponent(id)}`),
+  devices: () => request<{ items: Device[] }>("GET", "/admin/devices"),
+  signOutDevice: (id: string) => request<{ ok: true }>("DELETE", `/admin/devices/${encodeURIComponent(id)}`),
   logs: (limit = 500) => request<{ items: LogEntry[] }>("GET", `/admin/logs${q({ limit })}`),
 };
 

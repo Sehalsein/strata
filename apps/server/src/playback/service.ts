@@ -53,9 +53,17 @@ export interface PlayResponse {
 }
 
 const LINK_TTL_MS = 30 * 60_000;
+const PROBE_FAILURE_TTL_MS = 60_000;
+
+/** A read timeout or dropped connection, as opposed to a file ffprobe can't make sense of. */
+function isNetworkStall(err: unknown): boolean {
+  return /timed out|connection|reset by peer|I\/O error|Server returned 5\d\d|Network is unreachable/i.test(String(err));
+}
 
 export class PlaybackService {
   private links = new Map<number, { url: string; at: number }>();
+  private probing = new Map<number, Promise<MediaInfo>>();
+  private probeFailures = new Map<number, number>();
 
   constructor(
     private readonly library: Library,
@@ -66,6 +74,8 @@ export class PlaybackService {
     private readonly torbox: () => TorboxClient | null,
     private readonly discovery: Discovery,
     private readonly findNextEpisode: (showId: number, season: number, episode: number) => Promise<EpisodeRef | null>,
+    /** Told when a TorBox torrent is played, so housekeeping keeps it. */
+    private readonly onPlayedTorrent: (torrentId: number) => void = () => {},
   ) {}
 
   async play(user: { userId: number; profileId: number }, req: PlayRequest): Promise<PlayResponse> {
@@ -83,6 +93,11 @@ export class PlaybackService {
       startMs = saved && !saved.completed ? saved.positionMs : 0;
     }
     startMs = Math.max(0, Math.min(startMs, Math.max(0, info.durationMs - 10_000)));
+
+    if (file.provider === "torbox") {
+      const ref = parseTorboxRef(file.ref);
+      if (ref.kind === "torrents") this.onPlayedTorrent(ref.itemId);
+    }
 
     this.sessions.stopForTarget(user.userId, req);
     const direct = plan.mode === "direct";
@@ -148,7 +163,8 @@ export class PlaybackService {
     const file = this.library.get(best.fileId);
     if (!file || file.probeJson) return;
     const { input } = await this.resolveInput(file);
-    await this.probeFile(file, input);
+    // Background work: no retry, so a bad file can't cost a second probe.
+    await this.probeFile(file, input, { allowRetry: false });
     log.debug(`Pre-warmed S${target.season}E${target.episode}`);
   }
 
@@ -208,32 +224,60 @@ export class PlaybackService {
     return { input: url, inputKind: "url" };
   }
 
-  private async probeFile(file: FileRow, input: string): Promise<MediaInfo> {
+  private async probeFile(file: FileRow, input: string, opts: { allowRetry?: boolean } = {}): Promise<MediaInfo> {
     if (file.probeJson) return JSON.parse(file.probeJson) as MediaInfo;
+    const failedAt = this.probeFailures.get(file.id);
+    if (failedAt && Date.now() - failedAt < PROBE_FAILURE_TTL_MS) throw this.probeError(file);
+    // Concurrent plays and pre-warms of one file share a single probe.
+    let pending = this.probing.get(file.id);
+    if (!pending) {
+      pending = this.probeOnce(file, input, opts.allowRetry ?? true).finally(() => this.probing.delete(file.id));
+      this.probing.set(file.id, pending);
+    }
+    return pending;
+  }
+
+  private async probeOnce(file: FileRow, input: string, allowRetry: boolean): Promise<MediaInfo> {
     const ff = this.ffmpeg();
     if (!ff) throw new PlaybackError("ffmpeg/ffprobe is not installed on the server", 503);
     try {
-      const info = await probe(ff.ffprobe, input);
-      this.library.saveProbe(file.id, info);
-      return info;
+      return this.saveProbe(file, await probe(ff.ffprobe, input));
     } catch (err) {
       // Details (already redacted) go to the log; clients get a plain message.
       log.warn(`Probe failed for file ${file.id}`, err);
-      if (file.provider === "local") throw new PlaybackError("Could not read this file", 502);
+      // Only a stalled TorBox link is worth one more try; an unreadable file isn't.
+      if (file.provider === "local" || !allowRetry || !isNetworkStall(err)) return this.probeFailed(file);
     }
     // TorBox's CDN sometimes stalls on a link (seen right after a release is added):
-    // retry once with a fresh link and more patience before giving up.
-    this.links.delete(file.id);
+    // one retry with a fresh link, within a tighter budget than the first attempt.
+    if (this.links.get(file.id)?.url === input) this.links.delete(file.id);
     try {
       const fresh = await this.resolveInput(file);
-      const info = await probe(ff.ffprobe, fresh.input, 75_000, 30_000);
-      this.library.saveProbe(file.id, info);
+      const info = this.saveProbe(file, await probe(ff.ffprobe, fresh.input, 30_000, 20_000));
       log.info(`Probe for file ${file.id} succeeded on retry`);
       return info;
     } catch (err) {
       log.warn(`Probe retry failed for file ${file.id}`, err);
       this.links.delete(file.id);
-      throw new PlaybackError("TorBox didn't respond in time. Try again in a moment.", 502);
+      return this.probeFailed(file);
     }
+  }
+
+  private saveProbe(file: FileRow, info: MediaInfo): MediaInfo {
+    this.library.saveProbe(file.id, info);
+    this.probeFailures.delete(file.id);
+    return info;
+  }
+
+  /** Remembers the failure briefly so repeated plays fail fast instead of re-probing. */
+  private probeFailed(file: FileRow): never {
+    this.probeFailures.set(file.id, Date.now());
+    throw this.probeError(file);
+  }
+
+  private probeError(file: FileRow): PlaybackError {
+    return file.provider === "local"
+      ? new PlaybackError("Could not read this file", 502)
+      : new PlaybackError("TorBox didn't respond in time. Try again in a moment.", 502);
   }
 }

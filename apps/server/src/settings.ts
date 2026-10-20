@@ -19,6 +19,8 @@ export const settingsSchema = z.object({
   region: z.string().default("US"),
   scanIntervalMinutes: z.number().int().min(0).default(60),
   torboxSyncMinutes: z.number().int().min(0).default(15),
+  /** Remove releases Strata added to TorBox once unplayed this many days (0 = never). */
+  torboxCleanupDays: z.number().int().min(0).max(365).default(14),
   sourcePriority: z.array(z.enum(["local", "torbox"])).default(["local", "torbox"]),
   maxResolution: z.number().int().default(2160),
   hardwareAcceleration: z.boolean().default(true),

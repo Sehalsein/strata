@@ -119,6 +119,14 @@ export function SettingsPage({ onServerNameChange }: { onServerNameChange: (name
                 </div>
               )}
             </Field>
+            <Field label="Remove unplayed TorBox releases after" hint="Releases Strata added to find something to play are removed from TorBox once nobody has played them for this long. Anything you add in TorBox yourself is never touched. 0 keeps everything.">
+              {(id, d) => (
+                <div className="input-suffix">
+                  <input id={id} aria-describedby={d} className="input mono" type="number" min={0} max={365} value={draft.torboxCleanupDays} onChange={(e) => set("torboxCleanupDays", num(e.target.value, draft.torboxCleanupDays))} />
+                  <span>days</span>
+                </div>
+              )}
+            </Field>
           </div>
         </Card>
 

@@ -93,4 +93,13 @@ export const migrations: string[] = [
   /* 4 */ `
   ALTER TABLE media_items ADD COLUMN genre_ids TEXT;
   `,
+  /* 5 */ `
+  CREATE TABLE torbox_added (
+    torrent_id INTEGER PRIMARY KEY,
+    hash TEXT NOT NULL,
+    name TEXT,
+    added_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    last_played_at INTEGER
+  );
+  `,
 ];

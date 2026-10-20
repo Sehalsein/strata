@@ -63,6 +63,21 @@ describe("setup and auth", () => {
     expect((await server.request(`/api/auth/device/${start.code}/approve`, { method: "POST", token })).status).toBe(404);
   });
 
+  test("admin lists devices and signs one out", async () => {
+    const other = (await json(await server.request("/api/auth/join", { method: "POST", ip: "192.168.2.50", json: { deviceName: "Bedroom TV" } }))).token;
+    const { items } = await json(await server.request("/api/admin/devices", { token }));
+    const tv = items.find((d: any) => d.deviceName === "Bedroom TV");
+    expect(tv).toMatchObject({ viewerOnly: true, isCurrent: false });
+    expect(items.find((d: any) => d.isCurrent)).toBeTruthy();
+    // Viewers can't see or manage devices.
+    expect((await server.request("/api/admin/devices", { token: other })).status).toBe(403);
+    // The admin can't sign out its own browser here, but can sign out the TV.
+    const self = items.find((d: any) => d.isCurrent);
+    expect((await server.request(`/api/admin/devices/${self.id}`, { method: "DELETE", token })).status).toBe(409);
+    expect((await server.request(`/api/admin/devices/${tv.id}`, { method: "DELETE", token })).status).toBe(200);
+    expect((await server.request("/api/me", { token: other })).status).toBe(401);
+  });
+
   test("PIN-protected profile", async () => {
     const created = await json(await server.request("/api/profiles", { method: "POST", token, json: { name: "Kids", pin: "1234" } }));
     expect(created.hasPin).toBe(true);
