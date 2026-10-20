@@ -48,8 +48,13 @@ export const fakeTmdb: typeof fetch = (async (input: string | URL | Request) => 
     const results = [
       ...(q.includes("big buck") ? [{ id: 10378, media_type: "movie", title: "Big Buck Bunny", release_date: "2008-05-30" }] : []),
       ...(q.includes("test show") ? [{ id: 9001, media_type: "tv", name: "Test Show", first_air_date: "2020-01-01" }] : []),
+      ...(q.includes("night") ? [{ id: 666, media_type: "movie", title: "Night Terror", release_date: "2020-10-31" }, { id: 10378, media_type: "movie", title: "Big Buck Bunny", release_date: "2008-05-30" }] : []),
     ];
     return json({ page: 1, results, total_pages: 1, total_results: results.length });
+  }
+  if (path === "/movie/666") {
+    return json({ id: 666, title: "Night Terror", release_date: "2020-10-31", genres: [{ id: 27, name: "Horror" }], credits: { cast: [], crew: [] }, recommendations: { page: 1, results: [], total_pages: 1, total_results: 0 },
+      release_dates: { results: [{ iso_3166_1: "US", release_dates: [{ certification: "R", type: 3 }] }] } });
   }
   if (path === "/genre/movie/list") return json({ genres: [{ id: 16, name: "Animation" }, { id: 35, name: "Comedy" }] });
   if (path === "/discover/movie") {

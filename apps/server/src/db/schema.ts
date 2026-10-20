@@ -20,6 +20,10 @@ export const profiles = sqliteTable("profiles", {
   avatar: text("avatar"),
   pinHash: text("pin_hash"),
   createdAt: integer("created_at").notNull().default(now),
+  /** "none" | "teen" | "kids" | "little" (see catalog/contentRating.ts). */
+  contentLimit: text("content_limit").notNull().default("none"),
+  /** A Kids profile: starts with the "kids" limit and is marked in the apps. */
+  isKids: integer("is_kids", { mode: "boolean" }).notNull().default(false),
 });
 
 export const sessions = sqliteTable("sessions", {

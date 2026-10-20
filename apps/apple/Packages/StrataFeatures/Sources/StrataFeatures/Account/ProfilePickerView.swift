@@ -48,6 +48,9 @@ struct ProfilePickerView: View {
                                     }
                                     .font(.stCallout.weight(.medium))
                                     .foregroundStyle(Theme.ink2)
+                                    if profile.isKids == true {
+                                        Text("Kids").eyebrowStyle(Theme.accentText)
+                                    }
                                 }
                             }
                             .buttonStyle(StrataCardStyle())

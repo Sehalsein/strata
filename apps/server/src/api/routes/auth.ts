@@ -5,6 +5,7 @@ import { z } from "zod";
 import { profiles } from "../../db/schema";
 import { API_VERSION, VERSION } from "../../version";
 import { body, intParam, requireAdmin, requireAuth, type Env } from "../context";
+import { CONTENT_LIMITS } from "../../catalog/contentRating";
 import { allowJoin, isLocalRequest } from "../localNetwork";
 
 const credentials = z.object({
@@ -18,6 +19,18 @@ const profileInput = z.object({
   avatar: z.string().max(64).nullish(),
   /** 4–8 digits; null removes the PIN. */
   pin: z.string().regex(/^\d{4,8}$/).nullish(),
+  /** Kids profiles start with the "kids" content limit. */
+  isKids: z.boolean().optional(),
+  contentLimit: z.enum(CONTENT_LIMITS).optional(),
+});
+
+const profileDto = (p: typeof profiles.$inferSelect) => ({
+  id: p.id,
+  name: p.name,
+  avatar: p.avatar,
+  hasPin: !!p.pinHash,
+  isKids: p.isKids,
+  contentLimit: p.contentLimit,
 });
 
 /** Shown on other devices (approval sheets, the dashboard), so plain words only. */
@@ -110,12 +123,12 @@ export const authRoutes = new Hono<Env>()
   .get("/me", requireAuth, (c) => {
     const { user, profileId } = c.var.session;
     const profile = profileId ? c.var.services.db.select().from(profiles).where(eq(profiles.id, profileId)).get() : undefined;
-    return c.json({ user, profile: profile ? { id: profile.id, name: profile.name, avatar: profile.avatar } : null });
+    return c.json({ user, profile: profile ? { id: profile.id, name: profile.name, avatar: profile.avatar, isKids: profile.isKids, contentLimit: profile.contentLimit } : null });
   })
 
   .get("/profiles", requireAuth, (c) => {
     const rows = c.var.services.db.select().from(profiles).orderBy(asc(profiles.id)).all();
-    return c.json(rows.map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, hasPin: !!p.pinHash })));
+    return c.json(rows.map(profileDto));
   })
 
   .post("/profiles/:id/select", requireAuth, async (c) => {
@@ -128,8 +141,10 @@ export const authRoutes = new Hono<Env>()
   .post("/profiles", requireAuth, requireAdmin, async (c) => {
     const input = await body(c, profileInput);
     const pinHash = input.pin ? await Bun.password.hash(input.pin) : null;
-    const row = c.var.services.db.insert(profiles).values({ name: input.name, avatar: input.avatar ?? null, pinHash }).returning().get();
-    return c.json({ id: row.id, name: row.name, avatar: row.avatar, hasPin: !!row.pinHash }, 201);
+    const isKids = input.isKids ?? false;
+    const contentLimit = input.contentLimit ?? (isKids ? "kids" : "none");
+    const row = c.var.services.db.insert(profiles).values({ name: input.name, avatar: input.avatar ?? null, pinHash, isKids, contentLimit }).returning().get();
+    return c.json(profileDto(row), 201);
   })
 
   .patch("/profiles/:id", requireAuth, requireAdmin, async (c) => {
@@ -138,9 +153,11 @@ export const authRoutes = new Hono<Env>()
     if (input.name !== undefined) patch.name = input.name;
     if (input.avatar !== undefined) patch.avatar = input.avatar;
     if (input.pin !== undefined) patch.pinHash = input.pin ? await Bun.password.hash(input.pin) : null;
+    if (input.isKids !== undefined) patch.isKids = input.isKids;
+    if (input.contentLimit !== undefined) patch.contentLimit = input.contentLimit;
     const row = c.var.services.db.update(profiles).set(patch).where(eq(profiles.id, intParam(c, "id"))).returning().get();
     if (!row) throw new HTTPException(404, { message: "No such profile" });
-    return c.json({ id: row.id, name: row.name, avatar: row.avatar, hasPin: !!row.pinHash });
+    return c.json(profileDto(row));
   })
 
   .delete("/profiles/:id", requireAuth, requireAdmin, (c) => {

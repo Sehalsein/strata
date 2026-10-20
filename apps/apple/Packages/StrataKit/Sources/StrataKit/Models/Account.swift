@@ -37,6 +37,8 @@ public struct Profile: Codable, Sendable, Hashable, Identifiable {
     public var name: String
     public var avatar: String?
     public var hasPin: Bool
+    /// A Kids profile; the server hides titles above its content limit. Absent from older servers.
+    public var isKids: Bool? = nil
 
     public init(id: Int, name: String, avatar: String? = nil, hasPin: Bool = false) {
         self.id = id

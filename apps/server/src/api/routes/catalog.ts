@@ -1,8 +1,9 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { body, intParam, optionalInt, profileOf, requireAuth, type Env } from "../context";
 import { capsSchema } from "../../playback/decide";
+import type { Shelf } from "../../catalog/service";
 
 const target = z.object({
   mediaType: z.enum(["movie", "episode"]),
@@ -16,10 +17,17 @@ const episodeRule = [
   { message: "season and episode are required for episodes" },
 ] as const;
 
+/** Drops titles above the profile's content limit, and shelves left empty. */
+async function allowedShelves(c: Context<Env>, shelves: Shelf[]): Promise<Shelf[]> {
+  const profileId = profileOf(c);
+  const filtered = await Promise.all(shelves.map(async (shelf) => ({ ...shelf, items: await c.var.services.content.filter(profileId, shelf.items) })));
+  return filtered.filter((shelf) => shelf.items.length > 0);
+}
+
 export const catalogRoutes = new Hono<Env>()
   .use(requireAuth)
 
-  .get("/home", async (c) => c.json({ shelves: await c.var.services.catalog.home(profileOf(c)) }))
+  .get("/home", async (c) => c.json({ shelves: await allowedShelves(c, await c.var.services.catalog.home(profileOf(c))) }))
 
   .get("/genres/:type", async (c) => {
     const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
@@ -28,26 +36,47 @@ export const catalogRoutes = new Hono<Env>()
 
   .get("/browse/:type/genre/:id", async (c) => {
     const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
-    return c.json({ shelves: await c.var.services.catalog.genreShelves(type, intParam(c, "id")) });
+    return c.json({ shelves: await allowedShelves(c, await c.var.services.catalog.genreShelves(type, intParam(c, "id"))) });
   })
 
-  .get("/person/:id", async (c) => c.json(await c.var.services.catalog.person(intParam(c, "id"))))
+  .get("/person/:id", async (c) => {
+    const person = await c.var.services.catalog.person(intParam(c, "id"));
+    const content = c.var.services.content;
+    const profileId = profileOf(c);
+    return c.json({ ...person, movies: await content.filter(profileId, person.movies), shows: await content.filter(profileId, person.shows) });
+  })
 
   .get("/browse/:type/:list", async (c) => {
     const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
     const list = z.enum(["trending", "popular", "topRated", "library"]).parse(c.req.param("list"));
-    return c.json({ items: await c.var.services.catalog.browse(type, list) });
+    return c.json({ items: await c.var.services.content.filter(profileOf(c), await c.var.services.catalog.browse(type, list)) });
   })
 
   .get("/search", async (c) => {
     const q = c.req.query("q")?.trim();
     if (!q) return c.json({ items: [] });
-    return c.json({ items: await c.var.services.catalog.search(q) });
+    return c.json({ items: await c.var.services.content.filter(profileOf(c), await c.var.services.catalog.search(q)) });
   })
 
-  .get("/titles/movie/:id", async (c) => c.json(await c.var.services.catalog.movie(profileOf(c), intParam(c, "id"))))
-  .get("/titles/show/:id", async (c) => c.json(await c.var.services.catalog.show(profileOf(c), intParam(c, "id"))))
-  .get("/titles/show/:id/seasons/:season", async (c) => c.json(await c.var.services.catalog.season(profileOf(c), intParam(c, "id"), intParam(c, "season"))))
+  .get("/titles/movie/:id", async (c) => {
+    const { catalog, content } = c.var.services;
+    const [profileId, id] = [profileOf(c), intParam(c, "id")];
+    await content.assertAllowed(profileId, "movie", id);
+    const movie = await catalog.movie(profileId, id);
+    return c.json({ ...movie, recommendations: await content.filter(profileId, movie.recommendations) });
+  })
+  .get("/titles/show/:id", async (c) => {
+    const { catalog, content } = c.var.services;
+    const [profileId, id] = [profileOf(c), intParam(c, "id")];
+    await content.assertAllowed(profileId, "show", id);
+    const show = await catalog.show(profileId, id);
+    return c.json({ ...show, recommendations: await content.filter(profileId, show.recommendations) });
+  })
+  .get("/titles/show/:id/seasons/:season", async (c) => {
+    const [profileId, id] = [profileOf(c), intParam(c, "id")];
+    await c.var.services.content.assertAllowed(profileId, "show", id);
+    return c.json(await c.var.services.catalog.season(profileId, id, intParam(c, "season")));
+  })
 
   // Library sources are instant; `discover=1` adds releases from scrapers (a few seconds).
   .get("/sources", async (c) => {
@@ -57,6 +86,7 @@ export const catalogRoutes = new Hono<Env>()
     const season = optionalInt(c.req.query("season"));
     const episode = optionalInt(c.req.query("episode"));
     if (mediaType === "episode" && (season === undefined || episode === undefined)) throw new HTTPException(400, { message: "season and episode are required for episodes" });
+    await c.var.services.content.assertAllowed(profileOf(c), mediaType === "movie" ? "movie" : "show", tmdbId);
     const items = c.var.services.catalog.sources(mediaType, tmdbId, season, episode);
     if (c.req.query("discover") === "1") items.push(...(await c.var.services.discovery.candidates({ mediaType, tmdbId, season, episode })));
     return c.json({ items });
@@ -75,6 +105,7 @@ export const catalogRoutes = new Hono<Env>()
         .refine(...episodeRule),
     );
     const profileId = profileOf(c);
+    await c.var.services.content.assertAllowed(profileId, req.mediaType === "movie" ? "movie" : "show", req.tmdbId);
     return c.json(await c.var.services.playback.play({ userId: c.var.session.user.id, profileId }, req));
   })
 

@@ -102,4 +102,8 @@ export const migrations: string[] = [
     last_played_at INTEGER
   );
   `,
+  /* 6 */ `
+  ALTER TABLE profiles ADD COLUMN content_limit TEXT NOT NULL DEFAULT 'none';
+  ALTER TABLE profiles ADD COLUMN is_kids INTEGER NOT NULL DEFAULT 0;
+  `,
 ];

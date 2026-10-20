@@ -13,6 +13,7 @@ import { SessionManager } from "./playback/sessions";
 import { detectFfmpeg, type FfmpegInfo } from "./platform/ffmpeg";
 import { KeepAwake } from "./platform/keepAwake";
 import { ProgressStore } from "./progress";
+import { ContentFilter } from "./catalog/contentRating";
 import { TorboxHousekeeping } from "./sources/torbox/cleanup";
 import { DeviceLinks } from "./deviceLink";
 import { SecretBox } from "./secrets";
@@ -41,6 +42,7 @@ export interface Services {
   library: Library;
   progress: ProgressStore;
   catalog: CatalogService;
+  content: ContentFilter;
   sessions: SessionManager;
   playback: PlaybackService;
   discovery: Discovery;
@@ -83,6 +85,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   const library = new Library(db, tmdb, new Matcher(tmdb));
   const progress = new ProgressStore(db);
   const catalog = new CatalogService(tmdb, library, progress, () => settings.get());
+  const content = new ContentFilter(db, tmdb, () => settings.get());
   const sessions = new SessionManager(paths.transcode, ffmpeg, new KeepAwake(), () => settings.get().maxTranscodes, () => settings.get().hardwareAcceleration);
   const subtitles = new SubtitleService(join(paths.root, "cache", "subtitles"), ffmpeg);
   const housekeeping = new TorboxHousekeeping(db, library);
@@ -155,5 +158,5 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     log.info("Stopped");
   };
 
-  return { config, paths, db, settings, auth: new Auth(db), deviceLinks: new DeviceLinks(), tmdb, library, progress, catalog, sessions, playback, discovery, subtitles, jobs, serverId, bonjour, updater, ffmpeg, torbox, startedAt: Date.now(), shutdown };
+  return { config, paths, db, settings, auth: new Auth(db), deviceLinks: new DeviceLinks(), tmdb, library, progress, catalog, content, sessions, playback, discovery, subtitles, jobs, serverId, bonjour, updater, ffmpeg, torbox, startedAt: Date.now(), shutdown };
 }

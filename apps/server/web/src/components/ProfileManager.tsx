@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, errorMessage } from "../api";
-import type { Profile } from "../types";
+import type { ContentLimit, Profile } from "../types";
 import { Dialog } from "./Dialog";
 import { Badge, ErrorText, Field, Spinner, useResource } from "./ui";
 
@@ -39,7 +39,10 @@ export function ProfileManager({ compact }: { compact?: boolean }) {
               </span>
               <div className="profile-main">
                 <span className="profile-name">{p.name}</span>
-                <span className="profile-meta">{p.hasPin ? <Badge tone="accent">PIN</Badge> : <span className="muted">No PIN</span>}</span>
+                <span className="profile-meta">
+                  {p.isKids && <Badge tone="ok">Kids</Badge>} {p.hasPin ? <Badge tone="accent">PIN</Badge> : <span className="muted">No PIN</span>}
+                  <span className="muted"> · {LIMIT_LABELS[p.contentLimit].short}</span>
+                </span>
                 {rowError?.id === p.id && <ErrorText error={rowError.message} />}
               </div>
               {!compact && (
@@ -74,6 +77,7 @@ export function ProfileManager({ compact }: { compact?: boolean }) {
 function AddProfileForm({ onAdded }: { onAdded: () => void }) {
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
+  const [isKids, setIsKids] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -87,9 +91,10 @@ function AddProfileForm({ onAdded }: { onAdded: () => void }) {
     setPending(true);
     setError(null);
     try {
-      await api.createProfile(name.trim(), pin || undefined);
+      await api.createProfile(name.trim(), pin || undefined, isKids);
       setName("");
       setPin("");
+      setIsKids(false);
       onAdded();
     } catch (err) {
       setError(errorMessage(err));
@@ -122,6 +127,10 @@ function AddProfileForm({ onAdded }: { onAdded: () => void }) {
           {pending ? "Adding…" : "Add profile"}
         </button>
       </div>
+      <label className="checkbox">
+        <input type="checkbox" checked={isKids} onChange={(e) => setIsKids(e.target.checked)} />
+        Kids profile: only titles rated PG / TV-PG or below. You can change the limit later.
+      </label>
       <ErrorText error={error} />
     </form>
   );
@@ -137,6 +146,8 @@ function EditProfileDialog({ profile, onClose, onSaved }: { profile: Profile | n
 
 function EditProfileBody({ profile, onClose, onSaved }: { profile: Profile; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(profile.name);
+  const [isKids, setIsKids] = useState(profile.isKids);
+  const [limit, setLimit] = useState<ContentLimit>(profile.contentLimit);
   const [pinMode, setPinMode] = useState<"keep" | "set" | "remove">("keep");
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -144,8 +155,10 @@ function EditProfileBody({ profile, onClose, onSaved }: { profile: Profile; onCl
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const patch: { name?: string; pin?: string | null } = {};
+    const patch: { name?: string; pin?: string | null; isKids?: boolean; contentLimit?: ContentLimit } = {};
     if (name.trim() && name.trim() !== profile.name) patch.name = name.trim();
+    if (isKids !== profile.isKids) patch.isKids = isKids;
+    if (limit !== profile.contentLimit) patch.contentLimit = limit;
     if (pinMode === "set") {
       if (!PIN_RE.test(pin)) {
         setError("PIN must be 4–8 digits.");
@@ -170,6 +183,28 @@ function EditProfileBody({ profile, onClose, onSaved }: { profile: Profile; onCl
   return (
     <form onSubmit={submit} className="stack">
       <Field label="Name">{(id) => <input id={id} className="input" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />}</Field>
+      <Field label="Content limit" hint="Titles rated above this are hidden everywhere on this profile and can't be played. Unrated titles show only if they're family or kids' animation. Put PINs on other profiles so this one can't just switch.">
+        {(id, d) => (
+          <select id={id} aria-describedby={d} className="input" value={limit} onChange={(e) => setLimit(e.target.value as ContentLimit)}>
+            {(Object.keys(LIMIT_LABELS) as ContentLimit[]).map((key) => (
+              <option key={key} value={key}>
+                {LIMIT_LABELS[key].long}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
+      <label className="checkbox">
+        <input
+          type="checkbox"
+          checked={isKids}
+          onChange={(e) => {
+            setIsKids(e.target.checked);
+            if (e.target.checked && limit === "none") setLimit("kids");
+          }}
+        />
+        Kids profile
+      </label>
       <fieldset className="fieldset">
         <legend className="field-label">PIN</legend>
         <div className="radio-row">
@@ -208,6 +243,13 @@ function EditProfileBody({ profile, onClose, onSaved }: { profile: Profile; onCl
     </form>
   );
 }
+
+const LIMIT_LABELS: Record<ContentLimit, { short: string; long: string }> = {
+  none: { short: "Everything", long: "No limit" },
+  teen: { short: "Up to PG-13 / TV-14", long: "Teens: up to PG-13 and TV-14" },
+  kids: { short: "Up to PG / TV-PG", long: "Kids: up to PG and TV-PG" },
+  little: { short: "Up to G / TV-Y7", long: "Little kids: G, TV-Y, TV-Y7 and TV-G" },
+};
 
 const AVATAR_FILLS = ["var(--sand)", "var(--accent)", "var(--local)", "var(--torbox)"];
 

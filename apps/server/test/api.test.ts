@@ -78,6 +78,23 @@ describe("setup and auth", () => {
     expect((await server.request("/api/me", { token: other })).status).toBe(401);
   });
 
+  test("a Kids profile hides and refuses titles above its limit", async () => {
+    const kids = await json(await server.request("/api/profiles", { method: "POST", token, json: { name: "Little Ones", isKids: true } }));
+    expect(kids).toMatchObject({ isKids: true, contentLimit: "kids" });
+    // A separate device on the Kids profile.
+    const kidToken = (await json(await server.request("/api/auth/login", { method: "POST", json: { username: "sehal", password: "correct-horse" } }))).token;
+    await server.request(`/api/profiles/${kids.id}/select`, { method: "POST", token: kidToken, json: {} });
+
+    const titles = async (t: string) => (await json(await server.request("/api/search?q=night", { token: t }))).items.map((i: any) => i.tmdbId);
+    expect(await titles(kidToken)).toEqual([10378]); // R-rated horror is gone; unrated family animation stays
+    expect((await server.request("/api/titles/movie/666", { token: kidToken })).status).toBe(403);
+    expect((await server.request("/api/play", { method: "POST", token: kidToken, json: { mediaType: "movie", tmdbId: 666 } })).status).toBe(403);
+    expect((await server.request("/api/titles/movie/10378", { token: kidToken })).status).toBe(200);
+    // Other profiles are unaffected.
+    expect(await titles(token)).toEqual([666, 10378]);
+    await server.request(`/api/profiles/${kids.id}`, { method: "DELETE", token });
+  });
+
   test("PIN-protected profile", async () => {
     const created = await json(await server.request("/api/profiles", { method: "POST", token, json: { name: "Kids", pin: "1234" } }));
     expect(created.hasPin).toBe(true);

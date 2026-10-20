@@ -14,6 +14,7 @@ import type {
   TorboxAccount,
   UpdateStatus,
   Device,
+  ContentLimit,
 } from "./types";
 
 const TOKEN_KEY = "strata.token";
@@ -103,8 +104,8 @@ export const api = {
   logout: () => request<{ ok: true }>("POST", "/auth/logout"),
 
   profiles: () => request<Profile[]>("GET", "/profiles"),
-  createProfile: (name: string, pin?: string) => request<Profile>("POST", "/profiles", { name, ...(pin ? { pin } : {}) }),
-  updateProfile: (id: number, patch: { name?: string; pin?: string | null }) => request<Profile>("PATCH", `/profiles/${id}`, patch),
+  createProfile: (name: string, pin?: string, isKids = false) => request<Profile>("POST", "/profiles", { name, isKids, ...(pin ? { pin } : {}) }),
+  updateProfile: (id: number, patch: { name?: string; pin?: string | null; isKids?: boolean; contentLimit?: ContentLimit }) => request<Profile>("PATCH", `/profiles/${id}`, patch),
   deleteProfile: (id: number) => request<{ ok: true }>("DELETE", `/profiles/${id}`),
 
   status: () => request<AdminStatus>("GET", "/admin/status"),

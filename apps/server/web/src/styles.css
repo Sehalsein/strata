@@ -2081,3 +2081,17 @@ input[type="checkbox"] {
     transition-duration: 0.01ms !important;
   }
 }
+
+.checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 0.9rem;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.checkbox input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}

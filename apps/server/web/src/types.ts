@@ -81,7 +81,11 @@ export interface Profile {
   name: string;
   avatar: string | null;
   hasPin: boolean;
+  isKids: boolean;
+  contentLimit: ContentLimit;
 }
+
+export type ContentLimit = "none" | "teen" | "kids" | "little";
 
 export interface JobStatus {
   name: string;
