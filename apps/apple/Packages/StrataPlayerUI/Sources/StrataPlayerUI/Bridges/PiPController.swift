@@ -24,8 +24,10 @@ public final class PiPController: NSObject, AVPictureInPictureControllerDelegate
         guard isAvailable else { return }
         let c = AVPictureInPictureController(playerLayer: playerLayer)
         c?.delegate = self
+        #if os(iOS)
         // Leaving the app mid-playback continues in Picture in Picture.
         c?.canStartPictureInPictureAutomaticallyFromInline = true
+        #endif
         self.controller = c
     }
 
