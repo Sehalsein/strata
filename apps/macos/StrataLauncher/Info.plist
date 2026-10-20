@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Strata</string>
+	<key>CFBundleDisplayName</key>
+	<string>Strata</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.sehalsein.strata.server</string>
+	<key>CFBundleExecutable</key>
+	<string>Strata</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>__VERSION__</string>
+	<key>CFBundleVersion</key>
+	<string>__VERSION__</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Strata media server</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Strata serves your library to the apps on your home network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_strata._tcp</string>
+	</array>
+</dict>
+</plist>

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { platform } from "node:os";
 import { logger } from "../log";
 
@@ -16,6 +16,8 @@ export interface FfmpegInfo {
 function locate(name: string, dataDir: string): string | undefined {
   const candidates = [
     process.env[`STRATA_${name.toUpperCase()}`],
+    // Strata.app ships its own ffmpeg next to the server binary (Contents/Resources/ffmpeg).
+    join(dirname(process.execPath), "..", "Resources", "ffmpeg", name),
     join(dataDir, "bin", name),
     Bun.which(name) ?? undefined,
     `/opt/homebrew/bin/${name}`,

@@ -20,15 +20,19 @@ export function createUpdater(opts: {
 }): Updater {
   const binary = compiledBinaryPath();
   const docker = inDocker();
+  // Replacing the binary inside Strata.app would break its signature.
+  const inApp = !!binary && binary.includes(".app/Contents/MacOS/");
   return new Updater({
     version: VERSION,
     platform: currentPlatformKey(),
     dataDir: opts.dataDir,
     dbPath: opts.dbPath,
-    binaryPath: docker ? null : binary,
+    binaryPath: docker || inApp ? null : binary,
     disabledReason: docker
       ? "Running in Docker: update by pulling a newer image"
-      : binary
+      : inApp
+        ? "Installed as Strata.app: update by installing the new version"
+        : binary
         ? null
         : "Running from source: self-update only works in the compiled binary",
     publicKey: UPDATE_PUBLIC_KEY,

@@ -8,7 +8,8 @@
     "build": "bun scripts/build.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "lint": "echo skip"
+    "lint": "echo skip",
+    "package:mac": "bun scripts/package-mac.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.44",
