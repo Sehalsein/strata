@@ -1,0 +1,222 @@
+import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
+import type { Db } from "./db";
+import { files, mediaItems, type FileProvider, type MatchStatus } from "./db/schema";
+import type { Matcher, MatchResult } from "./catalog/matcher";
+import type { Tmdb } from "./catalog/tmdb";
+import { yearOf } from "./catalog/tmdb";
+import type { ParsedName } from "./media/parse";
+import type { MediaInfo } from "./media/probe";
+import { logger } from "./log";
+
+const log = logger("library");
+
+export type FileRow = typeof files.$inferSelect;
+
+export interface FileInput {
+  provider: FileProvider;
+  ref: string;
+  name: string;
+  size: number;
+  mtime?: number;
+  parsed: ParsedName;
+}
+
+/** The `files` table: every playable file Strata knows about, from any provider. */
+export class Library {
+  constructor(
+    private readonly db: Db,
+    private readonly tmdb: Tmdb,
+    private readonly matcher: Matcher,
+  ) {}
+
+  /** Inserts or refreshes a file. Changed files lose their probe and are re-matched. */
+  upsert(input: FileInput): FileRow {
+    const existing = this.db.select().from(files).where(and(eq(files.provider, input.provider), eq(files.ref, input.ref))).get();
+    const parsedJson = JSON.stringify(input.parsed);
+    if (existing) {
+      const changed = existing.size !== input.size || existing.mtime !== (input.mtime ?? null) || existing.parsedJson !== parsedJson;
+      if (!changed && !existing.missing) return existing;
+      const keepMatch = existing.matchStatus === "manual" || existing.matchStatus === "ignored";
+      return this.db
+        .update(files)
+        .set({
+          name: input.name,
+          size: input.size,
+          mtime: input.mtime ?? null,
+          parsedJson,
+          missing: false,
+          updatedAt: Date.now(),
+          ...(changed ? { probeJson: null } : {}),
+          ...(changed && !keepMatch ? { matchStatus: "pending" as MatchStatus } : {}),
+        })
+        .where(eq(files.id, existing.id))
+        .returning()
+        .get();
+    }
+    return this.db
+      .insert(files)
+      .values({ provider: input.provider, ref: input.ref, name: input.name, size: input.size, mtime: input.mtime ?? null, parsedJson })
+      .returning()
+      .get();
+  }
+
+  /** Flags files from `provider` (optionally under `refPrefix`) that a sync no longer saw. */
+  markMissing(provider: FileProvider, seenRefs: string[], refPrefix?: string) {
+    const conditions = [eq(files.provider, provider), eq(files.missing, false)];
+    if (refPrefix) conditions.push(sql`${files.ref} LIKE ${refPrefix + "%"}`);
+    // SQLite caps bound parameters; compare in JS for large libraries.
+    const rows = this.db.select({ id: files.id, ref: files.ref }).from(files).where(and(...conditions)).all();
+    const seen = new Set(seenRefs);
+    const gone = rows.filter((r) => !seen.has(r.ref)).map((r) => r.id);
+    for (let i = 0; i < gone.length; i += 500) {
+      this.db.update(files).set({ missing: true, updatedAt: Date.now() }).where(inArray(files.id, gone.slice(i, i + 500))).run();
+    }
+    if (gone.length) log.info(`${gone.length} ${provider} file(s) went missing`);
+    return gone.length;
+  }
+
+  /** Matches every pending file against TMDB. Returns counts for status reporting. */
+  async matchPending(onProgress?: (done: number, total: number) => void): Promise<{ matched: number; unmatched: number }> {
+    if (!this.tmdb.configured) return { matched: 0, unmatched: 0 };
+    const pending = this.db.select().from(files).where(and(eq(files.matchStatus, "pending"), eq(files.missing, false))).all();
+    let matched = 0;
+    let unmatched = 0;
+    for (const [i, file] of pending.entries()) {
+      const parsed = JSON.parse(file.parsedJson ?? "{}") as ParsedName;
+      try {
+        const result = await this.matcher.match(parsed);
+        if (result) {
+          this.applyMatch(file.id, result, parsed.season, parsed.episode, "matched");
+          matched++;
+        } else {
+          this.db.update(files).set({ matchStatus: "unmatched", updatedAt: Date.now() }).where(eq(files.id, file.id)).run();
+          unmatched++;
+        }
+      } catch (err) {
+        log.warn(`Matching ${file.name} failed`, err);
+      }
+      onProgress?.(i + 1, pending.length);
+    }
+    if (pending.length) log.info(`Matched ${matched}, unmatched ${unmatched}`);
+    return { matched, unmatched };
+  }
+
+  async setManualMatch(fileId: number, type: "movie" | "show", tmdbId: number, season?: number, episode?: number) {
+    if (type === "movie") {
+      const m = await this.tmdb.movie(tmdbId);
+      this.applyMatch(fileId, { type, tmdbId, title: m.title, year: yearOf(m.release_date), posterPath: m.poster_path ?? null, backdropPath: m.backdrop_path ?? null }, undefined, undefined, "manual");
+    } else {
+      if (season === undefined || episode === undefined) throw new Error("season and episode are required for shows");
+      const s = await this.tmdb.show(tmdbId);
+      this.applyMatch(fileId, { type, tmdbId, title: s.name, year: yearOf(s.first_air_date), posterPath: s.poster_path ?? null, backdropPath: s.backdrop_path ?? null }, season, episode, "manual");
+    }
+  }
+
+  ignore(fileId: number) {
+    this.db.update(files).set({ matchStatus: "ignored", mediaType: null, tmdbId: null, updatedAt: Date.now() }).where(eq(files.id, fileId)).run();
+  }
+
+  private applyMatch(fileId: number, m: MatchResult, season: number | undefined, episode: number | undefined, status: MatchStatus) {
+    this.db.transaction((tx) => {
+      tx.update(files)
+        .set({
+          mediaType: m.type === "movie" ? "movie" : "episode",
+          tmdbId: m.tmdbId,
+          season: m.type === "show" ? (season ?? null) : null,
+          episode: m.type === "show" ? (episode ?? null) : null,
+          matchStatus: status,
+          updatedAt: Date.now(),
+        })
+        .where(eq(files.id, fileId))
+        .run();
+      tx.insert(mediaItems)
+        .values({ type: m.type, tmdbId: m.tmdbId, title: m.title, year: m.year, posterPath: m.posterPath, backdropPath: m.backdropPath })
+        .onConflictDoNothing()
+        .run();
+    });
+  }
+
+  saveProbe(fileId: number, info: MediaInfo) {
+    this.db.update(files).set({ probeJson: JSON.stringify(info) }).where(eq(files.id, fileId)).run();
+  }
+
+  get(fileId: number): FileRow | undefined {
+    return this.db.select().from(files).where(eq(files.id, fileId)).get();
+  }
+
+  filesFor(mediaType: "movie" | "episode", tmdbId: number, season?: number, episode?: number): FileRow[] {
+    const conditions = [eq(files.mediaType, mediaType), eq(files.tmdbId, tmdbId), eq(files.missing, false), notInArray(files.matchStatus, ["ignored", "pending", "unmatched"])];
+    if (season !== undefined) conditions.push(eq(files.season, season));
+    if (episode !== undefined) conditions.push(eq(files.episode, episode));
+    return this.db.select().from(files).where(and(...conditions)).all();
+  }
+
+  /** Providers available per title, for badges on catalog cards. */
+  availability(type: "movie" | "show", tmdbIds: number[]): Map<number, FileProvider[]> {
+    const out = new Map<number, FileProvider[]>();
+    if (tmdbIds.length === 0) return out;
+    const rows = this.db
+      .selectDistinct({ tmdbId: files.tmdbId, provider: files.provider })
+      .from(files)
+      .where(and(eq(files.mediaType, type === "movie" ? "movie" : "episode"), inArray(files.tmdbId, tmdbIds), eq(files.missing, false), inArray(files.matchStatus, ["matched", "manual"])))
+      .all();
+    for (const row of rows) {
+      const list = out.get(row.tmdbId!) ?? [];
+      list.push(row.provider);
+      out.set(row.tmdbId!, list);
+    }
+    return out;
+  }
+
+  recentlyAdded(type: "movie" | "show", limit = 20) {
+    return this.db.select().from(mediaItems).where(eq(mediaItems.type, type)).orderBy(desc(mediaItems.addedAt)).limit(limit).all();
+  }
+
+  list(opts: { status?: MatchStatus; provider?: FileProvider; limit: number; offset: number }) {
+    const conditions = [eq(files.missing, false)];
+    if (opts.status) conditions.push(eq(files.matchStatus, opts.status));
+    if (opts.provider) conditions.push(eq(files.provider, opts.provider));
+    const where = and(...conditions);
+    const rows = this.db
+      .select({ file: files, title: mediaItems.title, year: mediaItems.year })
+      .from(files)
+      .leftJoin(mediaItems, and(eq(mediaItems.tmdbId, files.tmdbId), eq(mediaItems.type, sql`CASE ${files.mediaType} WHEN 'movie' THEN 'movie' ELSE 'show' END`)))
+      .where(where)
+      .orderBy(files.name)
+      .limit(opts.limit)
+      .offset(opts.offset)
+      .all();
+    const total = this.db.select({ n: sql<number>`count(*)` }).from(files).where(where).get()?.n ?? 0;
+    return { rows, total };
+  }
+
+  /** Puts an ignored file back into matching. */
+  unignore(fileId: number) {
+    this.db.update(files).set({ matchStatus: "pending", updatedAt: Date.now() }).where(and(eq(files.id, fileId), eq(files.matchStatus, "ignored"))).run();
+  }
+
+  titleOf(type: "movie" | "show", tmdbId: number): string | null {
+    return this.db.select({ title: mediaItems.title }).from(mediaItems).where(and(eq(mediaItems.type, type), eq(mediaItems.tmdbId, tmdbId))).get()?.title ?? null;
+  }
+
+  stats() {
+    const rows = this.db
+      .select({ provider: files.provider, status: files.matchStatus, count: sql<number>`count(*)` })
+      .from(files)
+      .where(eq(files.missing, false))
+      .groupBy(files.provider, files.matchStatus)
+      .all();
+    const items = this.db.select({ type: mediaItems.type, count: sql<number>`count(*)` }).from(mediaItems).groupBy(mediaItems.type).all();
+    return { files: rows, titles: Object.fromEntries(items.map((r) => [r.type, r.count])) };
+  }
+
+  /** Removes media_items with no remaining playable files (after deletions). */
+  pruneOrphans() {
+    this.db.run(sql`
+      DELETE FROM media_items WHERE NOT EXISTS (
+        SELECT 1 FROM files f WHERE f.tmdb_id = media_items.tmdb_id AND f.missing = 0
+          AND f.match_status IN ('matched','manual')
+          AND f.media_type = CASE media_items.type WHEN 'movie' THEN 'movie' ELSE 'episode' END
+      )`);
+  }
+}

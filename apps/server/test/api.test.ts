@@ -1,0 +1,129 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { join } from "node:path";
+import { makeFixtures, startTestServer, type TestServer } from "./helpers";
+
+let server: TestServer;
+let token: string;
+let media: string;
+const json = async (res: Response) => (await res.json()) as any;
+
+beforeAll(async () => {
+  media = await makeFixtures();
+  server = await startTestServer();
+}, 60_000);
+
+afterAll(() => server.services.shutdown());
+
+describe("setup and auth", () => {
+  test("info reports setup required", async () => {
+    const info = await json(await server.request("/api/info"));
+    expect(info).toMatchObject({ name: "strata", setupRequired: true, apiVersion: 1 });
+  });
+
+  test("protected routes need a token", async () => {
+    expect((await server.request("/api/home")).status).toBe(401);
+    expect((await server.request("/api/admin/status")).status).toBe(401);
+  });
+
+  test("first admin is created once", async () => {
+    const res = await server.request("/api/setup/admin", { method: "POST", json: { username: "sehal", password: "correct-horse" } });
+    expect(res.status).toBe(200);
+    token = (await json(res)).token;
+    const again = await server.request("/api/setup/admin", { method: "POST", json: { username: "x", password: "another-pass" } });
+    expect(again.status).toBe(409);
+  });
+
+  test("login, and the single profile is auto-selected", async () => {
+    expect((await server.request("/api/auth/login", { method: "POST", json: { username: "sehal", password: "nope" } })).status).toBe(401);
+    const res = await server.request("/api/auth/login", { method: "POST", json: { username: "sehal", password: "correct-horse" } });
+    token = (await json(res)).token;
+    const me = await json(await server.request("/api/me", { token }));
+    expect(me.user).toMatchObject({ username: "sehal", isAdmin: true });
+    expect(me.profile.name).toBe("sehal");
+  });
+
+  test("PIN-protected profile", async () => {
+    const created = await json(await server.request("/api/profiles", { method: "POST", token, json: { name: "Kids", pin: "1234" } }));
+    expect(created.hasPin).toBe(true);
+    const wrong = await server.request(`/api/profiles/${created.id}/select`, { method: "POST", token, json: { pin: "0000" } });
+    expect(wrong.status).toBe(403);
+    const right = await server.request(`/api/profiles/${created.id}/select`, { method: "POST", token, json: { pin: "1234" } });
+    expect(right.status).toBe(200);
+    // Back to the main profile for the rest of the suite.
+    await server.request(`/api/profiles/1/select`, { method: "POST", token, json: {} });
+  });
+});
+
+describe("library", () => {
+  test("settings and folder scan", async () => {
+    const res = await server.request("/api/admin/settings", {
+      method: "PATCH",
+      token,
+      json: { mediaFolders: [{ path: join(media, "Movies"), kind: "movies" }, { path: join(media, "Shows"), kind: "shows" }] },
+    });
+    expect(res.status).toBe(200);
+    await server.services.jobs.run("scanLocal");
+    const files = (await json(await server.request("/api/admin/files", { token }))).items;
+    expect(files).toHaveLength(3);
+    expect(files.every((f: any) => f.matchStatus === "matched")).toBe(true);
+  });
+
+  test("home shows library shelves with availability", async () => {
+    const { shelves } = await json(await server.request("/api/home", { token }));
+    const ids = shelves.map((s: any) => s.id);
+    expect(ids).toContain("libraryMovies");
+    expect(ids).toContain("libraryShows");
+    const trending = shelves.find((s: any) => s.id === "trendingMovies");
+    expect(trending.items[0].available).toEqual(["local"]);
+  });
+
+  test("season detail marks available episodes", async () => {
+    const season = await json(await server.request("/api/titles/show/9001/seasons/1", { token }));
+    expect(season.episodes.map((e: any) => e.available)).toEqual([["local"], ["local"]]);
+  });
+});
+
+describe("playback", () => {
+  test("mp4 + aac direct plays with byte ranges", async () => {
+    const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 1 } }));
+    expect(play.mode).toBe("direct");
+    const res = await server.request(play.url, { headers: { Range: "bytes=0-99" } });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("content-range")).toMatch(/^bytes 0-99\//);
+    expect((await res.arrayBuffer()).byteLength).toBe(100);
+  });
+
+  test("mkv remuxes to HLS from the resume point", async () => {
+    await server.request("/api/progress", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, positionMs: 90_000, durationMs: 3_600_000 } });
+    const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378 } }));
+    expect(play.mode).toBe("remux");
+    // Resume is clamped to 10 s before the (30 s) file's end.
+    expect(play.startOffsetMs).toBe(20_000);
+    const playlist = await server.request(play.url);
+    expect(playlist.status).toBe(200);
+    const text = await playlist.text();
+    expect(text).toContain("#EXT-X-MAP:URI=\"init.mp4\"");
+    const segment = await server.request(play.url.replace("stream.m3u8", "seg00000.m4s"));
+    expect(segment.status).toBe(200);
+    expect((await segment.arrayBuffer()).byteLength).toBeGreaterThan(1000);
+    expect((await server.request(`/api/play/${play.sessionId}`, { method: "DELETE", token })).status).toBe(200);
+  }, 30_000);
+
+  test("DTS audio is transcoded", async () => {
+    const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 2 } }));
+    expect(play.mode).toBe("remux");
+    expect(play.reasons.join(" ")).toContain("audio dts");
+    const res = await server.request(play.url.replace("stream.m3u8", "init.mp4"));
+    expect(res.status).toBe(200);
+    server.services.sessions.stop(play.sessionId);
+  }, 30_000);
+
+  test("progress feeds continue watching and next up", async () => {
+    await server.request("/api/progress", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 1, positionMs: 29_000, durationMs: 30_000 } });
+    const { shelves } = await json(await server.request("/api/home", { token }));
+    const cont = shelves.find((s: any) => s.id === "continue");
+    expect(cont.items[0]).toMatchObject({ type: "movie", tmdbId: 10378, positionMs: 90_000 });
+    const next = shelves.find((s: any) => s.id === "nextUp");
+    expect(next.items[0]).toMatchObject({ type: "show", tmdbId: 9001, episode: { season: 1, episode: 2 } });
+  });
+});
