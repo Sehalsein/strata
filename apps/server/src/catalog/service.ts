@@ -1,6 +1,6 @@
 import type { FileProvider } from "../db/schema";
 import type { Library } from "../library";
-import type { ProgressRow, ProgressStore } from "../progress";
+import { isResumable, type ProgressRow, type ProgressStore } from "../progress";
 import type { Settings } from "../settings";
 import { findCandidates, type Candidate } from "../sources/resolver";
 import { imageUrl, yearOf, type Tmdb, type TmdbCredits, type TmdbListItem, type TmdbMovie, type TmdbShow } from "./tmdb";
@@ -268,7 +268,7 @@ export class CatalogService {
   }
 
   private async showUpNext(show: TmdbShow, watched: ProgressRow[]) {
-    const inProgress = watched.filter((w) => !w.completed && w.positionMs > 60_000).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    const inProgress = watched.filter(isResumable).sort((a, b) => b.updatedAt - a.updatedAt)[0];
     if (inProgress) return { season: inProgress.season, episode: inProgress.episode, positionMs: inProgress.positionMs };
     const furthest = watched.filter((w) => w.completed).sort((a, b) => b.season - a.season || b.episode - a.episode)[0];
     if (furthest) {

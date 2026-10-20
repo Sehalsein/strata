@@ -5,6 +5,7 @@ import StrataPlayerUI
 
 struct MovieDetailView: View {
     @Environment(AppServices.self) private var services
+    @Environment(\.dismiss) private var dismiss
     let tmdbId: Int
     @State private var detail: Loadable<MovieDetail> = .loading
     @State private var inWatchlist = false
@@ -29,17 +30,20 @@ struct MovieDetailView: View {
         .ignoresSafeArea(edges: .top)
         #if os(tvOS)
         .toolbar(.hidden, for: .tabBar)
+        .overlay(alignment: .topLeading) { TVBackButton { dismiss() } }
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task { await load() }
+        .onChange(of: services.progressRevision) { Task { await load() } }
     }
 
     @ViewBuilder private func content(_ movie: MovieDetail) -> some View {
         VStack(alignment: .leading, spacing: Metrics.railGap) {
             HeroBillboard(id: movie.id,
                           backdropURL: movie.backdropUrl,
+                          fallbackURL: movie.posterUrl,
                           eyebrow: movie.availabilityLabel ?? "Movie",
                           title: movie.title,
                           meta: [movie.yearText, movie.runtimeText, movie.certification].compactMap { $0 },
@@ -180,3 +184,20 @@ struct InfoGrid: View {
         }
     }
 }
+
+#if os(tvOS)
+/// tvOS has no navigation bar on full-screen detail pages, so this gives a visible
+/// way back alongside the remote's Menu button.
+struct TVBackButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        // Lines up with the title's left edge (the page bleeds under the side safe
+        // area, so the gutter alone is the inset) and sits at the top safe margin.
+        GlassButton("Back", systemImage: "chevron.left", iconOnly: true, action: action)
+            .padding(.leading, Metrics.gutter)
+            .padding(.top, 60)
+            .ignoresSafeArea()
+    }
+}
+#endif

@@ -42,6 +42,27 @@ describe("setup and auth", () => {
     expect(me.profile.name).toBe("sehal");
   });
 
+  test("a TV signs in by code once a signed-in phone approves it", async () => {
+    const start = await json(await server.request("/api/auth/device", { method: "POST", json: { deviceName: "Living Room Apple TV" } }));
+    expect(start.code).toMatch(/^[A-Z2-9]{8}$/);
+    const poll = () => server.request("/api/auth/device/poll", { method: "POST", json: { pollToken: start.pollToken } }).then(json);
+    expect(await poll()).toEqual({ status: "pending" });
+
+    // Looking up and approving need a signed-in phone; lower-case and dashes are fine.
+    const typed = `${start.code.slice(0, 4)}-${start.code.slice(4)}`.toLowerCase();
+    expect((await server.request(`/api/auth/device/${typed}`)).status).toBe(401);
+    expect(await json(await server.request(`/api/auth/device/${typed}`, { token }))).toMatchObject({ deviceName: "Living Room Apple TV" });
+    expect((await server.request(`/api/auth/device/${typed}/approve`, { method: "POST", token })).status).toBe(200);
+
+    const approved = await poll();
+    expect(approved.status).toBe("approved");
+    expect((await server.request("/api/me", { token: approved.token })).status).toBe(200);
+
+    // Single use: the token is handed over once and the code is gone.
+    expect(await poll()).toEqual({ status: "expired" });
+    expect((await server.request(`/api/auth/device/${start.code}/approve`, { method: "POST", token })).status).toBe(404);
+  });
+
   test("PIN-protected profile", async () => {
     const created = await json(await server.request("/api/profiles", { method: "POST", token, json: { name: "Kids", pin: "1234" } }));
     expect(created.hasPin).toBe(true);

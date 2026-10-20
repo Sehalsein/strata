@@ -43,6 +43,35 @@ export const authRoutes = new Hono<Env>()
     return c.json({ token });
   })
 
+  // Sign-in by code (QR on a TV). Start and poll are public: the TV isn't signed in yet.
+  .post("/auth/device", async (c) => {
+    const { deviceName } = await body(c, z.object({ deviceName: z.string().trim().min(1).max(128).optional() }).default({}));
+    const link = c.var.services.deviceLinks.start(deviceName ?? "TV");
+    if (!link) throw new HTTPException(429, { message: "Too many sign-in codes waiting. Try again in a few minutes." });
+    return c.json({ ...link, pollIntervalMs: 2000 });
+  })
+
+  // POST so the poll token stays out of URLs and access logs.
+  .post("/auth/device/poll", async (c) => {
+    const { pollToken } = await body(c, z.object({ pollToken: z.string().min(1).max(128) }));
+    return c.json(c.var.services.deviceLinks.poll(pollToken));
+  })
+
+  // The approving phone shows which device it's about to sign in before confirming.
+  .get("/auth/device/:code", requireAuth, (c) => {
+    const pending = c.var.services.deviceLinks.pending(c.req.param("code"));
+    if (!pending) throw new HTTPException(404, { message: "That code has expired or was already used. Show a new one on the TV." });
+    return c.json(pending);
+  })
+
+  .post("/auth/device/:code/approve", requireAuth, (c) => {
+    const s = c.var.services;
+    const userId = c.var.session.user.id;
+    const ok = s.deviceLinks.approve(c.req.param("code"), (deviceName) => s.auth.issue(userId, deviceName));
+    if (!ok) throw new HTTPException(404, { message: "That code has expired or was already used. Show a new one on the TV." });
+    return c.json({ ok: true });
+  })
+
   .post("/auth/logout", requireAuth, (c) => {
     c.var.services.auth.logout(c.var.session.tokenHash);
     return c.json({ ok: true });

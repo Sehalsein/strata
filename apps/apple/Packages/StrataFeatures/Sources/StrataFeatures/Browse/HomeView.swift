@@ -50,6 +50,7 @@ struct HomeView: View {
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
         .task { await load(force: false) }
+        .onChange(of: services.progressRevision) { Task { await load(force: false) } }
     }
 
     private func load(force: Bool) async {
@@ -87,6 +88,12 @@ struct ShelfRail: View {
                     .contextMenu {
                         NavigationLink(value: card.route) { Label(card.type == .show ? "Go to Show" : "Go to Movie", systemImage: "info.circle") }
                         Button { if let r = card.watchRequest(restart: true) { services.play(r) } } label: { Label("Play from Beginning", systemImage: "arrow.counterclockwise") }
+                        if let target = card.watchRequest()?.target {
+                            Button { setWatched(target, true) } label: { Label("Mark as Watched", systemImage: "checkmark.circle") }
+                            if shelf.id == "continue" {
+                                Button(role: .destructive) { setWatched(target, false) } label: { Label("Remove from Continue Watching", systemImage: "minus.circle") }
+                            }
+                        }
                     }
                 } else {
                     NavigationLink(value: card.route) {
@@ -97,31 +104,37 @@ struct ShelfRail: View {
             }
         }
     }
+
+    /// Watched marks the item done; unwatched clears its progress, so either way it leaves the rail.
+    private func setWatched(_ target: PlaybackTarget, _ watched: Bool) {
+        Task {
+            _ = await services.load { try await $0.setWatched(target, watched) }
+            await services.progressChanged()
+        }
+    }
 }
 
 /// Poster artwork and caption for a title, for use inside a NavigationLink.
 struct PosterCardLabel: View {
     let card: TitleCard
+    /// Fixed width in rails; `nil` fills the cell in a grid.
+    var width: CGFloat? = Metrics.posterWidth
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space2) {
             ArtworkImage(url: card.posterUrl, aspectRatio: 2 / 3, seed: card.id, title: card.title)
             VStack(alignment: .leading, spacing: 2) {
                 Text(card.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
-                HStack(spacing: Metrics.space2) {
-                    if let provider = card.providerKinds.first {
-                        Circle().fill(provider.color).frame(width: 6, height: 6).accessibilityLabel("On \(provider.label)")
-                    }
-                    if let year = card.yearText { Text(year) }
+                if let year = card.yearText {
+                    Text(year).font(.stFootnote).foregroundStyle(Theme.ink3)
                 }
-                .font(.stFootnote)
-                .foregroundStyle(Theme.ink3)
             }
             #if os(tvOS)
             .opacity(0.9)
             #endif
         }
-        .frame(width: Metrics.posterWidth)
+        .frame(width: width)
+        .frame(maxWidth: width == nil ? .infinity : nil)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([card.title, card.yearText, card.providerKinds.first.map { "on \($0.label)" }].compactMap { $0 }.joined(separator: ", "))

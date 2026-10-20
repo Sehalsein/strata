@@ -49,7 +49,7 @@ public struct PosterGrid<Content: View>: View {
     public init(@ViewBuilder content: @escaping () -> Content) { self.content = content }
 
     public var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: Metrics.posterWidth, maximum: Metrics.posterWidth * 1.35), spacing: Metrics.cardGap, alignment: .top)],
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: Metrics.posterWidth), spacing: Metrics.cardGap, alignment: .top)],
                   alignment: .leading, spacing: Metrics.space8) {
             content()
         }

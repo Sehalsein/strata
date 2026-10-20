@@ -178,26 +178,8 @@ public final class ServerStore {
             }
             let anon = StrataClient(baseURL: url, session: session)
             let token = try await anon.login(username: username.trimmingCharacters(in: .whitespaces), password: password)
-            let authed = anon.withToken(token)
-            let me = try await authed.me()
-
-            var server = servers.first { $0.id == info.id } ?? SavedServer(id: info.id, name: info.serverName, addresses: [], username: me.user.username)
-            if let old = tokens.read(server.id), old != token, let oldURL = server.addresses.first {
-                // Replace the previous session on that server (best-effort).
-                let previous = StrataClient(baseURL: oldURL, token: old, session: session, cacheTTL: 0)
-                Task { try? await previous.logout() }
-            }
-            server.name = info.serverName
-            server.version = info.version
-            server.username = me.user.username
-            server.isAdmin = me.user.isAdmin
-            server.addresses = [url] + server.addresses.filter { $0 != url }
-            server.profileId = me.profile?.id
-            server.profileName = me.profile?.name
-            tokens.write(token, server.id)
-            upsert(server)
-            activate(server.id)
-            Log.auth.info("signIn ok server=\(server.id, privacy: .public) user=\(server.username, privacy: .private)")
+            try await adopt(token: token, url: url, info: info)
+            Log.auth.info("signIn ok server=\(info.id, privacy: .public)")
             return true
         } catch {
             let e = StrataError.wrap(error)
@@ -205,6 +187,52 @@ public final class ServerStore {
             Log.auth.error("signIn failed: \(e.message, privacy: .public)")
             return false
         }
+    }
+
+    /// Finishes a sign-in that produced `token` some other way (a TV approved by
+    /// code from a phone): saves the server and makes it active.
+    @discardableResult
+    public func signIn(token: String, url: URL, info: ServerInfo) async -> Bool {
+        lastError = nil
+        do {
+            try await adopt(token: token, url: url, info: info)
+            Log.auth.info("signIn by code ok server=\(info.id, privacy: .public)")
+            return true
+        } catch {
+            lastError = StrataError.wrap(error).message
+            return false
+        }
+    }
+
+    /// The client for a saved server other than (or the same as) the active one.
+    public func client(forServer id: String) -> StrataClient? {
+        guard let server = servers.first(where: { $0.id == id }), let url = server.addresses.first, let token = tokens.read(id) else { return nil }
+        if id == activeID, let client { return client }
+        return StrataClient(baseURL: url, token: token, session: session, cacheTTL: 0)
+    }
+
+    /// Saves `token` for the server at `url` and makes it active. Re-signing in to a
+    /// known server (same id) updates it in place and adds the new address.
+    private func adopt(token: String, url: URL, info: ServerInfo) async throws {
+        let authed = StrataClient(baseURL: url, token: token, session: session)
+        let me = try await authed.me()
+
+        var server = servers.first { $0.id == info.id } ?? SavedServer(id: info.id, name: info.serverName, addresses: [], username: me.user.username)
+        if let old = tokens.read(server.id), old != token, let oldURL = server.addresses.first {
+            // Replace the previous session on that server (best-effort).
+            let previous = StrataClient(baseURL: oldURL, token: old, session: session, cacheTTL: 0)
+            Task { try? await previous.logout() }
+        }
+        server.name = info.serverName
+        server.version = info.version
+        server.username = me.user.username
+        server.isAdmin = me.user.isAdmin
+        server.addresses = [url] + server.addresses.filter { $0 != url }
+        server.profileId = me.profile?.id
+        server.profileName = me.profile?.name
+        tokens.write(token, server.id)
+        upsert(server)
+        activate(server.id)
     }
 
     /// Logs out of the active server and forgets it. Switches to another saved server if any.

@@ -8,6 +8,7 @@ import UIKit
 public struct HeroBillboard<Actions: View>: View {
     let id: String
     let backdropURL: URL?
+    let fallbackURL: URL?
     let eyebrow: String?
     let title: String
     let meta: [String]
@@ -15,9 +16,10 @@ public struct HeroBillboard<Actions: View>: View {
     let overview: String?
     @ViewBuilder let actions: () -> Actions
 
-    public init(id: String, backdropURL: URL?, eyebrow: String? = nil, title: String, meta: [String] = [], badges: [String] = [], overview: String? = nil, @ViewBuilder actions: @escaping () -> Actions) {
+    public init(id: String, backdropURL: URL?, fallbackURL: URL? = nil, eyebrow: String? = nil, title: String, meta: [String] = [], badges: [String] = [], overview: String? = nil, @ViewBuilder actions: @escaping () -> Actions) {
         self.id = id
         self.backdropURL = backdropURL
+        self.fallbackURL = fallbackURL
         self.eyebrow = eyebrow
         self.title = title
         self.meta = meta
@@ -54,12 +56,16 @@ public struct HeroBillboard<Actions: View>: View {
         #endif
     }
 
+    /// The backdrop; without one, the poster blurred to fill; without either, a
+    /// full-bleed placeholder. Whichever it is runs to the top edge of the page.
     private var backdrop: some View {
-        AsyncImage(url: backdropURL, transaction: Transaction(animation: .easeOut(duration: 0.3))) { phase in
+        let blurred = backdropURL == nil
+        return AsyncImage(url: backdropURL ?? fallbackURL, transaction: Transaction(animation: .easeOut(duration: 0.3))) { phase in
             if case .success(let image) = phase {
                 image.resizable().scaledToFill()
+                    .blur(radius: blurred ? 40 : 0, opaque: true)
             } else {
-                StrataPlaceholder(seed: id)
+                StrataPlaceholder.hero(seed: id)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -137,7 +143,8 @@ public struct HeroBillboard<Actions: View>: View {
             actionRow.padding(.top, Metrics.space2)
         }
         .padding(.horizontal, Metrics.gutter)
-        .padding(.bottom, Metrics.space8)
+        // The page's section gap follows, so only a small inset here.
+        .padding(.bottom, Metrics.space2)
     }
     #endif
 }

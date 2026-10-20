@@ -1,12 +1,32 @@
-import { and, desc, eq, gt, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "./db";
 import { progress, watchlist } from "./db/schema";
 
 export type ProgressRow = typeof progress.$inferSelect;
 
-/** A title counts as watched once this fraction is played or under 3 minutes remain. */
+/**
+ * A title counts as watched once this fraction is played, or, for anything long
+ * enough to have end credits, once under 3 minutes remain.
+ */
 const COMPLETE_RATIO = 0.92;
 const COMPLETE_REMAINING_MS = 180_000;
+const CREDITS_MIN_DURATION_MS = 20 * 60_000;
+
+/** Worth resuming once a minute in, or 5% in for short titles (never under 5s). */
+const RESUME_MIN_MS = 60_000;
+const RESUME_MIN_RATIO = 0.05;
+const RESUME_FLOOR_MS = 5_000;
+
+export function isComplete(positionMs: number, durationMs: number): boolean {
+  if (durationMs <= 0) return false;
+  if (positionMs / durationMs >= COMPLETE_RATIO) return true;
+  return durationMs >= CREDITS_MIN_DURATION_MS && durationMs - positionMs <= COMPLETE_REMAINING_MS;
+}
+
+export function isResumable(row: Pick<ProgressRow, "positionMs" | "durationMs" | "completed">): boolean {
+  if (row.completed || row.positionMs <= RESUME_FLOOR_MS) return false;
+  return row.positionMs >= RESUME_MIN_MS || (row.durationMs > 0 && row.positionMs >= row.durationMs * RESUME_MIN_RATIO);
+}
 
 export interface ProgressKey {
   mediaType: "movie" | "episode";
@@ -19,7 +39,7 @@ export class ProgressStore {
   constructor(private readonly db: Db) {}
 
   record(profileId: number, key: ProgressKey, positionMs: number, durationMs: number): ProgressRow {
-    const completed = durationMs > 0 && (positionMs / durationMs >= COMPLETE_RATIO || durationMs - positionMs <= COMPLETE_REMAINING_MS);
+    const completed = isComplete(positionMs, durationMs);
     const values = {
       profileId,
       mediaType: key.mediaType,
@@ -71,7 +91,14 @@ export class ProgressStore {
     return this.db
       .select()
       .from(progress)
-      .where(and(eq(progress.profileId, profileId), eq(progress.completed, false), gt(progress.positionMs, 60_000)))
+      .where(
+        and(
+          eq(progress.profileId, profileId),
+          eq(progress.completed, false),
+          // Same rule as isResumable().
+          sql`${progress.positionMs} > ${RESUME_FLOOR_MS} AND (${progress.positionMs} >= ${RESUME_MIN_MS} OR ${progress.positionMs} >= ${progress.durationMs} * ${RESUME_MIN_RATIO})`,
+        ),
+      )
       .orderBy(desc(progress.updatedAt))
       .limit(limit)
       .all();

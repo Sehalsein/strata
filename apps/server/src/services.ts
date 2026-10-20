@@ -13,6 +13,7 @@ import { SessionManager } from "./playback/sessions";
 import { detectFfmpeg, type FfmpegInfo } from "./platform/ffmpeg";
 import { KeepAwake } from "./platform/keepAwake";
 import { ProgressStore } from "./progress";
+import { DeviceLinks } from "./deviceLink";
 import { SecretBox } from "./secrets";
 import { SettingsStore } from "./settings";
 import { scanLocal } from "./sources/local/scanner";
@@ -34,6 +35,7 @@ export interface Services {
   db: Db;
   settings: SettingsStore;
   auth: Auth;
+  deviceLinks: DeviceLinks;
   tmdb: Tmdb;
   library: Library;
   progress: ProgressStore;
@@ -138,5 +140,5 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     log.info("Stopped");
   };
 
-  return { config, paths, db, settings, auth: new Auth(db), tmdb, library, progress, catalog, sessions, playback, discovery, subtitles, jobs, serverId, bonjour, updater, ffmpeg, torbox, startedAt: Date.now(), shutdown };
+  return { config, paths, db, settings, auth: new Auth(db), deviceLinks: new DeviceLinks(), tmdb, library, progress, catalog, sessions, playback, discovery, subtitles, jobs, serverId, bonjour, updater, ffmpeg, torbox, startedAt: Date.now(), shutdown };
 }

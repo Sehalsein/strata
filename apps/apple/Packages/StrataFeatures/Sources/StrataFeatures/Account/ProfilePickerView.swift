@@ -12,6 +12,9 @@ struct ProfilePickerView: View {
     @State private var pinFor: Profile?
     @State private var pin = ""
     @State private var pinError: String?
+    /// Profiles load after the screen appears; without this, tvOS focus lands on
+    /// "Use a different server" (the only button at first) and one click signs out.
+    @FocusState private var focusedProfile: Int?
 
     #if os(tvOS)
     private let avatarSize: CGFloat = 160
@@ -48,6 +51,7 @@ struct ProfilePickerView: View {
                                 }
                             }
                             .buttonStyle(StrataCardStyle())
+                            .focused($focusedProfile, equals: profile.id)
                         }
                         Spacer(minLength: 0)
                     }
@@ -61,13 +65,20 @@ struct ProfilePickerView: View {
                     Task { await services.store.signOut() }
                 }
                 .font(.stCallout)
+                #if os(tvOS)
+                .padding(.top, Metrics.space8)
+                #else
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.accentText)
+                #endif
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.bg.ignoresSafeArea())
         .task { await load() }
+        .onChange(of: profiles.value?.first?.id) { _, first in
+            if focusedProfile == nil { focusedProfile = first }
+        }
         .alert("Enter PIN for \(pinFor?.name ?? "")", isPresented: Binding(get: { pinFor != nil }, set: { if !$0 { pinFor = nil } })) {
             SecureField("PIN", text: $pin)
                 #if os(iOS)

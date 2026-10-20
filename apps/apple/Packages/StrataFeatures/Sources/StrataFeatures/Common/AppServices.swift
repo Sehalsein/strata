@@ -16,6 +16,14 @@ public final class AppServices {
 
     /// What the full-screen player is showing, if anything.
     public var watching: WatchRequest?
+    /// Bumped after playback stops and its final position is saved, so screens
+    /// showing progress (Continue Watching, Resume buttons) can reload.
+    public private(set) var progressRevision = 0
+
+    public func progressChanged() async {
+        await client?.clearCache()
+        progressRevision += 1
+    }
 
     public init(store: ServerStore? = nil) {
         self.store = store ?? ServerStore()
@@ -115,14 +123,24 @@ public extension Array where Element == Provider {
     var kinds: [ProviderKind] { compactMap { ProviderKind(rawValue: $0.rawValue) } }
 }
 
+/// A TV's sign-in code to approve, from a scanned QR code or typed in Settings.
+public struct LinkRequest: Identifiable, Hashable {
+    public let code: String
+    /// The server the TV is signing in to; nil means the active one.
+    public let serverID: String?
+    public var id: String { code }
+}
+
 /// Handles `strata://` deep links:
 /// `strata://movie/<id>`, `strata://show/<id>`,
-/// `strata://watch/movie/<id>`, `strata://watch/episode/<show>/<season>/<episode>`.
+/// `strata://watch/movie/<id>`, `strata://watch/episode/<show>/<season>/<episode>`,
+/// `strata://link?code=<code>&server=<id>` (approve a TV's sign-in).
 @MainActor
 @Observable
 public final class AppCoordinator {
     public var pendingRoute: Route?
     public var pendingWatch: PlaybackTarget?
+    public var pendingLink: LinkRequest?
 
     public init() {}
 
@@ -136,6 +154,12 @@ public final class AppCoordinator {
             let kind = url.pathComponents.dropFirst().first
             if kind == "movie", let id = parts.first { pendingWatch = .movie(id) }
             if kind == "episode", parts.count == 3 { pendingWatch = .episode(show: parts[0], season: parts[1], episode: parts[2]) }
+        case "link":
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
+            if let code = value("code"), !DeviceLink.normalize(code).isEmpty {
+                pendingLink = LinkRequest(code: DeviceLink.normalize(code), serverID: value("server"))
+            }
         default: break
         }
     }

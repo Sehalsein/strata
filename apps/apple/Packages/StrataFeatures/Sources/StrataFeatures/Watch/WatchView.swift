@@ -108,7 +108,10 @@ struct WatchView: View {
         }
         .onDisappear {
             hideTask?.cancel()
-            Task { await engine.unload() }
+            Task {
+                await engine.unload()
+                await services.progressChanged()
+            }
         }
     }
 

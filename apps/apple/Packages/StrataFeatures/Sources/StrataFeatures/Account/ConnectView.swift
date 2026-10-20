@@ -13,6 +13,13 @@ struct ConnectView: View {
     @State private var probing: String?
     @State private var error: String?
     @State private var signInTarget: SignInTarget?
+    @State private var codeTarget: ServerTarget?
+
+    #if os(tvOS)
+    static let columnWidth: CGFloat = 960
+    #else
+    static let columnWidth: CGFloat = 560
+    #endif
 
     struct SignInTarget: Identifiable, Hashable {
         let address: String
@@ -28,7 +35,7 @@ struct ConnectView: View {
                     discovered
                     manual
                 }
-                .frame(maxWidth: 560, alignment: .leading)
+                .frame(maxWidth: Self.columnWidth, alignment: .leading)
                 .padding(.horizontal, Metrics.gutter)
                 .padding(.vertical, Metrics.space8)
                 .frame(maxWidth: .infinity)
@@ -45,6 +52,14 @@ struct ConnectView: View {
                     if isAddingServer { dismiss() }
                 }
             }
+            #if os(tvOS)
+            .navigationDestination(item: $codeTarget) { target in
+                TVCodeSignInView(target: target) {
+                    services.refreshClient()
+                    if isAddingServer { dismiss() }
+                }
+            }
+            #endif
         }
         .onAppear { services.browser.start() }
         .onDisappear { services.browser.stop() }
@@ -153,7 +168,12 @@ struct ConnectView: View {
                 error = "\(info.serverName) isn't set up yet. Open \(url.absoluteString) in a browser to finish setup, then try again."
                 return
             }
+            #if os(tvOS)
+            // Typing a password with the remote is slow; scanning a code with a phone isn't.
+            codeTarget = ServerTarget(url: url, info: info)
+            #else
             signInTarget = SignInTarget(address: url.absoluteString, name: info.serverName)
+            #endif
         } catch {
             self.error = StrataError.wrap(error).message
         }

@@ -71,6 +71,19 @@ public struct StrataPlaceholder: View {
         }
     }
 
+    /// Full-bleed fill for heroes: the colored layer runs from the top edge so the
+    /// art reads as reaching the top of the page.
+    public static func hero(seed: String) -> some View {
+        let tints = [Theme.apricot, Theme.local, Theme.torbox, Theme.rust]
+        let tint = tints[index(for: seed, count: tints.count)]
+        return LinearGradient(stops: [
+            .init(color: tint.opacity(0.75), location: 0),
+            .init(color: tint.opacity(0.35), location: 0.55),
+            .init(color: Theme.bg, location: 1),
+        ], startPoint: .topTrailing, endPoint: .bottomLeading)
+        .background(Theme.surface1)
+    }
+
     private static let variants: [(Color, Color, Color)] = [
         (Theme.surface2, Theme.surface3, Theme.surface1),
         (Theme.rust, Theme.apricot, Theme.sand),

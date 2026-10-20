@@ -21,9 +21,12 @@ public struct RootView: View {
             }
         }
         .background(Theme.bg.ignoresSafeArea())
-        .tint(Theme.accentText)
         #if os(tvOS)
+        // Focused tvOS controls turn white; an apricot label on white doesn't read,
+        // so tvOS keeps the system's own focus colors.
         .preferredColorScheme(.dark)
+        #else
+        .tint(Theme.accentText)
         #endif
         .task {
             guard !didConnect else { return }
@@ -40,10 +43,16 @@ public struct RootView: View {
         .fullScreenCover(item: Binding(get: { services.watching }, set: { services.watching = $0 })) { request in
             WatchView(request: request)
         }
+        #if os(iOS)
+        // A TV's QR code was scanned: confirm and approve its sign-in.
+        .sheet(item: Binding(get: { services.coordinator.pendingLink }, set: { services.coordinator.pendingLink = $0 })) { request in
+            ApproveDeviceView(request: request)
+        }
+        #endif
     }
 }
 
-enum AppTab: Hashable { case home, movies, shows, myList, search }
+enum AppTab: Hashable { case home, movies, shows, myList, search, profile }
 
 /// The signed-in app: a floating Liquid Glass tab bar (iPhone), a sidebar
 /// that adapts to a tab bar (iPad), or the top tab bar (tvOS).
@@ -62,24 +71,28 @@ struct MainShell: View {
             Tab("Shows", systemImage: "tv", value: AppTab.shows) {
                 StackHost { BrowseView(type: .show) }
             }
-            #if os(tvOS)
             Tab("My List", systemImage: "bookmark", value: AppTab.myList) {
                 StackHost { MyListView() }
             }
-            #else
-            Tab("My List", systemImage: "bookmark", value: AppTab.myList) {
-                StackHost { MyListView() }
-            }
-            #endif
             Tab(value: AppTab.search, role: .search) {
                 StackHost { SearchView() }
             }
+            #if os(tvOS)
+            // tvOS has no toolbar for the avatar button, so the profile lives in the
+            // tab bar like the TV app's: switching profiles, servers and sign-out.
+            Tab(value: AppTab.profile) {
+                SettingsView(embedded: true)
+            } label: {
+                Label(services.store.active?.profileName ?? "Profile", systemImage: "person.crop.circle")
+            }
+            #endif
         }
         #if os(iOS)
         .tabViewStyle(.sidebarAdaptable)
         .tabBarMinimizeBehavior(.onScrollDown)
-        #endif
+        // Not on tvOS: there the tint also colors focused labels, which sit on white.
         .tint(Theme.ink)
+        #endif
     }
 }
 

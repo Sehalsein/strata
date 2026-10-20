@@ -67,6 +67,26 @@ public final class StrataClient: Sendable {
         return res.token
     }
 
+    // MARK: Sign-in by code (a TV shows a QR code; a signed-in phone approves it)
+
+    /// Starts a code for this device. Unauthenticated: the device isn't signed in yet.
+    public func startDeviceLink(deviceName: String = DeviceInfo.deviceName) async throws -> DeviceLink {
+        try await send("POST", "/api/auth/device", body: DeviceNameBody(deviceName: deviceName))
+    }
+
+    public func pollDeviceLink(_ pollToken: String) async throws -> DeviceLinkPoll {
+        try await send("POST", "/api/auth/device/poll", body: PollBody(pollToken: pollToken))
+    }
+
+    /// What a code would sign in, so the phone can ask before approving.
+    public func pendingDeviceLink(code: String) async throws -> PendingDeviceLink {
+        try await get("/api/auth/device/\(DeviceLink.normalize(code))", cached: false)
+    }
+
+    public func approveDeviceLink(code: String) async throws {
+        let _: OKResponse = try await send("POST", "/api/auth/device/\(DeviceLink.normalize(code))/approve")
+    }
+
     public func logout() async throws {
         let _: OKResponse = try await send("POST", "/api/auth/logout")
         await cache.clear()
@@ -308,6 +328,8 @@ private struct Empty: Encodable {}
 private struct ErrorBody: Decodable { var error: String? }
 private struct Credentials: Encodable { var username: String; var password: String; var deviceName: String }
 private struct PinBody: Encodable { var pin: String? }
+private struct DeviceNameBody: Encodable { var deviceName: String }
+private struct PollBody: Encodable { var pollToken: String }
 private struct WatchlistBody: Encodable { var type: TitleType; var tmdbId: Int; var on: Bool }
 
 private struct PlayBody: Encodable {

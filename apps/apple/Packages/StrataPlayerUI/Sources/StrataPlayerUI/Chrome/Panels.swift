@@ -84,30 +84,39 @@ public struct StreamDetailsPanel: View {
     public init(session: PlayResponse?) { self.session = session }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.space3) {
+        VStack(alignment: .leading, spacing: Metrics.space4) {
             Text("Stream details").font(.stTitle2).foregroundStyle(Theme.ink)
             if let session {
                 let c = session.candidate
-                Grid(alignment: .leading, horizontalSpacing: Metrics.space4, verticalSpacing: Metrics.space2) {
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Metrics.space4, verticalSpacing: Metrics.space3) {
                     row("Source", c.provider.label)
                     row("File", c.displayName)
                     row("Playback", session.mode.label)
                     row("Video", [c.resolutionLabel, c.codecLabel, c.hdrLabel].compactMap { $0 }.joined(separator: " · "))
                     row("Audio", session.selectedAudio?.displayTitle ?? "—")
                     if let size = c.sizeLabel { row("Size", size) }
-                    if !session.reasons.isEmpty { row("Why", session.reasons.joined(separator: "; ")) }
+                }
+                if !session.reasons.isEmpty {
+                    Text(session.reasons.joined(separator: "; "))
+                        .font(.stFootnote)
+                        .foregroundStyle(.secondary)
                 }
             } else {
-                Text("Nothing is playing.").font(.stCallout).foregroundStyle(Theme.ink2)
+                Text("Nothing is playing.").font(.stCallout).foregroundStyle(.secondary)
             }
         }
-        .padding(Metrics.space6)
-        .frame(maxWidth: 480, alignment: .leading)
+        .padding(.horizontal, Metrics.space6)
+        .padding(.top, Metrics.space8)
+        .padding(.bottom, Metrics.space6)
+        // Pin to the top of the sheet instead of floating in the middle of it.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .presentationDragIndicator(.visible)
     }
 
+    // Labels use the vibrant secondary color: the sheet is glass, where ink-3 doesn't read.
     private func row(_ label: String, _ value: String) -> some View {
         GridRow {
-            Text(label).font(.stFootnote).foregroundStyle(Theme.ink3)
+            Text(label).font(.stFootnote).foregroundStyle(.secondary)
             Text(value.isEmpty ? "—" : value).font(.stCallout).foregroundStyle(Theme.ink)
                 #if !os(tvOS)
                 .textSelection(.enabled)

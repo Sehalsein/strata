@@ -5,6 +5,7 @@ import StrataPlayerUI
 
 struct ShowDetailView: View {
     @Environment(AppServices.self) private var services
+    @Environment(\.dismiss) private var dismiss
     let tmdbId: Int
     @State private var detail: Loadable<ShowDetail> = .loading
     @State private var selectedSeason: Int?
@@ -31,11 +32,13 @@ struct ShowDetailView: View {
         .ignoresSafeArea(edges: .top)
         #if os(tvOS)
         .toolbar(.hidden, for: .tabBar)
+        .overlay(alignment: .topLeading) { TVBackButton { dismiss() } }
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task { await load() }
+        .onChange(of: services.progressRevision) { Task { await load(); await loadSeason(quietly: true) } }
         .task(id: selectedSeason) { await loadSeason() }
     }
 
@@ -43,6 +46,7 @@ struct ShowDetailView: View {
         VStack(alignment: .leading, spacing: Metrics.railGap) {
             HeroBillboard(id: show.id,
                           backdropURL: show.backdropUrl,
+                          fallbackURL: show.posterUrl,
                           eyebrow: show.availabilityLabel ?? "Series",
                           title: show.title,
                           meta: [show.yearRangeText, show.certification, seasonCount(show)].compactMap { $0 },
@@ -184,9 +188,10 @@ struct ShowDetailView: View {
         }
     }
 
-    private func loadSeason() async {
+    /// `quietly` keeps the current episodes on screen while refreshing their progress.
+    private func loadSeason(quietly: Bool = false) async {
         guard let n = selectedSeason else { return }
-        season = .loading
+        if !quietly { season = .loading }
         let result = await services.load { try await $0.season(show: tmdbId, n) }
         if case .loading = result { return }
         season = result

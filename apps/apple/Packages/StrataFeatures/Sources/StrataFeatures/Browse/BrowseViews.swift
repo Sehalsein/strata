@@ -101,7 +101,7 @@ struct BrowseListView: View {
             case .loaded(let cards):
                 PosterGrid {
                     ForEach(cards) { card in
-                        NavigationLink(value: card.route) { PosterCardLabel(card: card) }.buttonStyle(StrataCardStyle())
+                        NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.buttonStyle(StrataCardStyle())
                     }
                 }
                 .padding(.vertical, Metrics.space4)
@@ -136,7 +136,7 @@ struct SearchView: View {
                 } else {
                     PosterGrid {
                         ForEach(cards) { card in
-                            NavigationLink(value: card.route) { PosterCardLabel(card: card) }.buttonStyle(StrataCardStyle())
+                            NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.buttonStyle(StrataCardStyle())
                         }
                     }
                     .padding(.vertical, Metrics.space4)
@@ -176,7 +176,7 @@ struct MyListView: View {
             case .loaded(let cards):
                 PosterGrid {
                     ForEach(cards) { card in
-                        NavigationLink(value: card.route) { PosterCardLabel(card: card) }.buttonStyle(StrataCardStyle())
+                        NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.buttonStyle(StrataCardStyle())
                     }
                 }
                 .padding(.vertical, Metrics.space4)

@@ -42,6 +42,50 @@ final class TVFocusTests: XCTestCase {
         snapshot("detail-04-down")
     }
 
+    /// Signed-out TV: type a server address, get the QR code, then wait for a phone to
+    /// approve it (done by hand or by a script while this runs). Needs STRATA_TEST_SERVER.
+    func testCodeSignIn() throws {
+        let server = try XCTUnwrap(ProcessInfo.processInfo.environment["STRATA_TEST_SERVER"], "set TEST_RUNNER_STRATA_TEST_SERVER")
+        app.launch()
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        snapshot("signin-01-connect")
+        // Focus moves down to the address field, select opens the keyboard.
+        while !field.hasFocus { press(.down) }
+        press(.select)
+        app.typeText(server)
+        snapshot("signin-02-typed")
+        press(.menu, pause: 1) // close the keyboard, submitting the address
+        if !app.buttons["Use Password Instead"].waitForExistence(timeout: 10) {
+            while !app.buttons["Continue"].hasFocus { press(.down) }
+            press(.select)
+        }
+        XCTAssertTrue(app.buttons["Use Password Instead"].waitForExistence(timeout: 15))
+        Thread.sleep(forTimeInterval: 2)
+        snapshot("signin-03-qr")
+        let code = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Code '")).firstMatch
+        if code.exists { print("SIGNIN_CODE \(code.label.replacingOccurrences(of: "Code ", with: "").replacingOccurrences(of: " ", with: ""))") }
+        // Approved from the phone: the TV moves on to the profile picker.
+        XCTAssertTrue(app.staticTexts["Who's watching?"].waitForExistence(timeout: 180), "the TV should sign in once the code is approved")
+        snapshot("signin-04-profiles")
+    }
+
+    /// The profile tab at the end of the tab bar opens Settings with Switch Profile.
+    func testProfileTab() {
+        app.launch()
+        if app.staticTexts["Who's watching?"].waitForExistence(timeout: 10) { press(.select, pause: 2) }
+        XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 15))
+        snapshot("profile-01-home")
+        // Up to the tab bar, then right to the last tab.
+        press(.up, 2)
+        press(.right, 6)
+        Thread.sleep(forTimeInterval: 2)
+        snapshot("profile-02-tab")
+        XCTAssertTrue(app.buttons["Switch Profile"].waitForExistence(timeout: 5), "the profile tab should show Settings")
+        press(.down, pause: 1)
+        snapshot("profile-03-settings")
+    }
+
     func testBrowseFocusAndPlay() {
         app.launch()
         XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 15))

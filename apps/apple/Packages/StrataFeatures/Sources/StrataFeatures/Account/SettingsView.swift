@@ -9,6 +9,9 @@ struct SettingsView: View {
     @State private var showProfiles = false
     @State private var showAddServer = false
     @State private var confirmSignOut = false
+    @State private var showSignInTV = false
+    /// Shown as a tab (tvOS) rather than a sheet: no Done button.
+    var embedded = false
 
     var body: some View {
         NavigationStack {
@@ -23,6 +26,9 @@ struct SettingsView: View {
                             }
                         }
                         Button("Switch Profile") { showProfiles = true }
+                        #if os(iOS)
+                        Button("Sign In a TV") { showSignInTV = true }
+                        #endif
                     }
                 }
 
@@ -64,7 +70,7 @@ struct SettingsView: View {
                                 Task {
                                     await services.store.signOut()
                                     services.refreshClient()
-                                    dismiss()
+                                    if !embedded { dismiss() }
                                 }
                             }
                         }
@@ -81,10 +87,13 @@ struct SettingsView: View {
             .background(Theme.bg)
             #endif
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                if !embedded {
+                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                }
             }
             .sheet(isPresented: $showProfiles) { ProfilePickerView(isSheet: true) }
             .sheet(isPresented: $showAddServer) { ConnectView(isAddingServer: true) }
+            .sheet(isPresented: $showSignInTV) { ApproveDeviceView() }
         }
     }
 }
