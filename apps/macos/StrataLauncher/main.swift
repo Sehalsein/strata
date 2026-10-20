@@ -6,7 +6,8 @@
 import AppKit
 
 private let port = 8420
-private let dashboardURL = URL(string: "http://localhost:\(port)")!
+// 127.0.0.1, not localhost: another program could sit on the IPv6 address.
+private let dashboardURL = URL(string: "http://127.0.0.1:\(port)")!
 private let logURL = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Logs/Strata/server.log")
 
@@ -16,9 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var stateItem: NSMenuItem!
     private var openItem: NSMenuItem!
     private var restartItem: NSMenuItem!
+    /// The server this app started. The app only ever opens the dashboard of this one.
     private var server: Process?
-    /// True when another Strata (e.g. started in a terminal) already had the port.
-    private var attached = false
     private var quitting = false
 
     private var signalSources: [DispatchSourceSignal] = []
@@ -53,40 +53,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func start(openDashboard: Bool) async {
         setState("Starting…", running: false)
+        // Something already on the port isn't ours, whatever it says it is: don't use it.
         if await isServing() {
-            // Only attach to a real Strata server run by this user; anything else could be
-            // impersonating the dashboard to collect a password.
-            guard Self.portOwnedByStrata() else {
-                attached = true
-                setState("Port \(port) is used by another program", running: false)
-                openItem.isEnabled = false
-                return
-            }
-            attached = true
-            setState("Running (started elsewhere)", running: true)
-        } else {
-            attached = false
-            do {
-                try launchServer()
-            } catch {
-                setState("Couldn't start: \(error.localizedDescription)", running: false)
-                return
-            }
-            var up = false
-            for _ in 0..<60 {
-                if await isServing() { up = true; break }
-                try? await Task.sleep(for: .milliseconds(500))
-            }
-            guard up else {
-                setState("Didn't start. See Show Logs.", running: false)
-                return
-            }
-            setState("Running on port \(port)", running: true)
+            portTaken()
+            return
         }
+        do {
+            try launchServer()
+        } catch {
+            setState("Couldn't start: \(error.localizedDescription)", running: false)
+            return
+        }
+        var up = false
+        for _ in 0..<60 {
+            guard server?.isRunning == true else { return } // exited: the termination handler says why
+            if await isServing() { up = true; break }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        guard up, server?.isRunning == true else {
+            setState("Didn't start. See Show Logs.", running: false)
+            return
+        }
+        setState("Running on port \(port)", running: true)
         if openDashboard {
             UserDefaults.standard.set(true, forKey: "openedOnce")
-            NSWorkspace.shared.open(dashboardURL)
+            self.openDashboard()
         }
+    }
+
+    private func portTaken() {
+        setState("Port \(port) is in use by another program. Quit it, then choose Restart Server.", running: false)
     }
 
     private func launchServer() throws {
@@ -114,12 +110,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         process.terminationHandler = { [weak self] proc in
             Task { @MainActor in
                 guard let self, !self.quitting else { return }
-                if Self.portListener() != nil, !Self.portOwnedByStrata() {
-                    self.setState("Port \(port) is used by another program", running: false)
-                    self.openItem.isEnabled = false
-                } else {
-                    self.setState("Stopped (exit \(proc.terminationStatus)). See Show Logs.", running: false)
-                }
+                // Exit right after starting usually means the port was taken.
+                if await self.isServing() { self.portTaken() }
+                else { self.setState("Stopped (exit \(proc.terminationStatus)). See Show Logs.", running: false) }
             }
         }
         try process.run()
@@ -134,33 +127,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return json["name"] as? String == "strata"
     }
 
-    /// Whether the process listening on the port is a strata-server binary owned by this user.
-    private static func portOwnedByStrata() -> Bool {
-        guard let pid = portListener() else { return false }
-        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return false }
-        let path = String(cString: buffer)
-        guard URL(fileURLWithPath: path).lastPathComponent.hasPrefix("strata-server"),
-              let owner = (try? FileManager.default.attributesOfItem(atPath: path))?[.ownerAccountID] as? NSNumber
-        else { return false }
-        return owner.uint32Value == getuid()
-    }
-
-    /// The process listening on the port, if any.
-    private static func portListener() -> pid_t? {
-        let lsof = Process()
-        lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        lsof.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-t"]
-        let pipe = Pipe()
-        lsof.standardOutput = pipe
-        lsof.standardError = FileHandle.nullDevice
-        guard (try? lsof.run()) != nil else { return nil }
-        lsof.waitUntilExit()
-        let pids = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .split(separator: "\n").compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
-        return pids.first
-    }
-
     // MARK: Menu
 
     private func buildMenu() {
@@ -169,6 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.toolTip = "Strata"
 
         let menu = NSMenu()
+        menu.autoenablesItems = false // we decide what's enabled (Open Dashboard only when ours runs)
         stateItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
         stateItem.isEnabled = false
         menu.addItem(stateItem)
@@ -192,16 +159,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setState(_ text: String, running: Bool) {
         NSLog("Strata: %@", text) // visible in Console.app
         stateItem.title = "Strata: \(text)"
-        restartItem.isHidden = attached
+        openItem.isEnabled = running
         statusItem.button?.appearsDisabled = !running
     }
 
-    @objc private func openDashboard() { NSWorkspace.shared.open(dashboardURL) }
+    /// Opens the dashboard only while the server this app started is running.
+    @objc private func openDashboard() {
+        guard server?.isRunning == true else { return }
+        NSWorkspace.shared.open(dashboardURL)
+    }
 
     @objc private func showLogs() { NSWorkspace.shared.open(logURL) }
 
     @objc private func restart() {
-        guard !attached else { return }
         server?.terminationHandler = nil
         server?.terminate()
         server?.waitUntilExit()
