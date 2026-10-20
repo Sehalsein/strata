@@ -6,6 +6,10 @@ import type { AuthedSession } from "../auth";
 import type { Services } from "../services";
 
 export type Env = {
+  /** The Bun server, passed as the second argument to fetch (absent in tests unless given). */
+  Bindings: {
+    requestIP?: (req: Request) => { address: string } | null;
+  };
   Variables: {
     services: Services;
     session: AuthedSession;

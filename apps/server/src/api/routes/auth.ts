@@ -1,10 +1,11 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { profiles } from "../../db/schema";
 import { API_VERSION, VERSION } from "../../version";
 import { body, intParam, requireAdmin, requireAuth, type Env } from "../context";
+import { isLocalRequest } from "../localNetwork";
 
 const credentials = z.object({
   username: z.string().trim().min(1).max(64),
@@ -19,10 +20,37 @@ const profileInput = z.object({
   pin: z.string().regex(/^\d{4,8}$/).nullish(),
 });
 
+/** Shown on other devices (approval sheets, the dashboard), so plain words only. */
+const deviceNameSchema = z.string().trim().regex(/^[\p{L}\p{N} .'’()-]{1,48}$/u, "Device names can only use letters, numbers and simple punctuation");
+
+function canJoinLocally(c: Context<Env>): boolean {
+  const s = c.var.services;
+  return s.settings.get().localJoin && s.auth.hasAnyUser() && isLocalRequest(c);
+}
+
 export const authRoutes = new Hono<Env>()
   .get("/info", (c) => {
     const s = c.var.services;
-    return c.json({ name: "strata", serverName: s.settings.get().serverName, id: s.serverId, version: VERSION, apiVersion: API_VERSION, setupRequired: !s.auth.hasAnyUser() });
+    return c.json({
+      name: "strata",
+      serverName: s.settings.get().serverName,
+      id: s.serverId,
+      version: VERSION,
+      apiVersion: API_VERSION,
+      setupRequired: !s.auth.hasAnyUser(),
+      /** True when this client may join without a password (see /auth/join). */
+      localJoin: canJoinLocally(c),
+    });
+  })
+
+  // Home-network devices skip the password and go straight to "Who's watching?";
+  // profile PINs still apply. The session can watch but never administer.
+  .post("/auth/join", async (c) => {
+    const { deviceName } = await body(c, z.object({ deviceName: deviceNameSchema.optional() }).default({}));
+    const s = c.var.services;
+    const userId = canJoinLocally(c) ? s.auth.householdUserId() : undefined;
+    if (!userId) throw new HTTPException(403, { message: "Sign in with your account to connect from outside your home network." });
+    return c.json({ token: s.auth.issue(userId, deviceName ?? "Device", { viewerOnly: true }) });
   })
 
   // First-run: creates the admin and a first profile. Locked once any user exists.
@@ -45,10 +73,7 @@ export const authRoutes = new Hono<Env>()
 
   // Sign-in by code (QR on a TV). Start and poll are public: the TV isn't signed in yet.
   .post("/auth/device", async (c) => {
-    // The approving phone shows this name, so keep it to plain words: no control
-    // characters or long text that could pass for instructions.
-    const name = z.string().trim().regex(/^[\p{L}\p{N} .'’()-]{1,48}$/u, "Device names can only use letters, numbers and simple punctuation");
-    const { deviceName } = await body(c, z.object({ deviceName: name.optional() }).default({}));
+    const { deviceName } = await body(c, z.object({ deviceName: deviceNameSchema.optional() }).default({}));
     const link = c.var.services.deviceLinks.start(deviceName ?? "TV");
     if (!link) throw new HTTPException(429, { message: "Too many sign-in codes waiting. Try again in a few minutes." });
     return c.json({ ...link, pollIntervalMs: 2000 });
@@ -70,7 +95,8 @@ export const authRoutes = new Hono<Env>()
   .post("/auth/device/:code/approve", requireAuth, (c) => {
     const s = c.var.services;
     const userId = c.var.session.user.id;
-    const ok = s.deviceLinks.approve(c.req.param("code"), (deviceName) => s.auth.issue(userId, deviceName));
+    // The TV can watch but not administer, whoever approved it.
+    const ok = s.deviceLinks.approve(c.req.param("code"), (deviceName) => s.auth.issue(userId, deviceName, { viewerOnly: true }));
     if (!ok) throw new HTTPException(404, { message: "That code has expired or was already used. Show a new one on the TV." });
     return c.json({ ok: true });
   })

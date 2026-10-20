@@ -126,9 +126,10 @@ public struct Candidate: Codable, Sendable, Hashable, Identifiable {
         case let other?: other
         }
     }
-    /// Compact spec chips, e.g. ["4K", "Dolby Vision", "HEVC", "Remux", "12.3 GB"].
+    /// Quality chips, e.g. ["4K", "Dolby Vision", "HEVC", "Remux"]. Size is shown as text
+    /// where it helps choose (`sizeLabel`), not as a chip.
     public var specLabels: [String] {
-        [resolutionLabel, hdrLabel, codecLabel, sourceLabel, sizeLabel].compactMap { $0 }
+        [resolutionLabel, hdrLabel, codecLabel, sourceLabel].compactMap { $0 }
     }
     public var displayName: String { releaseTitle ?? name }
 

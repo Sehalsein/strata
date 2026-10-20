@@ -128,6 +128,17 @@ public struct Trailer: Codable, Sendable, Hashable {
     public var youtubeURL: URL? { site == "youtube" ? URL(string: "https://www.youtube.com/watch?v=\(key)") : nil }
 }
 
+/// A trailer or extra (YouTube), for the "Trailers & Extras" rail.
+public struct TitleVideo: Codable, Sendable, Hashable, Identifiable {
+    public var key: String
+    public var name: String
+    /// "Trailer", "Teaser", "Clip", "Featurette" or "Behind the Scenes".
+    public var type: String
+    public var url: URL
+    public var thumbnailUrl: URL?
+    public var id: String { key }
+}
+
 public struct CollectionRef: Codable, Sendable, Hashable, Identifiable {
     public var id: Int
     public var name: String
@@ -153,6 +164,8 @@ public struct MovieDetail: Codable, Sendable, Hashable, Identifiable {
     public var cast: [CastMember]
     public var directors: [String]
     public var trailer: Trailer?
+    /// Absent from older servers.
+    public var videos: [TitleVideo]?
     public var collection: CollectionRef?
     public var recommendations: [TitleCard]
     public var available: [Provider]
@@ -216,6 +229,8 @@ public struct ShowDetail: Codable, Sendable, Hashable, Identifiable {
     public var backdropUrl: URL?
     public var cast: [CastMember]
     public var trailer: Trailer?
+    /// Absent from older servers.
+    public var videos: [TitleVideo]?
     public var seasons: [SeasonSummary]
     public var recommendations: [TitleCard]
     public var available: [Provider]

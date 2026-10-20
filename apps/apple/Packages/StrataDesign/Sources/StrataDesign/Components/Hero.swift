@@ -60,17 +60,21 @@ public struct HeroBillboard<Actions: View>: View {
     /// full-bleed placeholder. Whichever it is runs to the top edge of the page.
     private var backdrop: some View {
         let blurred = backdropURL == nil
-        return AsyncImage(url: backdropURL ?? fallbackURL, transaction: Transaction(animation: .easeOut(duration: 0.3))) { phase in
-            if case .success(let image) = phase {
-                image.resizable().scaledToFill()
-                    .blur(radius: blurred ? 40 : 0, opaque: true)
-            } else {
-                StrataPlaceholder.hero(seed: id)
+        // The container sets the size and the image fills it as an overlay: an
+        // aspect-fill image laid out directly would widen the page past the screen.
+        return Color.clear
+            .overlay {
+                AsyncImage(url: backdropURL ?? fallbackURL, transaction: Transaction(animation: .easeOut(duration: 0.3))) { phase in
+                    if case .success(let image) = phase {
+                        image.resizable().scaledToFill()
+                            .blur(radius: blurred ? 40 : 0, opaque: true)
+                    } else {
+                        StrataPlaceholder.hero(seed: id)
+                    }
+                }
             }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipped()
-        .accessibilityHidden(true)
+            .clipped()
+            .accessibilityHidden(true)
     }
 
     @ViewBuilder private var scrims: some View {

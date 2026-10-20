@@ -130,6 +130,7 @@ export class CatalogService {
       cast: castOf(m.credits),
       directors: m.credits?.crew.filter((c) => c.job === "Director").map((c) => c.name) ?? [],
       trailer: trailerOf(m.videos),
+      videos: videosOf(m.videos),
       collection: m.belongs_to_collection ? { id: m.belongs_to_collection.id, name: m.belongs_to_collection.name } : null,
       recommendations: this.cards(m.recommendations?.results ?? [], "movie"),
       available: [...new Set(sources.map((s) => s.provider))],
@@ -162,6 +163,7 @@ export class CatalogService {
       backdropUrl: imageUrl(s.backdrop_path, "w1280"),
       cast: castOf(s.credits),
       trailer: trailerOf(s.videos),
+      videos: videosOf(s.videos),
       seasons: s.seasons.map((season) => ({
         season: season.season_number,
         name: season.name,
@@ -333,6 +335,23 @@ export class CatalogService {
 
 function castOf(credits?: TmdbCredits) {
   return (credits?.cast ?? []).slice(0, 20).map((c) => ({ id: c.id, name: c.name, character: c.character ?? null, profileUrl: imageUrl(c.profile_path, "w185") }));
+}
+
+const VIDEO_ORDER = ["Trailer", "Teaser", "Clip", "Featurette", "Behind the Scenes"];
+
+/** YouTube trailers and extras for a "Trailers & Extras" rail: trailers first, official first. */
+function videosOf(videos?: TmdbMovie["videos"]) {
+  return (videos?.results ?? [])
+    .filter((v) => v.site === "YouTube" && VIDEO_ORDER.includes(v.type))
+    .sort((a, b) => VIDEO_ORDER.indexOf(a.type) - VIDEO_ORDER.indexOf(b.type) || Number(!!b.official) - Number(!!a.official))
+    .slice(0, 12)
+    .map((v) => ({
+      key: v.key,
+      name: v.name,
+      type: v.type,
+      url: `https://www.youtube.com/watch?v=${encodeURIComponent(v.key)}`,
+      thumbnailUrl: `https://i.ytimg.com/vi/${encodeURIComponent(v.key)}/hqdefault.jpg`,
+    }));
 }
 
 function trailerOf(videos?: TmdbMovie["videos"]) {

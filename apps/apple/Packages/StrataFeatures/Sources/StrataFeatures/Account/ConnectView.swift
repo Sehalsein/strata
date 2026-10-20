@@ -15,6 +15,9 @@ struct ConnectView: View {
     @State private var signInTarget: SignInTarget?
     @State private var codeTarget: ServerTarget?
     @State private var showAddressEntry = false
+    /// Servers appear a moment after the screen; on tvOS focus moves to the first one
+    /// (otherwise it sits on "Enter Address", the only button at first).
+    @FocusState private var focusedServer: String?
 
     #if os(tvOS)
     static let columnWidth: CGFloat = 960
@@ -78,6 +81,9 @@ struct ConnectView: View {
         }
         .onAppear { services.browser.start() }
         .onDisappear { services.browser.stop() }
+        .onChange(of: found.first?.id) { _, first in
+            if focusedServer == nil { focusedServer = first }
+        }
     }
 
     #if os(tvOS)
@@ -128,6 +134,7 @@ struct ConnectView: View {
                 }
                 #if os(tvOS)
                 .buttonStyle(.card)
+                .focused($focusedServer, equals: server.id)
                 #else
                 .buttonStyle(.plain)
                 .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
@@ -198,6 +205,16 @@ struct ConnectView: View {
                 error = "\(info.serverName) isn't set up yet. Open \(url.absoluteString) in a browser to finish setup, then try again."
                 return
             }
+            // On the server's home network there's no password: straight to "Who's watching?".
+            if info.localJoin == true {
+                if await services.store.join(url: url, info: info) {
+                    services.refreshClient()
+                    if isAddingServer { dismiss() }
+                } else {
+                    error = services.store.lastError
+                }
+                return
+            }
             #if os(tvOS)
             // Typing a password with the remote is slow; scanning a code with a phone isn't.
             codeTarget = ServerTarget(url: url, info: info)
@@ -226,7 +243,8 @@ struct SignInView: View {
             VStack(alignment: .leading, spacing: Metrics.space6) {
                 VStack(alignment: .leading, spacing: Metrics.space2) {
                     Text("Sign in to \(serverName)").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                    Text(address).font(.stFootnote).foregroundStyle(Theme.ink3)
+                    Text("Use the account you created in the server’s dashboard. You’ll pick a profile next.")
+                        .font(.stCallout).foregroundStyle(Theme.ink2)
                 }
                 VStack(spacing: Metrics.space3) {
                     TextField("Username", text: $username)

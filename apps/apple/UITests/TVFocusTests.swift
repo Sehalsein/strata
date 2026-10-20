@@ -40,9 +40,14 @@ final class TVFocusTests: XCTestCase {
 
     /// Detail page: the hero fills the screen with Play focused; down scrolls to the sections below.
     func testDetailHeroAndSections() {
-        launchSignedIn(["-StrataOpenURL", "strata://movie/10378"])
+        // STRATA_TEST_MOVIE picks a title on a real server; the demo server knows 10378.
+        let movie = ProcessInfo.processInfo.environment["STRATA_TEST_MOVIE"] ?? "10378"
+        launchSignedIn(["-StrataOpenURL", "strata://movie/\(movie)"])
         XCTAssertTrue(app.buttons["Play"].waitForExistence(timeout: 15))
         snapshot("detail-01-hero")
+        press(.right, pause: 1)
+        snapshot("detail-01b-second-button")
+        press(.left, pause: 1)
         press(.down, pause: 1)
         snapshot("detail-02-down")
         press(.down, pause: 1)
@@ -51,7 +56,30 @@ final class TVFocusTests: XCTestCase {
         snapshot("detail-04-down")
     }
 
-    /// Signed-out TV: type a server address, get the QR code, then wait for a phone to
+    /// Signed-out TV on the server's home network: picking the server found on the
+    /// network goes straight to "Who's watching?" with no password or code.
+    func testHomeNetworkJoin() {
+        app.launch()
+        XCTAssertTrue(app.buttons["Enter Address"].waitForExistence(timeout: 15))
+        Thread.sleep(forTimeInterval: 3) // let Bonjour find servers
+        snapshot("join-01-connect")
+        press(.select, pause: 3) // the first server row has focus
+        XCTAssertTrue(app.staticTexts["Who's watching?"].waitForExistence(timeout: 15), "home-network join should skip sign-in")
+        snapshot("join-02-profiles")
+        press(.select, pause: 4)
+        XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 15))
+        Thread.sleep(forTimeInterval: 3)
+        snapshot("join-03-home")
+        press(.right, pause: 1)
+        snapshot("join-04-more-info-focused")
+        // A real detail page: down from the hero's Play into the rails below.
+        press(.select, pause: 4)
+        snapshot("join-05-detail")
+        press(.down, 2, pause: 1)
+        snapshot("join-06-detail-rails")
+    }
+
+    /// Signed-out TV off the home network (or with home sign-in off): type a server address, get the QR code, then wait for a phone to
     /// approve it (done by hand or by a script while this runs). Needs STRATA_TEST_SERVER.
     func testCodeSignIn() throws {
         let server = try XCTUnwrap(ProcessInfo.processInfo.environment["STRATA_TEST_SERVER"], "set TEST_RUNNER_STRATA_TEST_SERVER")

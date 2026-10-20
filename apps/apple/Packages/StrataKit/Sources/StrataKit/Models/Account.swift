@@ -11,14 +11,18 @@ public struct ServerInfo: Codable, Sendable, Hashable {
     public var version: String
     public var apiVersion: Int
     public var setupRequired: Bool
+    /// This device is on the server's home network and may join without a password.
+    /// Absent from older servers.
+    public var localJoin: Bool?
 
-    public init(name: String = "strata", serverName: String, id: String, version: String, apiVersion: Int, setupRequired: Bool) {
+    public init(name: String = "strata", serverName: String, id: String, version: String, apiVersion: Int, setupRequired: Bool, localJoin: Bool? = nil) {
         self.name = name
         self.serverName = serverName
         self.id = id
         self.version = version
         self.apiVersion = apiVersion
         self.setupRequired = setupRequired
+        self.localJoin = localJoin
     }
 
     /// The API version this client speaks.

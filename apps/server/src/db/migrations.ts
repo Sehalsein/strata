@@ -87,4 +87,7 @@ export const migrations: string[] = [
   ALTER TABLE files ADD COLUMN source_hash TEXT;
   CREATE INDEX files_source_hash ON files(source_hash);
   `,
+  /* 3 */ `
+  ALTER TABLE sessions ADD COLUMN viewer_only INTEGER NOT NULL DEFAULT 0;
+  `,
 ];

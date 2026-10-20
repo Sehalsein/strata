@@ -86,7 +86,7 @@ struct SourceRow: View {
             VStack(alignment: .leading, spacing: Metrics.space2) {
                 Text(candidate.displayName).font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(2).multilineTextAlignment(.leading)
                 HStack(spacing: Metrics.space2) {
-                    ForEach(candidate.specLabels.filter { $0 != candidate.sizeLabel }.prefix(4), id: \.self) { SpecBadge($0) }
+                    ForEach(candidate.specLabels.prefix(4), id: \.self) { SpecBadge($0) }
                 }
                 Text([candidate.sizeLabel, candidate.seeders.map { "\($0) seeders" }].compactMap { $0 }.joined(separator: " · "))
                     .font(.stFootnote).foregroundStyle(Theme.ink3)

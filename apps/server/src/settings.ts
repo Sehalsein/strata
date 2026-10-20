@@ -35,6 +35,8 @@ export const settingsSchema = z.object({
   // Network / updates (port and bind host stay CLI/env-driven on purpose).
   /** Advertise `_strata._tcp` on the LAN so the apps find the server. */
   bonjourEnabled: z.boolean().default(true),
+  /** Devices on the home network join without a password and go straight to the profile picker. */
+  localJoin: z.boolean().default(true),
   /** Defaults to the channel this binary was published to. */
   updateChannel: z.enum(["stable", "nightly"]).default(BUILD_CHANNEL),
   /** Apply updates automatically once nothing is playing. */

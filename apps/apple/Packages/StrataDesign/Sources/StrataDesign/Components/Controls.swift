@@ -85,6 +85,9 @@ public struct GlassButton: View {
         }
         .buttonStyle(.glass)
         .controlSize(.large)
+        // Glass labels take the tint: ink, not the app's accent (apricot is for Play only).
+        // The system still inverts it for the tvOS focus state.
+        .tint(Theme.ink)
     }
 }
 

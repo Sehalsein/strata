@@ -19,8 +19,16 @@ describe("decide", () => {
   });
 
   test("mkv is remuxed with video copied", () => {
-    const plan = decide(media(), DEFAULT_CAPS);
+    const plan = decide(media({ audio: [{ index: 1, codec: "aac", channels: 2, isDefault: true }] }), DEFAULT_CAPS);
     expect(plan).toMatchObject({ mode: "remux", video: "copy", audio: "copy" });
+  });
+
+  test("Dolby audio is re-encoded rather than copied into HLS", () => {
+    // Copying it can leave an empty audio track in the init segment (audio stored late in the file).
+    expect(decide(media(), DEFAULT_CAPS)).toMatchObject({ mode: "remux", audio: "eac3" });
+    expect(decide(media({ audio: [{ index: 1, codec: "ac3", channels: 6, isDefault: true }] }), DEFAULT_CAPS).audio).toBe("eac3");
+    // Direct play keeps the original track.
+    expect(decide(media({ container: "mp4" }), DEFAULT_CAPS)).toMatchObject({ mode: "direct", audio: "copy" });
   });
 
   test("TrueHD/DTS become EAC3 when multichannel", () => {

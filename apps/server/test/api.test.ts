@@ -73,9 +73,47 @@ describe("setup and auth", () => {
     // Back to the main profile for the rest of the suite.
     await server.request(`/api/profiles/1/select`, { method: "POST", token, json: {} });
   });
+
+  test("home-network devices join without a password, as viewers", async () => {
+    const info = async (init: { ip?: string; headers?: Record<string, string> }) => (await json(await server.request("/api/info", init))).localJoin;
+    expect(await info({ ip: "192.168.2.40" })).toBe(true);
+    expect(await info({ ip: "::ffff:10.0.0.7" })).toBe(true);
+    expect(await info({ ip: "203.0.113.9" })).toBe(false);
+    expect(await info({})).toBe(false);
+    // Behind a proxy every client looks local, so proxied requests never qualify.
+    expect(await info({ ip: "127.0.0.1", headers: { "X-Forwarded-For": "203.0.113.9" } })).toBe(false);
+
+    expect((await server.request("/api/auth/join", { method: "POST", ip: "203.0.113.9", json: {} })).status).toBe(403);
+    const joined = await server.request("/api/auth/join", { method: "POST", ip: "192.168.2.40", json: { deviceName: "Living Room" } });
+    expect(joined.status).toBe(200);
+    const viewer = (await json(joined)).token;
+
+    // Two profiles now, one with a PIN: the device picks, and the PIN still applies.
+    expect((await json(await server.request("/api/me", { token: viewer }))).profile).toBeNull();
+    const kids = (await json(await server.request("/api/profiles", { token: viewer }))).find((p: any) => p.name === "Kids");
+    expect((await server.request(`/api/profiles/${kids.id}/select`, { method: "POST", token: viewer, json: {} })).status).toBe(403);
+    expect((await server.request(`/api/profiles/${kids.id}/select`, { method: "POST", token: viewer, json: { pin: "1234" } })).status).toBe(200);
+
+    // Watching yes, administering no.
+    expect((await server.request("/api/home", { token: viewer })).status).toBe(200);
+    expect((await server.request("/api/admin/settings", { token: viewer })).status).toBe(403);
+    expect((await json(await server.request("/api/me", { token: viewer }))).user.isAdmin).toBe(false);
+
+    // The admin can switch it off.
+    await server.request("/api/admin/settings", { method: "PATCH", token, json: { localJoin: false } });
+    expect((await server.request("/api/auth/join", { method: "POST", ip: "192.168.2.40", json: {} })).status).toBe(403);
+    await server.request("/api/admin/settings", { method: "PATCH", token, json: { localJoin: true } });
+  });
 });
 
 describe("library", () => {
+  test("movie detail lists trailers and extras, official trailers first", async () => {
+    const movie = await json(await server.request("/api/titles/movie/10378", { token }));
+    expect(movie.trailer.key).toBe("official");
+    expect(movie.videos.map((v: any) => v.key)).toEqual(["official", "fan", "clip1"]);
+    expect(movie.videos[0]).toMatchObject({ type: "Trailer", url: "https://www.youtube.com/watch?v=official", thumbnailUrl: "https://i.ytimg.com/vi/official/hqdefault.jpg" });
+  });
+
   test("settings and folder scan", async () => {
     const res = await server.request("/api/admin/settings", {
       method: "PATCH",

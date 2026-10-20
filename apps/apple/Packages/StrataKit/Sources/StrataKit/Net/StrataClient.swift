@@ -67,6 +67,13 @@ public final class StrataClient: Sendable {
         return res.token
     }
 
+    /// Joins from the home network without a password (only when `ServerInfo.localJoin`).
+    /// The session can watch but not administer; profile PINs still apply.
+    public func join(deviceName: String = DeviceInfo.deviceName) async throws -> String {
+        let res: TokenResponse = try await send("POST", "/api/auth/join", body: DeviceNameBody(deviceName: deviceName))
+        return res.token
+    }
+
     // MARK: Sign-in by code (a TV shows a QR code; a signed-in phone approves it)
 
     /// Starts a code for this device. Unauthenticated: the device isn't signed in yet.

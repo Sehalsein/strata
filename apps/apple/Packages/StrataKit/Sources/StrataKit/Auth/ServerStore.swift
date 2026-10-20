@@ -189,6 +189,25 @@ public final class ServerStore {
         }
     }
 
+    /// Joins a server from its home network without a password, then makes it active.
+    /// Returns false and sets `lastError` on failure.
+    @discardableResult
+    public func join(url: URL, info: ServerInfo) async -> Bool {
+        isAuthenticating = true
+        lastError = nil
+        defer { isAuthenticating = false }
+        do {
+            let token = try await StrataClient(baseURL: url, session: session, cacheTTL: 0).join()
+            try await adopt(token: token, url: url, info: info)
+            Log.auth.info("join ok server=\(info.id, privacy: .public)")
+            return true
+        } catch {
+            lastError = StrataError.wrap(error).message
+            Log.auth.error("join failed: \(StrataError.wrap(error).message, privacy: .public)")
+            return false
+        }
+    }
+
     /// Finishes a sign-in that produced `token` some other way (a TV approved by
     /// code from a phone): saves the server and makes it active.
     @discardableResult

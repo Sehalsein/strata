@@ -150,14 +150,16 @@ private struct FeaturedHero: View {
 
     var body: some View {
         HeroBillboard(id: card.id, backdropURL: card.backdropUrl, eyebrow: card.isAvailable ? "In your library" : "Trending this week",
-                      title: card.title, meta: [card.yearText, card.ratingText].compactMap { $0 }, overview: card.overview) {
+                      title: card.title, meta: [card.yearText, card.ratingText.map { "★ \($0)" }].compactMap { $0 }, overview: card.overview) {
             if card.type == .movie {
                 PlayButton("Play") {
                     services.play(WatchRequest(target: .movie(card.tmdbId), meta: PlaybackMeta(title: card.title, subtitle: card.yearText, artworkURL: card.backdropUrl)))
                 }
             }
+            // Ink, not the accent: glass labels take the tint, and apricot means Play.
             NavigationLink(value: card.route) { Label("More Info", systemImage: "info.circle").font(.stHeadline) }
                 .buttonStyle(.glass)
+                .tint(Theme.ink)
         }
     }
 }

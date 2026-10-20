@@ -32,7 +32,6 @@ struct ShowDetailView: View {
         .ignoresSafeArea(edges: .top)
         #if os(tvOS)
         .toolbar(.hidden, for: .tabBar)
-        .overlay(alignment: .topLeading) { TVBackButton { dismiss() } }
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -49,7 +48,7 @@ struct ShowDetailView: View {
                           fallbackURL: show.posterUrl,
                           eyebrow: show.availabilityLabel ?? "Series",
                           title: show.title,
-                          meta: [show.yearRangeText, show.certification, seasonCount(show)].compactMap { $0 },
+                          meta: [show.genres.first, show.yearRangeText, show.certification, seasonCount(show), show.ratingText.map { "★ \($0)" }].compactMap { $0 },
                           overview: show.overview) {
                 if let upNext = show.upNext {
                     PlayButton(upNext.isResume ? "Resume \(code(upNext.season, upNext.episode))" : "Play \(code(upNext.season, upNext.episode))") {
@@ -59,11 +58,18 @@ struct ShowDetailView: View {
                 GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV) {
                     Task { await toggleWatchlist(show) }
                 }
+                if let trailer = show.trailer?.youtubeURL { TrailerButton(url: trailer) }
             }
+            #if os(tvOS)
+            // Part of the hero, so it scrolls away with it instead of floating over the page.
+            .overlay(alignment: .topLeading) { TVBackButton { dismiss() } }
+            #endif
 
             seasonSection(show)
 
             CastRail(cast: show.cast)
+
+            VideosRail(videos: show.videos ?? [])
 
             if !show.recommendations.isEmpty {
                 Rail("More Like This") {

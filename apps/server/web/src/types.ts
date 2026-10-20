@@ -35,6 +35,7 @@ export interface Settings {
   showUncached: boolean;
   maxReleaseSizeGb: number;
   bonjourEnabled: boolean;
+  localJoin: boolean;
   updateChannel: UpdateChannel;
   autoUpdate: boolean;
   updateManifestUrl: string;

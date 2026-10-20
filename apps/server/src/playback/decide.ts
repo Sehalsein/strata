@@ -93,5 +93,13 @@ export function decide(info: MediaInfo, caps: ClientCaps, audioIndex?: number, p
     if (!containerOk) reasons.push(`container ${info.container} → HLS`);
   }
 
+  // Copying Dolby audio into HLS fMP4 needs its first packet to describe the track; when a
+  // file stores audio well after the video (common in MKV WEBRips) the init segment gets an
+  // empty audio track and Apple's player refuses the stream. Re-encoding knows it up front.
+  if (mode !== "direct" && audioAction === "copy" && audio && (audio.codec === "eac3" || audio.codec === "ac3")) {
+    audioAction = "eac3";
+    reasons.push(`audio ${audio.codec} re-encoded for HLS`);
+  }
+
   return { mode, video, audio: audioAction, audioStreamIndex: audio?.index, videoStreamIndex: v?.index, stripDolbyVision, targetHeight, reasons };
 }

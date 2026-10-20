@@ -15,6 +15,11 @@ let dummyHash: string | undefined;
 export class Auth {
   constructor(private readonly db: Db) {}
 
+  /** The household account that password-less devices join as. */
+  householdUserId(): number | undefined {
+    return this.db.select({ id: users.id }).from(users).where(eq(users.isAdmin, true)).orderBy(users.id).limit(1).get()?.id;
+  }
+
   hasAnyUser(): boolean {
     return this.db.select({ id: users.id }).from(users).limit(1).get() !== undefined;
   }
@@ -45,12 +50,12 @@ export class Auth {
     return this.issue(user.id, deviceName);
   }
 
-  issue(userId: number, deviceName?: string): string {
+  issue(userId: number, deviceName?: string, options: { viewerOnly?: boolean } = {}): string {
     const token = randomBytes(32).toString("base64url");
     // A single-profile household skips the picker.
     const allProfiles = this.db.select({ id: profiles.id, pin: profiles.pinHash }).from(profiles).all();
     const autoProfile = allProfiles.length === 1 && !allProfiles[0]!.pin ? allProfiles[0]!.id : null;
-    this.db.insert(sessions).values({ tokenHash: hashToken(token), userId, deviceName, profileId: autoProfile }).run();
+    this.db.insert(sessions).values({ tokenHash: hashToken(token), userId, deviceName, profileId: autoProfile, viewerOnly: options.viewerOnly ?? false }).run();
     return token;
   }
 
@@ -64,6 +69,7 @@ export class Auth {
         id: users.id,
         username: users.username,
         isAdmin: users.isAdmin,
+        viewerOnly: sessions.viewerOnly,
       })
       .from(sessions)
       .innerJoin(users, eq(users.id, sessions.userId))
@@ -73,7 +79,7 @@ export class Auth {
     if (Date.now() - row.lastSeenAt > 60_000) {
       this.db.update(sessions).set({ lastSeenAt: sql`(unixepoch() * 1000)` }).where(eq(sessions.tokenHash, tokenHash)).run();
     }
-    return { tokenHash, profileId: row.profileId, user: { id: row.id, username: row.username, isAdmin: row.isAdmin } };
+    return { tokenHash, profileId: row.profileId, user: { id: row.id, username: row.username, isAdmin: row.isAdmin && !row.viewerOnly } };
   }
 
   logout(tokenHash: string) {

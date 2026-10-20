@@ -29,6 +29,8 @@ export const sessions = sqliteTable("sessions", {
   deviceName: text("device_name"),
   createdAt: integer("created_at").notNull().default(now),
   lastSeenAt: integer("last_seen_at").notNull().default(now),
+  /** Joined without a password (home network, TV code): can watch, never administer. */
+  viewerOnly: integer("viewer_only", { mode: "boolean" }).notNull().default(false),
 });
 
 export const settings = sqliteTable("settings", {

@@ -30,7 +30,6 @@ struct MovieDetailView: View {
         .ignoresSafeArea(edges: .top)
         #if os(tvOS)
         .toolbar(.hidden, for: .tabBar)
-        .overlay(alignment: .topLeading) { TVBackButton { dismiss() } }
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -46,7 +45,7 @@ struct MovieDetailView: View {
                           fallbackURL: movie.posterUrl,
                           eyebrow: movie.availabilityLabel ?? "Movie",
                           title: movie.title,
-                          meta: [movie.yearText, movie.runtimeText, movie.certification].compactMap { $0 },
+                          meta: [movie.genres.first, movie.yearText, movie.runtimeText, movie.certification, movie.ratingText.map { "★ \($0)" }].compactMap { $0 },
                           badges: movie.sources.first?.specLabels.prefix(3).map { $0 } ?? [],
                           overview: movie.overview) {
                 PlayButton(movie.resumeMs != nil ? "Resume" : "Play") { play(movie, candidateId: nil) }
@@ -54,16 +53,13 @@ struct MovieDetailView: View {
                 GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV) {
                     Task { await toggleWatchlist(movie) }
                 }
-                GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: true) { showSources = true }
-                if let trailer = movie.trailer?.youtubeURL {
-                    #if !os(tvOS)
-                    Link(destination: trailer) { Image(systemName: "play.rectangle").font(.stHeadline).frame(minHeight: 30) }
-                        .buttonStyle(.glass)
-                        .controlSize(.large)
-                        .accessibilityLabel("Trailer")
-                    #endif
-                }
+                GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV) { showSources = true }
+                if let trailer = movie.trailer?.youtubeURL { TrailerButton(url: trailer) }
             }
+            #if os(tvOS)
+            // Part of the hero, so it scrolls away with it instead of floating over the page.
+            .overlay(alignment: .topLeading) { TVBackButton { dismiss() } }
+            #endif
 
             if let progress = movie.progress, progress.isResumable {
                 HStack(spacing: Metrics.space3) {
@@ -78,6 +74,8 @@ struct MovieDetailView: View {
             }
 
             CastRail(cast: movie.cast)
+
+            VideosRail(videos: movie.videos ?? [])
 
             if !movie.recommendations.isEmpty {
                 Rail("More Like This") {
@@ -156,6 +154,62 @@ struct CastRail: View {
     #else
     private var avatar: CGFloat { Metrics.isPad ? 96 : 72 }
     #endif
+}
+
+/// Opens the trailer on YouTube. Labeled where there's room, icon-only on iPhone.
+/// Not on tvOS, which has no browser to hand YouTube links to.
+struct TrailerButton: View {
+    let url: URL
+
+    var body: some View {
+        #if !os(tvOS)
+        Link(destination: url) {
+            if Metrics.isPad {
+                Label("Trailer", systemImage: "play.rectangle").font(.stHeadline).frame(minHeight: 30)
+            } else {
+                Image(systemName: "play.rectangle").font(.stHeadline).frame(minHeight: 30)
+            }
+        }
+        .buttonStyle(.glass)
+        .controlSize(.large)
+        .accessibilityLabel("Trailer")
+        #endif
+    }
+}
+
+/// "Trailers & Extras": YouTube trailers, teasers, clips and featurettes.
+struct VideosRail: View {
+    let videos: [TitleVideo]
+
+    var body: some View {
+        #if !os(tvOS)
+        if !videos.isEmpty {
+            Rail("Trailers & Extras") {
+                ForEach(videos) { video in
+                    Link(destination: video.url) {
+                        VStack(alignment: .leading, spacing: Metrics.space2) {
+                            ArtworkImage(url: video.thumbnailUrl, aspectRatio: 16 / 9, seed: video.key)
+                                .overlay {
+                                    Image(systemName: "play.fill")
+                                        .font(.stHeadline)
+                                        .foregroundStyle(Theme.onArtwork)
+                                        .frame(width: 44, height: 44)
+                                        .glassEffect(.regular, in: .circle)
+                                }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(video.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                                Text(video.type).font(.stFootnote).foregroundStyle(Theme.ink3)
+                            }
+                        }
+                        .frame(width: Metrics.landscapeWidth)
+                    }
+                    .buttonStyle(StrataCardStyle())
+                    .accessibilityLabel("\(video.type): \(video.name)")
+                }
+            }
+        }
+        #endif
+    }
 }
 
 struct InfoGrid: View {

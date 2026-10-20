@@ -94,6 +94,12 @@ export function NetworkCard({ draft, set }: { draft: Settings; set: SetFn }) {
           label="Bonjour discovery"
           hint={`Advertise this server on the local network so the Strata apps find it automatically.${net && draft.bonjourEnabled && !net.bonjour ? " (Not advertising right now — see Logs.)" : ""}`}
         />
+        <Switch
+          checked={draft.localJoin}
+          onChange={(v) => set("localJoin", v)}
+          label="No password at home"
+          hint="Devices on your home network skip sign-in and go straight to picking a profile (PINs still apply). They can watch but can't change settings. Away from home, devices sign in with your account."
+        />
       </div>
     </Card>
   );

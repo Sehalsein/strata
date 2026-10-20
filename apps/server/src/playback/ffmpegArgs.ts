@@ -53,8 +53,16 @@ export function buildHlsArgs({ ffmpeg, input, startSeconds, plan, info, outDir, 
 
   const audio = info.audio.find((a) => a.index === plan.audioStreamIndex);
   if (plan.audio === "copy") args.push("-c:a", "copy");
-  else if (plan.audio === "eac3") args.push("-c:a", "eac3", "-b:a", "640k", "-ac", String(Math.min(audio?.channels ?? 6, 6)));
-  else args.push("-c:a", "aac", "-b:a", "192k", "-ac", "2");
+  else {
+    if (plan.audio === "eac3") args.push("-c:a", "eac3", "-b:a", "640k", "-ac", String(Math.min(audio?.channels ?? 6, 6)));
+    else args.push("-c:a", "aac", "-b:a", "192k", "-ac", "2");
+    // Some releases start their audio well after the video (15s into one WEBRip). Fill that
+    // gap with silence from 0 so the first segment, and the init segment's audio
+    // description, exist; sync is kept because the silence covers exactly the gap.
+    args.push("-af", "aresample=async=1:first_pts=0");
+  }
+  // Wait for every stream rather than writing a segment without the late one (default 10s).
+  args.push("-max_interleave_delta", "0");
 
   args.push(
     "-sn",

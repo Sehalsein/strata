@@ -23,7 +23,12 @@ export const fakeTmdb: typeof fetch = (async (input: string | URL | Request) => 
     return json({ page: 1, results, total_pages: 1, total_results: results.length });
   }
   if (path === "/movie/10378") {
-    return json({ id: 10378, imdb_id: "tt1254207", title: "Big Buck Bunny", release_date: "2008-05-30", runtime: 10, genres: [{ id: 16, name: "Animation" }], poster_path: "/bbb.jpg", credits: { cast: [], crew: [] }, recommendations: { page: 1, results: [], total_pages: 1, total_results: 0 } });
+    return json({ id: 10378, imdb_id: "tt1254207", title: "Big Buck Bunny", release_date: "2008-05-30", runtime: 10, genres: [{ id: 16, name: "Animation" }], poster_path: "/bbb.jpg", credits: { cast: [], crew: [] }, recommendations: { page: 1, results: [], total_pages: 1, total_results: 0 }, videos: { results: [
+      { key: "clip1", site: "YouTube", type: "Clip", name: "Opening", official: true },
+      { key: "fan", site: "YouTube", type: "Trailer", name: "Fan trailer", official: false },
+      { key: "vimeo1", site: "Vimeo", type: "Trailer", name: "Elsewhere", official: true },
+      { key: "official", site: "YouTube", type: "Trailer", name: "Official Trailer", official: true },
+    ] } });
   }
   if (path === "/tv/9001") {
     return json({ id: 9001, name: "Test Show", first_air_date: "2020-01-01", external_ids: { imdb_id: "tt9000001" }, genres: [], seasons: [{ season_number: 1, name: "Season 1", episode_count: 2 }] });
@@ -54,7 +59,7 @@ export const fakeTmdb: typeof fetch = (async (input: string | URL | Request) => 
 
 export interface TestServer {
   services: Services;
-  request: (path: string, init?: RequestInit & { json?: unknown; token?: string }) => Promise<Response>;
+  request: (path: string, init?: RequestInit & { json?: unknown; token?: string; ip?: string }) => Promise<Response>;
   dataDir: string;
 }
 
@@ -63,7 +68,8 @@ export async function startTestServer(fetchImpl: typeof fetch = fakeTmdb): Promi
   process.env.TMDB_API_KEY = "test-key";
   const services = await createServices({ dataDir, port: 0, host: "127.0.0.1" }, { fetch: fetchImpl });
   const app = createApp(services);
-  const request = async (path: string, init: RequestInit & { json?: unknown; token?: string } = {}) => {
+  /** `ip` simulates the client address (otherwise the request has none, i.e. not local). */
+  const request = async (path: string, init: RequestInit & { json?: unknown; token?: string; ip?: string } = {}) => {
     const headers = new Headers(init.headers);
     if (init.token) headers.set("Authorization", `Bearer ${init.token}`);
     let bodyInit = init.body;
@@ -71,7 +77,8 @@ export async function startTestServer(fetchImpl: typeof fetch = fakeTmdb): Promi
       headers.set("Content-Type", "application/json");
       bodyInit = JSON.stringify(init.json);
     }
-    return app.fetch(new Request(`http://test${path}`, { ...init, headers, body: bodyInit }));
+    const env = init.ip ? { requestIP: () => ({ address: init.ip! }) } : {};
+    return app.fetch(new Request(`http://test${path}`, { ...init, headers, body: bodyInit }), env);
   };
   return { services, request, dataDir };
 }
