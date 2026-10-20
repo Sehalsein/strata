@@ -101,7 +101,7 @@ export class CatalogService {
     return (await this.tmdb.genres(type === "movie" ? "movie" : "tv")).genres;
   }
 
-  /** Rails for one genre: what's in the library, then popular, top rated and new on TMDB. */
+  /** Rails for one genre: new, popular and top rated on TMDB. */
   async genreShelves(type: TitleType, genreId: number): Promise<Shelf[]> {
     const tmdbType = type === "movie" ? "movie" : "tv";
     const today = new Date().toISOString().slice(0, 10);
@@ -115,11 +115,9 @@ export class CatalogService {
       safe(discover({ sort_by: `${dateKey}.desc`, [`${dateKey}.lte`]: today, "vote_count.gte": "20" })),
     ]);
     const shelves: Shelf[] = [];
-    const library = this.cardsFromLibrary(type, this.library.byGenre(type, genreId));
-    if (library.length) shelves.push({ id: "library", title: "In Your Library", kind: "titles", items: library });
+    if (fresh.length) shelves.push({ id: "new", title: "New", kind: "titles", items: fresh });
     if (popular.length) shelves.push({ id: "popular", title: "Popular", kind: "titles", items: popular });
     if (topRated.length) shelves.push({ id: "topRated", title: "Top Rated", kind: "titles", items: topRated });
-    if (fresh.length) shelves.push({ id: "new", title: "New", kind: "titles", items: fresh });
     return shelves;
   }
 
@@ -152,22 +150,6 @@ export class CatalogService {
       movies: withRole(this.cards(ranked.filter((c) => c.media_type === "movie").slice(0, 40), "movie"), "movie"),
       shows: withRole(this.cards(ranked.filter((c) => c.media_type === "tv").slice(0, 40), "show"), "tv"),
     };
-  }
-
-  /** Fills in genres for library titles added before they were stored. */
-  async backfillGenres(onProgress?: (done: number, total: number) => void) {
-    const missing = this.library.withoutGenres();
-    let done = 0;
-    for (const item of missing) {
-      try {
-        const detail = item.type === "movie" ? await this.tmdb.movie(item.tmdbId) : await this.tmdb.show(item.tmdbId);
-        this.library.setGenres(item.type, item.tmdbId, detail.genres.map((g) => g.id));
-      } catch (err) {
-        log.warn(`Couldn't load genres for ${item.type} ${item.tmdbId}`, err);
-      }
-      onProgress?.(++done, missing.length);
-    }
-    return { filled: done };
   }
 
   async search(query: string): Promise<TitleCard[]> {
@@ -370,10 +352,7 @@ export class CatalogService {
   }
 
   private libraryCards(type: TitleType, limit = 20): TitleCard[] {
-    return this.cardsFromLibrary(type, this.library.recentlyAdded(type, limit));
-  }
-
-  private cardsFromLibrary(type: TitleType, items: ReturnType<Library["recentlyAdded"]>): TitleCard[] {
+    const items = this.library.recentlyAdded(type, limit);
     const avail = this.library.availability(type, items.map((i) => i.tmdbId));
     return items.map((i) => ({
       type,

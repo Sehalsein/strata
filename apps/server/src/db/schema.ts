@@ -88,7 +88,7 @@ export const mediaItems = sqliteTable(
     posterPath: text("poster_path"),
     backdropPath: text("backdrop_path"),
     addedAt: integer("added_at").notNull().default(now),
-    /** JSON array of TMDB genre ids; null until known (see the backfillGenres job). */
+    /** JSON array of TMDB genre ids, recorded when a file is matched (null for older rows). */
     genreIds: text("genre_ids"),
   },
   (t) => [primaryKey({ columns: [t.type, t.tmdbId] })],

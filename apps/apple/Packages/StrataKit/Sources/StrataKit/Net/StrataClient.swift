@@ -131,7 +131,7 @@ public final class StrataClient: Sendable {
         return res.items
     }
 
-    /// Rails for one genre: In Your Library, Popular, Top Rated, New.
+    /// Rails for one genre: In Your Library, New, Popular, Top Rated.
     public func genreShelves(_ type: TitleType, genreId: Int) async throws -> [Shelf] {
         let res: ShelvesResponse = try await get("/api/browse/\(type.rawValue)/genre/\(genreId)")
         return res.shelves

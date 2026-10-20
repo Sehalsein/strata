@@ -95,7 +95,6 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     return syncTorbox(client, library, report);
   });
   jobs.register("matchPending", (report) => library.matchPending((d, t) => report(d, t, "Matching titles")));
-  jobs.register("backfillGenres", (report) => catalog.backfillGenres((d, t) => report(d, t, "Loading genres")));
   jobs.register("detectFfmpeg", async () => {
     ffmpegInfo = await detectFfmpeg(paths.root);
     return { found: !!ffmpegInfo };
@@ -131,7 +130,6 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   if (process.env.STRATA_NO_JOBS !== "1") {
     applySchedule();
     jobs.schedule("checkUpdates", 6 * 60 * MINUTE, 60_000);
-    jobs.schedule("backfillGenres", 6 * 60 * MINUTE, 20_000);
   }
 
   const shutdown = () => {

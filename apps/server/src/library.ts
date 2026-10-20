@@ -186,26 +186,6 @@ export class Library {
     return out;
   }
 
-  /** Library titles in a TMDB genre, most recently added first. */
-  byGenre(type: "movie" | "show", genreId: number, limit = 60) {
-    return this.db
-      .select()
-      .from(mediaItems)
-      .where(and(eq(mediaItems.type, type), sql`EXISTS (SELECT 1 FROM json_each(${mediaItems.genreIds}) WHERE value = ${genreId})`))
-      .orderBy(desc(mediaItems.addedAt))
-      .limit(limit)
-      .all();
-  }
-
-  /** Titles whose genres aren't known yet (added before genres were stored). */
-  withoutGenres(limit = 200) {
-    return this.db.select({ type: mediaItems.type, tmdbId: mediaItems.tmdbId }).from(mediaItems).where(isNull(mediaItems.genreIds)).limit(limit).all();
-  }
-
-  setGenres(type: "movie" | "show", tmdbId: number, genreIds: number[]) {
-    this.db.update(mediaItems).set({ genreIds: JSON.stringify(genreIds) }).where(and(eq(mediaItems.type, type), eq(mediaItems.tmdbId, tmdbId))).run();
-  }
-
   recentlyAdded(type: "movie" | "show", limit = 20) {
     return this.db.select().from(mediaItems).where(eq(mediaItems.type, type)).orderBy(desc(mediaItems.addedAt)).limit(limit).all();
   }

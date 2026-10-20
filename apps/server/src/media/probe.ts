@@ -44,9 +44,10 @@ export interface MediaInfo {
 
 const TEXT_SUBTITLES = new Set(["subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text"]);
 
-export async function probe(ffprobe: string, input: string, timeoutMs = 45_000): Promise<MediaInfo> {
+/** `networkTimeoutMs` bounds each read from a URL (a stalled CDN fails fast instead of hanging). */
+export async function probe(ffprobe: string, input: string, timeoutMs = 45_000, networkTimeoutMs = 15_000): Promise<MediaInfo> {
   const args = [ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", "-show_chapters"];
-  if (/^https?:/.test(input)) args.push("-rw_timeout", "15000000");
+  if (/^https?:/.test(input)) args.push("-rw_timeout", String(networkTimeoutMs * 1000));
   args.push(input);
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
   const timer = setTimeout(() => proc.kill(), timeoutMs);

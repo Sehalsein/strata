@@ -71,8 +71,10 @@ export class PlaybackService {
   async play(user: { userId: number; profileId: number }, req: PlayRequest): Promise<PlayResponse> {
     const file = await this.chooseFile(req);
 
+    const first = await this.resolveInput(file);
+    const info = await this.probeFile(file, first.input);
+    // The probe may have swapped a stalled TorBox link for a fresh one.
     const { input, inputKind } = await this.resolveInput(file);
-    const info = await this.probeFile(file, input);
     const plan = decide(info, req.caps, req.audioStreamIndex, this.settings().language);
 
     let startMs = req.startMs;
@@ -215,9 +217,23 @@ export class PlaybackService {
       this.library.saveProbe(file.id, info);
       return info;
     } catch (err) {
-      // Details (already redacted) go to the log; clients get a generic message.
+      // Details (already redacted) go to the log; clients get a plain message.
       log.warn(`Probe failed for file ${file.id}`, err);
-      throw new PlaybackError("Could not read this file", 502);
+      if (file.provider === "local") throw new PlaybackError("Could not read this file", 502);
+    }
+    // TorBox's CDN sometimes stalls on a link (seen right after a release is added):
+    // retry once with a fresh link and more patience before giving up.
+    this.links.delete(file.id);
+    try {
+      const fresh = await this.resolveInput(file);
+      const info = await probe(ff.ffprobe, fresh.input, 75_000, 30_000);
+      this.library.saveProbe(file.id, info);
+      log.info(`Probe for file ${file.id} succeeded on retry`);
+      return info;
+    } catch (err) {
+      log.warn(`Probe retry failed for file ${file.id}`, err);
+      this.links.delete(file.id);
+      throw new PlaybackError("TorBox didn't respond in time. Try again in a moment.", 502);
     }
   }
 }
