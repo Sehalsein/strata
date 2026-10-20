@@ -30,6 +30,9 @@ struct MovieDetailView: View {
         .ignoresSafeArea(edges: .top)
         #if os(tvOS)
         .toolbar(.hidden, for: .tabBar)
+        // Content loads after the page appears, so focus Play once it's there
+        // (otherwise the back button gets it).
+        .onChange(of: detail.value?.tmdbId) { _, id in if id != nil { playFocused = true } }
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -50,6 +53,9 @@ struct MovieDetailView: View {
                           overview: movie.overview) {
                 PlayButton(movie.resumeMs != nil ? "Resume" : "Play") { play(movie, candidateId: nil) }
                     .glassEffectID("play", in: namespace)
+                    #if os(tvOS)
+                    .focused($playFocused)
+                    #endif
                 GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV) {
                     Task { await toggleWatchlist(movie) }
                 }
@@ -101,6 +107,9 @@ struct MovieDetailView: View {
     }
 
     @Namespace private var namespace
+    #if os(tvOS)
+    @FocusState private var playFocused: Bool
+    #endif
 
     private func play(_ movie: MovieDetail, candidateId: String?) {
         services.play(WatchRequest(target: movie.target,
@@ -129,24 +138,27 @@ struct CastRail: View {
         if !cast.isEmpty {
             Rail("Cast") {
                 ForEach(cast.prefix(15)) { person in
-                    VStack(spacing: Metrics.space2) {
-                        AsyncImage(url: person.profileUrl) { phase in
-                            if case .success(let image) = phase { image.resizable().scaledToFill() } else {
-                                Theme.surface2.overlay { Text(person.name.prefix(1)).font(.stTitle2).foregroundStyle(Theme.ink3) }
-                            }
-                        }
-                        .frame(width: avatar, height: avatar)
-                        .clipShape(Circle())
-                        Text(person.name).font(.stFootnote.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
-                        if let character = person.character { Text(character).font(.caption).foregroundStyle(Theme.ink3).lineLimit(1) }
-                    }
-                    .frame(width: avatar + 16)
-                    #if os(tvOS)
-                    .focusable()
-                    #endif
+                    NavigationLink(value: Route.person(person.id)) { member(person) }
+                        .buttonStyle(StrataCardStyle())
+                        .accessibilityLabel([person.name, person.character].compactMap { $0 }.joined(separator: ", "))
                 }
             }
         }
+    }
+
+    private func member(_ person: CastMember) -> some View {
+        VStack(spacing: Metrics.space2) {
+            AsyncImage(url: person.profileUrl) { phase in
+                if case .success(let image) = phase { image.resizable().scaledToFill() } else {
+                    Theme.surface2.overlay { Text(person.name.prefix(1)).font(.stTitle2).foregroundStyle(Theme.ink3) }
+                }
+            }
+            .frame(width: avatar, height: avatar)
+            .clipShape(Circle())
+            Text(person.name).font(.stFootnote.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+            if let character = person.character { Text(character).font(.caption).foregroundStyle(Theme.ink3).lineLimit(1) }
+        }
+        .frame(width: avatar + 16)
     }
 
     #if os(tvOS)

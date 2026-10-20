@@ -51,6 +51,25 @@ export const fakeTmdb: typeof fetch = (async (input: string | URL | Request) => 
     ];
     return json({ page: 1, results, total_pages: 1, total_results: results.length });
   }
+  if (path === "/genre/movie/list") return json({ genres: [{ id: 16, name: "Animation" }, { id: 35, name: "Comedy" }] });
+  if (path === "/discover/movie") {
+    const results = url.searchParams.get("with_genres") === "16" ? [{ id: 10378, title: "Big Buck Bunny", release_date: "2008-05-30", genre_ids: [16] }] : [];
+    return json({ page: 1, results, total_pages: 1, total_results: results.length });
+  }
+  if (path === "/person/77") {
+    return json({
+      id: 77, name: "Sacha Goedegebure", known_for_department: "Directing", biography: "Dutch animator.", birthday: "1980-01-01", profile_path: "/sacha.jpg",
+      combined_credits: {
+        cast: [{ id: 10378, media_type: "movie", title: "Big Buck Bunny", character: "Voice", vote_count: 10 }],
+        crew: [
+          { id: 10378, media_type: "movie", title: "Big Buck Bunny", job: "Director", vote_count: 900 },
+          { id: 10378, media_type: "movie", title: "Big Buck Bunny", job: "Writer", vote_count: 900 },
+          { id: 9001, media_type: "tv", name: "Test Show", job: "Creator", vote_count: 50 },
+          { id: 5, media_type: "movie", title: "Lighting Only", job: "Lighting", vote_count: 5000 },
+        ],
+      },
+    });
+  }
   if (path.startsWith("/trending/") || path.endsWith("/popular") || path.endsWith("/top_rated")) {
     return json({ page: 1, results: [{ id: 10378, title: "Big Buck Bunny", release_date: "2008-05-30" }], total_pages: 1, total_results: 1 });
   }

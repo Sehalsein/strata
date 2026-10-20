@@ -71,7 +71,10 @@ struct SourcePickerSheet: View {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
+            #if !os(tvOS)
+            // On tvOS the remote's Menu button closes the sheet, and the title needs the room.
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            #endif
         }
         .presentationDetents([.medium, .large])
         .task { sources = await services.load { try await $0.sources(target, discover: true) } }

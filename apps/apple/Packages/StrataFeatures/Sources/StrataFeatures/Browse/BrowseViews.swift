@@ -2,12 +2,16 @@ import SwiftUI
 import StrataKit
 import StrataDesign
 
-/// Movies or Shows tab: rails for the library and TMDB lists.
+/// Movies or Shows tab: genre chips, then rails for the library and TMDB lists,
+/// or for the chosen genre.
 struct BrowseView: View {
     @Environment(AppServices.self) private var services
     let type: TitleType
     @State private var lists: [BrowseList: [TitleCard]] = [:]
     @State private var error: String?
+    @State private var genres: [Genre] = []
+    @State private var genre: Genre?
+    @State private var genreShelves: Loadable<[Shelf]> = .loading
 
     private let order: [BrowseList] = [.library, .trending, .popular, .topRated]
     private var title: String { type == .movie ? "Movies" : "Shows" }
@@ -15,6 +19,50 @@ struct BrowseView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Metrics.railGap) {
+                if !genres.isEmpty {
+                    GenreChips(genres: genres, selected: $genre)
+                }
+                if let genre {
+                    genreContent(genre)
+                } else {
+                    allContent
+                }
+            }
+            .padding(.vertical, Metrics.space4)
+        }
+        .background(Theme.bg.ignoresSafeArea())
+        .fullBleedOnTV()
+        #if !os(tvOS)
+        .navigationTitle(title)
+        .toolbar { ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() } }
+        .refreshable { await services.client?.clearCache(); await load() }
+        #endif
+        .task { await load() }
+        .task { await loadGenres() }
+        .task(id: genre) {
+            guard let genre else { return }
+            genreShelves = .loading
+            let result = await services.load { try await $0.genreShelves(type, genreId: genre.id) }
+            if case .loading = result { return }
+            genreShelves = result
+        }
+    }
+
+    @ViewBuilder private func genreContent(_ genre: Genre) -> some View {
+        switch genreShelves {
+        case .loading:
+            SkeletonRail(width: Metrics.posterWidth)
+            SkeletonRail(width: Metrics.posterWidth)
+        case .failed(let message):
+            MessageView(systemImage: "wifi.exclamationmark", title: "Couldn't load \(genre.name)", message: message).frame(minHeight: 300)
+        case .loaded(let shelves) where shelves.isEmpty:
+            MessageView(systemImage: "film.stack", title: "Nothing in \(genre.name) yet").frame(minHeight: 300)
+        case .loaded(let shelves):
+            ForEach(shelves) { shelf in ShelfRail(shelf: shelf) }
+        }
+    }
+
+    @ViewBuilder private var allContent: some View {
                 if lists.isEmpty, error == nil {
                     SkeletonRail(width: Metrics.posterWidth)
                     SkeletonRail(width: Metrics.posterWidth)
@@ -48,17 +96,10 @@ struct BrowseView: View {
                         }
                     }
                 }
-            }
-            .padding(.vertical, Metrics.space4)
-        }
-        .background(Theme.bg.ignoresSafeArea())
-        .fullBleedOnTV()
-        #if !os(tvOS)
-        .navigationTitle(title)
-        .toolbar { ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() } }
-        .refreshable { await services.client?.clearCache(); await load() }
-        #endif
-        .task { await load() }
+    }
+
+    private func loadGenres() async {
+        if case .loaded(let items) = await services.load({ try await $0.genres(type) }) { genres = items }
     }
 
     private func railTitle(_ list: BrowseList) -> String {
@@ -85,6 +126,80 @@ struct BrowseView: View {
         }
     }
 }
+
+/// "All" plus one chip per genre. The selected chip is filled (apricot marks the
+/// selected segment); tapping it again goes back to All.
+struct GenreChips: View {
+    let genres: [Genre]
+    @Binding var selected: Genre?
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Metrics.space2) {
+                chip("All", isOn: selected == nil) { selected = nil }
+                ForEach(genres) { genre in
+                    chip(genre.name, isOn: selected == genre) { selected = selected == genre ? nil : genre }
+                }
+            }
+            .padding(.horizontal, Metrics.gutter)
+            #if os(tvOS)
+            .padding(.vertical, Metrics.space6) // room for the focus lift
+            #endif
+        }
+        .scrollClipDisabled()
+    }
+
+    @ViewBuilder private func chip(_ title: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        #if os(tvOS)
+        Button(title, action: action)
+            .buttonStyle(TVChipStyle(isOn: isOn))
+            .accessibilityAddTraits(isOn ? .isSelected : [])
+        #else
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(isOn ? Theme.onAccent : Theme.ink)
+                .padding(.horizontal, Metrics.space4)
+                .frame(minHeight: 36)
+                .background(isOn ? AnyShapeStyle(Theme.apricot) : AnyShapeStyle(Theme.surface2), in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+        #endif
+    }
+}
+
+#if os(tvOS)
+/// tvOS chip: system buttons keep their tint even when focused, so the three states
+/// are spelled out: focused (white, lifted), selected (apricot), resting (surface).
+private struct TVChipStyle: ButtonStyle {
+    let isOn: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        Chip(label: configuration.label, isOn: isOn, pressed: configuration.isPressed)
+    }
+
+    private struct Chip<Label: View>: View {
+        @Environment(\.isFocused) private var focused
+        let label: Label
+        let isOn: Bool
+        let pressed: Bool
+
+        var body: some View {
+            label
+                .font(.stCallout.weight(.semibold))
+                .foregroundStyle(focused ? Theme.bg : isOn ? Theme.onAccent : Theme.ink)
+                .padding(.horizontal, Metrics.space6)
+                .frame(minHeight: 56)
+                .background(focused ? Theme.onArtwork : isOn ? Theme.apricot : Theme.surface2, in: Capsule())
+                .scaleEffect(focused ? (pressed ? 1.02 : 1.08) : 1)
+                .shadow(color: .black.opacity(focused ? 0.4 : 0), radius: 12, y: 8)
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: focused)
+        }
+    }
+}
+#endif
 
 /// A full grid of one list ("See all").
 struct BrowseListView: View {

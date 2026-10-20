@@ -90,4 +90,7 @@ export const migrations: string[] = [
   /* 3 */ `
   ALTER TABLE sessions ADD COLUMN viewer_only INTEGER NOT NULL DEFAULT 0;
   `,
+  /* 4 */ `
+  ALTER TABLE media_items ADD COLUMN genre_ids TEXT;
+  `,
 ];

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import type { Db } from "./db";
 import { files, mediaItems, type FileProvider, type MatchStatus } from "./db/schema";
 import type { Matcher, MatchResult } from "./catalog/matcher";
@@ -106,11 +106,11 @@ export class Library {
   async setManualMatch(fileId: number, type: "movie" | "show", tmdbId: number, season?: number, episode?: number, status: MatchStatus = "manual") {
     if (type === "movie") {
       const m = await this.tmdb.movie(tmdbId);
-      this.applyMatch(fileId, { type, tmdbId, title: m.title, year: yearOf(m.release_date), posterPath: m.poster_path ?? null, backdropPath: m.backdrop_path ?? null }, undefined, undefined, status);
+      this.applyMatch(fileId, { type, tmdbId, title: m.title, year: yearOf(m.release_date), posterPath: m.poster_path ?? null, backdropPath: m.backdrop_path ?? null, genreIds: m.genres.map((g) => g.id) }, undefined, undefined, status);
     } else {
       if (season === undefined || episode === undefined) throw new Error("season and episode are required for shows");
       const s = await this.tmdb.show(tmdbId);
-      this.applyMatch(fileId, { type, tmdbId, title: s.name, year: yearOf(s.first_air_date), posterPath: s.poster_path ?? null, backdropPath: s.backdrop_path ?? null }, season, episode, status);
+      this.applyMatch(fileId, { type, tmdbId, title: s.name, year: yearOf(s.first_air_date), posterPath: s.poster_path ?? null, backdropPath: s.backdrop_path ?? null, genreIds: s.genres.map((g) => g.id) }, season, episode, status);
     }
   }
 
@@ -132,9 +132,15 @@ export class Library {
         .where(eq(files.id, fileId))
         .run();
       tx.insert(mediaItems)
-        .values({ type: m.type, tmdbId: m.tmdbId, title: m.title, year: m.year, posterPath: m.posterPath, backdropPath: m.backdropPath })
+        .values({ type: m.type, tmdbId: m.tmdbId, title: m.title, year: m.year, posterPath: m.posterPath, backdropPath: m.backdropPath, genreIds: m.genreIds ? JSON.stringify(m.genreIds) : null })
         .onConflictDoNothing()
         .run();
+      if (m.genreIds) {
+        tx.update(mediaItems)
+          .set({ genreIds: JSON.stringify(m.genreIds) })
+          .where(and(eq(mediaItems.type, m.type), eq(mediaItems.tmdbId, m.tmdbId), isNull(mediaItems.genreIds)))
+          .run();
+      }
     });
   }
 
@@ -178,6 +184,26 @@ export class Library {
       out.set(row.tmdbId!, list);
     }
     return out;
+  }
+
+  /** Library titles in a TMDB genre, most recently added first. */
+  byGenre(type: "movie" | "show", genreId: number, limit = 60) {
+    return this.db
+      .select()
+      .from(mediaItems)
+      .where(and(eq(mediaItems.type, type), sql`EXISTS (SELECT 1 FROM json_each(${mediaItems.genreIds}) WHERE value = ${genreId})`))
+      .orderBy(desc(mediaItems.addedAt))
+      .limit(limit)
+      .all();
+  }
+
+  /** Titles whose genres aren't known yet (added before genres were stored). */
+  withoutGenres(limit = 200) {
+    return this.db.select({ type: mediaItems.type, tmdbId: mediaItems.tmdbId }).from(mediaItems).where(isNull(mediaItems.genreIds)).limit(limit).all();
+  }
+
+  setGenres(type: "movie" | "show", tmdbId: number, genreIds: number[]) {
+    this.db.update(mediaItems).set({ genreIds: JSON.stringify(genreIds) }).where(and(eq(mediaItems.type, type), eq(mediaItems.tmdbId, tmdbId))).run();
   }
 
   recentlyAdded(type: "movie" | "show", limit = 20) {

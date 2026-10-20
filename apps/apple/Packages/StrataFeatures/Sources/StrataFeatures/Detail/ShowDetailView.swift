@@ -12,6 +12,9 @@ struct ShowDetailView: View {
     @State private var season: Loadable<SeasonDetail> = .loading
     @State private var inWatchlist = false
     @State private var sourcesFor: EpisodeItem?
+    #if os(tvOS)
+    @FocusState private var playFocused: Bool
+    #endif
 
     var body: some View {
         ScrollView {
@@ -32,6 +35,8 @@ struct ShowDetailView: View {
         .ignoresSafeArea(edges: .top)
         #if os(tvOS)
         .toolbar(.hidden, for: .tabBar)
+        // Content loads after the page appears, so focus Play once it's there.
+        .onChange(of: detail.value?.tmdbId) { _, id in if id != nil { playFocused = true } }
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -54,6 +59,9 @@ struct ShowDetailView: View {
                     PlayButton(upNext.isResume ? "Resume \(code(upNext.season, upNext.episode))" : "Play \(code(upNext.season, upNext.episode))") {
                         play(show, season: upNext.season, episode: upNext.episode, name: nil, still: nil, candidateId: nil)
                     }
+                    #if os(tvOS)
+                    .focused($playFocused)
+                    #endif
                 }
                 GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV) {
                     Task { await toggleWatchlist(show) }

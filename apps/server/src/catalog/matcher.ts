@@ -8,6 +8,7 @@ export interface MatchResult {
   year: number | null;
   posterPath: string | null;
   backdropPath: string | null;
+  genreIds?: number[] | null;
 }
 
 /** Maps parsed file names to TMDB ids. Results are memoized per (kind, title, year). */
@@ -43,6 +44,7 @@ export class Matcher {
       year: yearOf(best.release_date ?? best.first_air_date),
       posterPath: best.poster_path ?? null,
       backdropPath: best.backdrop_path ?? null,
+      genreIds: best.genre_ids ?? null,
     };
   }
 }

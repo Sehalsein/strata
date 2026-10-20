@@ -125,6 +125,22 @@ public final class StrataClient: Sendable {
         return res.items
     }
 
+    /// TMDB genres for movies or shows, in the server's language.
+    public func genres(_ type: TitleType) async throws -> [Genre] {
+        let res: ItemsResponse<Genre> = try await get("/api/genres/\(type.rawValue)")
+        return res.items
+    }
+
+    /// Rails for one genre: In Your Library, Popular, Top Rated, New.
+    public func genreShelves(_ type: TitleType, genreId: Int) async throws -> [Shelf] {
+        let res: ShelvesResponse = try await get("/api/browse/\(type.rawValue)/genre/\(genreId)")
+        return res.shelves
+    }
+
+    public func person(_ id: Int) async throws -> PersonDetail {
+        try await get("/api/person/\(id)")
+    }
+
     public func search(_ query: String) async throws -> [TitleCard] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return [] }

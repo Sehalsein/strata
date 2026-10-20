@@ -84,6 +84,25 @@ export interface TmdbShow {
   external_ids?: { imdb_id?: string | null; tvdb_id?: number | null };
   videos?: TmdbMovie["videos"];
 }
+export interface TmdbPersonCredit extends TmdbListItem {
+  media_type: "movie" | "tv";
+  character?: string;
+  job?: string;
+  popularity?: number;
+  vote_count?: number;
+}
+export interface TmdbPerson {
+  id: number;
+  name: string;
+  biography?: string;
+  birthday?: string | null;
+  deathday?: string | null;
+  place_of_birth?: string | null;
+  profile_path?: string | null;
+  known_for_department?: string;
+  combined_credits?: { cast: TmdbPersonCredit[]; crew: TmdbPersonCredit[] };
+}
+
 export interface TmdbEpisode {
   id: number;
   season_number: number;
@@ -144,6 +163,16 @@ export class Tmdb {
   }
   searchMulti(query: string) {
     return this.get<TmdbPage>("/search/multi", { query }, 6 * HOUR);
+  }
+  genres(type: "movie" | "tv") {
+    return this.get<{ genres: { id: number; name: string }[] }>(`/genre/${type}/list`, {}, 7 * DAY);
+  }
+  /** TMDB discover: `params` are passed through (with_genres, sort_by, date bounds…). */
+  discover(type: "movie" | "tv", params: Record<string, string>) {
+    return this.get<TmdbPage>(`/discover/${type}`, { include_adult: "false", ...params }, 6 * HOUR);
+  }
+  person(id: number) {
+    return this.get<TmdbPerson>(`/person/${id}`, { append_to_response: "combined_credits" }, 3 * DAY);
   }
   trending(type: "movie" | "tv") {
     return this.get<TmdbPage>(`/trending/${type}/week`, {}, 6 * HOUR);

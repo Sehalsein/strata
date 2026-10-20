@@ -96,6 +96,80 @@ export class CatalogService {
     return this.cards(page.results, type);
   }
 
+  /** TMDB's genres for movies or shows, in the server's metadata language. */
+  async genres(type: TitleType): Promise<{ id: number; name: string }[]> {
+    return (await this.tmdb.genres(type === "movie" ? "movie" : "tv")).genres;
+  }
+
+  /** Rails for one genre: what's in the library, then popular, top rated and new on TMDB. */
+  async genreShelves(type: TitleType, genreId: number): Promise<Shelf[]> {
+    const tmdbType = type === "movie" ? "movie" : "tv";
+    const today = new Date().toISOString().slice(0, 10);
+    const dateKey = type === "movie" ? "primary_release_date" : "first_air_date";
+    const discover = (params: Record<string, string>) =>
+      this.tmdb.discover(tmdbType, { with_genres: String(genreId), ...params }).then((p) => this.cards(p.results, type));
+    const safe = <T,>(work: Promise<T[]>) => work.catch((err) => (log.warn("Genre shelf failed", err), [] as T[]));
+    const [popular, topRated, fresh] = await Promise.all([
+      safe(discover({ sort_by: "popularity.desc" })),
+      safe(discover({ sort_by: "vote_average.desc", "vote_count.gte": "300" })),
+      safe(discover({ sort_by: `${dateKey}.desc`, [`${dateKey}.lte`]: today, "vote_count.gte": "20" })),
+    ]);
+    const shelves: Shelf[] = [];
+    const library = this.cardsFromLibrary(type, this.library.byGenre(type, genreId));
+    if (library.length) shelves.push({ id: "library", title: "In Your Library", kind: "titles", items: library });
+    if (popular.length) shelves.push({ id: "popular", title: "Popular", kind: "titles", items: popular });
+    if (topRated.length) shelves.push({ id: "topRated", title: "Top Rated", kind: "titles", items: topRated });
+    if (fresh.length) shelves.push({ id: "new", title: "New", kind: "titles", items: fresh });
+    return shelves;
+  }
+
+  /** A cast or crew member and the movies and shows they're known for, most popular first. */
+  async person(id: number) {
+    const p = await this.tmdb.person(id);
+    const acting = (p.known_for_department ?? "Acting") === "Acting";
+    const credits = acting ? p.combined_credits?.cast ?? [] : p.combined_credits?.crew.filter((c) => c.job === "Director" || c.job === "Creator" || c.job === "Writer") ?? [];
+    const seen = new Set<string>();
+    const ranked = credits
+      .filter((c) => (c.media_type === "movie" || c.media_type === "tv") && !(c.media_type === "tv" && c.character?.includes("Self")))
+      .sort((a, b) => (b.vote_count ?? 0) - (a.vote_count ?? 0) || (b.popularity ?? 0) - (a.popularity ?? 0))
+      .filter((c) => {
+        const key = `${c.media_type}-${c.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    const role = new Map(ranked.map((c) => [`${c.media_type}-${c.id}`, c.character || c.job || null]));
+    const withRole = (cards: TitleCard[], t: string) => cards.map((card) => ({ ...card, role: role.get(`${t}-${card.tmdbId}`) ?? null }));
+    return {
+      id: p.id,
+      name: p.name,
+      biography: p.biography || null,
+      birthday: p.birthday ?? null,
+      deathday: p.deathday ?? null,
+      placeOfBirth: p.place_of_birth ?? null,
+      knownFor: p.known_for_department ?? null,
+      profileUrl: imageUrl(p.profile_path, "w500"),
+      movies: withRole(this.cards(ranked.filter((c) => c.media_type === "movie").slice(0, 40), "movie"), "movie"),
+      shows: withRole(this.cards(ranked.filter((c) => c.media_type === "tv").slice(0, 40), "show"), "tv"),
+    };
+  }
+
+  /** Fills in genres for library titles added before they were stored. */
+  async backfillGenres(onProgress?: (done: number, total: number) => void) {
+    const missing = this.library.withoutGenres();
+    let done = 0;
+    for (const item of missing) {
+      try {
+        const detail = item.type === "movie" ? await this.tmdb.movie(item.tmdbId) : await this.tmdb.show(item.tmdbId);
+        this.library.setGenres(item.type, item.tmdbId, detail.genres.map((g) => g.id));
+      } catch (err) {
+        log.warn(`Couldn't load genres for ${item.type} ${item.tmdbId}`, err);
+      }
+      onProgress?.(++done, missing.length);
+    }
+    return { filled: done };
+  }
+
   async search(query: string): Promise<TitleCard[]> {
     const page = await this.tmdb.searchMulti(query);
     const movies = page.results.filter((r) => r.media_type === "movie");
@@ -296,7 +370,10 @@ export class CatalogService {
   }
 
   private libraryCards(type: TitleType, limit = 20): TitleCard[] {
-    const items = this.library.recentlyAdded(type, limit);
+    return this.cardsFromLibrary(type, this.library.recentlyAdded(type, limit));
+  }
+
+  private cardsFromLibrary(type: TitleType, items: ReturnType<Library["recentlyAdded"]>): TitleCard[] {
     const avail = this.library.availability(type, items.map((i) => i.tmdbId));
     return items.map((i) => ({
       type,

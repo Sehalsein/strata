@@ -145,6 +145,26 @@ describe("library", () => {
     expect(trending.items[0].available).toEqual(["local"]);
   });
 
+  test("genres: the list, and rails for one genre including library titles", async () => {
+    expect((await json(await server.request("/api/genres/movie", { token }))).items).toContainEqual({ id: 35, name: "Comedy" });
+    // Library titles get their genres from the backfill (older rows) or at match time.
+    await server.services.jobs.run("backfillGenres");
+    const { shelves } = await json(await server.request("/api/browse/movie/genre/16", { token }));
+    expect(shelves.map((s: any) => s.id)).toEqual(["library", "popular", "topRated", "new"]);
+    expect(shelves[0].items[0]).toMatchObject({ tmdbId: 10378, available: ["local"] });
+    const comedy = await json(await server.request("/api/browse/movie/genre/35", { token }));
+    expect(comedy.shelves).toEqual([]);
+  });
+
+  test("person page lists their work, deduplicated, by department", async () => {
+    const person = await json(await server.request("/api/person/77", { token }));
+    expect(person).toMatchObject({ name: "Sacha Goedegebure", knownFor: "Directing", biography: "Dutch animator." });
+    // A director's page lists directing/writing/creating, not other crew jobs, each title once.
+    expect(person.movies.map((m: any) => m.tmdbId)).toEqual([10378]);
+    expect(person.movies[0].role).toBe("Director");
+    expect(person.shows.map((s: any) => s.tmdbId)).toEqual([9001]);
+  });
+
   test("season detail marks available episodes", async () => {
     const season = await json(await server.request("/api/titles/show/9001/seasons/1", { token }));
     expect(season.episodes.map((e: any) => e.available)).toEqual([["local"], ["local"]]);

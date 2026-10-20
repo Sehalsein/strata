@@ -127,6 +127,30 @@ final class TVFocusTests: XCTestCase {
         snapshot("profile-03-settings")
     }
 
+    /// Movies tab genre chips, then a cast member's page from a movie's detail page.
+    func testGenresAndPerson() {
+        let movie = ProcessInfo.processInfo.environment["STRATA_TEST_MOVIE"] ?? "10378"
+        launchSignedIn(["-StrataTab", "movies"])
+        XCTAssertTrue(app.buttons["All"].waitForExistence(timeout: 15), "genre chips should show on Movies")
+        press(.down, pause: 1)
+        press(.right, pause: 1)
+        press(.select, pause: 3)
+        snapshot("genre-01-selected")
+        press(.down, pause: 1.5)
+        snapshot("genre-02-rails")
+
+        app.terminate()
+        launchSignedIn(["-StrataOpenURL", "strata://movie/\(movie)"])
+        XCTAssertTrue(app.buttons["Play"].waitForExistence(timeout: 15))
+        // Down from the hero to the first cast member, then open their page.
+        press(.down, pause: 1.5)
+        snapshot("person-00-cast-focused")
+        press(.select, pause: 4)
+        snapshot("person-01-page")
+        press(.down, pause: 1.5)
+        snapshot("person-02-credits")
+    }
+
     func testBrowseFocusAndPlay() {
         launchSignedIn()
         XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 15))

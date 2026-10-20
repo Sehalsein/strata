@@ -34,6 +34,8 @@ public struct TitleCard: Codable, Sendable, Hashable, Identifiable {
     public var episode: EpisodeRef?
     public var positionMs: Int?
     public var durationMs: Int?
+    /// On a person's page: the character they played or their job ("Director").
+    public var role: String? = nil
 
     public init(type: TitleType, tmdbId: Int, title: String, year: Int? = nil, overview: String? = nil,
                 posterUrl: URL? = nil, backdropUrl: URL? = nil, rating: Double? = nil, available: [Provider] = [],
@@ -97,6 +99,41 @@ public struct Shelf: Codable, Sendable, Hashable, Identifiable {
 }
 
 /// `GET /api/browse/:type/:list`
+/// A TMDB genre ("Comedy", id 35), for filtering Movies and Shows.
+public struct Genre: Codable, Sendable, Hashable, Identifiable {
+    public var id: Int
+    public var name: String
+    public init(id: Int, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
+/// `GET /api/person/:id`: a cast or crew member and their movies and shows.
+public struct PersonDetail: Codable, Sendable, Hashable, Identifiable {
+    public var id: Int
+    public var name: String
+    public var biography: String?
+    public var birthday: String?
+    public var deathday: String?
+    public var placeOfBirth: String?
+    public var knownFor: String?
+    public var profileUrl: URL?
+    public var movies: [TitleCard]
+    public var shows: [TitleCard]
+
+    /// "Born March 3, 1972 in Toronto" / "1940 – 2016".
+    public var lifeText: String? {
+        let born = Formatting.date(birthday)?.formatted(date: .long, time: .omitted)
+        if let died = Formatting.date(deathday) {
+            let years = [Formatting.date(birthday), died].compactMap { $0 }.map { String(Calendar.current.component(.year, from: $0)) }
+            return years.joined(separator: " – ")
+        }
+        guard let born else { return placeOfBirth.map { "Born in \($0)" } }
+        return placeOfBirth.map { "Born \(born) in \($0)" } ?? "Born \(born)"
+    }
+}
+
 public enum BrowseList: String, Codable, Sendable, Hashable, CaseIterable {
     case trending, popular, topRated, library
 

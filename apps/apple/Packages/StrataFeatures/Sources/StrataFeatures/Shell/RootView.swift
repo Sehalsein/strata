@@ -130,6 +130,7 @@ struct StackHost<Root: View>: View {
                     case .movie(let id): MovieDetailView(tmdbId: id)
                     case .show(let id): ShowDetailView(tmdbId: id)
                     case .browse(let type, let list): BrowseListView(type: type, list: list)
+                    case .person(let id): PersonView(personId: id)
                     }
                 }
         }

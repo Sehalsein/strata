@@ -103,6 +103,7 @@ public enum Route: Hashable {
     case movie(Int)
     case show(Int)
     case browse(TitleType, BrowseList)
+    case person(Int)
 }
 
 public extension TitleCard {

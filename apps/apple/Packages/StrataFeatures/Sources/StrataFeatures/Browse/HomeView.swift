@@ -126,8 +126,9 @@ struct PosterCardLabel: View {
             ArtworkImage(url: card.posterUrl, aspectRatio: 2 / 3, seed: card.id)
             VStack(alignment: .leading, spacing: 2) {
                 Text(card.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
-                if let year = card.yearText {
-                    Text(year).font(.stFootnote).foregroundStyle(Theme.ink3)
+                // On a person's page the role ("Tony Lip", "Director") says more than the year.
+                if let caption = card.role.map({ [$0, card.yearText].compactMap { $0 }.joined(separator: " · ") }) ?? card.yearText {
+                    Text(caption).font(.stFootnote).foregroundStyle(Theme.ink3).lineLimit(1)
                 }
             }
             #if os(tvOS)

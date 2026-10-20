@@ -21,6 +21,18 @@ export const catalogRoutes = new Hono<Env>()
 
   .get("/home", async (c) => c.json({ shelves: await c.var.services.catalog.home(profileOf(c)) }))
 
+  .get("/genres/:type", async (c) => {
+    const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
+    return c.json({ items: await c.var.services.catalog.genres(type) });
+  })
+
+  .get("/browse/:type/genre/:id", async (c) => {
+    const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
+    return c.json({ shelves: await c.var.services.catalog.genreShelves(type, intParam(c, "id")) });
+  })
+
+  .get("/person/:id", async (c) => c.json(await c.var.services.catalog.person(intParam(c, "id"))))
+
   .get("/browse/:type/:list", async (c) => {
     const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
     const list = z.enum(["trending", "popular", "topRated", "library"]).parse(c.req.param("list"));
