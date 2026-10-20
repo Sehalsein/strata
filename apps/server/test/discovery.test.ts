@@ -149,6 +149,14 @@ describe("discovery end to end", () => {
     }
   });
 
+  test("a library torrent can't be replayed as a different title", async () => {
+    const before = server.services.library.byHash(CACHED).map((f) => [f.id, f.mediaType, f.tmdbId]);
+    expect(before.length).toBeGreaterThan(0);
+    const res = await server.request("/api/play", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 1, candidateId: `hash:${CACHED}` } });
+    expect(res.status).toBe(404);
+    expect(server.services.library.byHash(CACHED).map((f) => [f.id, f.mediaType, f.tmdbId])).toEqual(before);
+  });
+
   test("an uncached release reports download progress", async () => {
     const res = await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, candidateId: `hash:${UNCACHED}` } });
     expect(res.status).toBe(202);

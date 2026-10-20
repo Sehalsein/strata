@@ -162,7 +162,10 @@ export class PlaybackService {
       if (!isInfoHash(hash)) throw new PlaybackError("Unknown source", 404);
       // Only hashes already in the library, or ones discovery offered for this exact
       // title, may be added to the owner's TorBox — never an arbitrary torrent.
-      if (this.library.byHash(hash).length === 0) {
+      const inLibraryForTarget = this.library
+        .byHash(hash)
+        .some((r) => r.mediaType === req.mediaType && r.tmdbId === req.tmdbId && (req.mediaType === "movie" || (r.season === req.season && r.episode === req.episode)));
+      if (!inLibraryForTarget) {
         if (!this.discovery.available) throw new PlaybackError("Discovery is turned off", 403);
         const offered = (await this.discovery.releases(target)).find((r) => r.hash === hash);
         if (!offered) throw new PlaybackError("Unknown source", 404);

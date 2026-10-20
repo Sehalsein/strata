@@ -157,6 +157,8 @@ export class Discovery {
    * collection of many films. Shows: every file with a season/episode number.
    */
   private async assignMatches(rows: FileRow[], target: DiscoveryTarget, fileName?: string) {
+    // Never relabel a file that's already matched (or hand-matched) to another title.
+    rows = rows.filter((r) => !((r.matchStatus === "matched" || r.matchStatus === "manual") && r.tmdbId !== null && r.tmdbId !== target.tmdbId));
     if (target.mediaType === "movie") {
       const movies = rows.filter((r) => (JSON.parse(r.parsedJson ?? "{}") as ParsedName).kind !== "episode");
       const pick = (fileName && movies.find((r) => r.name === fileName)) || movies.sort((a, b) => b.size - a.size)[0];
