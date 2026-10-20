@@ -95,6 +95,20 @@ describe("setup and auth", () => {
     await server.request(`/api/profiles/${kids.id}`, { method: "DELETE", token });
   });
 
+  test("launcher proof: only with the shared secret, as an HMAC of the challenge", async () => {
+    const challenge = "ab".repeat(16);
+    expect((await server.request("/api/launcher/proof", { headers: { "X-Strata-Challenge": challenge } })).status).toBe(404);
+    process.env.STRATA_LAUNCH_SECRET = "s3cret";
+    try {
+      const { proof } = await json(await server.request("/api/launcher/proof", { headers: { "X-Strata-Challenge": challenge } }));
+      const expected = new Bun.CryptoHasher("sha256", "s3cret").update(challenge).digest("hex");
+      expect(proof).toBe(expected);
+      expect((await server.request("/api/launcher/proof", { headers: { "X-Strata-Challenge": "nothex" } })).status).toBe(404);
+    } finally {
+      delete process.env.STRATA_LAUNCH_SECRET;
+    }
+  });
+
   test("PIN-protected profile", async () => {
     const created = await json(await server.request("/api/profiles", { method: "POST", token, json: { name: "Kids", pin: "1234" } }));
     expect(created.hasPin).toBe(true);

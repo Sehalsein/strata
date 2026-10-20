@@ -4,6 +4,7 @@
 // so the same binary also runs on a NAS or from a terminal.
 
 import AppKit
+import CryptoKit
 
 private let port = 8420
 // 127.0.0.1, not localhost: another program could sit on the IPv6 address.
@@ -19,6 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var restartItem: NSMenuItem!
     /// The server this app started. The app only ever opens the dashboard of this one.
     private var server: Process?
+    /// Shared with the server it starts (as hex text, which is also the HMAC key on both
+    /// sides); the server proves itself with it (see isOurs).
+    private let launchSecret: String = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }.map { String(format: "%02x", $0) }.joined()
     private var quitting = false
 
     private var signalSources: [DispatchSourceSignal] = []
@@ -67,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var up = false
         for _ in 0..<60 {
             guard server?.isRunning == true else { return } // exited: the termination handler says why
-            if await isServing() { up = true; break }
+            if await isOurs() { up = true; break }
             try? await Task.sleep(for: .milliseconds(500))
         }
         guard up, server?.isRunning == true else {
@@ -93,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var env = ProcessInfo.processInfo.environment
         // The server stops itself if this app disappears without stopping it (crash, force quit).
         env["STRATA_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
+        env["STRATA_LAUNCH_SECRET"] = launchSecret
         let ffmpegDir = bundle.appendingPathComponent("Contents/Resources/ffmpeg")
         if FileManager.default.fileExists(atPath: ffmpegDir.appendingPathComponent("ffmpeg").path) {
             env["STRATA_FFMPEG"] = ffmpegDir.appendingPathComponent("ffmpeg").path
@@ -117,6 +122,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         try process.run()
         server = process
+    }
+
+    /// Whether the server answering on the port is the one this app started: it must
+    /// return the HMAC of a fresh random challenge under the secret only it was given.
+    private func isOurs() async -> Bool {
+        guard server?.isRunning == true else { return false }
+        let challenge = (0..<32).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
+        var request = URLRequest(url: dashboardURL.appendingPathComponent("api/launcher/proof"))
+        request.timeoutInterval = 2
+        request.setValue(challenge, forHTTPHeaderField: "X-Strata-Challenge")
+        guard let (data, _) = try? await URLSession.shared.data(for: request),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let proof = json["proof"] as? String
+        else { return false }
+        let expected = HMAC<SHA256>.authenticationCode(for: Data(challenge.utf8), using: SymmetricKey(data: Data(launchSecret.utf8)))
+            .map { String(format: "%02x", $0) }.joined()
+        return proof == expected
     }
 
     private func isServing() async -> Bool {
@@ -163,10 +185,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.appearsDisabled = !running
     }
 
-    /// Opens the dashboard only while the server this app started is running.
+    /// Opens the dashboard only after the server answering proves it's the one this app started.
     @objc private func openDashboard() {
-        guard server?.isRunning == true else { return }
-        NSWorkspace.shared.open(dashboardURL)
+        Task {
+            guard await isOurs() else {
+                setState("Couldn't verify the server on port \(port). Choose Restart Server.", running: false)
+                return
+            }
+            NSWorkspace.shared.open(dashboardURL)
+        }
     }
 
     @objc private func showLogs() { NSWorkspace.shared.open(logURL) }
