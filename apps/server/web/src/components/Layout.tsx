@@ -107,12 +107,15 @@ export function Layout({ path, serverName, version, onSignOut, children }: { pat
   );
 }
 
+/** The Strata mark: three bands (sand, apricot, rust) that form a play triangle. */
 export function BrandMark({ size = 26 }: { size?: number }) {
   return (
-    <svg className="brand-mark" viewBox="0 0 32 32" width={size} height={size} aria-hidden="true">
-      <rect x="5" y="8" width="22" height="3.2" rx="1.6" />
-      <rect x="5" y="14.4" width="16" height="3.2" rx="1.6" opacity=".7" />
-      <rect x="5" y="20.8" width="10" height="3.2" rx="1.6" opacity=".45" />
+    <svg className="brand-mark" viewBox="292 254 476 516" width={size} height={size} aria-hidden="true">
+      <g strokeLinejoin="round" strokeWidth="16">
+        <path d="M300 262 L552 399 L300 399 Z" fill="var(--sand)" stroke="var(--sand)" />
+        <path d="M300 443 L633 443 L760 512 L633 581 L300 581 Z" fill="var(--accent)" stroke="var(--accent)" />
+        <path d="M300 625 L552 625 L300 762 Z" fill="var(--rust)" stroke="var(--rust)" />
+      </g>
     </svg>
   );
 }

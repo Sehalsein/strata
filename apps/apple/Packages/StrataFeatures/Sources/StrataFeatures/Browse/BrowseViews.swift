@@ -124,7 +124,7 @@ struct SearchView: View {
             switch results {
             case nil:
                 MessageView(systemImage: "magnifyingglass", title: "Search movies and shows",
-                            message: "Anything on TMDB. Titles you can play now show a dot.")
+                            message: "Find any movie or show to watch or add to My List.")
                     .frame(minHeight: 400)
             case .loading?:
                 ProgressView().padding(Metrics.space12)

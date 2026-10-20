@@ -10,6 +10,8 @@ import { randomBytes, randomInt } from "node:crypto";
 const TTL_MS = 10 * 60_000;
 /** Pending links are unauthenticated, so cap how many can exist at once. */
 const MAX_PENDING = 50;
+/** A TV polls every couple of seconds; a link nobody polls is abandoned (or a flood). */
+const ABANDONED_MS = 60_000;
 /** No 0/O, 1/I/L: the code is read off a TV and may be typed on a phone. */
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
@@ -18,6 +20,7 @@ interface Link {
   pollToken: string;
   deviceName: string;
   expiresAt: number;
+  lastSeenAt: number;
   /** Set on approval; handed to the TV once, then the link is gone. */
   token?: string;
 }
@@ -32,10 +35,17 @@ export class DeviceLinks {
 
   start(deviceName: string): { code: string; pollToken: string; expiresAt: number } | null {
     this.prune();
-    if (this.byPoll.size >= MAX_PENDING) return null;
+    if (this.byPoll.size >= MAX_PENDING) {
+      // Full: make room by dropping the least recently polled link, so a flood of
+      // starts can't lock out a TV that is actually waiting.
+      const stalest = [...this.byPoll.values()].filter((l) => !l.token).sort((a, b) => a.lastSeenAt - b.lastSeenAt)[0];
+      if (!stalest) return null;
+      this.remove(stalest);
+    }
     let code = newCode();
     while (this.byCode.has(code)) code = newCode();
-    const link: Link = { code, pollToken: randomBytes(32).toString("base64url"), deviceName, expiresAt: this.now() + TTL_MS };
+    const now = this.now();
+    const link: Link = { code, pollToken: randomBytes(32).toString("base64url"), deviceName, expiresAt: now + TTL_MS, lastSeenAt: now };
     this.byPoll.set(link.pollToken, link);
     this.byCode.set(code, link);
     return { code, pollToken: link.pollToken, expiresAt: link.expiresAt };
@@ -58,6 +68,7 @@ export class DeviceLinks {
   poll(pollToken: string): PollResult {
     const link = this.live(this.byPoll.get(pollToken));
     if (!link) return { status: "expired" };
+    link.lastSeenAt = this.now();
     if (!link.token) return { status: "pending" };
     this.remove(link);
     return { status: "approved", token: link.token };
@@ -65,7 +76,8 @@ export class DeviceLinks {
 
   private live(link: Link | undefined): Link | undefined {
     if (!link) return undefined;
-    if (link.expiresAt <= this.now()) {
+    const now = this.now();
+    if (link.expiresAt <= now || (!link.token && now - link.lastSeenAt > ABANDONED_MS)) {
       this.remove(link);
       return undefined;
     }

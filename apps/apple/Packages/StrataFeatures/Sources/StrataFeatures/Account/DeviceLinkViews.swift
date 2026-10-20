@@ -25,23 +25,18 @@ struct TVCodeSignInView: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: Metrics.space20) {
-            VStack(alignment: .leading, spacing: Metrics.space6) {
+            VStack(alignment: .leading, spacing: Metrics.space10) {
                 VStack(alignment: .leading, spacing: Metrics.space3) {
-                    StrataMark().frame(height: 56)
                     Text("Sign in to \(target.info.serverName)").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                    Text(target.url.host() ?? target.url.absoluteString).font(.stCallout).foregroundStyle(Theme.ink3)
-                }
-                VStack(alignment: .leading, spacing: Metrics.space4) {
-                    step(1, "Open the Camera on a phone signed in to Strata.")
-                    step(2, "Point it at the code and tap the Strata link.")
-                    step(3, "Choose Approve.")
+                    Text("Scan the code with your phone's camera, then tap Approve in Strata.")
+                        .font(.stBody).foregroundStyle(Theme.ink2)
                 }
                 if let link {
                     VStack(alignment: .leading, spacing: Metrics.space2) {
-                        Text("Or in Strata on your phone, go to Settings › Sign In a TV and enter")
-                            .font(.stCallout).foregroundStyle(Theme.ink2)
+                        Text("Or enter this code in Settings › Sign In a TV")
+                            .font(.stCallout).foregroundStyle(Theme.ink3)
                         Text(link.displayCode)
-                            .font(.system(size: 56, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 64, weight: .semibold, design: .monospaced))
                             .tracking(4)
                             .foregroundStyle(Theme.ink)
                             .accessibilityLabel("Code \(link.displayCode.map(String.init).joined(separator: " "))")
@@ -51,7 +46,6 @@ struct TVCodeSignInView: View {
                     Label(error, systemImage: "exclamationmark.triangle.fill").font(.stCallout).foregroundStyle(Theme.danger)
                 }
                 Button("Use Password Instead") { usePassword = true }
-                    .padding(.top, Metrics.space4)
             }
             .frame(maxWidth: 820, alignment: .leading)
 
@@ -73,17 +67,6 @@ struct TVCodeSignInView: View {
             SignInView(address: target.url.absoluteString, serverName: target.info.serverName, onSignedIn: onSignedIn)
         }
         .task(id: attempt) { await run() }
-    }
-
-    private func step(_ number: Int, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: Metrics.space3) {
-            Text("\(number)")
-                .font(.stHeadline.monospacedDigit())
-                .foregroundStyle(Theme.onAccent)
-                .frame(width: 44, height: 44)
-                .background(Theme.apricot, in: Circle())
-            Text(text).font(.stBody).foregroundStyle(Theme.ink)
-        }
     }
 
     /// Gets a code, then polls until a phone approves it. An expired code is
@@ -179,9 +162,21 @@ struct ApproveDeviceView: View {
         } else if let pending {
             VStack(alignment: .leading, spacing: Metrics.space2) {
                 Text("Approve this sign-in?").font(.stTitle2).foregroundStyle(Theme.ink)
-                Text("\(pending.deviceName) will be signed in to \(server?.name ?? "this server") as \(server?.username ?? "you"). Only approve a code shown on your own TV.")
+                Text("“\(pending.deviceName)” will be signed in to \(server?.name ?? "this server") as \(server?.username ?? "you").")
                     .font(.stCallout).foregroundStyle(Theme.ink2)
             }
+            // Someone could show you a code for their own device; matching the code on
+            // your screen is what proves it's yours.
+            VStack(alignment: .leading, spacing: Metrics.space2) {
+                Text("Check that your TV shows this code").font(.stFootnote).foregroundStyle(Theme.ink3)
+                Text(DeviceLink(code: code, pollToken: "", expiresAt: 0, pollIntervalMs: 0).displayCode)
+                    .font(.system(.title, design: .monospaced).weight(.semibold))
+                    .tracking(2)
+                    .foregroundStyle(Theme.ink)
+            }
+            .padding(Metrics.space4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
             errorLabel
             PrimaryButton("Approve", isLoading: phase == .approving) { Task { await approve() } }
                 .disabled(phase == .approving)

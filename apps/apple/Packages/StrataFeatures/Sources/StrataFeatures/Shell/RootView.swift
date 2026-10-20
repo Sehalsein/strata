@@ -52,13 +52,32 @@ public struct RootView: View {
     }
 }
 
-enum AppTab: Hashable { case home, movies, shows, myList, search, profile }
+enum AppTab: String, Hashable { case home, movies, shows, myList, search, profile }
 
 /// The signed-in app: a floating Liquid Glass tab bar (iPhone), a sidebar
 /// that adapts to a tab bar (iPad), or the top tab bar (tvOS).
 struct MainShell: View {
     @Environment(AppServices.self) private var services
-    @State private var tab: AppTab = .home
+    @State private var tab: AppTab = Self.launchTab
+    @State private var showSettings = Self.launchSettings
+
+    /// DEBUG: `-StrataTab search` opens a tab and `-StrataSettings YES` the Settings
+    /// sheet at launch, for screenshots and UI tests.
+    private static var launchTab: AppTab {
+        #if DEBUG
+        UserDefaults.standard.string(forKey: "StrataTab").flatMap(AppTab.init(rawValue:)) ?? .home
+        #else
+        .home
+        #endif
+    }
+
+    private static var launchSettings: Bool {
+        #if DEBUG && os(iOS)
+        UserDefaults.standard.bool(forKey: "StrataSettings")
+        #else
+        false
+        #endif
+    }
 
     var body: some View {
         TabView(selection: $tab) {
@@ -92,6 +111,7 @@ struct MainShell: View {
         .tabBarMinimizeBehavior(.onScrollDown)
         // Not on tvOS: there the tint also colors focused labels, which sit on white.
         .tint(Theme.ink)
+        .sheet(isPresented: $showSettings) { SettingsView() }
         #endif
     }
 }

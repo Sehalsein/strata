@@ -34,7 +34,7 @@ export function ProfileManager({ compact }: { compact?: boolean }) {
         <ul className="profile-list">
           {profiles?.map((p) => (
             <li key={p.id} className="profile-row">
-              <span className="avatar" aria-hidden="true">
+              <span className="avatar" aria-hidden="true" style={{ background: avatarFill(p.id) }}>
                 {p.name.slice(0, 1).toUpperCase()}
               </span>
               <div className="profile-main">
@@ -207,4 +207,13 @@ function EditProfileBody({ profile, onClose, onSaved }: { profile: Profile; onCl
       </div>
     </form>
   );
+}
+
+const AVATAR_FILLS = ["var(--sand)", "var(--accent)", "var(--local)", "var(--torbox)"];
+
+/** Same pick as the apps (FNV-1a over the profile id), so a profile has one color everywhere. */
+function avatarFill(id: number): string {
+  let hash = 2166136261;
+  for (const byte of new TextEncoder().encode(String(id))) hash = Math.imul(hash ^ byte, 16777619) >>> 0;
+  return AVATAR_FILLS[hash % AVATAR_FILLS.length]!;
 }

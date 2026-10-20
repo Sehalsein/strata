@@ -89,7 +89,7 @@ function KV({ k, children, mono }: { k: string; children: React.ReactNode; mono?
 
 function ServerCard({ status }: { status: AdminStatus }) {
   return (
-    <Card eyebrow="Server" title="Status">
+    <Card title="Status">
       <dl className="kvs">
         <KV k="Version" mono>
           {status.version} <span className="muted">· API {String(status.apiVersion)}</span>
@@ -131,7 +131,6 @@ function LibraryCard({ stats }: { stats: LibraryStats }) {
   const s = summarize(stats);
   return (
     <Card
-      eyebrow="Library"
       title="Contents"
       actions={
         <a href="/library" className="btn btn-ghost btn-sm" onClick={linkClick}>
@@ -176,7 +175,7 @@ function Figure({ value, label }: { value: number; label: string }) {
 function IntegrationsCard({ status }: { status: AdminStatus }) {
   const account = useResource(() => (status.torbox.configured ? api.torboxAccount() : Promise.resolve(null)), { deps: [status.torbox.configured] });
   return (
-    <Card eyebrow="Integrations" title="Providers">
+    <Card title="Providers">
       <dl className="kvs">
         <KV k="TMDB">{status.tmdb.configured ? <Badge tone="ok">Connected</Badge> : <Badge tone="warn">No key</Badge>}</KV>
         <KV k="TorBox">{status.torbox.configured ? <Badge tone="ok">Connected</Badge> : <Badge>Not set up</Badge>}</KV>
@@ -225,7 +224,7 @@ function SessionsCard({ sessions, onChanged }: { sessions: PlaybackSessionDto[];
     }
   };
   return (
-    <Card eyebrow="Playback" title={`Now playing${sessions.length ? ` · ${sessions.length}` : ""}`}>
+    <Card title={`Now playing${sessions.length ? ` · ${sessions.length}` : ""}`}>
       {sessions.length === 0 ? (
         <p className="empty-inline">Nothing is playing.</p>
       ) : (
@@ -276,7 +275,7 @@ function JobsCard({ jobs, onChanged }: { jobs: JobStatus[]; onChanged: () => voi
     }
   };
   return (
-    <Card eyebrow="Background" title="Jobs">
+    <Card title="Jobs">
       <ul className="jobs">
         {jobs.map((j) => (
           <li key={j.name} className="job">

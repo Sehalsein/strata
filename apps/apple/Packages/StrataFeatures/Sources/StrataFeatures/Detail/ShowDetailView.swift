@@ -77,7 +77,7 @@ struct ShowDetailView: View {
                 ("Status", show.status ?? ""),
                 ("Genres", show.genres.joined(separator: ", ")),
                 ("First aired", Formatting.date(show.firstAirDate)?.formatted(date: .abbreviated, time: .omitted) ?? ""),
-                ("Rating", show.ratingText.map { "\($0) on TMDB" } ?? ""),
+                ("Rating", show.ratingText.map { "\($0) / 10" } ?? ""),
             ])
         }
         .padding(.bottom, Metrics.space12)
@@ -125,7 +125,13 @@ struct ShowDetailView: View {
                                        stillURL: episode.stillUrl,
                                        progress: episode.progressFraction,
                                        isCurrent: show.upNext.map { $0.season == episode.season && $0.episode == episode.episode } ?? false) {
-                                AvailabilityLabel(availability(episode)).labelStyle(.iconOnly).font(.title3)
+                                // Playable is the default, so only exceptions get an icon.
+                                if let state = rowState(episode) {
+                                    Image(systemName: state.systemImage)
+                                        .font(.stHeadline)
+                                        .foregroundStyle(Theme.ink3)
+                                        .accessibilityLabel(state.title)
+                                }
                             }
                         }
                         .buttonStyle(.plain)
@@ -148,11 +154,10 @@ struct ShowDetailView: View {
         }
     }
 
-    private func availability(_ e: EpisodeItem) -> Availability {
+    private func rowState(_ e: EpisodeItem) -> Availability? {
         if e.isWatched { return .watched }
-        if e.isAvailable { return .ready }
         if e.isUpcoming { return .unavailable }
-        return services.store.active == nil ? .unavailable : .instant
+        return nil
     }
 
     private func foot(_ e: EpisodeItem) -> String {

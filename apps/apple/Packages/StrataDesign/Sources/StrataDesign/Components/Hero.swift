@@ -187,6 +187,7 @@ public struct EpisodeRow<Trailing: View>: View {
                     if let progress, progress > 0 { ProgressBar(progress, track: .white.opacity(0.25)).padding(6) }
                 }
             VStack(alignment: .leading, spacing: 2) {
+                if isCurrent { Text("Up Next").eyebrowStyle(Theme.accentText).padding(.bottom, 2) }
                 Text("\(number). \(title)").font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(2)
                 if let overview, !overview.isEmpty {
                     Text(overview).font(.stCallout).foregroundStyle(Theme.ink2).lineLimit(Metrics.isPadOrTV ? 2 : 1)
@@ -198,7 +199,6 @@ public struct EpisodeRow<Trailing: View>: View {
         }
         .padding(.vertical, Metrics.space3)
         .padding(.horizontal, Metrics.space4)
-        .background(isCurrent ? Theme.surface3 : .clear)
         .contentShape(Rectangle())
     }
 }

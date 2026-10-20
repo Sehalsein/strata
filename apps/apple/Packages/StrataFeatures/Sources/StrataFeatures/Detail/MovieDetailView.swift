@@ -91,7 +91,7 @@ struct MovieDetailView: View {
                 ("Directed by", movie.directors.joined(separator: ", ")),
                 ("Genres", movie.genres.joined(separator: ", ")),
                 ("Released", Formatting.date(movie.releaseDate)?.formatted(date: .abbreviated, time: .omitted) ?? ""),
-                ("Rating", movie.ratingText.map { "\($0) on TMDB" } ?? ""),
+                ("Rating", movie.ratingText.map { "\($0) / 10" } ?? ""),
             ])
         }
         .padding(.bottom, Metrics.space12)

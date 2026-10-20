@@ -12,7 +12,8 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://localhost:8420",
+      // STRATA_API points the dev dashboard at another server (e.g. a demo instance).
+      "/api": process.env.STRATA_API ?? "http://localhost:8420",
     },
   },
 });

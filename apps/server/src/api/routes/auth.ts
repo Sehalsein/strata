@@ -45,7 +45,10 @@ export const authRoutes = new Hono<Env>()
 
   // Sign-in by code (QR on a TV). Start and poll are public: the TV isn't signed in yet.
   .post("/auth/device", async (c) => {
-    const { deviceName } = await body(c, z.object({ deviceName: z.string().trim().min(1).max(128).optional() }).default({}));
+    // The approving phone shows this name, so keep it to plain words: no control
+    // characters or long text that could pass for instructions.
+    const name = z.string().trim().regex(/^[\p{L}\p{N} .'’()-]{1,48}$/u, "Device names can only use letters, numbers and simple punctuation");
+    const { deviceName } = await body(c, z.object({ deviceName: name.optional() }).default({}));
     const link = c.var.services.deviceLinks.start(deviceName ?? "TV");
     if (!link) throw new HTTPException(429, { message: "Too many sign-in codes waiting. Try again in a few minutes." });
     return c.json({ ...link, pollIntervalMs: 2000 });

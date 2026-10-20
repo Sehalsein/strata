@@ -21,6 +21,16 @@ final class TVFocusTests: XCTestCase {
         }
     }
 
+    /// Launches past "Who's watching?" (picking the focused first profile) when it shows.
+    private func launchSignedIn(_ arguments: [String] = []) {
+        app.launchArguments = arguments
+        app.launch()
+        if app.staticTexts["Who's watching?"].waitForExistence(timeout: 6) {
+            press(.select, pause: 2)
+            if !arguments.isEmpty { app.terminate(); app.launch() } // re-run the launch link now a profile is picked
+        }
+    }
+
     private func press(_ button: XCUIRemote.Button, _ times: Int = 1, pause: TimeInterval = 0.6) {
         for _ in 0..<times {
             remote.press(button)
@@ -30,8 +40,7 @@ final class TVFocusTests: XCTestCase {
 
     /// Detail page: the hero fills the screen with Play focused; down scrolls to the sections below.
     func testDetailHeroAndSections() {
-        app.launchArguments = ["-StrataOpenURL", "strata://movie/10378"]
-        app.launch()
+        launchSignedIn(["-StrataOpenURL", "strata://movie/10378"])
         XCTAssertTrue(app.buttons["Play"].waitForExistence(timeout: 15))
         snapshot("detail-01-hero")
         press(.down, pause: 1)
@@ -47,10 +56,15 @@ final class TVFocusTests: XCTestCase {
     func testCodeSignIn() throws {
         let server = try XCTUnwrap(ProcessInfo.processInfo.environment["STRATA_TEST_SERVER"], "set TEST_RUNNER_STRATA_TEST_SERVER")
         app.launch()
-        let field = app.textFields.firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        let enterAddress = app.buttons["Enter Address"]
+        XCTAssertTrue(enterAddress.waitForExistence(timeout: 15))
         snapshot("signin-01-connect")
-        // Focus moves down to the address field, select opens the keyboard.
+        // Down past any discovered servers to "Enter Address", which opens the address screen.
+        var presses = 0
+        while !enterAddress.hasFocus && presses < 8 { press(.down); presses += 1 }
+        press(.select, pause: 1.5)
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
         while !field.hasFocus { press(.down) }
         press(.select)
         app.typeText(server)
@@ -72,8 +86,7 @@ final class TVFocusTests: XCTestCase {
 
     /// The profile tab at the end of the tab bar opens Settings with Switch Profile.
     func testProfileTab() {
-        app.launch()
-        if app.staticTexts["Who's watching?"].waitForExistence(timeout: 10) { press(.select, pause: 2) }
+        launchSignedIn()
         XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 15))
         snapshot("profile-01-home")
         // Up to the tab bar, then right to the last tab.
@@ -87,7 +100,7 @@ final class TVFocusTests: XCTestCase {
     }
 
     func testBrowseFocusAndPlay() {
-        app.launch()
+        launchSignedIn()
         XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 15))
         snapshot("01-home-tabs")
 

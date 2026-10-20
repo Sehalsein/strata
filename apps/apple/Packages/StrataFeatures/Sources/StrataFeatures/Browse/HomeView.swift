@@ -122,7 +122,8 @@ struct PosterCardLabel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space2) {
-            ArtworkImage(url: card.posterUrl, aspectRatio: 2 / 3, seed: card.id, title: card.title)
+            // No title on the placeholder: the caption below already names it.
+            ArtworkImage(url: card.posterUrl, aspectRatio: 2 / 3, seed: card.id)
             VStack(alignment: .leading, spacing: 2) {
                 Text(card.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                 if let year = card.yearText {

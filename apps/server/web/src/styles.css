@@ -1,72 +1,88 @@
-/* Strata dashboard — "Cinemathèque": near-black, warm paper text, one ember accent. */
+/* Strata dashboard — the Strata design system: layers instead of shadows, SF Pro,
+   one apricot accent that means "go". Tokens mirror the apps' Theme.swift. */
 
 :root {
   color-scheme: dark;
-  --font-display: ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif;
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
-  --bg: #0d0c0b;
-  --bg-raised: #121110;
-  --surface: #161513;
-  --surface-2: #1d1b18;
-  --surface-3: #26231f;
-  --line: rgba(239, 229, 212, 0.08);
-  --line-strong: rgba(239, 229, 212, 0.16);
-  --text: #eee7da;
-  --text-2: #c9c1b3;
-  --muted: #958d80;
-  --faint: #6c665d;
+  --bg: #0b0c0f;
+  --bg-raised: #0f1114;
+  --surface: #14161a;
+  --surface-2: #1d2025;
+  --surface-3: #292d33;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.12);
+  --text: #f5f3ef;
+  --text-2: #b4b7be;
+  --muted: #8a8e97;
+  --faint: #6b6f78;
 
-  --accent: #e8a33d;
-  --accent-hover: #f0b357;
-  --accent-ink: #1b1206;
-  --accent-soft: rgba(232, 163, 61, 0.13);
-  --accent-line: rgba(232, 163, 61, 0.4);
+  /* apricot: fills (primary buttons, progress, selection). accent-text: links and glyphs. */
+  --accent: #f39256;
+  --accent-hover: #f6a574;
+  --accent-text: #f6a574;
+  --accent-ink: #1a0e06;
+  --accent-soft: rgba(243, 146, 86, 0.14);
+  --accent-line: rgba(243, 146, 86, 0.45);
 
-  --ok: #8fbf8f;
-  --ok-soft: rgba(143, 191, 143, 0.12);
-  --warn: #e8894a;
-  --warn-soft: rgba(232, 137, 74, 0.13);
-  --error: #ec6f63;
-  --error-soft: rgba(236, 111, 99, 0.13);
+  --sand: #f7c873;
+  --rust: #d2603f;
+  --local: #7db7ff;
+  --torbox: #b9a4ff;
 
-  --radius: 10px;
-  --radius-sm: 7px;
-  --shadow: 0 1px 0 rgba(255, 255, 255, 0.02) inset, 0 12px 40px -18px rgba(0, 0, 0, 0.7);
-  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
-  --sidebar-w: 236px;
+  --ok: #4cd08a;
+  --ok-soft: rgba(76, 208, 138, 0.12);
+  --warn: #f7c873;
+  --warn-soft: rgba(247, 200, 115, 0.12);
+  --error: #ff6b6b;
+  --error-soft: rgba(255, 107, 107, 0.12);
+
+  --radius: 14px;
+  --radius-sm: 10px;
+  --radius-xs: 6px;
+  --shadow: none;
+  --focus-ring: #ffffff;
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--focus-ring);
+  --sidebar-w: 240px;
   --tabbar-h: 60px;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
     color-scheme: light;
-    --bg: #f3eee5;
-    --bg-raised: #efe9de;
-    --surface: #fbf8f2;
-    --surface-2: #f2ece2;
-    --surface-3: #e8e0d3;
-    --line: rgba(40, 30, 15, 0.1);
-    --line-strong: rgba(40, 30, 15, 0.2);
-    --text: #1d1a15;
-    --text-2: #3d372e;
-    --muted: #6b6356;
-    --faint: #958c7e;
+    --bg: #ffffff;
+    --bg-raised: #fafafb;
+    --surface: #f4f4f6;
+    --surface-2: #ebebef;
+    --surface-3: #dfdfe5;
+    --line: rgba(11, 12, 15, 0.08);
+    --line-strong: rgba(11, 12, 15, 0.14);
+    --text: #111317;
+    --text-2: #4b4f57;
+    --muted: #62666f;
+    --faint: #8a8e97;
 
-    --accent: #a8651a;
-    --accent-hover: #8f5414;
-    --accent-ink: #fffaf1;
-    --accent-soft: rgba(168, 101, 26, 0.1);
-    --accent-line: rgba(168, 101, 26, 0.45);
+    --accent: #f08a48;
+    --accent-hover: #f39256;
+    --accent-text: #b04f17;
+    --accent-ink: #1a0e06;
+    --accent-soft: rgba(240, 138, 72, 0.12);
+    --accent-line: rgba(176, 79, 23, 0.4);
 
-    --ok: #3f7a48;
-    --ok-soft: rgba(63, 122, 72, 0.11);
-    --warn: #b0561c;
-    --warn-soft: rgba(176, 86, 28, 0.1);
-    --error: #b8382c;
-    --error-soft: rgba(184, 56, 44, 0.1);
-    --shadow: 0 1px 2px rgba(40, 30, 15, 0.05), 0 10px 30px -20px rgba(40, 30, 15, 0.35);
+    --sand: #f2b544;
+    --rust: #c2502f;
+    --local: #1f66c9;
+    --torbox: #6a4fd1;
+
+    --ok: #18804a;
+    --ok-soft: rgba(24, 128, 74, 0.1);
+    --warn: #9a6a00;
+    --warn-soft: rgba(154, 106, 0, 0.1);
+    --error: #c4242c;
+    --error-soft: rgba(196, 36, 44, 0.1);
+    --focus-ring: #111317;
   }
 }
 
@@ -93,7 +109,7 @@ body {
 }
 
 a {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
 }
@@ -112,7 +128,8 @@ h1,
 h2,
 h3 {
   margin: 0;
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 p {
@@ -168,7 +185,7 @@ p {
   color: var(--error);
 }
 .link-accent {
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 500;
 }
 
@@ -252,6 +269,12 @@ p {
 .btn-primary {
   background: var(--accent);
   color: var(--accent-ink);
+}
+/* Disabled primary goes neutral (as in the apps) rather than a faded accent. */
+.btn-primary:disabled {
+  background: var(--surface-3);
+  color: var(--muted);
+  opacity: 1;
 }
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
@@ -542,7 +565,7 @@ input[type="checkbox"] {
 }
 .badge-accent {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .badge-ok {
   background: var(--ok-soft);
@@ -655,7 +678,6 @@ input[type="checkbox"] {
   min-width: 0;
 }
 .brand-mark {
-  fill: var(--accent);
   flex: none;
 }
 .brand-name {
@@ -783,10 +805,10 @@ input[type="checkbox"] {
 }
 .page-title {
   font-family: var(--font-display);
-  font-size: clamp(1.9rem, 1.5rem + 1.5vw, 2.6rem);
-  font-weight: 500;
+  font-size: clamp(1.9rem, 1.5rem + 1.5vw, 2.4rem);
+  font-weight: 700;
   line-height: 1.05;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.02em;
 }
 .page-subtitle {
   margin-top: 6px;
@@ -846,7 +868,7 @@ input[type="checkbox"] {
     -webkit-tap-highlight-color: transparent;
   }
   .tab.is-active {
-    color: var(--accent);
+    color: var(--accent-text);
   }
   .tab:focus-visible {
     box-shadow: inset 0 0 0 2px var(--accent);
@@ -876,8 +898,10 @@ input[type="checkbox"] {
 }
 .card-title {
   font-family: var(--font-display);
-  font-size: 1.3rem;
+  font-size: 1.15rem;
+  font-weight: 600;
   line-height: 1.2;
+  letter-spacing: -0.01em;
 }
 .card-actions {
   display: flex;
@@ -1132,7 +1156,8 @@ input[type="checkbox"] {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  overflow: hidden;
+  /* Scroll sideways rather than clip the action buttons. */
+  overflow-x: auto;
 }
 .table {
   width: 100%;
@@ -1167,14 +1192,16 @@ input[type="checkbox"] {
   white-space: nowrap;
 }
 .file-cell {
-  min-width: 0;
-  max-width: 460px;
+  /* The file name is what people scan for: give it the room, not the badges. */
+  width: 36%;
+  min-width: 220px;
+  max-width: 520px;
 }
 .file-name {
   display: block;
   font-family: var(--font-mono);
   font-size: 0.82rem;
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .file-parsed {
   display: block;
@@ -1206,7 +1233,8 @@ input[type="checkbox"] {
   flex-wrap: nowrap;
 }
 
-@media (max-width: 760px) {
+/* Six columns need room beside the sidebar; below that, rows become cards. */
+@media (max-width: 1100px) {
   .table thead {
     display: none;
   }
@@ -1381,7 +1409,7 @@ input[type="checkbox"] {
   border-top: 0;
 }
 .folder-glyph {
-  color: var(--accent);
+  color: var(--accent-text);
   flex: none;
 }
 .folder-path {
@@ -1551,11 +1579,11 @@ input[type="checkbox"] {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--surface-3);
+  color: var(--accent-ink);
   font-family: var(--font-display);
-  font-size: 1.2rem;
-  border: 1px solid var(--accent-line);
+  font-size: 1.1rem;
+  font-weight: 700;
 }
 .profile-main {
   flex: 1;
@@ -1696,7 +1724,7 @@ input[type="checkbox"] {
   border-top: 0;
 }
 .priority-rank {
-  color: var(--accent);
+  color: var(--accent-text);
   width: 14px;
 }
 .priority-name {
@@ -1805,7 +1833,7 @@ input[type="checkbox"] {
   background: var(--error-soft);
 }
 .log-scope {
-  color: var(--accent);
+  color: var(--accent-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1845,7 +1873,7 @@ input[type="checkbox"] {
   display: grid;
   place-items: center;
   padding: 24px 16px;
-  background: radial-gradient(ellipse 80% 50% at 50% 0%, var(--accent-soft), transparent 70%), var(--bg);
+  background: var(--bg);
 }
 .login-card {
   width: 100%;
@@ -1929,7 +1957,7 @@ input[type="checkbox"] {
 }
 .step.is-current .step-num {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--accent-soft);
 }
 .step.is-done {
@@ -1981,7 +2009,7 @@ input[type="checkbox"] {
   gap: 6px;
 }
 .done-list li::marker {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 @media (max-width: 860px) {

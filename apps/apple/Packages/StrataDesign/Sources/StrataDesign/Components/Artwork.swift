@@ -85,7 +85,7 @@ public struct StrataPlaceholder: View {
     }
 
     private static let variants: [(Color, Color, Color)] = [
-        (Theme.surface2, Theme.surface3, Theme.surface1),
+        (Theme.surface2, Theme.sand.opacity(0.45), Theme.surface1),
         (Theme.rust, Theme.apricot, Theme.sand),
         (Theme.surface3, Theme.local.opacity(0.55), Theme.surface2),
         (Theme.surface1, Theme.torbox.opacity(0.5), Theme.surface3),

@@ -14,6 +14,7 @@ struct ConnectView: View {
     @State private var error: String?
     @State private var signInTarget: SignInTarget?
     @State private var codeTarget: ServerTarget?
+    @State private var showAddressEntry = false
 
     #if os(tvOS)
     static let columnWidth: CGFloat = 960
@@ -30,16 +31,21 @@ struct ConnectView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: Metrics.space8) {
+                VStack(alignment: Self.alignment, spacing: Metrics.space8) {
                     header
-                    discovered
-                    manual
+                    serverList
+                    #if os(tvOS)
+                    Button("Enter Address") { showAddressEntry = true }
+                    #else
+                    addressEntry
+                    #endif
                 }
-                .frame(maxWidth: Self.columnWidth, alignment: .leading)
+                .frame(maxWidth: Self.columnWidth, alignment: Self.frameAlignment)
                 .padding(.horizontal, Metrics.gutter)
-                .padding(.vertical, Metrics.space8)
+                .padding(.vertical, Metrics.space12)
                 .frame(maxWidth: .infinity)
             }
+            .scrollBounceBehavior(.basedOnSize)
             .background(Theme.bg.ignoresSafeArea())
             .toolbar {
                 if isAddingServer {
@@ -59,103 +65,127 @@ struct ConnectView: View {
                     if isAddingServer { dismiss() }
                 }
             }
+            .navigationDestination(isPresented: $showAddressEntry) {
+                VStack(alignment: .leading, spacing: Metrics.space8) {
+                    Text("Enter the server address").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                    addressEntry
+                }
+                .frame(maxWidth: Self.columnWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Theme.bg.ignoresSafeArea())
+            }
             #endif
         }
         .onAppear { services.browser.start() }
         .onDisappear { services.browser.stop() }
     }
 
+    #if os(tvOS)
+    private static let alignment = HorizontalAlignment.center
+    private static let frameAlignment = Alignment.center
+    #else
+    private static let alignment = HorizontalAlignment.leading
+    private static let frameAlignment = Alignment.leading
+    #endif
+
     private var header: some View {
-        VStack(alignment: .leading, spacing: Metrics.space3) {
-            StrataMark().frame(height: 44)
+        VStack(alignment: Self.alignment, spacing: Metrics.space3) {
+            StrataMark().frame(height: 44).padding(.bottom, Metrics.space2)
             Text(isAddingServer ? "Add a server" : "Connect to Strata")
                 .font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-            Text("Servers on your network appear automatically.")
+            Text("Pick a server on your network, or enter its address.")
                 .font(.stCallout).foregroundStyle(Theme.ink2)
+                .multilineTextAlignment(Self.alignment == .center ? .center : .leading)
         }
     }
 
-    @ViewBuilder private var discovered: some View {
-        let servers = services.browser.servers.filter { found in !services.store.servers.contains { $0.id == found.id } || !isAddingServer }
-        VStack(alignment: .leading, spacing: Metrics.space3) {
-            Text("On your network").eyebrowStyle()
-            VStack(spacing: 0) {
-                if servers.isEmpty {
-                    HStack(spacing: Metrics.space3) {
-                        if services.browser.state == .denied {
-                            Image(systemName: "wifi.exclamationmark").foregroundStyle(Theme.warning)
-                            Text("Allow Local Network access in Settings to find servers automatically.")
-                        } else {
-                            ProgressView()
-                            Text("Looking for servers…")
-                        }
+    private var found: [DiscoveredServer] {
+        services.browser.servers.filter { found in !isAddingServer || !services.store.servers.contains { $0.id == found.id } }
+    }
+
+    @ViewBuilder private var serverList: some View {
+        VStack(spacing: Metrics.space2) {
+            if found.isEmpty {
+                HStack(spacing: Metrics.space3) {
+                    if services.browser.state == .denied {
+                        Image(systemName: "wifi.exclamationmark").foregroundStyle(Theme.warning)
+                        Text("Allow Local Network access in Settings to find servers automatically.")
+                    } else {
+                        ProgressView()
+                        Text("Looking for servers…")
                     }
-                    .font(.stCallout)
-                    .foregroundStyle(Theme.ink2)
-                    .padding(Metrics.space4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                ForEach(servers) { server in
-                    Button {
-                        Task { await probe(server.url.absoluteString) }
-                    } label: {
-                        HStack(spacing: Metrics.space3) {
-                            Image(systemName: "server.rack")
-                                .foregroundStyle(Theme.ink2)
-                                .frame(width: 36, height: 36)
-                                .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Metrics.radiusSM, style: .continuous))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(server.name).font(.stHeadline).foregroundStyle(Theme.ink)
-                                Text([server.url.host(), server.version.map { "v\($0)" }].compactMap { $0 }.joined(separator: " · "))
-                                    .font(.stFootnote).foregroundStyle(Theme.ink3)
-                            }
-                            Spacer()
-                            if probing == server.url.absoluteString {
-                                ProgressView()
-                            } else if !server.isCompatible {
-                                Text("Update needed").font(.stFootnote).foregroundStyle(Theme.warning)
-                            } else {
-                                Image(systemName: "chevron.right").foregroundStyle(Theme.ink3)
-                            }
-                        }
-                        .padding(Metrics.space4)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(probing != nil)
-                    if server.id != servers.last?.id { Divider().overlay(Theme.hairline).padding(.leading, 64) }
-                }
+                .font(.stCallout)
+                .foregroundStyle(Theme.ink2)
+                .frame(maxWidth: .infinity, alignment: Self.frameAlignment)
+                .padding(.vertical, Metrics.space4)
             }
-            .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
+            ForEach(found) { server in
+                Button {
+                    Task { await probe(server.url.absoluteString) }
+                } label: {
+                    serverRow(server)
+                }
+                #if os(tvOS)
+                .buttonStyle(.card)
+                #else
+                .buttonStyle(.plain)
+                .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
+                #endif
+                .disabled(probing != nil)
+            }
         }
     }
 
-    private var manual: some View {
+    private func serverRow(_ server: DiscoveredServer) -> some View {
+        HStack(spacing: Metrics.space4) {
+            Image(systemName: "server.rack")
+                .font(.stHeadline)
+                .foregroundStyle(Theme.ink2)
+                .frame(width: 44, height: 44)
+                .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Metrics.radiusSM, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(server.name).font(.stHeadline).foregroundStyle(Theme.ink)
+                Text(server.url.host() ?? server.url.absoluteString).font(.stFootnote).foregroundStyle(Theme.ink3)
+            }
+            Spacer(minLength: Metrics.space2)
+            if probing == server.url.absoluteString {
+                ProgressView()
+            } else if !server.isCompatible {
+                Text("Update needed").font(.stFootnote).foregroundStyle(Theme.warning)
+            } else {
+                Image(systemName: "chevron.right").font(.stFootnote.weight(.semibold)).foregroundStyle(Theme.ink3)
+            }
+        }
+        .padding(Metrics.space4)
+        .contentShape(Rectangle())
+    }
+
+    private var addressEntry: some View {
         VStack(alignment: .leading, spacing: Metrics.space3) {
-            Text("Server address").eyebrowStyle()
-            TextField("192.168.1.20 or strata.example.com", text: $address)
+            TextField("Server address", text: $address, prompt: Text("Server address, like 192.168.1.20"))
                 .textContentType(.URL)
                 #if os(iOS)
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
+                .submitLabel(.continue)
                 #endif
                 .autocorrectionDisabled()
                 .onSubmit { Task { await probe(address) } }
-                #if !os(tvOS)
-                .padding(.horizontal, Metrics.space4)
-                .frame(minHeight: 48)
-                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Metrics.radiusSM, style: .continuous))
-                #endif
-            Text("Port 8420 is added if you leave it out.").font(.stFootnote).foregroundStyle(Theme.ink3)
+                .modifier(FieldStyle())
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.stFootnote).foregroundStyle(Theme.danger)
             }
-            PrimaryButton("Continue", isLoading: probing == address && !address.isEmpty) {
-                Task { await probe(address) }
+            if !address.trimmingCharacters(in: .whitespaces).isEmpty {
+                PrimaryButton("Continue", isLoading: probing == address) {
+                    Task { await probe(address) }
+                }
+                .disabled(probing != nil)
+                .transition(.opacity)
             }
-            .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty || probing != nil)
         }
+        .animation(.easeOut(duration: 0.2), value: address.isEmpty)
     }
 
     private func probe(_ value: String) async {

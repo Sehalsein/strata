@@ -20,7 +20,7 @@ function Switch({ checked, onChange, label, hint }: { checked: boolean; onChange
 
 export function DiscoveryCard({ draft, set }: { draft: Settings; set: SetFn }) {
   return (
-    <Card eyebrow="Playback" title="Discovery">
+    <Card title="Discovery">
       <div className="form-grid">
         <Switch checked={draft.discoveryEnabled} onChange={(v) => set("discoveryEnabled", v)} label="Find releases on TorBox" hint="Look for playable TorBox releases of titles that aren't in your library." />
         <Field label="Stream addon URL" hint="A Torrentio-compatible Stremio addon to search. Leave empty to turn it off.">
@@ -59,7 +59,7 @@ export function NetworkCard({ draft, set }: { draft: Settings; set: SetFn }) {
   const { data } = useResource<AdminStatus>(api.status);
   const net = data?.network;
   return (
-    <Card eyebrow="Server" title="Network">
+    <Card title="Network">
       <div className="form-grid">
         <dl className="kvs">
           <div className="kv">
@@ -160,7 +160,6 @@ export function UpdatesCard({ draft, set }: { draft: Settings; set: SetFn }) {
 
   return (
     <Card
-      eyebrow="Server"
       title="Updates"
       actions={
         status && (

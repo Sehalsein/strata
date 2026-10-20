@@ -49,13 +49,12 @@ export function Field({ label, hint, error, children }: { label: string; hint?: 
   );
 }
 
-export function Card({ title, eyebrow, actions, children, className = "" }: { title?: ReactNode; eyebrow?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
+export function Card({ title, actions, children, className = "" }: { title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <section className={`card ${className}`}>
       {(title || actions) && (
         <header className="card-head">
           <div>
-            {eyebrow && <p className="eyebrow">{eyebrow}</p>}
             {title && <h2 className="card-title">{title}</h2>}
           </div>
           {actions && <div className="card-actions">{actions}</div>}

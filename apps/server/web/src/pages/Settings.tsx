@@ -81,7 +81,7 @@ export function SettingsPage({ onServerNameChange }: { onServerNameChange: (name
 
       {/* Cards hold their own nested forms (keys), so the save bar is the settings form. */}
       <div className="stack-lg">
-        <Card eyebrow="General" title="Server">
+        <Card title="Server">
           <div className="form-grid">
             <Field label="Server name" hint="Shown in the apps when they find this server.">
               {(id, d) => <input id={id} aria-describedby={d} className="input" value={draft.serverName} maxLength={64} onChange={(e) => set("serverName", e.target.value)} required />}
@@ -97,11 +97,11 @@ export function SettingsPage({ onServerNameChange }: { onServerNameChange: (name
 
         <NetworkCard draft={draft} set={set} />
 
-        <Card eyebrow="Library" title="Media folders">
+        <Card title="Media folders">
           <MediaFolders value={draft.mediaFolders} onChange={(v) => set("mediaFolders", v)} />
         </Card>
 
-        <Card eyebrow="Library" title="Scanning & sync">
+        <Card title="Scanning & sync">
           <div className="form-grid">
             <Field label="Scan local folders every" hint="Minutes. 0 turns scheduled scans off.">
               {(id, d) => (
@@ -122,7 +122,7 @@ export function SettingsPage({ onServerNameChange }: { onServerNameChange: (name
           </div>
         </Card>
 
-        <Card eyebrow="Playback" title="Sources & quality">
+        <Card title="Sources & quality">
           <div className="form-grid">
             <div className="field">
               <span className="field-label" id="priority-label">
@@ -165,7 +165,7 @@ export function SettingsPage({ onServerNameChange }: { onServerNameChange: (name
 
         <DiscoveryCard draft={draft} set={set} />
 
-        <Card eyebrow="Playback" title="Transcoding">
+        <Card title="Transcoding">
           <div className="form-grid">
             <label className="switch-row">
               <input type="checkbox" className="switch" role="switch" checked={draft.hardwareAcceleration} onChange={(e) => set("hardwareAcceleration", e.target.checked)} />
@@ -197,7 +197,7 @@ export function SettingsPage({ onServerNameChange }: { onServerNameChange: (name
       </div>
 
       <section id="keys" className="keys-section">
-        <Card eyebrow="Security" title="Provider keys">
+        <Card title="Provider keys">
           <div className="stack-lg">
             <SecretKeyForm
               secretKey="tmdbApiKey"
