@@ -216,11 +216,7 @@ export class Library {
     const ids = latest.map((r) => r.tmdbId).filter((id): id is number => id !== null);
     if (!ids.length) return [];
     const items = new Map(this.db.select().from(mediaItems).where(and(eq(mediaItems.type, type), inArray(mediaItems.tmdbId, ids))).all().map((m) => [m.tmdbId, m]));
-    const when = new Map(latest.map((r) => [r.tmdbId, r.at]));
-    return ids.flatMap((id) => {
-      const m = items.get(id);
-      return m ? [{ ...m, latestFileAt: when.get(id) ?? m.addedAt }] : [];
-    });
+    return ids.map((id) => items.get(id)).filter((m): m is NonNullable<typeof m> => !!m);
   }
 
 

@@ -79,6 +79,8 @@ export class PlaybackService {
   ) {}
 
   async play(user: { userId: number; profileId: number }, req: PlayRequest): Promise<PlayResponse> {
+    // Started now so the (possibly uncached) season lookup overlaps the probe and link.
+    const nextLookup = req.mediaType === "episode" ? this.findNextEpisode(req.tmdbId, req.season!, req.episode!).catch(() => null) : Promise.resolve(null);
     const file = await this.chooseFile(req);
 
     const first = await this.resolveInput(file);
@@ -120,7 +122,7 @@ export class PlaybackService {
       throw new PlaybackError(err instanceof Error ? err.message : String(err), 503);
     }
 
-    const next = req.mediaType === "episode" ? await this.findNextEpisode(req.tmdbId, req.season!, req.episode!).catch(() => null) : null;
+    const next = await nextLookup;
     const nextInLibrary = next ? findCandidates(this.library, this.settings(), "episode", req.tmdbId, next.season, next.episode) : [];
     if (next) void this.prewarm({ mediaType: "episode", tmdbId: req.tmdbId, season: next.season, episode: next.episode }, nextInLibrary).catch((err) => log.debug("Pre-warm failed", err));
 

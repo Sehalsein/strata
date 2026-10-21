@@ -177,11 +177,11 @@ describe("library", () => {
     expect(files.every((f: any) => f.matchStatus === "matched")).toBe(true);
   });
 
-  test("home shows library shelves with availability", async () => {
+  test("home: catalog rails with library availability (Recently Added is the catalog's, not the library's)", async () => {
     const { shelves } = await json(await server.request("/api/home", { token }));
     const ids = shelves.map((s: any) => s.id);
-    expect(ids).toContain("libraryMovies");
-    expect(ids).toContain("libraryShows");
+    expect(ids).not.toContain("libraryMovies");
+    expect(ids).not.toContain("libraryShows");
     const trending = shelves.find((s: any) => s.id === "trendingMovies");
     expect(trending.items[0].available).toEqual(["local"]);
   });

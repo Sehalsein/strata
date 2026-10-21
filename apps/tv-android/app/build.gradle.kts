@@ -26,7 +26,7 @@ android {
         // emulator's host loopback).
         val jellyfinUrl = providers
             .gradleProperty("strata.jellyfinUrl")
-            .orElse("http://192.168.2.162:8096")
+            .orElse("http://192.168.1.50:8096")
             .get()
         buildConfigField("String", "JELLYFIN_URL", "\"$jellyfinUrl\"")
     }

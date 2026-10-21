@@ -14,6 +14,7 @@ import { catalogRoutes } from "./routes/catalog";
 import { streamRoutes } from "./routes/stream";
 import { systemRoutes } from "./routes/system";
 import { webHandler } from "../web/static";
+import { gzipJson } from "./gzip";
 
 const log = logger("http");
 
@@ -26,6 +27,8 @@ export function createApp(services: Services) {
     c.set("services", services);
     await next();
   });
+
+  app.use("/api/*", gzipJson());
 
   // Order matters: catalogRoutes applies requireAuth to everything it sees under /api,
   // so the public and stream routes must be registered first.

@@ -770,6 +770,15 @@ input[type="checkbox"] {
   stroke-linejoin: round;
   flex: none;
 }
+.attribution {
+  margin-top: 64px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.attribution a {
+  color: inherit;
+}
+
 .sidebar-foot {
   margin-top: auto;
   display: flex;

@@ -77,7 +77,7 @@ fetch from. If you change networks, re-run the build to refresh URLs.
 
 ```
 strata.tail-abc.ts.net {
-  root * /Users/you/sehalsein/hbo/tools/deploy/out
+  root * /path/to/strata/tools/deploy/out
   file_server browse
 }
 ```

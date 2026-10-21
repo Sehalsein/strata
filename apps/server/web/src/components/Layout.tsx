@@ -94,6 +94,10 @@ export function Layout({ path, serverName, version, onSignOut, children }: { pat
 
       <main id="main" className="main" tabIndex={-1}>
         {children}
+        {/* Required by TMDB's API terms. */}
+        <footer className="attribution muted small">
+          Movie and show data from <a href="https://www.themoviedb.org" target="_blank" rel="noreferrer">TMDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.
+        </footer>
       </main>
 
       <nav className="tabbar" aria-label="Main">

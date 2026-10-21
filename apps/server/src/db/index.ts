@@ -15,6 +15,9 @@ export function openDatabase(path: string, backupsDir?: string): Db {
   const fresh = !existsSync(path);
   const sqlite = new Database(path, { create: true });
   sqlite.exec("PRAGMA journal_mode = WAL");
+  // WAL keeps the database consistent through a crash at this level; FULL would fsync
+  // on every progress and cache write.
+  sqlite.exec("PRAGMA synchronous = NORMAL");
   sqlite.exec("PRAGMA foreign_keys = ON");
   sqlite.exec("PRAGMA busy_timeout = 5000");
   migrate(sqlite, path, fresh ? undefined : backupsDir);

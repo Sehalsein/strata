@@ -3,6 +3,9 @@ import type { Db } from "../db";
 import { tmdbCache } from "../db/schema";
 import { logger } from "../log";
 
+const FETCH_TIMEOUT_MS = 8_000;
+const MEMO_ENTRIES = 400;
+const REFRESH_BACKOFF_MS = 60_000;
 const log = logger("tmdb");
 const BASE = "https://api.themoviedb.org/3";
 const HOUR = 3_600_000;
@@ -202,36 +205,65 @@ export class Tmdb {
     const query = { ...params, language: this.getLanguage() };
     const cacheKey = path + "?" + new URLSearchParams(Object.entries(query).sort()).toString();
 
-    const cached = this.db.select().from(tmdbCache).where(eq(tmdbCache.key, cacheKey)).get();
-    if (cached && Date.now() - cached.fetchedAt < ttl) return JSON.parse(cached.json) as T;
+    const cached = this.cached(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < ttl) return cached.value as T;
+    if (cached) {
+      // Stale: answer now from the cache and refresh behind it, so a page never
+      // waits on TMDB for data it already has. A failed refresh keeps the old copy.
+      const failedAt = this.refreshFailedAt.get(cacheKey) ?? 0;
+      if (!this.inflight.has(cacheKey) && Date.now() - failedAt > REFRESH_BACKOFF_MS) {
+        this.fetch<T>(path, query, key, cacheKey).catch(() => {
+          this.refreshFailedAt.set(cacheKey, Date.now());
+          if (this.refreshFailedAt.size > 1_000) this.refreshFailedAt.delete(this.refreshFailedAt.keys().next().value!);
+        });
+      }
+      return cached.value as T;
+    }
+    return ((this.inflight.get(cacheKey) as Promise<T> | undefined) ?? this.fetch<T>(path, query, key, cacheKey));
+  }
 
-    const pending = this.inflight.get(cacheKey);
-    if (pending) return pending as Promise<T>;
+  /** When a background refresh last failed, per key (TMDB down: don't retry on every view). */
+  private refreshFailedAt = new Map<string, number>();
 
+  /** Parsed responses, most recently used last; bounded, since detail pages run ~40 KB. */
+  private memo = new Map<string, { fetchedAt: number; value: unknown }>();
+
+  private cached(cacheKey: string): { fetchedAt: number; value: unknown } | null {
+    const hit = this.memo.get(cacheKey);
+    if (hit) {
+      this.memo.delete(cacheKey);
+      this.memo.set(cacheKey, hit);
+      return hit;
+    }
+    const row = this.db.select().from(tmdbCache).where(eq(tmdbCache.key, cacheKey)).get();
+    if (!row) return null;
+    return this.remember(cacheKey, { fetchedAt: row.fetchedAt, value: JSON.parse(row.json) });
+  }
+
+  private remember(cacheKey: string, entry: { fetchedAt: number; value: unknown }) {
+    this.memo.delete(cacheKey);
+    this.memo.set(cacheKey, entry);
+    if (this.memo.size > MEMO_ENTRIES) this.memo.delete(this.memo.keys().next().value!);
+    return entry;
+  }
+
+  private fetch<T>(path: string, query: Record<string, string>, key: string, cacheKey: string): Promise<T> {
     const promise = this.limited(async () => {
-      const res = await this.fetchImpl(this.url(path, query, key), { headers: this.headers(key) });
+      // A hung request would hold one of the few slots and stall every page behind it.
+      const res = await this.fetchImpl(this.url(path, query, key), { headers: this.headers(key), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
       if (!res.ok) {
-        // Serve stale data rather than failing when TMDB is down or rate limiting.
-        if (cached && res.status >= 429) return JSON.parse(cached.json) as T;
         log.warn(`TMDB ${path} failed: ${res.status}`);
         throw new TmdbError(res.status === 404 ? "That title isn't in the catalog." : "The movie catalog isn't responding. Try again in a moment.", res.status === 404 ? 404 : 502);
       }
       const text = await res.text();
+      const fetchedAt = Date.now();
       this.db
         .insert(tmdbCache)
-        .values({ key: cacheKey, json: text, fetchedAt: Date.now() })
-        .onConflictDoUpdate({ target: tmdbCache.key, set: { json: text, fetchedAt: Date.now() } })
+        .values({ key: cacheKey, json: text, fetchedAt })
+        .onConflictDoUpdate({ target: tmdbCache.key, set: { json: text, fetchedAt } })
         .run();
-      return JSON.parse(text) as T;
-    })
-      .catch((err) => {
-        if (cached && !(err instanceof TmdbError)) {
-          log.warn(`Serving stale ${path}`, err);
-          return JSON.parse(cached.json) as T;
-        }
-        throw err;
-      })
-      .finally(() => this.inflight.delete(cacheKey));
+      return this.remember(cacheKey, { fetchedAt, value: JSON.parse(text) }).value as T;
+    }).finally(() => this.inflight.delete(cacheKey));
     this.inflight.set(cacheKey, promise);
     return promise;
   }

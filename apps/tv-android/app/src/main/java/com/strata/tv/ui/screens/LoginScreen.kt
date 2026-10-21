@@ -286,7 +286,7 @@ private fun LoginForm(modifier: Modifier = Modifier, onSignedIn: () -> Unit) {
 
         EditorialField(
             label = "Server",
-            placeholder = "http://192.168.2.162:8096",
+            placeholder = "http://192.168.1.50:8096",
             value = serverUrl,
             onValueChange = { serverUrl = it },
             mono = true,

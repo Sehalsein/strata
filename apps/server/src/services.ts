@@ -1,3 +1,5 @@
+import { lt } from "drizzle-orm";
+import { tmdbCache } from "./db/schema";
 import { join } from "node:path";
 import { Auth } from "./auth";
 import { CatalogService } from "./catalog/service";
@@ -122,6 +124,11 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
       });
     return housekeeping.clean(client, settings.get().torboxCleanupDays, streaming);
   });
+  // Catalog answers (TMDB, Kitsu, AniList) a month unused are only taking space.
+  jobs.register("pruneCatalogCache", async () => {
+    const removed = db.delete(tmdbCache).where(lt(tmdbCache.fetchedAt, Date.now() - 30 * 24 * 60 * MINUTE)).returning({ key: tmdbCache.key }).all().length;
+    return { removed };
+  });
   jobs.register("detectFfmpeg", async () => {
     ffmpegInfo = await detectFfmpeg(paths.root);
     return { found: !!ffmpegInfo };
@@ -158,6 +165,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     applySchedule();
     jobs.schedule("checkUpdates", 6 * 60 * MINUTE, 60_000);
     jobs.schedule("cleanTorbox", 24 * 60 * MINUTE, 10 * MINUTE);
+    jobs.schedule("pruneCatalogCache", 24 * 60 * MINUTE, 15 * MINUTE);
     jobs.schedule("refreshAnimeIds", 24 * 60 * MINUTE, 30_000);
   }
 

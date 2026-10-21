@@ -88,7 +88,7 @@ Compose recreates only the port mapping; no pull or rebuild.
 If Jellyfin doesn't live on the Mac mini, override:
 
 ```sh
-echo "JELLYFIN_URL=http://192.168.2.162:8096" >> .env
+echo "JELLYFIN_URL=http://192.168.1.50:8096" >> .env
 docker compose up -d
 ```
 

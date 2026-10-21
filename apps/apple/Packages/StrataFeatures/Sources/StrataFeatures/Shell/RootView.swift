@@ -124,16 +124,7 @@ struct StackHost<Root: View>: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            root()
-                .navigationDestination(for: Route.self) { route in
-                    switch route {
-                    case .movie(let id): MovieDetailView(tmdbId: id)
-                    case .show(let id): ShowDetailView(tmdbId: id)
-                    case .browse(let type, let list): BrowseListView(type: type, list: list)
-                    case .person(let id): PersonView(personId: id)
-                    case .myList: MyListView()
-                    }
-                }
+            root().routeDestinations()
         }
         .onChange(of: services.coordinator.pendingRoute) { _, route in
             if route != nil, let next = services.coordinator.consume() { path.append(next) }
@@ -154,5 +145,20 @@ struct ProfileToolbarButton: View {
         }
         .accessibilityLabel("Settings")
         .sheet(isPresented: $showSettings) { SettingsView() }
+    }
+}
+
+extension View {
+    /// The app's navigation destinations, for any stack that pushes a `Route`.
+    func routeDestinations() -> some View {
+        navigationDestination(for: Route.self) { route in
+            switch route {
+            case .movie(let id): MovieDetailView(tmdbId: id)
+            case .show(let id): ShowDetailView(tmdbId: id)
+            case .browse(let type, let list): BrowseListView(type: type, list: list)
+            case .person(let id): PersonView(personId: id)
+            case .myList: MyListView()
+            }
+        }
     }
 }

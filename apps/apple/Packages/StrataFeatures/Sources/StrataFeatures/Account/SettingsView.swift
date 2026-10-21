@@ -26,6 +26,10 @@ struct SettingsView: View {
                             }
                         }
                         Button("Switch Profile") { showProfiles = true }
+                        #if os(tvOS)
+                        // The TV's tab bar has no room for My List; it lives with the profile.
+                        NavigationLink(value: Route.myList) { Label("My List", systemImage: "bookmark") }
+                        #endif
                         #if os(iOS)
                         Button("Sign In a TV") { showSignInTV = true }
                         #endif
@@ -76,12 +80,18 @@ struct SettingsView: View {
                         }
                 }
 
-                Section("About") {
+                Section {
                     LabeledContent("Server version", value: services.store.active?.version ?? "—")
                     LabeledContent("App version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+                } header: {
+                    Text("About")
+                } footer: {
+                    // Required by TMDB's API terms.
+                    Text("Movie and show data from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.")
                 }
             }
             .navigationTitle("Settings")
+            .routeDestinations()
             #if !os(tvOS)
             .scrollContentBackground(.hidden)
             .background(Theme.bg)
