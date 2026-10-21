@@ -104,6 +104,24 @@ test("malformed entries in the downloaded list are ignored, not trusted", () => 
     { anilist_id: 2, themoviedb_id: { tv: 42 }, season: { tvdb: 1, tmdb: 1 } },
     null as unknown as object,
   ]);
-  expect(map.anilist(1)).toMatchObject({ tmdbTv: undefined, tmdbSeason: undefined, tmdbOffset: 0 });
+  // An invalid season/offset drops the whole entry instead of turning it "absolute".
+  expect(map.anilist(1)).toBeUndefined();
   expect(map.show(42)[0]?.anilistId).toBe(2);
+});
+
+test("AniList: identical lookups share one request, failures back off", async () => {
+  const { Anilist } = await import("../src/catalog/anime/anilist");
+  const { startTestServer } = await import("./helpers");
+  const server = await startTestServer();
+  let calls = 0;
+  const anilist = new Anilist(server.services.db, (async () => {
+    calls++;
+    return new Response("busy", { status: 500 });
+  }) as unknown as typeof fetch);
+  const [a, b] = await Promise.all([anilist.media(7), anilist.media(7)]);
+  expect([a, b]).toEqual([null, null]);
+  expect(calls).toBe(1); // shared
+  await anilist.media(7);
+  expect(calls).toBe(1); // failed recently: not retried
+  server.services.shutdown();
 });

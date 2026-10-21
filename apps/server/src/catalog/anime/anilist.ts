@@ -8,6 +8,10 @@ const ENDPOINT = "https://graphql.anilist.co";
 /** AniList allows 30 requests a minute right now: one every 2s, lazily, never bulk. */
 const MIN_INTERVAL_MS = 2_100;
 const DAY = 24 * 60 * 60_000;
+/** Requests waiting for their turn; beyond this, new ones are refused rather than queued. */
+const MAX_PENDING = 20;
+/** A lookup that failed isn't retried for this long. */
+const FAILURE_TTL_MS = 10 * 60_000;
 
 export interface AnilistMedia {
   id: number;
@@ -45,6 +49,9 @@ const DETAILS = `query ($id: Int) {
 export class Anilist {
   private queue: Promise<unknown> = Promise.resolve();
   private last = 0;
+  private pending = 0;
+  private inFlight = new Map<string, Promise<unknown>>();
+  private failures = new Map<string, number>();
 
   constructor(
     private readonly db: Db,
@@ -64,7 +71,22 @@ export class Anilist {
   private async request<T>(query: string, variables: Record<string, unknown>, cacheKey: string, ttl: number): Promise<T | null> {
     const cached = this.db.select().from(tmdbCache).where(eq(tmdbCache.key, cacheKey)).get();
     if (cached && Date.now() - cached.fetchedAt < ttl) return JSON.parse(cached.json) as T;
+    const stale = cached ? (JSON.parse(cached.json) as T) : null;
 
+    const failedAt = this.failures.get(cacheKey);
+    if (failedAt && Date.now() - failedAt < FAILURE_TTL_MS) return stale;
+    // The same lookup already on its way: share it.
+    const sharing = this.inFlight.get(cacheKey) as Promise<T | null> | undefined;
+    if (sharing) return sharing;
+    if (this.pending >= MAX_PENDING) return stale;
+
+    const work = this.fetchAndCache<T>(query, variables, cacheKey, stale).finally(() => this.inFlight.delete(cacheKey));
+    this.inFlight.set(cacheKey, work);
+    return work;
+  }
+
+  private async fetchAndCache<T>(query: string, variables: Record<string, unknown>, cacheKey: string, stale: T | null): Promise<T | null> {
+    this.pending++;
     // One request at a time, at least MIN_INTERVAL_MS apart.
     const run = this.queue.then(async () => {
       const wait = this.last + MIN_INTERVAL_MS - Date.now();
@@ -92,8 +114,12 @@ export class Anilist {
       return data;
     } catch (err) {
       log.warn(`AniList request failed`, err);
+      this.failures.set(cacheKey, Date.now());
+      if (this.failures.size > 1_000) this.failures.clear();
       // A stale answer beats none.
-      return cached ? (JSON.parse(cached.json) as T) : null;
+      return stale;
+    } finally {
+      this.pending--;
     }
   }
 }

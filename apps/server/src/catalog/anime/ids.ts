@@ -90,6 +90,11 @@ export class AnimeIds {
     for (const r of raw) {
       if (!r || typeof r !== "object") continue;
       const tmdb = typeof r.themoviedb_id === "number" ? { tv: r.themoviedb_id } : r.themoviedb_id && typeof r.themoviedb_id === "object" ? r.themoviedb_id : {};
+      // A season/offset that's present but invalid would read as "absolute numbering":
+      // skip the entry rather than misplace its episodes.
+      if (r.season?.tmdb !== undefined && count(r.season.tmdb) === undefined) continue;
+      if (r.season?.tvdb !== undefined && count(r.season.tvdb) === undefined) continue;
+      if (r.episode_offset?.tmdb !== undefined && count(r.episode_offset.tmdb) === undefined) continue;
       const entry: AnimeEntry = {
         anilistId: id(r.anilist_id),
         kitsuId: id(r.kitsu_id),
