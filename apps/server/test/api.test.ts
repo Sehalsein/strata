@@ -186,17 +186,24 @@ describe("library", () => {
     expect(trending.items[0].available).toEqual(["local"]);
   });
 
-  test("genres: the list, and rails for one genre (new first)", async () => {
+  test("genres: the list, and rails for one genre (trending, then new)", async () => {
     const genres = (await json(await server.request("/api/genres/movie", { token }))).items;
-    expect(genres[0]).toEqual({ id: -1, name: "Anime" }); // virtual genre, first
+    expect(genres.some((g: any) => g.id === -1)).toBe(false); // anime has its own tab now
     expect(genres).toContainEqual({ id: 35, name: "Comedy" });
     const anime = await json(await server.request("/api/browse/movie/genre/-1", { token }));
     expect(anime.shelves[0].items[0]).toMatchObject({ tmdbId: 129, title: "Spirited Away" });
     const { shelves } = await json(await server.request("/api/browse/movie/genre/16", { token }));
-    expect(shelves.map((s: any) => s.id)).toEqual(["new", "popular", "topRated"]);
-    expect(shelves[0].items[0]).toMatchObject({ tmdbId: 10378, available: ["local"] });
+    expect(shelves.map((s: any) => s.id)).toEqual(["trending", "new", "popular", "topRated"]);
+    expect(shelves[1].items[0]).toMatchObject({ tmdbId: 10378, available: ["local"] });
     const comedy = await json(await server.request("/api/browse/movie/genre/35", { token }));
     expect(comedy.shelves).toEqual([]);
+  });
+
+  test("anime tab: its categories, and unknown ones are refused", async () => {
+    const { items } = await json(await server.request("/api/anime/categories", { token }));
+    expect(items).toContainEqual({ id: "isekai", name: "Isekai" });
+    expect((await server.request("/api/anime?category=../x", { token })).status).toBe(400);
+    expect((await server.request("/api/anime", { token })).status).toBe(200);
   });
 
   test("person page lists their work, deduplicated, by department", async () => {

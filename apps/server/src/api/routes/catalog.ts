@@ -39,6 +39,14 @@ export const catalogRoutes = new Hono<Env>()
     return c.json({ shelves: await allowedShelves(c, await c.var.services.catalog.genreShelves(type, intParam(c, "id"))) });
   })
 
+  .get("/anime/categories", (c) => c.json({ items: c.var.services.catalog.animeCategories() }))
+
+  .get("/anime", async (c) => {
+    const category = c.req.query("category") || undefined;
+    if (category && !c.var.services.catalog.animeCategories().some((x) => x.id === category)) throw new HTTPException(400, { message: "Unknown anime category" });
+    return c.json({ shelves: await allowedShelves(c, await c.var.services.catalog.animePage(category)) });
+  })
+
   .get("/person/:id", async (c) => {
     const person = await c.var.services.catalog.person(intParam(c, "id"));
     const content = c.var.services.content;

@@ -24,6 +24,17 @@ interface KitsuAnime {
 
 export type KitsuRail = "season" | "lastSeason" | "top" | "popular" | "recent";
 
+/** The Anime tab's categories: Kitsu category slugs and their names. */
+export const ANIME_CATEGORIES: { id: string; name: string }[] = [
+  ["action", "Action"], ["adventure", "Adventure"], ["comedy", "Comedy"], ["drama", "Drama"], ["fantasy", "Fantasy"],
+  ["isekai", "Isekai"], ["romance", "Romance"], ["slice-of-life", "Slice of Life"], ["science-fiction", "Sci-Fi"],
+  ["mystery", "Mystery"], ["psychological", "Psychological"], ["thriller", "Thriller"], ["horror", "Horror"],
+  ["supernatural", "Supernatural"], ["sports", "Sports"], ["mecha", "Mecha"], ["music", "Music"],
+  ["school-life", "School"], ["martial-arts", "Martial Arts"], ["historical", "Historical"],
+  ["shounen", "Shounen"], ["seinen", "Seinen"], ["shoujo", "Shoujo"],
+].map(([id, name]) => ({ id: id!, name: name! }));
+const CATEGORY_IDS = new Set(ANIME_CATEGORIES.map((c) => c.id));
+
 const SEASONS = ["winter", "spring", "summer", "fall"] as const;
 
 /**
@@ -40,9 +51,12 @@ export class Kitsu {
   ) {}
 
   /** Kitsu ids, in rank order, for one rail of series or films. */
-  async rail(kind: "series" | "films", rail: KitsuRail, now = new Date()): Promise<number[]> {
+  async rail(kind: "series" | "films", rail: KitsuRail, opts: { category?: string; now?: Date } = {}): Promise<number[]> {
+    const now = opts.now ?? new Date();
     const subtype = kind === "films" ? "movie" : "TV";
     const q = new URLSearchParams({ "filter[subtype]": subtype, "page[limit]": "20" });
+    // Only known slugs reach Kitsu (and the cache key).
+    if (opts.category && CATEGORY_IDS.has(opts.category)) q.set("filter[categories]", opts.category);
     const quarter = Math.floor(now.getUTCMonth() / 3);
     const year = now.getUTCFullYear();
     switch (rail) {
@@ -66,7 +80,7 @@ export class Kitsu {
         q.set("sort", "popularityRank");
         break;
     }
-    const list = await this.request(`anime?${q}`, `kitsu:rail:${kind}:${rail}:${q.get("filter[seasonYear]") ?? ""}:${q.get("filter[season]") ?? ""}`, 12 * HOUR);
+    const list = await this.request(`anime?${q}`, `kitsu:rail:${kind}:${rail}:${q.get("filter[seasonYear]") ?? ""}:${q.get("filter[season]") ?? ""}:${q.get("filter[categories]") ?? ""}`, 12 * HOUR);
     return (list ?? []).map((a) => Number(a.id)).filter((id) => Number.isInteger(id) && id > 0);
   }
 

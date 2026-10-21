@@ -146,10 +146,13 @@ describe("Kitsu", () => {
   test("season rails ask for this and last season, wrapping the year", async () => {
     const seen: string[] = [];
     const { kitsu, server } = await kitsuWith({ data: [{ id: "46474", attributes: {} }] }, seen);
-    expect(await kitsu.rail("series", "season", new Date("2026-01-15"))).toEqual([46474]);
-    await kitsu.rail("series", "lastSeason", new Date("2026-01-15"));
+    expect(await kitsu.rail("series", "season", { now: new Date("2026-01-15") })).toEqual([46474]);
+    await kitsu.rail("series", "lastSeason", { now: new Date("2026-01-15"), category: "isekai" });
+    await kitsu.rail("series", "top", { category: "../evil" });
     expect(seen[0]).toContain("filter[season]=winter&filter[seasonYear]=2026");
     expect(seen[1]).toContain("filter[season]=fall&filter[seasonYear]=2025");
+    expect(seen[1]).toContain("filter[categories]=isekai");
+    expect(seen[2]).not.toContain("categories"); // unknown categories are dropped
     server.services.shutdown();
   });
 

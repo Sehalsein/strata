@@ -137,6 +137,17 @@ public final class StrataClient: Sendable {
         return res.shelves
     }
 
+    public func animeCategories() async throws -> [AnimeCategory] {
+        let res: ItemsResponse<AnimeCategory> = try await get("/api/anime/categories")
+        return res.items
+    }
+
+    /// The Anime tab's rails, for every category or just one.
+    public func anime(category: String? = nil) async throws -> [Shelf] {
+        let res: ShelvesResponse = try await get("/api/anime", query: category.map { [URLQueryItem(name: "category", value: $0)] } ?? [])
+        return res.shelves
+    }
+
     public func person(_ id: Int) async throws -> PersonDetail {
         try await get("/api/person/\(id)")
     }

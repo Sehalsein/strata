@@ -52,7 +52,7 @@ public struct RootView: View {
     }
 }
 
-enum AppTab: String, Hashable { case home, movies, shows, myList, search, profile }
+enum AppTab: String, Hashable { case home, movies, shows, anime, search, profile }
 
 /// The signed-in app: a floating Liquid Glass tab bar (iPhone), a sidebar
 /// that adapts to a tab bar (iPad), or the top tab bar (tvOS).
@@ -90,8 +90,8 @@ struct MainShell: View {
             Tab("Shows", systemImage: "tv", value: AppTab.shows) {
                 StackHost { BrowseView(type: .show) }
             }
-            Tab("My List", systemImage: "bookmark", value: AppTab.myList) {
-                StackHost { MyListView() }
+            Tab("Anime", systemImage: "sparkles", value: AppTab.anime) {
+                StackHost { AnimeView() }
             }
             Tab(value: AppTab.search, role: .search) {
                 StackHost { SearchView() }
@@ -131,6 +131,7 @@ struct StackHost<Root: View>: View {
                     case .show(let id): ShowDetailView(tmdbId: id)
                     case .browse(let type, let list): BrowseListView(type: type, list: list)
                     case .person(let id): PersonView(personId: id)
+                    case .myList: MyListView()
                     }
                 }
         }

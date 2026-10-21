@@ -7,7 +7,7 @@ import { imageUrl, yearOf, type Tmdb, type TmdbCredits, type TmdbListItem, type 
 import { logger } from "../log";
 import type { Anilist } from "./anime/anilist";
 import type { AnimeIds } from "./anime/ids";
-import type { Kitsu, KitsuRail } from "./anime/kitsu";
+import { ANIME_CATEGORIES, type Kitsu, type KitsuRail } from "./anime/kitsu";
 
 const log = logger("catalog");
 
@@ -138,17 +138,18 @@ export class CatalogService {
   }
 
   /** TMDB's genres for movies or shows, in the server's metadata language. */
-  /** TMDB's genres, led by "Anime" (a virtual genre: see ANIME_GENRE_ID). */
+  /** TMDB's genres. Anime has its own tab (see `animePage`). */
   async genres(type: TitleType): Promise<{ id: number; name: string }[]> {
-    return [{ id: ANIME_GENRE_ID, name: "Anime" }, ...(await this.tmdb.genres(type === "movie" ? "movie" : "tv")).genres];
+    return (await this.tmdb.genres(type === "movie" ? "movie" : "tv")).genres;
   }
 
   /** Rails for one genre: new, popular and top rated on TMDB. */
   async genreShelves(type: TitleType, genreId: number): Promise<Shelf[]> {
+    // Older apps still list "Anime" under Movies/Shows: its half of the Anime page.
     if (genreId === ANIME_GENRE_ID) {
-      // Anime ranked by an anime site reads far better than TMDB's "Japanese animation".
-      const ranked = await this.animeShelves(type).catch((err) => (log.warn("Anime rails failed", err), [] as Shelf[]));
-      if (ranked.length) return ranked;
+      const page = await this.animePage();
+      const half = page.filter((s) => (type === "movie" ? s.id.startsWith("anime-films") : !s.id.startsWith("anime-films")));
+      if (half.length) return half;
     }
     const tmdbType = type === "movie" ? "movie" : "tv";
     const today = new Date().toISOString().slice(0, 10);
@@ -157,36 +158,85 @@ export class CatalogService {
     const discover = (params: Record<string, string>) =>
       this.tmdb.discover(tmdbType, { ...filter, ...params }).then((p) => this.cards(p.results, type));
     const safe = <T,>(work: Promise<T[]>) => work.catch((err) => (log.warn("Genre shelf failed", err), [] as T[]));
-    const [popular, topRated, fresh] = await Promise.all([
+    const [trending, popular, topRated, fresh] = await Promise.all([
+      safe(this.trendingThisWeek(type, (i) => i.genre_ids?.includes(genreId) ?? false, filter)),
       safe(discover({ sort_by: "popularity.desc" })),
       safe(discover({ sort_by: "vote_average.desc", "vote_count.gte": "300" })),
       safe(discover({ sort_by: `${dateKey}.desc`, [`${dateKey}.lte`]: today, "vote_count.gte": "20" })),
     ]);
     const shelves: Shelf[] = [];
+    if (trending.length) shelves.push({ id: "trending", title: "Trending This Week", kind: "titles", items: trending });
     if (fresh.length) shelves.push({ id: "new", title: "New", kind: "titles", items: fresh });
     if (popular.length) shelves.push({ id: "popular", title: "Popular", kind: "titles", items: popular });
     if (topRated.length) shelves.push({ id: "topRated", title: "Top Rated", kind: "titles", items: topRated });
     return shelves;
   }
 
-  /** Anime rails from Kitsu's rankings, mapped to TMDB titles through the anime id list. */
-  private async animeShelves(type: TitleType): Promise<Shelf[]> {
+  /**
+   * TMDB's trending this week, narrowed to what `keep` accepts. Narrow genres rarely
+   * fill a rail from the overall chart, so it's topped up with the genre's most popular
+   * titles out this week (shows with an episode in the last 7 days, films in the last 60).
+   */
+  private async trendingThisWeek(type: TitleType, keep: (item: TmdbListItem) => boolean, discoverFilter: Record<string, string>): Promise<TitleCard[]> {
+    const tmdbType = type === "movie" ? "movie" : "tv";
+    const pages = await Promise.all([1, 2, 3].map((p) => this.tmdb.trending(tmdbType, p).then((r) => r.results).catch(() => [] as TmdbListItem[])));
+    const items = pages.flat().filter(keep);
+    if (items.length < 12) {
+      const day = (offset: number) => new Date(Date.now() - offset * 86_400_000).toISOString().slice(0, 10);
+      const window: Record<string, string> =
+        type === "movie" ? { "primary_release_date.gte": day(60), "primary_release_date.lte": day(0) } : { "air_date.gte": day(7), "air_date.lte": day(0) };
+      const recent = await this.tmdb.discover(tmdbType, { ...discoverFilter, ...window, sort_by: "popularity.desc" }).then((r) => r.results).catch(() => [] as TmdbListItem[]);
+      const seen = new Set(items.map((i) => i.id));
+      items.push(...recent.filter((i) => !seen.has(i.id)));
+    }
+    return this.cards(items.slice(0, 20), type);
+  }
+
+  /** The Anime tab's categories (Kitsu's). */
+  animeCategories() {
+    return ANIME_CATEGORIES;
+  }
+
+  /**
+   * The Anime tab: what's trending and airing, then series and films ranked by Kitsu.
+   * With a category, its own popular and top rated series and films.
+   */
+  async animePage(category?: string): Promise<Shelf[]> {
     const { ids, kitsu } = this.anime ?? {};
     if (!ids || !kitsu) return [];
     await ids.ready();
-    const rails: [KitsuRail, string][] =
-      type === "movie"
-        ? [["recent", "New"], ["popular", "Popular"], ["top", "Top Rated"]]
-        : [["season", "This Season"], ["lastSeason", "Last Season"], ["top", "Top Rated"], ["popular", "All-Time Popular"]];
-    const shelves = await Promise.all(
-      rails.map(async ([rail, title]): Promise<Shelf> => {
-        const ranked = await kitsu.rail(type === "movie" ? "films" : "series", rail);
+    type Plan = { id: string; title: string; kind: "series" | "films"; rail: KitsuRail };
+    const plans: Plan[] = category
+      ? [
+          { id: "anime-series-season", title: "This Season", kind: "series", rail: "season" },
+          { id: "anime-series-popular", title: "Popular Series", kind: "series", rail: "popular" },
+          { id: "anime-series-top", title: "Top Rated Series", kind: "series", rail: "top" },
+          { id: "anime-films-popular", title: "Popular Movies", kind: "films", rail: "popular" },
+          { id: "anime-films-top", title: "Top Rated Movies", kind: "films", rail: "top" },
+        ]
+      : [
+          { id: "anime-series-season", title: "This Season", kind: "series", rail: "season" },
+          { id: "anime-series-top", title: "Top Rated Series", kind: "series", rail: "top" },
+          { id: "anime-films-recent", title: "New Movies", kind: "films", rail: "recent" },
+          { id: "anime-series-lastSeason", title: "Last Season", kind: "series", rail: "lastSeason" },
+          { id: "anime-series-popular", title: "All-Time Popular", kind: "series", rail: "popular" },
+          { id: "anime-films-popular", title: "Popular Movies", kind: "films", rail: "popular" },
+          { id: "anime-films-top", title: "Top Rated Movies", kind: "films", rail: "top" },
+        ];
+    const isAnime = (i: TmdbListItem) => i.original_language === "ja" && (i.genre_ids?.includes(16) ?? false);
+    const [trending, ...ranked] = await Promise.all([
+      category ? Promise.resolve([] as TitleCard[]) : this.trendingThisWeek("show", isAnime, ANIME_DISCOVER).catch(() => [] as TitleCard[]),
+      ...plans.map(async (plan): Promise<Shelf> => {
+        const type: TitleType = plan.kind === "films" ? "movie" : "show";
+        const kitsuIds = await kitsu.rail(plan.kind, plan.rail, { category });
         // Several Kitsu entries (seasons, cours) are one TMDB show: keep its best rank.
-        const tmdbIds = [...new Set(ranked.map((k) => (type === "movie" ? ids.kitsu(k)?.tmdbMovie : ids.kitsu(k)?.tmdbTv)).filter((id): id is number => !!id))];
-        return { id: `anime-${rail}`, title, kind: "titles", items: await this.detailCards(type, tmdbIds) };
+        const tmdbIds = [...new Set(kitsuIds.map((k) => (type === "movie" ? ids.kitsu(k)?.tmdbMovie : ids.kitsu(k)?.tmdbTv)).filter((id): id is number => !!id))];
+        return { id: plan.id, title: plan.title, kind: "titles", items: await this.detailCards(type, tmdbIds) };
       }),
-    );
-    return shelves.filter((s) => s.items.length >= 3);
+    ]);
+    const shelves = ranked.filter((s) => s.items.length >= 3);
+    if (trending.length >= 3) shelves.unshift({ id: "anime-series-trending", title: "Trending This Week", kind: "titles", items: trending });
+    return shelves;
   }
 
   /** Cards from TMDB details (cached), a few lookups at a time; ones that fail are left out. */

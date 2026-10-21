@@ -104,6 +104,7 @@ public enum Route: Hashable {
     case show(Int)
     case browse(TitleType, BrowseList)
     case person(Int)
+    case myList
 }
 
 public extension TitleCard {

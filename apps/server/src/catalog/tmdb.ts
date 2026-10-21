@@ -30,6 +30,7 @@ export interface TmdbListItem {
   name?: string;
   original_title?: string;
   original_name?: string;
+  original_language?: string;
   release_date?: string;
   first_air_date?: string;
   overview?: string;
@@ -185,8 +186,8 @@ export class Tmdb {
   person(id: number) {
     return this.get<TmdbPerson>(`/person/${id}`, { append_to_response: "combined_credits" }, 3 * DAY);
   }
-  trending(type: "movie" | "tv") {
-    return this.get<TmdbPage>(`/trending/${type}/week`, {}, 6 * HOUR);
+  trending(type: "movie" | "tv", page = 1) {
+    return this.get<TmdbPage>(`/trending/${type}/week`, page > 1 ? { page: String(page) } : {}, 6 * HOUR);
   }
   popular(type: "movie" | "tv") {
     return this.get<TmdbPage>(`/${type}/popular`, {}, 12 * HOUR);

@@ -100,6 +100,16 @@ public struct Shelf: Codable, Sendable, Hashable, Identifiable {
 
 /// `GET /api/browse/:type/:list`
 /// A TMDB genre ("Comedy", id 35), for filtering Movies and Shows.
+/// An Anime tab category ("isekai", "Isekai").
+public struct AnimeCategory: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var name: String
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
 public struct Genre: Codable, Sendable, Hashable, Identifiable {
     public var id: Int
     public var name: String

@@ -44,7 +44,13 @@ struct HomeView: View {
         .ignoresSafeArea(edges: .top)
         #else
         .navigationTitle("Home")
-        .toolbar { ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() } }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                NavigationLink(value: Route.myList) { Label("My List", systemImage: "bookmark") }
+            }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() }
+        }
         .refreshable { await load(force: true) }
         #endif
         .background(Theme.bg.ignoresSafeArea())
@@ -102,6 +108,10 @@ struct ShelfRail: View {
                     .buttonStyle(StrataCardStyle())
                 }
             }
+            // My List lives on Home now: its rail ends in the full list.
+            if shelf.id == "watchlist" {
+                NavigationLink(value: Route.myList) { SeeAllTile() }.buttonStyle(StrataCardStyle())
+            }
         }
     }
 
@@ -145,7 +155,7 @@ struct PosterCardLabel: View {
 
 #if os(tvOS)
 /// The tvOS Home hero: a trending title with Play and More Info.
-private struct FeaturedHero: View {
+struct FeaturedHero: View {
     @Environment(AppServices.self) private var services
     let card: TitleCard
 

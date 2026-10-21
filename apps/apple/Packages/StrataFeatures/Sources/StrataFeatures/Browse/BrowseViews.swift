@@ -92,16 +92,7 @@ struct BrowseView: View {
                                     .buttonStyle(StrataCardStyle())
                             }
                             if items.count > 20 {
-                                NavigationLink(value: Route.browse(type, list)) {
-                                    VStack {
-                                        Image(systemName: "chevron.right").font(.title2)
-                                        Text("See all").font(.stCallout)
-                                    }
-                                    .foregroundStyle(Theme.accentText)
-                                    .frame(width: Metrics.posterWidth)
-                                    .aspectRatio(2 / 3, contentMode: .fit)
-                                    .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
-                                }
+                                NavigationLink(value: Route.browse(type, list)) { SeeAllTile() }
                                 .buttonStyle(StrataCardStyle())
                             }
                         }
@@ -140,30 +131,54 @@ struct BrowseView: View {
 
 /// One button that names the active genre ("All Genres", "Comedy") and opens the list,
 /// so the current filter is always on screen instead of somewhere in a scrolling row.
-struct GenreMenu: View {
-    let genres: [Genre]
-    @Binding var selected: Genre?
+/// Also the Anime tab's category menu.
+struct GenreMenu<Item: Hashable & Identifiable>: View {
+    let genres: [Item]
+    @Binding var selected: Item?
+    let name: (Item) -> String
+    var noun = "Genre"
+    var allTitle = "All Genres"
 
     var body: some View {
         Menu {
-            Picker("Genre", selection: $selected) {
-                Text("All Genres").tag(Genre?.none)
-                ForEach(genres) { genre in Text(genre.name).tag(Genre?.some(genre)) }
+            Picker(noun, selection: $selected) {
+                Text(allTitle).tag(Item?.none)
+                ForEach(genres) { genre in Text(name(genre)).tag(Item?.some(genre)) }
             }
             .pickerStyle(.inline)
         } label: {
             #if os(tvOS)
-            Label(selected?.name ?? "All Genres", systemImage: "line.3.horizontal.decrease")
+            Label(selected.map(name) ?? allTitle, systemImage: "line.3.horizontal.decrease")
                 .font(.stHeadline)
             #else
-            Label(selected?.name ?? "Genre", systemImage: selected == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+            Label(selected.map(name) ?? noun, systemImage: selected == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
             #endif
         }
         #if os(tvOS)
         .buttonStyle(.glass)
         .tint(Theme.ink)
         #endif
-        .accessibilityLabel(selected.map { "Genre: \($0.name)" } ?? "Filter by genre")
+        .accessibilityLabel(selected.map { "\(noun): \(name($0))" } ?? "Filter by \(noun.lowercased())")
+    }
+}
+
+extension GenreMenu where Item == Genre {
+    init(genres: [Genre], selected: Binding<Genre?>) {
+        self.init(genres: genres, selected: selected, name: \.name)
+    }
+}
+
+/// The poster-sized "See all" card that ends a rail.
+struct SeeAllTile: View {
+    var body: some View {
+        VStack {
+            Image(systemName: "chevron.right").font(.title2)
+            Text("See all").font(.stCallout)
+        }
+        .foregroundStyle(Theme.accentText)
+        .frame(width: Metrics.posterWidth)
+        .aspectRatio(2 / 3, contentMode: .fit)
+        .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
     }
 }
 
