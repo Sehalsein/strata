@@ -3,6 +3,7 @@ import { diceCoefficient, normalize, type MatchResult } from "../matcher";
 import { type Tmdb, yearOf } from "../tmdb";
 import type { Anilist, AnilistMedia } from "./anilist";
 import type { AnimeEntry, AnimeIds } from "./ids";
+import type { Kitsu } from "./kitsu";
 
 /**
  * Matches anime-style file names ("[Group] Sousou no Frieren - 12") to TMDB: AniList
@@ -14,12 +15,18 @@ export class AnimeMatcher {
     private readonly anilist: Anilist,
     private readonly ids: AnimeIds,
     private readonly tmdb: Tmdb,
+    private readonly kitsu?: Kitsu,
   ) {}
 
   async match(parsed: ParsedName): Promise<MatchResult | null> {
     await this.ids.ready();
-    const media = pickAnime(await this.anilist.search(parsed.title), parsed);
-    const entry = media ? this.ids.anilist(media.id) : undefined;
+    let media = pickAnime(await this.anilist.search(parsed.title), parsed);
+    let entry = media ? this.ids.anilist(media.id) : undefined;
+    // AniList down or without a mapped result: Kitsu's search, through its ids.
+    if (!entry && this.kitsu) {
+      media = pickAnime(await this.kitsu.search(parsed.title), parsed);
+      entry = media ? this.ids.kitsu(media.id) : undefined;
+    }
     if (!media || !entry) return null;
 
     if (parsed.episode === undefined) {

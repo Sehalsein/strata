@@ -16,6 +16,13 @@ const log = logger("playback");
 const AHEAD_PAUSE = 40;
 const IDLE_TIMEOUT_MS = 90_000;
 const WAIT_TIMEOUT_MS = 45_000;
+/**
+ * VideoToolbox can wedge (every encode call blocks, nothing is written). A hardware
+ * transcode with no first segment by then is restarted on the software encoder, and
+ * the hardware encoder is left alone for a while.
+ */
+const HW_STALL_MS = 12_000;
+const HW_COOLDOWN_MS = 10 * 60_000;
 
 export interface SessionTarget {
   mediaType: "movie" | "episode";
@@ -50,6 +57,7 @@ export interface PlaybackSession {
 
 export class SessionManager {
   private sessions = new Map<string, PlaybackSession>();
+  private hwStalledAt = 0;
   private sweeper: ReturnType<typeof setInterval>;
 
   constructor(
@@ -137,12 +145,13 @@ export class SessionManager {
     return existsSync(path.replace("stream.m3u8", "seg00000.m4s"));
   }
 
-  private startHls(session: PlaybackSession) {
+  private startHls(session: PlaybackSession, software = false) {
     const ffmpeg = this.getFfmpeg();
     if (!ffmpeg) throw new Error("ffmpeg is not installed; this file needs remuxing to play");
-    if (this.activeTranscodes() >= this.maxTranscodes()) throw new Error("Too many active transcodes; try again shortly");
+    if (!software && this.activeTranscodes() >= this.maxTranscodes()) throw new Error("Too many active transcodes; try again shortly");
     session.dir = join(this.transcodeDir, session.id);
     mkdirSync(session.dir, { recursive: true });
+    const hwEncoder = !software && this.hwAllowed() && Date.now() - this.hwStalledAt > HW_COOLDOWN_MS ? ffmpeg.hwEncoder : undefined;
     const args = buildHlsArgs({
       ffmpeg: ffmpeg.ffmpeg,
       input: session.input,
@@ -150,7 +159,7 @@ export class SessionManager {
       plan: session.plan,
       info: session.info,
       outDir: session.dir,
-      hwEncoder: this.hwAllowed() ? ffmpeg.hwEncoder : undefined,
+      hwEncoder,
     });
     log.debug(`ffmpeg ${redactSecrets(args.slice(1).join(" "))}`);
     const proc = Bun.spawn(args, { stdout: "ignore", stderr: "pipe" });
@@ -158,12 +167,28 @@ export class SessionManager {
     void (async () => {
       const stderr = await new Response(proc.stderr).text();
       const code = await proc.exited;
+      // A process replaced by the stall restart below isn't the session's any more.
+      if (session.proc !== proc) return;
       session.exitCode = code;
       if (code !== 0 && this.sessions.has(session.id)) {
         session.error = redactSecrets(stderr.trim().split("\n").slice(-3).join(" | "));
         log.warn(`ffmpeg exited ${code} for ${session.id.slice(0, 8)}: ${session.error}`);
       }
     })();
+    if (hwEncoder && session.plan.mode === "transcode") {
+      setTimeout(() => {
+        if (session.proc !== proc || proc.exitCode !== null || !this.sessions.has(session.id)) return;
+        if (existsSync(join(session.dir!, "seg00000.m4s"))) return;
+        log.warn(`Hardware encoder stalled for ${session.id.slice(0, 8)}; restarting on the software encoder`);
+        this.hwStalledAt = Date.now();
+        session.proc = undefined;
+        if (session.paused) process.kill(proc.pid, "SIGCONT");
+        session.paused = false;
+        proc.kill("SIGKILL");
+        rmSync(session.dir!, { recursive: true, force: true });
+        this.startHls(session, true);
+      }, HW_STALL_MS).unref();
+    }
   }
 
   private produced(session: PlaybackSession): number {

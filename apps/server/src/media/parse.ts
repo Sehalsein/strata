@@ -48,14 +48,21 @@ const MARKERS: RegExp[] = [
 const FANSUB_GROUP = /^\s*\[[^\]]+\]/;
 const DASH_EPISODE = /\s-\s\d{1,4}(?:v\d)?(?:\s|$|\[|\()/;
 
+/** "[HMXT]Spiderman.3.HDRip.Ac3.avi": a scene release with a tag, not a fansub. */
+const SCENE_STYLE = (name: string) => {
+  const rest = name.replace(FANSUB_GROUP, "").replace(/\[[^\]]*\]/g, "");
+  return !/\s/.test(rest.trim()) && (rest.match(/\./g)?.length ?? 0) >= 3;
+};
+
 export function parseFileName(name: string): ParsedName {
-  const fansub = FANSUB_GROUP.test(name) || (DASH_EPISODE.test(name) && !EPISODE_PATTERNS[0]!.test(name.replace(/[._]+/g, " ")));
+  const fansub = (FANSUB_GROUP.test(name) && !SCENE_STYLE(name)) || (DASH_EPISODE.test(name) && !EPISODE_PATTERNS[0]!.test(name.replace(/[._]+/g, " ")));
   if (fansub) {
     const anime = parseAnimeName(name);
     if (anime) return anime;
   }
   const base = name.replace(/\.[a-z0-9]{2,4}$/i, "");
-  const text = base.replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
+  // A leading "[Tag]" is the releaser, not part of the title.
+  const text = base.replace(FANSUB_GROUP, "").replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
 
   let cut = text.length;
   let season: number | undefined;

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import type { Db } from "./db";
 import { files, mediaItems, type FileProvider, type MatchStatus } from "./db/schema";
 import type { Matcher, MatchResult } from "./catalog/matcher";
@@ -9,6 +9,7 @@ import type { MediaInfo } from "./media/probe";
 import { logger } from "./log";
 
 const log = logger("library");
+const UNMATCHED_RETRY_MS = 24 * 60 * 60_000;
 
 export type FileRow = typeof files.$inferSelect;
 
@@ -80,7 +81,14 @@ export class Library {
   /** Matches every pending file against TMDB. Returns counts for status reporting. */
   async matchPending(onProgress?: (done: number, total: number) => void): Promise<{ matched: number; unmatched: number }> {
     if (!this.tmdb.configured) return { matched: 0, unmatched: 0 };
-    const pending = this.db.select().from(files).where(and(eq(files.matchStatus, "pending"), eq(files.missing, false))).all();
+    // Unmatched files get another try daily: lookups that failed (an anime site down,
+    // TMDB adding the title later) may succeed now.
+    const retryBefore = Date.now() - UNMATCHED_RETRY_MS;
+    const pending = this.db
+      .select()
+      .from(files)
+      .where(and(eq(files.missing, false), or(eq(files.matchStatus, "pending"), and(eq(files.matchStatus, "unmatched"), lt(files.updatedAt, retryBefore)))))
+      .all();
     let matched = 0;
     let unmatched = 0;
     for (const [i, file] of pending.entries()) {

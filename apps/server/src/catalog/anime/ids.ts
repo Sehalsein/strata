@@ -32,7 +32,8 @@ interface RawEntry {
   kitsu_id?: number;
   mal_id?: number;
   anidb_id?: number;
-  themoviedb_id?: { tv?: number; movie?: number } | number;
+  /** Movies come as a list (a film split in parts maps to several); the first is the film. */
+  themoviedb_id?: { tv?: number; movie?: number | number[] } | number;
   season?: { tvdb?: number; tmdb?: number };
   episode_offset?: { tmdb?: number; tvdb?: number };
 }
@@ -102,7 +103,7 @@ export class AnimeIds {
         anidbId: id(r.anidb_id),
         type: typeof r.type === "string" ? r.type : undefined,
         tmdbTv: id(tmdb.tv),
-        tmdbMovie: id(tmdb.movie),
+        tmdbMovie: id(Array.isArray(tmdb.movie) ? tmdb.movie[0] : tmdb.movie),
         tmdbSeason: count(r.season?.tmdb),
         tvdbSeason: count(r.season?.tvdb),
         tmdbOffset: count(r.episode_offset?.tmdb) ?? 0,

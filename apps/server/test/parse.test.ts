@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { isVideoFile, parseFileName, parseMediaPath } from "../src/media/parse";
+import { Matcher, pickBest } from "../src/catalog/matcher";
 
 describe("parseFileName", () => {
   test("scene movie", () => {
@@ -56,4 +57,30 @@ test("isVideoFile skips samples and non-video", () => {
   expect(isVideoFile("Movie.2020.mkv")).toBe(true);
   expect(isVideoFile("Movie.2020.sample.mkv")).toBe(false);
   expect(isVideoFile("Movie.2020.nfo")).toBe(false);
+});
+
+describe("names that used to go unmatched", () => {
+  test("a scene release with a [tag] in front isn't read as anime", () => {
+    expect(parseFileName("[HMXT]Spiderman.3.HDRip.Ac3.[www.hermeticos.org].avi")).toMatchObject({ kind: "movie", title: "Spiderman 3" });
+    expect(parseFileName("[HMXT]Spiderman.3.HDRip.Ac3.[www.hermeticos.org].avi").anime).toBeUndefined();
+  });
+});
+
+describe("matching titles", () => {
+  test("non-Latin titles match TMDB's original title", () => {
+    const results = [{ id: 1, title: "The Cliff", original_title: "Утёс", release_date: "2026-03-01" }];
+    expect(pickBest(results, "Утёс", 2026)?.id).toBe(1);
+  });
+
+  test("a non-Latin name found through a translation takes TMDB's top hit of that year", async () => {
+    const tmdb = { searchMovie: async () => ({ results: [{ id: 799882, title: "The Bluff", original_title: "The Bluff", release_date: "2026-02-25" }] }) };
+    expect((await new Matcher(tmdb as never).match(parseFileName("Утёс.2026.WEB-DLRip-AVC.x264.seleZen.mkv")))?.tmdbId).toBe(799882);
+  });
+
+  test("a studio name before the title is dropped when the year confirms it", async () => {
+    const ironMan = { id: 1726, title: "Iron Man", release_date: "2008-04-30" };
+    const tmdb = { searchMovie: async (q: string) => ({ results: q === "Iron Man" ? [ironMan] : [] }) };
+    const matcher = new Matcher(tmdb as never);
+    expect((await matcher.match(parseFileName("Marvel Studios Iron Man 2008 1080p MA WEB-DL DDP5 1 H 264-SARVO.mkv")))?.tmdbId).toBe(1726);
+  });
 });

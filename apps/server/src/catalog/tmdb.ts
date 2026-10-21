@@ -28,6 +28,8 @@ export interface TmdbListItem {
   media_type?: "movie" | "tv" | "person";
   title?: string;
   name?: string;
+  original_title?: string;
+  original_name?: string;
   release_date?: string;
   first_air_date?: string;
   overview?: string;

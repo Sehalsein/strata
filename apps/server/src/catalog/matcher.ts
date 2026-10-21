@@ -52,7 +52,22 @@ export class Matcher {
     const search = (y?: number) => (type === "movie" ? this.tmdb.searchMovie(title, y) : this.tmdb.searchShow(title, y));
     let results = (await search(year)).results;
     if (results.length === 0 && year) results = (await search()).results;
-    const best = pickBest(results, title, year);
+    let best = pickBest(results, title, year);
+    // A non-Latin name ("Утёс") is often found through a translation, so neither of
+    // TMDB's titles looks like it: trust the top hit when its year agrees.
+    if (!best && year && /\p{L}/u.test(title) && !/\p{Script=Latin}/u.test(title)) {
+      const top = results[0];
+      if (top && yearOf(top.release_date ?? top.first_air_date) === year) best = top;
+    }
+    // "Marvel Studios Iron Man 2008": a studio or brand before the title. With a year to
+    // confirm it, try again without the first word or two.
+    const words = title.split(/\s+/);
+    for (let drop = 1; !best && year && drop <= 2 && words.length - drop >= 1; drop++) {
+      const shorter = words.slice(drop).join(" ");
+      if (shorter.length < 3) break;
+      const r = (await (type === "movie" ? this.tmdb.searchMovie(shorter, year) : this.tmdb.searchShow(shorter, year))).results;
+      best = pickBest(r, shorter, year, true);
+    }
     if (!best) return null;
     return {
       type,
@@ -66,15 +81,18 @@ export class Matcher {
   }
 }
 
-export function pickBest(results: TmdbListItem[], title: string, year?: number): TmdbListItem | null {
+/** `exactYear`: only a result from that year counts (used when the title was guessed at). */
+export function pickBest(results: TmdbListItem[], title: string, year?: number, exactYear = false): TmdbListItem | null {
   const wanted = normalize(title);
   let best: { item: TmdbListItem; score: number } | null = null;
   // TMDB's own ordering (popularity-weighted relevance) is a good tiebreaker.
   results.slice(0, 10).forEach((item, rank) => {
-    const name = normalize(item.title ?? item.name ?? "");
-    const similarity = name === wanted ? 1 : diceCoefficient(name, wanted);
+    // The original title too: a file named in Russian or Japanese, TMDB answering in English.
+    const names = [item.title ?? item.name ?? "", item.original_title ?? item.original_name ?? ""].map(normalize).filter(Boolean);
+    const similarity = Math.max(0, ...names.map((name) => (name === wanted ? 1 : diceCoefficient(name, wanted))));
     if (similarity < 0.6) return;
     const itemYear = yearOf(item.release_date ?? item.first_air_date);
+    if (exactYear && itemYear !== year) return;
     let score = similarity * 10 - rank * 0.3;
     if (year && itemYear) score += itemYear === year ? 3 : Math.abs(itemYear - year) === 1 ? 1.5 : -3;
     if (!best || score > best.score) best = { item, score };
@@ -89,7 +107,7 @@ export function normalize(s: string): string {
     .toLowerCase()
     .replace(/&/g, "and")
     .replace(/['’]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .replace(/^(the|a|an) /, "")
     .trim();
 }

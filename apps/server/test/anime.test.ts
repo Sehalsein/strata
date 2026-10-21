@@ -11,7 +11,7 @@ const RAW = [
   { type: "TV", anilist_id: 154587, kitsu_id: 46474, themoviedb_id: { tv: 209867 }, season: { tvdb: 1, tmdb: 1 } }, // Frieren
   { type: "TV", anilist_id: 182255, kitsu_id: 49240, themoviedb_id: { tv: 209867 }, season: { tvdb: 2, tmdb: 1 }, episode_offset: { tmdb: 28 } }, // Frieren S2
   { type: "TV", anilist_id: 21, kitsu_id: 12, themoviedb_id: { tv: 37854 } }, // One Piece: absolute
-  { type: "MOVIE", anilist_id: 21519, kitsu_id: 11614, themoviedb_id: { movie: 372058 } }, // Your Name.
+  { type: "MOVIE", anilist_id: 21519, kitsu_id: 11614, themoviedb_id: { movie: [372058] } }, // Your Name.
 ];
 
 const ids = () => {
@@ -78,6 +78,11 @@ describe("AnimeMatcher", () => {
   });
 });
 
+test("films map to TMDB (the list gives movie ids as an array)", () => {
+  expect(ids().kitsu(11614)?.tmdbMovie).toBe(372058);
+  expect(ids().anilist(21519)?.tmdbMovie).toBe(372058);
+});
+
 describe("Torrentio anime ids", () => {
   test("TMDB episodes become the Kitsu entry and its own episode number", () => {
     const map = ids();
@@ -124,4 +129,39 @@ test("AniList: identical lookups share one request, failures back off", async ()
   await anilist.media(7);
   expect(calls).toBe(1); // failed recently: not retried
   server.services.shutdown();
+});
+
+describe("Kitsu", () => {
+  const kitsuWith = async (body: unknown, seen: string[]) => {
+    const { Kitsu } = await import("../src/catalog/anime/kitsu");
+    const { startTestServer } = await import("./helpers");
+    const server = await startTestServer();
+    const kitsu = new Kitsu(server.services.db, (async (url: string) => {
+      seen.push(decodeURIComponent(String(url)));
+      return Response.json(body);
+    }) as unknown as typeof fetch);
+    return { kitsu, server };
+  };
+
+  test("season rails ask for this and last season, wrapping the year", async () => {
+    const seen: string[] = [];
+    const { kitsu, server } = await kitsuWith({ data: [{ id: "46474", attributes: {} }] }, seen);
+    expect(await kitsu.rail("series", "season", new Date("2026-01-15"))).toEqual([46474]);
+    await kitsu.rail("series", "lastSeason", new Date("2026-01-15"));
+    expect(seen[0]).toContain("filter[season]=winter&filter[seasonYear]=2026");
+    expect(seen[1]).toContain("filter[season]=fall&filter[seasonYear]=2025");
+    server.services.shutdown();
+  });
+
+  test("a file AniList can't place is matched through Kitsu's search", async () => {
+    const seen: string[] = [];
+    const { kitsu, server } = await kitsuWith({ data: [{ id: "46474", attributes: { canonicalTitle: "Sousou no Frieren", titles: { en_jp: "Sousou no Frieren" }, subtype: "TV", startDate: "2023-09-29" } }] }, seen);
+    const anilist = { search: async () => [] } as unknown as Anilist;
+    const tmdb = { show: async () => ({ id: 209867, name: "Frieren", first_air_date: "2023-09-29", genres: [], seasons: [{ season_number: 1, episode_count: 38 }] }) } as unknown as Tmdb;
+    const map = ids();
+    map.ready = async () => {};
+    const matcher = new AnimeMatcher(anilist, map, tmdb, kitsu);
+    expect(await matcher.match(parseFileName("[SubsPlease] Sousou no Frieren - 12 (1080p).mkv"))).toMatchObject({ tmdbId: 209867, season: 1, episode: 12 });
+    server.services.shutdown();
+  });
 });

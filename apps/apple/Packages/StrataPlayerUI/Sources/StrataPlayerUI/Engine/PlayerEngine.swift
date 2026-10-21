@@ -223,6 +223,7 @@ public final class PlayerEngine {
             subtitleError = nil
         }
 
+        if res.mode.isHLS { try await waitForPlaylist(res.url, gen: gen) }
         let item = AVPlayerItem(url: res.url)
         // Start buffering a little ahead; long forward buffers waste server work on a remux.
         item.preferredForwardBufferDuration = res.mode.isHLS ? 30 : 0
@@ -326,6 +327,29 @@ public final class PlayerEngine {
             position = media
             restartTarget = media
             scheduleRestart(at: media, audioIndex: activeAudioIndex)
+        }
+    }
+
+    /// Waits for the server's first HLS segment. A transcode can take longer than AVPlayer's
+    /// ~20s playlist timeout to start (4K source, TorBox file not yet warm), and AVPlayer
+    /// then fails the item as "resource unavailable"; it gets the URL once it answers.
+    private func waitForPlaylist(_ url: URL, gen: Int) async throws {
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)
+        request.httpMethod = "GET"
+        let deadline = Date().addingTimeInterval(150)
+        while true {
+            guard gen == generation else { throw CancellationError() }
+            let status: Int
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            } catch let error as URLError where error.code == .timedOut {
+                status = 504
+            }
+            if (200..<300).contains(status) { return }
+            // 504: not ready yet. Anything else (502 = ffmpeg failed): let AVPlayer report it.
+            guard status == 504, Date() < deadline else { return }
+            try await Task.sleep(nanoseconds: 500_000_000)
         }
     }
 

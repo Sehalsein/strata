@@ -12,6 +12,7 @@ const DAY = 24 * 60 * 60_000;
 const MAX_PENDING = 20;
 /** A lookup that failed isn't retried for this long. */
 const FAILURE_TTL_MS = 10 * 60_000;
+const MAX_STALE_MS = 30 * DAY;
 
 export interface AnilistMedia {
   id: number;
@@ -71,7 +72,8 @@ export class Anilist {
   private async request<T>(query: string, variables: Record<string, unknown>, cacheKey: string, ttl: number): Promise<T | null> {
     const cached = this.db.select().from(tmdbCache).where(eq(tmdbCache.key, cacheKey)).get();
     if (cached && Date.now() - cached.fetchedAt < ttl) return JSON.parse(cached.json) as T;
-    const stale = cached ? (JSON.parse(cached.json) as T) : null;
+    // Past a month a cached answer is too old to stand in for a failed refresh.
+    const stale = cached && Date.now() - cached.fetchedAt < MAX_STALE_MS ? (JSON.parse(cached.json) as T) : null;
 
     const failedAt = this.failures.get(cacheKey);
     if (failedAt && Date.now() - failedAt < FAILURE_TTL_MS) return stale;
@@ -107,6 +109,7 @@ export class Anilist {
     this.queue = run.catch(() => {});
     try {
       const data = await run;
+      this.failures.delete(cacheKey);
       if (data) {
         const row = { key: cacheKey, json: JSON.stringify(data), fetchedAt: Date.now() };
         this.db.insert(tmdbCache).values(row).onConflictDoUpdate({ target: tmdbCache.key, set: { json: row.json, fetchedAt: row.fetchedAt } }).run();
@@ -114,8 +117,10 @@ export class Anilist {
       return data;
     } catch (err) {
       log.warn(`AniList request failed`, err);
+      this.failures.delete(cacheKey);
       this.failures.set(cacheKey, Date.now());
-      if (this.failures.size > 1_000) this.failures.clear();
+      // Oldest first (insertion order): drop the oldest rather than forgetting every backoff.
+      if (this.failures.size > 1_000) this.failures.delete(this.failures.keys().next().value!);
       // A stale answer beats none.
       return stale;
     } finally {

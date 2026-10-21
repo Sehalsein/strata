@@ -11,6 +11,7 @@ import { ingestItem } from "./torbox/sync";
 const log = logger("discovery");
 const RELEASE_TTL_MS = 20 * 60_000;
 const SCRAPER_TIMEOUT_MS = 12_000;
+const SCRAPER_BACKOFF_MS = 5 * 60_000;
 const READY_WAIT_MS = 20_000;
 
 export interface DiscoveryTarget {
@@ -50,6 +51,7 @@ export class Discovery {
   private cache = new Map<string, { at: number; releases: Promise<Release[]> }>();
   /** Torrents we added that weren't ready yet, by hash. */
   private pending = new Map<string, number>();
+  private scraperDown = new Map<string, number>();
 
   constructor(
     private readonly tmdb: Tmdb,
@@ -203,6 +205,30 @@ export class Discovery {
     return matching.sort((a, b) => b.size - a.size)[0];
   }
 
+  /**
+   * Runs one scraper with a time limit. One that fails is skipped for a few minutes, so
+   * an unreachable service (a host that stopped resolving) costs one log line, not one
+   * per lookup.
+   */
+  private async scrape(name: string, run: () => Promise<Release[]>): Promise<Release[]> {
+    const downUntil = this.scraperDown.get(name) ?? 0;
+    if (Date.now() < downUntil) return [];
+    try {
+      const releases = await timeout(run(), name);
+      this.scraperDown.delete(name);
+      return releases;
+    } catch (err) {
+      // A slow answer is worth trying again next time; a connection that fails isn't.
+      if (err instanceof ScraperTimeout) {
+        log.warn(`${name} timed out`);
+      } else {
+        log.warn(`${name} failed; skipping it for ${SCRAPER_BACKOFF_MS / 60_000} minutes`, err);
+        this.scraperDown.set(name, Date.now() + SCRAPER_BACKOFF_MS);
+      }
+      throw err;
+    }
+  }
+
   private async search(target: DiscoveryTarget): Promise<Release[]> {
     const imdbId = await this.imdbId(target);
     if (!imdbId) return [];
@@ -210,16 +236,16 @@ export class Discovery {
     const client = this.torbox();
     const jobs: Promise<Release[]>[] = [];
     if (settings.torrentioUrl) {
-      jobs.push(timeout(this.torrentio(settings.torrentioUrl, imdbId, target), "torrentio"));
+      const base = settings.torrentioUrl;
+      jobs.push(this.scrape("Torrentio", () => this.torrentio(base, imdbId, target)));
       const kitsu = await this.kitsuId(target).catch(() => null);
-      if (kitsu) jobs.push(timeout(this.torrentio(settings.torrentioUrl, kitsu, target, true), "torrentio anime"));
+      if (kitsu) jobs.push(this.scrape("Torrentio", () => this.torrentio(base, kitsu, target, true)));
     }
-    if (settings.useTorboxSearch && client) jobs.push(timeout(this.torboxSearch(client, imdbId, target), "torbox search"));
+    if (settings.useTorboxSearch && client) jobs.push(this.scrape("TorBox search", () => this.torboxSearch(client, imdbId, target)));
 
     const byHash = new Map<string, Release>();
     for (const result of await Promise.allSettled(jobs)) {
       if (result.status === "rejected") {
-        log.warn("Scraper failed", result.reason);
         continue;
       }
       for (const r of result.value) {
@@ -383,6 +409,8 @@ function resolutionFromName(name?: string): number | undefined {
   return m ? Number(m[1]) : undefined;
 }
 
+class ScraperTimeout extends Error {}
+
 function timeout<T>(promise: Promise<T>, label: string): Promise<T> {
-  return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label} timed out`)), SCRAPER_TIMEOUT_MS))]);
+  return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new ScraperTimeout(`${label} timed out`)), SCRAPER_TIMEOUT_MS))]);
 }
