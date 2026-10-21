@@ -23,7 +23,8 @@ concurrency:
 jobs:
   build:
     name: ${{ matrix.name }}
-    runs-on: macos-15
+    # macOS 26: the packages target macOS 26, and their SwiftUI tests run on the host.
+    runs-on: macos-26
     timeout-minutes: 35
     strategy:
       fail-fast: false

@@ -60,9 +60,7 @@ media from your own server.
 
 ## Keywords
 
-media server,home theater,movies,tv shows,anime,library,self-hosted,stream,player,plex,jellyfin
-
-*(Competitor names in keywords can be rejected under 2.3.7; drop "plex,jellyfin" if review objects.)*
+media server,home theater,movies,tv shows,anime,library,self-hosted,stream,player
 
 ## What's New (first release)
 

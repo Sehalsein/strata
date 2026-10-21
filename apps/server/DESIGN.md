@@ -17,7 +17,7 @@ app talks only to this server. There is no Jellyfin anywhere in the stack.
 | Users | Household: one admin + profiles (optional PIN), per-profile progress and watchlist. LAN-first; remote via Tailscale or similar. |
 | Sources | Local folders + TorBox. TorBox discovery via built-in scrapers (Stremio-addon-style) and TorBox's own search. |
 | Player | Apple app keeps AVPlayer. Server direct-plays when possible, otherwise remuxes to HLS with ffmpeg. |
-| Jellyfin | Removed. `apps/web` and `apps/tv-android` are frozen (kept, unmaintained). |
+| Jellyfin | Removed, along with the old Jellyfin-based web and Android TV apps. |
 | Apple app | Data layer rewritten in place; design system, player chrome and shells are kept. |
 
 ## Architecture
@@ -181,7 +181,7 @@ Like Jellyfin, the server is a headless process configured from a browser.
   - update channel
 - Secrets are stored server-side, encrypted at rest with a key in the data directory.
 - Watching in the browser is out of scope for now. The dashboard is admin-only.
-  `apps/web` could later be revived as a web player against the Strata API.
+  A web player against the Strata API could be added later.
 
 The server advertises itself over Bonjour (`_strata._tcp`), so the Apple client apps find it
 on the LAN automatically.

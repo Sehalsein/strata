@@ -1,22 +1,17 @@
 {
-  "name": "hbo",
+  "name": "strata",
   "private": true,
   "type": "module",
   "workspaces": ["apps/*"],
   "packageManager": "bun@1.2.20",
   "scripts": {
-    "dev": "turbo run dev",
-    "build": "turbo run build",
-    "start": "bun --cwd apps/web run preview",
-    "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
-    "deploy:ios": "make -C tools/deploy ios",
-    "deploy:android": "make -C tools/deploy android",
-    "deploy:all": "make -C tools/deploy all",
-    "deploy:serve": "make -C tools/deploy serve"
+    "dev": "bun --cwd apps/server run dev",
+    "build": "bun --cwd apps/server run build",
+    "test": "bun --cwd apps/server run test",
+    "typecheck": "bun --cwd apps/server run typecheck",
+    "package:mac": "bun --cwd apps/server run package:mac"
   },
   "devDependencies": {
-    "turbo": "^2.3.3",
     "typescript": "^5.7.2",
     "@types/bun": "^1.2.0"
   }
