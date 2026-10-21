@@ -9,7 +9,7 @@
     {
       "class_name": "StrataDemo",
       "image": "./Dockerfile",
-      "image_build_context": "../../apps/server",
+      "image_build_context": "../..",
       // One small instance, never more: the cost ceiling (see README).
       "max_instances": 1,
       "instance_type": "lite"

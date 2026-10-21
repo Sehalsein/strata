@@ -1,0 +1,8 @@
+# Build context is the repo root; send only what the Dockerfile copies.
+*
+!package.json
+!bun.lock
+!apps/server/package.json
+!apps/server/src
+!apps/server/scripts/demo
+**/*.test.ts

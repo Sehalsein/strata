@@ -61,23 +61,48 @@ export default {
     }
     const kind = classify(request.method, url);
     if (!kind) return json(403, "That isn't available in the demo.");
-    if (Number(request.headers.get("Content-Length") ?? 0) > LIMITS.maxBodyBytes) return json(413, "Request too large.");
+    // Bodies are read here, not trusted from Content-Length: anything past the cap is refused.
+    let body: ArrayBuffer | undefined;
+    if (request.method !== "GET" && request.body) {
+      const read = await readCapped(request.body, LIMITS.maxBodyBytes);
+      if (!read) return json(413, "Request too large.");
+      body = read;
+    }
 
     const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
     // A cheap first filter at the edge (approximate, per location), then the strict one.
     const edge = await env.EDGE_LIMIT.limit({ key: ip });
     if (!edge.success) return json(429, "Slow down a little.", 60);
     const gate = env.GATE.get(env.GATE.idFromName("global"));
-    const verdict = await gate.admit(kind, ip, Date.now());
+    // Streams reserve their bytes before anything is sent (the requested range, or a whole
+    // clip), so parallel requests can't overrun the budget; the real count settles it.
+    const reserve = kind === "stream" ? rangeLength(request.headers.get("Range")) ?? LIMITS.maxClipBytes : 0;
+    const verdict = await gate.admit(kind, ip, Date.now(), reserve);
     if (!verdict.ok) return json(verdict.status, verdict.reason, verdict.retryAfter);
 
-    const res = await env.STRATA.get(env.STRATA.idFromName("demo")).fetch(request);
-    if (kind === "stream" && res.ok) {
-      // Unknown lengths (rare: playlists) count as 2 MB so nothing streams uncounted.
-      const bytes = Number(res.headers.get("Content-Length") ?? 2 * 1024 * 1024);
-      ctx.waitUntil(gate.spend(ip, bytes, Date.now()));
+    const forwarded = new Request(request, body !== undefined ? { body } : {});
+    let res: Response;
+    try {
+      res = await env.STRATA.get(env.STRATA.idFromName("demo")).fetch(forwarded);
+    } catch (err) {
+      if (kind === "stream") ctx.waitUntil(gate.settle(ip, reserve, 0, Date.now()));
+      throw err;
     }
-    return res;
+    if (kind !== "stream") return res;
+    if (!res.ok || !res.body) {
+      ctx.waitUntil(gate.settle(ip, reserve, 0, Date.now()));
+      return res;
+    }
+    // Count what actually goes out, and settle when the response ends (or is cut off).
+    let sent = 0;
+    const counter = new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        sent += chunk.byteLength;
+        controller.enqueue(chunk);
+      },
+    });
+    ctx.waitUntil(res.body.pipeTo(counter.writable).catch(() => {}).finally(() => gate.settle(ip, reserve, sent, Date.now())));
+    return new Response(counter.readable, res);
   },
 } satisfies ExportedHandler<Env>;
 
@@ -91,8 +116,9 @@ type Verdict = { ok: true } | { ok: false; status: number; reason: string; retry
 export class Gate extends DurableObject<Env> {
   private windows = new Map<string, number[]>();
   private viewers = new Map<string, number>();
+  private inFlight = new Map<string, number>();
 
-  async admit(kind: Kind, ip: string, now: number): Promise<Verdict> {
+  async admit(kind: Kind, ip: string, now: number, reserve = 0): Promise<Verdict> {
     const { perVisitor: v, global: g } = LIMITS;
     const minute = 60_000;
     const hour = 60 * minute;
@@ -121,20 +147,35 @@ export class Gate extends DurableObject<Env> {
         this.ctx.storage.get<number>(`day:${day(now)}:bytes`),
         this.ctx.storage.get<number>(`month:${month(now)}:bytes`),
       ]);
-      if ((mine ?? 0) >= v.bytesPerDay) return busy("You've reached today's demo viewing limit. Try again tomorrow.", untilTomorrow(now));
-      if ((today ?? 0) >= g.bytesPerDay || (thisMonth ?? 0) >= g.bytesPerMonth) return busy("The demo has reached its viewing limit for now. Try again tomorrow.", untilTomorrow(now));
-      if (kind === "stream") this.viewers.set(ip, now);
+      if ((mine ?? 0) + reserve > v.bytesPerDay) return busy("You've reached today's demo viewing limit. Try again tomorrow.", untilTomorrow(now));
+      if ((today ?? 0) + reserve > g.bytesPerDay || (thisMonth ?? 0) + reserve > g.bytesPerMonth) return busy("The demo has reached its viewing limit for now. Try again tomorrow.", untilTomorrow(now));
+    }
+
+    if (kind === "stream") {
+      const open = this.inFlight.get(ip) ?? 0;
+      if (open >= v.streamsInFlight) return slow(10);
+      this.inFlight.set(ip, open + 1);
+      await this.spend(ip, reserve, now);
+      this.viewers.set(ip, now);
     }
     return { ok: true };
   }
 
-  /** Counts bytes sent to a viewer against their and the demo's budgets. */
-  async spend(ip: string, bytes: number, now: number): Promise<void> {
-    if (!Number.isFinite(bytes) || bytes <= 0) return;
+  /** A stream ended: swap its reservation for the bytes actually sent. */
+  async settle(ip: string, reserved: number, sent: number, now: number): Promise<void> {
+    const open = (this.inFlight.get(ip) ?? 1) - 1;
+    if (open > 0) this.inFlight.set(ip, open);
+    else this.inFlight.delete(ip);
+    await this.spend(ip, sent - reserved, now);
+  }
+
+  /** Adds (or, settling a reservation, takes back) bytes on the visitor's and the demo's budgets. */
+  private async spend(ip: string, bytes: number, now: number): Promise<void> {
+    if (!Number.isFinite(bytes) || bytes === 0) return;
     const keys = [`day:${day(now)}:bytes:${ip}`, `day:${day(now)}:bytes`, `month:${month(now)}:bytes`];
     const values = await this.ctx.storage.get<number>(keys);
     const next: Record<string, number> = {};
-    for (const key of keys) next[key] = (values.get(key) ?? 0) + bytes;
+    for (const key of keys) next[key] = Math.max(0, (values.get(key) ?? 0) + bytes);
     await this.ctx.storage.put(next);
     // Old daily and monthly counters aren't needed once their period is over: sweep daily.
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(now + 24 * 60 * 60_000);
@@ -187,3 +228,35 @@ const busy = (reason: string, retryAfter: number): Verdict => ({ ok: false, stat
 const day = (now: number) => new Date(now).toISOString().slice(0, 10);
 const month = (now: number) => new Date(now).toISOString().slice(0, 7);
 const untilTomorrow = (now: number) => Math.ceil((Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate() + 1) - now) / 1000);
+
+/** Reads a body, giving up (null) once it passes `max` bytes. */
+async function readCapped(stream: ReadableStream<Uint8Array>, max: number): Promise<ArrayBuffer | null> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return out.buffer;
+}
+
+/** Bytes a "bytes=a-b" Range asks for; null when open-ended or absent. */
+function rangeLength(range: string | null): number | null {
+  const m = range ? /^bytes=(\d+)-(\d+)$/.exec(range.trim()) : null;
+  if (!m) return null;
+  const length = Number(m[2]) - Number(m[1]) + 1;
+  return length > 0 ? Math.min(length, LIMITS.maxClipBytes) : null;
+}
