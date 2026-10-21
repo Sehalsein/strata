@@ -5,12 +5,12 @@ import * as bindings from "../vendor/anitomy/anitomy_ng_bg.js";
 import type { Element } from "../vendor/anitomy/anitomy_ng";
 
 const module = new WebAssembly.Module(await Bun.file(wasmPath).arrayBuffer());
-const instance = new WebAssembly.Instance(module, { "./anitomy_ng_bg.js": bindings as unknown as WebAssembly.ModuleImports });
+const instance = new WebAssembly.Instance(module, { "./anitomy_ng_bg.js": bindings } as unknown as ConstructorParameters<typeof WebAssembly.Instance>[1]);
 bindings.__wbg_set_wasm(instance.exports);
 (instance.exports.__wbindgen_start as () => void)();
 
 export type AnitomyElement = Element;
 
 export function anitomy(filename: string): AnitomyElement[] {
-  return bindings.parse(filename) as AnitomyElement[];
+  return bindings.parse(filename);
 }
