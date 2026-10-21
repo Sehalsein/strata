@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { logger } from "../../log";
 
@@ -142,7 +142,11 @@ export class AnimeIds {
       this.index((await Bun.file(file).json()) as RawEntry[]);
       log.info(`Anime id list: ${this.byAnilist.size} AniList / ${this.byTv.size} TMDB shows`);
     } catch (err) {
+      // Throw the bad copy away so the next attempt downloads a fresh one, and back
+      // off like a failed download rather than rereading it on every lookup.
       log.warn("Anime id list is unreadable", err);
+      rmSync(file, { force: true });
+      this.loadedAt = Date.now() - MAX_AGE_MS + RETRY_MS;
     }
   }
 

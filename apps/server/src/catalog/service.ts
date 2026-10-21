@@ -113,7 +113,8 @@ export class CatalogService {
     };
 
     // Anime gets rails of its own on Home: it's left out of the movie and show rails.
-    await this.anime?.ids.ready().catch(() => {});
+    // Usually instant (the list is cached); never hold Home up for long on a slow load.
+    await Promise.race([this.anime?.ids.ready().catch(() => {}), Bun.sleep(1_500)]);
     // Japanese animation, or anything the anime id list knows (Cyberpunk: Edgerunners
     // is listed as English on TMDB).
     const japaneseAnimation = (i: TmdbListItem) => i.original_language === "ja" && (i.genre_ids?.includes(16) ?? false);
@@ -138,12 +139,12 @@ export class CatalogService {
 
     const featured = await safe("featured", () =>
       this.featured([
-        { label: "Recently Added", type: "movie", cards: recentMovies, take: 2 },
-        { label: "Trending Movie", type: "movie", cards: trendingMovies ?? [], take: 3 },
-        { label: "Trending Show", type: "show", cards: trendingShows ?? [], take: 2 },
-        { label: "Trending Anime", type: "show", cards: trendingAnime, take: 2 },
-        { label: "Recently Added", type: "show", cards: recentShows, take: 1 },
-        { label: "Recently Added Anime", type: "show", cards: recentAnime.filter((c) => c.type === "show"), take: 1 },
+        { label: "Recently Added", cards: recentMovies, take: 2 },
+        { label: "Trending Movie", cards: trendingMovies ?? [], take: 3 },
+        { label: "Trending Show", cards: trendingShows ?? [], take: 2 },
+        { label: "Trending Anime", cards: trendingAnime, take: 2 },
+        { label: "Recently Added", cards: recentShows, take: 1 },
+        { label: "Recently Added Anime", cards: recentAnime, take: 1 },
       ]),
     );
     if (featured?.length) shelves.push({ id: "featured", title: "Featured", kind: "titles", items: featured });
@@ -164,12 +165,16 @@ export class CatalogService {
    * carousel alternates between them. Each needs a backdrop; library titles are
    * filled out from TMDB (they're stored without an overview).
    */
-  private async featured(sources: { label: string; type: TitleType; cards: TitleCard[]; take: number }[]): Promise<TitleCard[]> {
+  private async featured(sources: { label: string; cards: TitleCard[]; take: number }[]): Promise<TitleCard[]> {
     const picks = await Promise.all(
       sources.map(async (src) => {
         const candidates = src.cards.filter((c) => c.backdropUrl).slice(0, src.take);
-        const full = candidates.some((c) => !c.overview) ? await this.detailCards(src.type, candidates.map((c) => c.tmdbId)) : candidates;
-        return full.filter((c) => c.backdropUrl).map((c) => ({ ...c, eyebrow: src.label }));
+        // Each card is filled out by its own type: a source can mix series and films,
+        // and a TMDB id means a different title in each.
+        const full = await Promise.all(
+          candidates.map(async (c) => (c.overview ? c : ((await this.detailCards(c.type, [c.tmdbId]))[0] ?? null))),
+        );
+        return full.filter((c): c is TitleCard => !!c?.backdropUrl).map((c) => ({ ...c, eyebrow: src.label }));
       }),
     );
     const seen = new Set<string>();

@@ -168,3 +168,21 @@ describe("Kitsu", () => {
     server.services.shutdown();
   });
 });
+
+test("an unreadable anime id list is thrown away and retried later, not reread on every lookup", async () => {
+  const { mkdtempSync, writeFileSync, existsSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "strata-anime-"));
+  writeFileSync(join(dir, "anime-list-full.json"), "{not json");
+  let downloads = 0;
+  const map = new AnimeIds(dir, (async () => {
+    downloads++;
+    return new Response("busy", { status: 503 });
+  }) as unknown as typeof fetch);
+  await map.ready();
+  expect(existsSync(join(dir, "anime-list-full.json"))).toBe(false);
+  await map.ready();
+  await map.ready();
+  expect(downloads).toBe(0); // fresh-looking copy wasn't downloaded; and no retry yet
+});
