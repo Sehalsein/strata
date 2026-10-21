@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { AnimeIds } from "../src/catalog/anime/ids";
+import { AnimeIds, kitsuEpisode } from "../src/catalog/anime/ids";
+import { relevant, type Release } from "../src/sources/discovery";
 import { AnimeMatcher, pickAnime, resolveEpisode } from "../src/catalog/anime/match";
 import type { Anilist } from "../src/catalog/anime/anilist";
 import type { Tmdb } from "../src/catalog/tmdb";
@@ -74,5 +75,24 @@ describe("AnimeMatcher", () => {
     const matcher = new AnimeMatcher(anilist, map, tmdb);
     expect(await matcher.match(parseFileName("[SubsPlease] Sousou no Frieren S2 - 02 (1080p) [ABCD1234].mkv"))).toMatchObject({ type: "show", tmdbId: 209867, season: 1, episode: 30 });
     expect(await matcher.match(parseFileName("[SubsPlease] Sousou no Frieren - 12 (1080p).mkv"))).toMatchObject({ tmdbId: 209867, season: 1, episode: 12 });
+  });
+});
+
+describe("Torrentio anime ids", () => {
+  test("TMDB episodes become the Kitsu entry and its own episode number", () => {
+    const map = ids();
+    const frieren = [{ season: 1, episodes: 38 }];
+    expect(kitsuEpisode(map.show(209867), 1, 12, frieren)).toEqual({ kitsuId: 46474, episode: 12 });
+    expect(kitsuEpisode(map.show(209867), 1, 30, frieren)).toEqual({ kitsuId: 49240, episode: 2 }); // S2 entry
+    const onePiece = [{ season: 0, episodes: 50 }, { season: 1, episodes: 61 }, { season: 2, episodes: 16 }];
+    expect(kitsuEpisode(map.show(37854), 2, 9, onePiece)).toEqual({ kitsuId: 12, episode: 70 }); // absolute
+    expect(kitsuEpisode(map.show(99999), 1, 1, frieren)).toBeNull();
+  });
+
+  test("Torrentio's anime picks count as the episode whatever their own numbering", () => {
+    const release = (title: string, targeted: boolean): Release => ({ hash: "a".repeat(40), title, origin: "torrentio", cached: false, isPack: false, targeted, parsed: parseFileName(title) });
+    const target = { mediaType: "episode" as const, tmdbId: 209867, season: 1, episode: 30 };
+    expect(relevant(release("[SubsPlease] Sousou no Frieren - 02 (1080p)", true), target)).toBe(true);
+    expect(relevant(release("[SubsPlease] Sousou no Frieren - 02 (1080p)", false), target)).toBe(false);
   });
 });

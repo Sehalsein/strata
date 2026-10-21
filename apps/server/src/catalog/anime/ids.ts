@@ -143,3 +143,24 @@ export class AnimeIds {
     renameSync(tmp, file);
   }
 }
+
+/**
+ * The Kitsu id and episode for a TMDB episode, as Torrentio's anime streams want them
+ * ("kitsu:<id>:<episode>"; Kitsu has one entry per season or cour).
+ */
+export function kitsuEpisode(
+  entries: AnimeEntry[],
+  season: number,
+  episode: number,
+  tmdbSeasons: { season: number; episodes: number }[],
+): { kitsuId: number; episode: number } | null {
+  const inSeason = entries
+    .filter((e) => e.kitsuId && e.tmdbSeason === season && e.tmdbOffset < episode)
+    .sort((a, b) => b.tmdbOffset - a.tmdbOffset)[0];
+  if (inSeason) return { kitsuId: inSeason.kitsuId!, episode: episode - inSeason.tmdbOffset };
+  // One entry numbered absolutely across TMDB's seasons (One Piece).
+  const absolute = entries.find((e) => e.kitsuId && e.tmdbSeason === undefined);
+  if (!absolute) return null;
+  const before = tmdbSeasons.filter((s) => s.season > 0 && s.season < season).reduce((sum, s) => sum + s.episodes, 0);
+  return { kitsuId: absolute.kitsuId!, episode: before + episode };
+}

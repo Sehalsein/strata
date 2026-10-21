@@ -1,3 +1,4 @@
+import { type AnimeIds, kitsuEpisode } from "../catalog/anime/ids";
 import type { Tmdb } from "../catalog/tmdb";
 import type { FileRow, Library } from "../library";
 import { logger } from "../log";
@@ -31,6 +32,8 @@ export interface Release {
   parsed: ParsedName;
   /** The release holds a whole season (or more), not just the requested episode. */
   isPack: boolean;
+  /** The scraper resolved it to the requested episode (Torrentio's anime/kitsu streams). */
+  targeted?: boolean;
 }
 
 export type AcquireResult =
@@ -56,6 +59,8 @@ export class Discovery {
     private readonly fetchImpl: typeof fetch = fetch,
     /** Told about every torrent discovery adds, so housekeeping can remove it later. */
     private readonly onAdded: (torrentId: number, hash: string, name?: string) => void = () => {},
+    /** Anime id list, for asking Torrentio by Kitsu id (much better anime coverage). */
+    private readonly animeIds?: AnimeIds,
   ) {}
 
   get available(): boolean {
@@ -175,8 +180,14 @@ export class Discovery {
       if (pick) await this.library.setManualMatch(pick.id, "movie", target.tmdbId, undefined, undefined, "matched");
       return;
     }
+    // The file the scraper pointed at is this episode, whatever its own numbering says
+    // ("[Group] Frieren - 30.mkv" is TMDB S1E30); the rest match as usual.
+    const pointed = fileName ? rows.find((r) => r.name === fileName) : undefined;
+    if (pointed) await this.library.setManualMatch(pointed.id, "show", target.tmdbId, target.season, target.episode, "matched");
     for (const row of rows) {
+      if (row === pointed) continue;
       const parsed = JSON.parse(row.parsedJson ?? "{}") as ParsedName;
+      if (parsed.anime) continue; // anime numbering: left to the anime matcher (matchPending)
       if (parsed.season !== undefined && parsed.episode !== undefined) {
         await this.library.setManualMatch(row.id, "show", target.tmdbId, parsed.season, parsed.episode, "matched");
       }
@@ -198,7 +209,11 @@ export class Discovery {
     const settings = this.settings();
     const client = this.torbox();
     const jobs: Promise<Release[]>[] = [];
-    if (settings.torrentioUrl) jobs.push(timeout(this.torrentio(settings.torrentioUrl, imdbId, target), "torrentio"));
+    if (settings.torrentioUrl) {
+      jobs.push(timeout(this.torrentio(settings.torrentioUrl, imdbId, target), "torrentio"));
+      const kitsu = await this.kitsuId(target).catch(() => null);
+      if (kitsu) jobs.push(timeout(this.torrentio(settings.torrentioUrl, kitsu, target, true), "torrentio anime"));
+    }
     if (settings.useTorboxSearch && client) jobs.push(timeout(this.torboxSearch(client, imdbId, target), "torbox search"));
 
     const byHash = new Map<string, Release>();
@@ -236,8 +251,25 @@ export class Discovery {
     return (await this.tmdb.show(target.tmdbId)).external_ids?.imdb_id ?? null;
   }
 
-  private async torrentio(base: string, imdbId: string, target: DiscoveryTarget): Promise<Release[]> {
-    const id = target.mediaType === "movie" ? imdbId : `${imdbId}:${target.season}:${target.episode}`;
+  /** "kitsu:<id>" / "kitsu:<id>:<episode>" for anime titles, else null. */
+  private async kitsuId(target: DiscoveryTarget): Promise<string | null> {
+    if (!this.animeIds) return null;
+    await this.animeIds.ready();
+    if (target.mediaType === "movie") {
+      const id = this.animeIds.movie(target.tmdbId)?.kitsuId;
+      return id ? `kitsu:${id}` : null;
+    }
+    const entries = this.animeIds.show(target.tmdbId);
+    if (!entries.length) return null;
+    const show = await this.tmdb.show(target.tmdbId);
+    const seasons = show.seasons.map((s) => ({ season: s.season_number, episodes: s.episode_count }));
+    const at = kitsuEpisode(entries, target.season!, target.episode!, seasons);
+    return at ? `kitsu:${at.kitsuId}:${at.episode}` : null;
+  }
+
+  /** `id` is an IMDb id (episodes get ":S:E" added) or a ready "kitsu:…" id. */
+  private async torrentio(base: string, imdbId: string, target: DiscoveryTarget, anime = false): Promise<Release[]> {
+    const id = anime || target.mediaType === "movie" ? imdbId : `${imdbId}:${target.season}:${target.episode}`;
     const url = `${base.replace(/\/+$/, "").replace(/\/manifest\.json$/, "")}/stream/${target.mediaType === "movie" ? "movie" : "series"}/${id}.json`;
     const res = await this.fetchImpl(url, { headers: { Accept: "application/json" } });
     if (!res.ok) throw new Error(`Torrentio ${res.status}`);
@@ -260,6 +292,7 @@ export class Discovery {
           cached: false,
           parsed: { ...parsed, resolution: parsed.resolution ?? resolutionFromName(s.name) },
           isPack: target.mediaType === "episode" && !!fileName && parseFileName(title).episode === undefined,
+          targeted: anime && target.mediaType === "episode",
         },
       ];
     });
@@ -299,6 +332,8 @@ export function isInfoHash(value: string): boolean {
 /** Drops cams and releases for the wrong episode/season or the wrong kind of title. */
 export function relevant(r: Release, target: DiscoveryTarget): boolean {
   if (r.parsed.source === "cam") return false;
+  // Torrentio already picked this episode (anime numbering differs from TMDB's).
+  if (r.targeted) return true;
   if (target.mediaType === "movie") return r.parsed.kind === "movie";
   const titleParse = parseFileName(r.title);
   if (r.parsed.kind === "episode" && r.fileName) {

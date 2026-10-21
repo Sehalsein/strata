@@ -94,7 +94,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   const sessions = new SessionManager(paths.transcode, ffmpeg, new KeepAwake(), () => settings.get().maxTranscodes, () => settings.get().hardwareAcceleration);
   const subtitles = new SubtitleService(join(paths.root, "cache", "subtitles"), ffmpeg);
   const housekeeping = new TorboxHousekeeping(db, library);
-  const discovery = new Discovery(tmdb, library, () => settings.get(), torbox, fetchImpl, (id, hash, name) => housekeeping.recordAdded(id, hash, name));
+  const discovery = new Discovery(tmdb, library, () => settings.get(), torbox, fetchImpl, (id, hash, name) => housekeeping.recordAdded(id, hash, name), animeIds);
   const playback = new PlaybackService(library, sessions, progress, () => settings.get(), ffmpeg, torbox, discovery, (id, s, e) => catalog.nextEpisode(id, s, e), (id) => housekeeping.recordPlayed(id));
 
   const jobs = new Jobs();
