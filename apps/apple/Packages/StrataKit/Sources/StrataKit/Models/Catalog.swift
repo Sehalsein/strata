@@ -36,6 +36,8 @@ public struct TitleCard: Codable, Sendable, Hashable, Identifiable {
     public var durationMs: Int?
     /// On a person's page: the character they played or their job ("Director").
     public var role: String? = nil
+    /// In the Home hero: why it's featured ("Recently Added", "Trending Anime").
+    public var eyebrow: String? = nil
 
     public init(type: TitleType, tmdbId: Int, title: String, year: Int? = nil, overview: String? = nil,
                 posterUrl: URL? = nil, backdropUrl: URL? = nil, rating: Double? = nil, available: [Provider] = [],

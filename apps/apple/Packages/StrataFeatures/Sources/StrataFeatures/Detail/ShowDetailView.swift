@@ -152,7 +152,7 @@ struct ShowDetailView: View {
                                 }
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(FocusLiftStyle())
                         .disabled(episode.isUpcoming)
                         .contextMenu {
                             Button { Task { await setWatched(show, episode, !episode.isWatched) } } label: {

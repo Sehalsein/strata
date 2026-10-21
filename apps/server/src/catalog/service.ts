@@ -30,6 +30,8 @@ export interface TitleCard {
   backdropUrl: string | null;
   rating?: number;
   available: FileProvider[];
+  /** Why a title is in the Home hero ("Recently Added", "Trending Anime"). */
+  eyebrow?: string;
 }
 
 export interface EpisodeRef {
@@ -110,24 +112,63 @@ export class CatalogService {
       }
     };
 
-    const [cont, nextUp, watchlist, trendingMovies, trendingShows] = await Promise.all([
+    const isAnime = (i: TmdbListItem) => i.original_language === "ja" && (i.genre_ids?.includes(16) ?? false);
+    const [cont, nextUp, watchlist, trendingMovies, trendingShows, trendingAnime] = await Promise.all([
       safe("continue", () => this.continueWatching(profileId)),
       safe("nextUp", () => this.nextUp(profileId)),
       safe("watchlist", () => this.watchlist(profileId)),
       safe("trendingMovies", async () => this.cards((await this.tmdb.trending("movie")).results, "movie")),
-      safe("trendingShows", async () => this.cards((await this.tmdb.trending("tv")).results, "show")),
+      safe("trendingShows", async () => this.cards((await this.tmdb.trending("tv")).results.filter((i) => !isAnime(i)), "show")),
+      safe("trendingAnime", () => this.trendingThisWeek("show", isAnime, ANIME_DISCOVER)),
     ]);
+    const recentMovies = this.libraryCards("movie");
+    const recentShows = this.libraryCards("show");
+
+    const featured = await safe("featured", () =>
+      this.featured([
+        { label: "Recently Added", type: "movie", cards: recentMovies, take: 2 },
+        { label: "Trending Movie", type: "movie", cards: trendingMovies ?? [], take: 3 },
+        { label: "Trending Show", type: "show", cards: trendingShows ?? [], take: 2 },
+        { label: "Trending Anime", type: "show", cards: trendingAnime ?? [], take: 2 },
+        { label: "Recently Added", type: "show", cards: recentShows, take: 1 },
+      ]),
+    );
+    if (featured?.length) shelves.push({ id: "featured", title: "Featured", kind: "titles", items: featured });
     if (cont?.length) shelves.push({ id: "continue", title: "Continue Watching", kind: "continue", items: cont });
     if (nextUp?.length) shelves.push({ id: "nextUp", title: "Next Up", kind: "continue", items: nextUp });
     if (watchlist?.length) shelves.push({ id: "watchlist", title: "My List", kind: "titles", items: watchlist });
-
-    const recentMovies = this.libraryCards("movie");
-    const recentShows = this.libraryCards("show");
     if (recentMovies.length) shelves.push({ id: "libraryMovies", title: "Recently Added Movies", kind: "titles", items: recentMovies });
     if (recentShows.length) shelves.push({ id: "libraryShows", title: "Recently Added Shows", kind: "titles", items: recentShows });
     if (trendingMovies?.length) shelves.push({ id: "trendingMovies", title: "Trending Movies", kind: "titles", items: trendingMovies });
     if (trendingShows?.length) shelves.push({ id: "trendingShows", title: "Trending Shows", kind: "titles", items: trendingShows });
+    if (trendingAnime?.length) shelves.push({ id: "trendingAnime", title: "Trending Anime", kind: "titles", items: trendingAnime });
     return shelves;
+  }
+
+  /**
+   * The Home hero carousel: a few titles from each source, taken in turns so the
+   * carousel alternates between them. Each needs a backdrop; library titles are
+   * filled out from TMDB (they're stored without an overview).
+   */
+  private async featured(sources: { label: string; type: TitleType; cards: TitleCard[]; take: number }[]): Promise<TitleCard[]> {
+    const picks = await Promise.all(
+      sources.map(async (src) => {
+        const candidates = src.cards.filter((c) => c.backdropUrl).slice(0, src.take);
+        const full = candidates.some((c) => !c.overview) ? await this.detailCards(src.type, candidates.map((c) => c.tmdbId)) : candidates;
+        return full.filter((c) => c.backdropUrl).map((c) => ({ ...c, eyebrow: src.label }));
+      }),
+    );
+    const seen = new Set<string>();
+    const out: TitleCard[] = [];
+    for (let round = 0; picks.some((p) => p.length > round); round++) {
+      for (const list of picks) {
+        const card = list[round];
+        if (!card || seen.has(`${card.type}-${card.tmdbId}`)) continue;
+        seen.add(`${card.type}-${card.tmdbId}`);
+        out.push(card);
+      }
+    }
+    return out.slice(0, 10);
   }
 
   async browse(type: TitleType, list: "trending" | "popular" | "topRated" | "library"): Promise<TitleCard[]> {

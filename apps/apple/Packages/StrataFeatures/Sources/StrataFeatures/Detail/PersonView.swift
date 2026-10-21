@@ -65,7 +65,7 @@ struct PersonView: View {
                         .frame(maxWidth: 760, alignment: .leading)
                     }
                     #if os(tvOS)
-                    .buttonStyle(BioFocusStyle())
+                    .buttonStyle(FocusLiftStyle(inset: Metrics.space4))
                     #else
                     .buttonStyle(.plain)
                     #endif
@@ -101,26 +101,4 @@ struct PersonView: View {
     }
 }
 
-#if os(tvOS)
-/// The system's focus platter is white, which washes out light body text; this lifts
-/// the biography onto a dark surface instead.
-private struct BioFocusStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        Body(label: configuration.label)
-    }
 
-    private struct Body<Label: View>: View {
-        @Environment(\.isFocused) private var focused
-        let label: Label
-
-        var body: some View {
-            label
-                .padding(Metrics.space4)
-                .background(focused ? Theme.surface2 : .clear, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
-                .scaleEffect(focused ? 1.02 : 1)
-                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: focused)
-                .padding(-Metrics.space4)
-        }
-    }
-}
-#endif

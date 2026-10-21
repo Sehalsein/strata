@@ -26,6 +26,8 @@ export interface TorboxItem {
   /** Seconds remaining. */
   eta?: number;
   files?: TorboxFile[];
+  /** When it was added to the account (ISO 8601). */
+  created_at?: string;
 }
 
 export interface TorboxUser {

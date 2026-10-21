@@ -21,8 +21,10 @@ struct BrowseView: View {
             LazyVStack(alignment: .leading, spacing: Metrics.railGap) {
                 #if os(tvOS)
                 if !genres.isEmpty {
-                    GenreMenu(genres: genres, selected: $genre)
+                    // Full width, so down from the tab bar reaches it (see AnimeView).
+                    HStack { GenreMenu(genres: genres, selected: $genre); Spacer() }
                         .padding(.horizontal, Metrics.gutter)
+                        .focusSection()
                 }
                 #endif
                 if let genre {

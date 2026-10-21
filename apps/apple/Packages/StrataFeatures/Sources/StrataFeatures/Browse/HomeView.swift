@@ -9,7 +9,7 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: Metrics.railGap) {
+            PageStack {
                 switch shelves {
                 case .loading:
                     SkeletonRail(aspectRatio: 16 / 9, width: Metrics.landscapeWidth)
@@ -20,30 +20,30 @@ struct HomeView: View {
                     }
                     .frame(minHeight: 400)
                 case .loaded(let list):
-                    #if os(tvOS)
-                    if let feature = featured(in: list) {
-                        FeaturedHero(card: feature)
+                    if let featured = list.first(where: { $0.id == "featured" }), !featured.items.isEmpty {
+                        HeroCarousel(cards: featured.items)
                     } else {
+                        #if os(tvOS)
                         Color.clear.frame(height: 120) // clear the top tab bar when there's no hero
+                        #endif
                     }
-                    #endif
                     if list.isEmpty {
                         MessageView(systemImage: "film.stack", title: "Nothing here yet",
                                     message: "Add media folders or a TorBox key in your server's dashboard.")
                             .frame(minHeight: 400)
                     }
-                    ForEach(list) { shelf in ShelfRail(shelf: shelf) }
+                    ForEach(list.filter { $0.id != "featured" }) { shelf in ShelfRail(shelf: shelf) }
                 }
             }
-            #if !os(tvOS)
-            .padding(.top, Metrics.space4)
-            #endif
             .padding(.bottom, Metrics.space12)
         }
-        #if os(tvOS)
-        .ignoresSafeArea(edges: .top)
-        #else
+        // The hero runs to the top edge, under the bar, like a title page.
+        .ignoresSafeArea(edges: hasHero ? .top : [])
+        #if !os(tvOS)
         .navigationTitle("Home")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 NavigationLink(value: Route.myList) { Label("My List", systemImage: "bookmark") }
@@ -59,16 +59,34 @@ struct HomeView: View {
         .onChange(of: services.progressRevision) { Task { await load(force: false) } }
     }
 
+    private var hasHero: Bool {
+        #if os(tvOS)
+        true // the top tab bar floats over the page either way
+        #else
+        shelves.value?.contains { $0.id == "featured" && !$0.items.isEmpty } ?? false
+        #endif
+    }
+
     private func load(force: Bool) async {
         if force { await services.client?.clearCache() }
         let result = await services.load { try await $0.home() }
         if case .loading = result { return }
         shelves = result
     }
+}
 
-    private func featured(in list: [Shelf]) -> TitleCard? {
-        let titles = list.first { $0.id == "trendingMovies" } ?? list.first { $0.kind == .titles }
-        return titles?.items.first { $0.backdropUrl != nil }
+/// The vertical stack of a page of rails. Lazy on iPhone and iPad; not on tvOS, where
+/// the hero fills the screen: a lazy stack wouldn't build anything below it, leaving
+/// the focus engine nowhere to go when you press down.
+struct PageStack<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        #if os(tvOS)
+        VStack(alignment: .leading, spacing: Metrics.railGap, content: content)
+        #else
+        LazyVStack(alignment: .leading, spacing: Metrics.railGap, content: content)
+        #endif
     }
 }
 
@@ -153,25 +171,108 @@ struct PosterCardLabel: View {
     }
 }
 
-#if os(tvOS)
-/// The tvOS Home hero: a trending title with Play and More Info.
-struct FeaturedHero: View {
+/// The Home hero: a carousel of featured titles (recently added, trending movies,
+/// shows and anime) that moves on by itself. iPhone and iPad swipe between them;
+/// on tvOS, moving left or right past the hero's buttons does.
+struct HeroCarousel: View {
     @Environment(AppServices.self) private var services
-    let card: TitleCard
+    let cards: [TitleCard]
+    @State private var index = 0
+    #if os(tvOS)
+    @FocusState private var focus: HeroButton?
+    enum HeroButton: Hashable { case play, info }
+    #endif
+
+    private static let interval: Double = 8
 
     var body: some View {
-        HeroBillboard(id: card.id, backdropURL: card.backdropUrl, eyebrow: card.isAvailable ? "In your library" : "Trending this week",
-                      title: card.title, meta: [card.yearText, card.ratingText.map { "★ \($0)" }].compactMap { $0 }, overview: card.overview) {
+        content
+            .overlay(alignment: .bottom) { dots }
+            // Restarts on every change, manual or not, so a swipe gets a full interval.
+            .task(id: index) {
+                try? await Task.sleep(for: .seconds(Self.interval))
+                guard !Task.isCancelled, cards.count > 1 else { return }
+                withAnimation(.easeInOut(duration: 0.6)) { index = (index + 1) % cards.count }
+            }
+    }
+
+    #if os(tvOS)
+    private var content: some View {
+        hero(cards[min(index, cards.count - 1)])
+            .id(index)
+            .transition(.opacity)
+            .focusSection()
+            .onMoveCommand { direction in
+                // Past the last button goes to the next title, before the first to the previous one.
+                let last: HeroButton = .info
+                let first: HeroButton = cards[index].type == .movie ? .play : .info
+                if direction == .right, focus == last { step(1) }
+                if direction == .left, focus == first { step(-1) }
+            }
+    }
+
+    private func step(_ by: Int) {
+        let keep = focus
+        withAnimation(.easeInOut(duration: 0.4)) { index = (index + by + cards.count) % cards.count }
+        // The new title's buttons replace the old ones: keep focus on the same kind.
+        DispatchQueue.main.async { focus = cards[index].type == .movie ? keep : .info }
+    }
+    #elseif os(iOS)
+    private var content: some View {
+        TabView(selection: $index) {
+            ForEach(Array(cards.enumerated()), id: \.offset) { i, card in
+                hero(card).tag(i)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .frame(height: Metrics.isPad ? 620 : 520)
+    }
+    #else
+    private var content: some View { hero(cards[min(index, cards.count - 1)]) }
+    #endif
+
+    private func hero(_ card: TitleCard) -> some View {
+        // Just the name: the carousel is for picking, the title page has the details.
+        HeroBillboard(id: card.id, backdropURL: card.backdropUrl, fallbackURL: card.posterUrl, eyebrow: card.eyebrow, title: card.title) {
             if card.type == .movie {
                 PlayButton("Play") {
                     services.play(WatchRequest(target: .movie(card.tmdbId), meta: PlaybackMeta(title: card.title, subtitle: card.yearText, artworkURL: card.backdropUrl)))
                 }
+                #if os(tvOS)
+                .focused($focus, equals: .play)
+                #endif
             }
             // Ink, not the accent: glass labels take the tint, and apricot means Play.
-            NavigationLink(value: card.route) { Label("More Info", systemImage: "info.circle").font(.stHeadline) }
+            // Sized like PlayButton (large control, 30pt label) so the two line up.
+            NavigationLink(value: card.route) {
+                Label("More Info", systemImage: "info.circle").font(.stHeadline).frame(minHeight: 30)
+            }
                 .buttonStyle(.glass)
+                .controlSize(.large)
                 .tint(Theme.ink)
+                #if os(tvOS)
+                .focused($focus, equals: .info)
+                #endif
+        }
+    }
+
+    @ViewBuilder private var dots: some View {
+        if cards.count > 1 {
+            HStack(spacing: 6) {
+                ForEach(cards.indices, id: \.self) { i in
+                    Capsule()
+                        .fill(Theme.onArtwork.opacity(i == index ? 0.9 : 0.35))
+                        .frame(width: i == index ? 18 : 6, height: 6)
+                }
+            }
+            .animation(.easeInOut(duration: 0.3), value: index)
+            #if os(tvOS)
+            .padding(.bottom, Metrics.space8)
+            #else
+            .padding(.bottom, -Metrics.space4)
+            #endif
+            .accessibilityElement()
+            .accessibilityLabel("Featured \(index + 1) of \(cards.count)")
         }
     }
 }
-#endif

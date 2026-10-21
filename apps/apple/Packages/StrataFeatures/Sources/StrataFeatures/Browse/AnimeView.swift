@@ -12,14 +12,16 @@ struct AnimeView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: Metrics.railGap) {
+            PageStack {
                 #if os(tvOS)
-                if category == nil, case .loaded(let list) = shelves, let feature = list.first?.items.first(where: { $0.backdropUrl != nil }) {
-                    FeaturedHero(card: feature)
-                } else {
-                    Color.clear.frame(height: 120) // clear the top tab bar when there's no hero
+                Color.clear.frame(height: 120) // clear the top tab bar
+                if !categories.isEmpty {
+                    // A full-width section: pressing down from the tab bar lands here
+                    // first, rather than on whichever poster sits under the tab.
+                    HStack { menu; Spacer() }
+                        .padding(.horizontal, Metrics.gutter)
+                        .focusSection()
                 }
-                if !categories.isEmpty { menu.padding(.horizontal, Metrics.gutter) }
                 #endif
                 content
             }
@@ -63,7 +65,7 @@ struct AnimeView: View {
             }
             .frame(minHeight: 400)
         case .loaded(let list) where list.isEmpty:
-            MessageView(systemImage: "character.ja", title: "Nothing in \(category?.name ?? "Anime") yet").frame(minHeight: 400)
+            MessageView(systemImage: "film.stack", title: "Nothing in \(category?.name ?? "Anime") yet").frame(minHeight: 400)
         case .loaded(let list):
             ForEach(list) { shelf in ShelfRail(shelf: shelf) }
         }

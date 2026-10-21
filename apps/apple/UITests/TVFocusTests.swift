@@ -151,6 +151,69 @@ final class TVFocusTests: XCTestCase {
         snapshot("person-02-credits")
     }
 
+    /// Home: the hero carousel moves on with right/left past its buttons, and down
+    /// reaches the rails below it.
+    func testHomeHeroCarousel() {
+        launchSignedIn(["-StrataTab", "home"])
+        XCTAssertTrue(app.buttons["More Info"].waitForExistence(timeout: 20))
+        Thread.sleep(forTimeInterval: 2)
+        let focused = { self.app.descendants(matching: .any).element(matching: NSPredicate(format: "hasFocus == true")) }
+        press(.down, pause: 1.2)
+        print("CAROUSEL focus: \(focused().label)")
+        snapshot("home-01-hero-focused")
+        press(.right, 3, pause: 1.2) // Play → More Info → next title
+        print("CAROUSEL after right: \(focused().label)")
+        snapshot("home-02-next-title")
+        press(.left, 2, pause: 1.2)
+        snapshot("home-03-back")
+        press(.down, pause: 1.5)
+        print("CAROUSEL after down: \(focused().label)")
+        snapshot("home-04-rails")
+    }
+
+    /// Show page: a focused episode row stays readable (dark lift, not the white platter).
+    func testEpisodeRowFocus() {
+        let show = ProcessInfo.processInfo.environment["STRATA_TEST_SHOW"] ?? "37854"
+        launchSignedIn(["-StrataOpenURL", "strata://show/\(show)"])
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume'")).firstMatch.waitForExistence(timeout: 20))
+        Thread.sleep(forTimeInterval: 2)
+        press(.down, 2, pause: 1.5)
+        snapshot("episode-01-focused")
+        press(.down, pause: 1.5)
+        snapshot("episode-02-next")
+    }
+
+    /// Anime tab: the category menu, a category's rails, a title, and back.
+    func testAnimeTab() {
+        launchSignedIn(["-StrataTab", "anime"])
+        XCTAssertTrue(app.buttons["Filter by category"].waitForExistence(timeout: 20), "the Anime tab should show its category menu")
+        Thread.sleep(forTimeInterval: 3)
+        let focused = { self.app.descendants(matching: .any).element(matching: NSPredicate(format: "hasFocus == true")) }
+        snapshot("anime-01-top")
+        press(.down, pause: 1)
+        print("ANIME after down 1: \(focused().label)")
+        snapshot("anime-02-menu-focused")
+        press(.down, pause: 1.5)
+        print("ANIME after down 2: \(focused().label)")
+        snapshot("anime-03-first-rail")
+        press(.down, 2, pause: 1.5)
+        snapshot("anime-04-more-rails")
+        press(.up, 3, pause: 1)
+        print("ANIME back up: \(focused().label)")
+        press(.select, pause: 1.5)
+        snapshot("anime-05-menu-open")
+        press(.down, 6, pause: 0.5) // All Anime, Action … Isekai
+        press(.select, pause: 6)
+        snapshot("anime-06-isekai")
+        press(.down, pause: 1.5)
+        print("ANIME isekai rail: \(focused().label)")
+        snapshot("anime-07-isekai-rail")
+        press(.select, pause: 4)
+        snapshot("anime-08-detail")
+        press(.menu, pause: 2)
+        snapshot("anime-09-back")
+    }
+
     func testBrowseFocusAndPlay() {
         launchSignedIn()
         XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 15))

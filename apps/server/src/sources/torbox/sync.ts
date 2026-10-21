@@ -19,6 +19,8 @@ export function parseTorboxRef(ref: string): { kind: TorboxKind; itemId: number;
 /** Upserts the video files of one finished TorBox item. */
 export function ingestItem(library: Library, kind: TorboxKind, item: TorboxItem): FileRow[] {
   const rows: FileRow[] = [];
+  // When it was added to TorBox: what "Recently Added" sorts by.
+  const added = item.created_at ? Date.parse(item.created_at) : NaN;
   for (const file of item.files ?? []) {
     const path = file.name.includes("/") ? file.name : `${item.name}/${file.short_name ?? file.name}`;
     const segments = path.split("/").filter(Boolean);
@@ -29,6 +31,7 @@ export function ingestItem(library: Library, kind: TorboxKind, item: TorboxItem)
         ref: torboxRef(kind, item.id, file.id),
         name: segments[segments.length - 1]!,
         size: file.size,
+        mtime: Number.isFinite(added) ? added : undefined,
         parsed: parseMediaPath(segments),
         sourceHash: kind === "torrents" ? item.hash?.toLowerCase() : undefined,
       }),

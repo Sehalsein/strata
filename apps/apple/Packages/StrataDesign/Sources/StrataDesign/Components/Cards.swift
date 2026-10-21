@@ -139,3 +139,45 @@ public struct ContinueCard: View {
         .frame(width: width)
     }
 }
+
+/// tvOS focus for rows of text (episodes, a biography). The system's white focus
+/// platter washes out light body text, so the focused row lifts onto a dark raised
+/// surface with a hairline edge instead. Elsewhere it's a plain button.
+public struct FocusLiftStyle: ButtonStyle {
+    /// Extra room around the label for the surface (rows that pad themselves need none).
+    let inset: CGFloat
+
+    public init(inset: CGFloat = 0) {
+        self.inset = inset
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
+        #if os(tvOS)
+        Body(label: configuration.label, inset: inset)
+        #else
+        configuration.label.opacity(configuration.isPressed ? 0.6 : 1)
+        #endif
+    }
+
+    #if os(tvOS)
+    private struct Body<Label: View>: View {
+        @Environment(\.isFocused) private var focused
+        let label: Label
+        let inset: CGFloat
+
+        var body: some View {
+            label
+                .padding(inset)
+                .background {
+                    RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous)
+                        .fill(focused ? Theme.surface3 : .clear)
+                        .strokeBorder(focused ? Theme.hairline : .clear, lineWidth: 1)
+                        .shadow(color: .black.opacity(focused ? 0.4 : 0), radius: 18, y: 10)
+                }
+                .scaleEffect(focused ? 1.02 : 1)
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: focused)
+                .padding(-inset)
+        }
+    }
+    #endif
+}

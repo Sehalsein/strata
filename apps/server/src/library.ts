@@ -36,8 +36,12 @@ export class Library {
     const existing = this.db.select().from(files).where(and(eq(files.provider, input.provider), eq(files.ref, input.ref))).get();
     const parsedJson = JSON.stringify(input.parsed);
     if (existing) {
-      const changed = existing.size !== input.size || existing.mtime !== (input.mtime ?? null) || existing.parsedJson !== parsedJson;
-      if (!changed && !existing.missing && existing.sourceHash === (input.sourceHash ?? null)) return existing;
+      // A time where there was none (TorBox files before they carried their add date)
+      // is new information, not a changed file.
+      const mtimeChanged = existing.mtime !== null && existing.mtime !== (input.mtime ?? null);
+      const changed = existing.size !== input.size || mtimeChanged || existing.parsedJson !== parsedJson;
+      const sameMtime = existing.mtime === (input.mtime ?? null);
+      if (!changed && sameMtime && !existing.missing && existing.sourceHash === (input.sourceHash ?? null)) return existing;
       const keepMatch = existing.matchStatus === "manual" || existing.matchStatus === "ignored";
       return this.db
         .update(files)
@@ -194,9 +198,27 @@ export class Library {
     return out;
   }
 
+  /**
+   * Titles by their newest file: when it was added to TorBox, or a local file's
+   * modified time (when Strata first saw it, failing both). A show moves up when
+   * a new episode arrives.
+   */
   recentlyAdded(type: "movie" | "show", limit = 20) {
-    return this.db.select().from(mediaItems).where(eq(mediaItems.type, type)).orderBy(desc(mediaItems.addedAt)).limit(limit).all();
+    const at = sql<number>`max(coalesce(${files.mtime}, ${files.addedAt}))`;
+    const latest = this.db
+      .select({ tmdbId: files.tmdbId, at })
+      .from(files)
+      .where(and(eq(files.mediaType, type === "movie" ? "movie" : "episode"), eq(files.missing, false), notInArray(files.matchStatus, ["ignored", "pending", "unmatched"])))
+      .groupBy(files.tmdbId)
+      .orderBy(desc(at))
+      .limit(limit)
+      .all();
+    const ids = latest.map((r) => r.tmdbId).filter((id): id is number => id !== null);
+    if (!ids.length) return [];
+    const items = new Map(this.db.select().from(mediaItems).where(and(eq(mediaItems.type, type), inArray(mediaItems.tmdbId, ids))).all().map((m) => [m.tmdbId, m]));
+    return ids.map((id) => items.get(id)).filter((m): m is NonNullable<typeof m> => !!m);
   }
+
 
   list(opts: { status?: MatchStatus; provider?: FileProvider; limit: number; offset: number }) {
     const conditions = [eq(files.missing, false)];
