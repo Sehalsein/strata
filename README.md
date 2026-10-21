@@ -10,6 +10,9 @@ shows and anime, and play what's in your own library on iPhone, iPad and Apple T
 See [apps/server/README.md](apps/server/README.md) to run the server and
 [apps/apple/README.md](apps/apple/README.md) to build the apps.
 
+**Try it without a server:** enter `https://strata-demo.seinsehal.workers.dev` in the app
+and sign in as `demo` / `strata-demo` (see [Try it](#try-it)).
+
 ## Contributions
 
 This is a personal project, published so others can read and run it. Pull requests aren't
@@ -27,8 +30,10 @@ services you connect. The project isn't affiliated with or endorsed by any of th
 ## Try it
 
 A public demo server with public-domain films is at
-**https://strata-demo.seinsehal.workers.dev**: add it in the app and sign in as
-`demo` / `strata-demo`.
+**https://strata-demo.seinsehal.workers.dev**. In the app, choose **Enter Address**, type
+that address, and sign in as `demo` / `strata-demo`. It's viewer-only and tightly rate
+limited (a few plays per visitor an hour, a few viewers at once), and it sleeps when idle,
+so the first request can take a few seconds.
 
 ## Attribution
 
