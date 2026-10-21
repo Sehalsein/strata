@@ -25,7 +25,7 @@ export class StrataDemo extends Container<Env> {
   }
 }
 
-/** A video request still open after this is treated as gone (its settle never arrived). */
+/** How long a video request may stay open; after this it's cut and its Gate slot freed. */
 const IN_FLIGHT_EXPIRY_MS = 10 * 60_000;
 
 type Kind = "api" | "signin" | "play" | "stream";
@@ -102,10 +102,14 @@ export default {
     const counter = new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, controller) {
         sent += chunk.byteLength;
+        // A stream never sends more than it reserved.
+        if (sent > reserve) throw new Error("over reservation");
         controller.enqueue(chunk);
       },
     });
-    ctx.waitUntil(res.body.pipeTo(counter.writable).catch(() => {}).finally(() => gate.settle(ip, reserve, sent, bookedAt, Date.now())));
+    // Nor outlives its slot in the Gate: it's cut when the slot expires.
+    const pipe = res.body.pipeTo(counter.writable, { signal: AbortSignal.timeout(IN_FLIGHT_EXPIRY_MS) });
+    ctx.waitUntil(pipe.catch(() => {}).finally(() => gate.settle(ip, reserve, Math.min(sent, reserve), bookedAt, Date.now())));
     return new Response(counter.readable, res);
   },
 } satisfies ExportedHandler<Env>;
@@ -187,7 +191,7 @@ export class Gate extends DurableObject<Env> {
     const keys = [`day:${day(now)}:bytes:${ip}`, `day:${day(now)}:bytes`, `month:${month(now)}:bytes`];
     const values = await this.ctx.storage.get<number>(keys);
     const next: Record<string, number> = {};
-    for (const key of keys) next[key] = (values.get(key) ?? 0) + bytes;
+    for (const key of keys) next[key] = Math.max(0, (values.get(key) ?? 0) + bytes);
     await this.ctx.storage.put(next);
     // Old daily and monthly counters aren't needed once their period is over: sweep daily.
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(now + 24 * 60 * 60_000);
