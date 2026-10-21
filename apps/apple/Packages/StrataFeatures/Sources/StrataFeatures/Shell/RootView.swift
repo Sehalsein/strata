@@ -90,7 +90,7 @@ struct MainShell: View {
             Tab("Shows", systemImage: "tv", value: AppTab.shows) {
                 StackHost { BrowseView(type: .show) }
             }
-            Tab("Anime", systemImage: "sparkles", value: AppTab.anime) {
+            Tab("Anime", systemImage: "character.ja", value: AppTab.anime) {
                 StackHost { AnimeView() }
             }
             Tab(value: AppTab.search, role: .search) {

@@ -63,7 +63,7 @@ struct AnimeView: View {
             }
             .frame(minHeight: 400)
         case .loaded(let list) where list.isEmpty:
-            MessageView(systemImage: "sparkles", title: "Nothing in \(category?.name ?? "Anime") yet").frame(minHeight: 400)
+            MessageView(systemImage: "character.ja", title: "Nothing in \(category?.name ?? "Anime") yet").frame(minHeight: 400)
         case .loaded(let list):
             ForEach(list) { shelf in ShelfRail(shelf: shelf) }
         }
