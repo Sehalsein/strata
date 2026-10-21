@@ -7,7 +7,7 @@ description 4000.
 ## Identity
 
 - **Name:** Strata TV *(the record's name; "Strata" alone was taken. The home-screen name is Strata.)*
-- **Subtitle:** Your own media server, anywhere
+- **Subtitle:** Your media server, anywhere
 - **Bundle ID:** com.sehalsein.strata (iOS, iPadOS, tvOS)
 - **Primary category:** Entertainment
 - **Secondary category:** Photo & Video
