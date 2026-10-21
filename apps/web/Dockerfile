@@ -15,6 +15,8 @@ WORKDIR /repo
 # Manifests first so the install layer caches across source-only edits.
 COPY package.json bun.lock turbo.json tsconfig.base.json ./
 COPY apps/web/package.json apps/web/package.json
+# Every workspace's manifest, or the frozen lockfile (which covers them all) won't match.
+COPY apps/server/package.json apps/server/package.json
 
 RUN bun install --frozen-lockfile
 
