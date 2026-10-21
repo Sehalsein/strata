@@ -173,14 +173,19 @@ extension GenreMenu where Item == Genre {
 /// The poster-sized "See all" card that ends a rail.
 struct SeeAllTile: View {
     var body: some View {
-        VStack {
-            Image(systemName: "chevron.right").font(.title2)
-            Text("See all").font(.stCallout)
-        }
-        .foregroundStyle(Theme.accentText)
-        .frame(width: Metrics.posterWidth)
-        .aspectRatio(2 / 3, contentMode: .fit)
-        .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+        // Poster-shaped: the shape sets the size, the label sits on it (a VStack given an
+        // aspect ratio shrinks to its content instead).
+        RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
+            .fill(Theme.surface1)
+            .aspectRatio(2 / 3, contentMode: .fit)
+            .frame(width: Metrics.posterWidth)
+            .overlay {
+                VStack {
+                    Image(systemName: "chevron.right").font(.title2)
+                    Text("See all").font(.stCallout)
+                }
+                .foregroundStyle(Theme.accentText)
+            }
     }
 }
 

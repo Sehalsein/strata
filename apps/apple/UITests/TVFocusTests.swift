@@ -151,6 +151,44 @@ final class TVFocusTests: XCTestCase {
         snapshot("person-02-credits")
     }
 
+    /// App Store screenshots from the demo server (apps/server/scripts/demo). Runs only with
+    /// TEST_RUNNER_STRATA_DEMO_SERVER=<address>, on a fresh simulator, and writes to
+    /// TEST_RUNNER_STRATA_SHOTS.
+    func testAppStoreScreenshots() throws {
+        guard let server = ProcessInfo.processInfo.environment["STRATA_DEMO_SERVER"] else { throw XCTSkip("needs STRATA_DEMO_SERVER") }
+        app.launchArguments = ["-StrataServer", server]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Who's watching?"].waitForExistence(timeout: 30))
+        Thread.sleep(forTimeInterval: 2)
+        snapshot("05-profiles")
+        press(.select, pause: 3) // Alex, focused first
+        XCTAssertTrue(app.buttons["More Info"].waitForExistence(timeout: 20))
+        Thread.sleep(forTimeInterval: 4) // artwork
+        snapshot("01-home")
+
+        let open = { (link: String) in
+            self.app.terminate()
+            self.app.launchArguments = ["-StrataOpenURL", link]
+            self.app.launch()
+        }
+        open("strata://movie/16093") // Carnival of Souls
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume'")).firstMatch.waitForExistence(timeout: 20))
+        Thread.sleep(forTimeInterval: 4)
+        snapshot("02-title")
+
+        open("strata://show/1018") // Bonanza
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume'")).firstMatch.waitForExistence(timeout: 20))
+        Thread.sleep(forTimeInterval: 2)
+        press(.down, 2, pause: 1.5)
+        Thread.sleep(forTimeInterval: 2)
+        snapshot("03-episodes")
+
+        open("strata://watch/movie/961") // The General
+        Thread.sleep(forTimeInterval: 14)
+        press(.up, pause: 1) // controls
+        snapshot("04-player")
+    }
+
     /// Home: the hero carousel moves on with right/left past its buttons, and down
     /// reaches the rails below it.
     func testHomeHeroCarousel() {

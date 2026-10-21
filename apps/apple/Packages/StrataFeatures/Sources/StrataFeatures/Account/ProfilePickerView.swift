@@ -34,7 +34,7 @@ struct ProfilePickerView: View {
                 }
             case .loaded(let list):
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: Metrics.space8) {
+                    HStack(alignment: .top, spacing: Metrics.space8) { // top: a Kids label mustn't lift its avatar
                         Spacer(minLength: 0)
                         ForEach(list) { profile in
                             Button {

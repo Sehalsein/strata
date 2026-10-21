@@ -80,6 +80,15 @@ struct ConnectView: View {
             #endif
         }
         .onAppear { services.browser.start() }
+        #if DEBUG
+        // `-StrataServer 127.0.0.1:8460` connects at launch, for UI tests and screenshots
+        // (typing an address with a remote is slow to script).
+        .task {
+            guard let preset = UserDefaults.standard.string(forKey: "StrataServer"), !preset.isEmpty else { return }
+            address = preset
+            await probe(preset)
+        }
+        #endif
         .onDisappear { services.browser.stop() }
         .onChange(of: found.first?.id) { _, first in
             if focusedServer == nil { focusedServer = first }
