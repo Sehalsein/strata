@@ -15,6 +15,7 @@ public struct HeroBillboard<Actions: View>: View {
     let badges: [String]
     let overview: String?
     @ViewBuilder let actions: () -> Actions
+    @Environment(\.colorScheme) private var colorScheme
 
     public init(id: String, backdropURL: URL?, fallbackURL: URL? = nil, eyebrow: String? = nil, title: String, meta: [String] = [], badges: [String] = [], overview: String? = nil, @ViewBuilder actions: @escaping () -> Actions) {
         self.id = id
@@ -85,27 +86,42 @@ public struct HeroBillboard<Actions: View>: View {
         // the bottom fade so the hero ends in plain `bg` with no seam.
         LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .leading, endPoint: .center)
         #endif
-        LinearGradient(stops: [
-            .init(color: Theme.bg.opacity(0), location: 0.35),
-            .init(color: Theme.scrim, location: 0.8),
-            .init(color: Theme.bg, location: 1),
-        ], startPoint: .top, endPoint: .bottom)
+        if colorScheme == .light {
+            // Light: the art dissolves straight into the page (no dark step, which turns
+            // grey on white), and the text below sits on the page in ink.
+            LinearGradient(stops: Self.eased(from: 0.3, to: 0.82) { Theme.bg.opacity($0) }, startPoint: .top, endPoint: .bottom)
+        } else {
+            LinearGradient(stops: Self.eased(from: 0.35, to: 0.8) { Color.black.opacity(0.7 * $0) }
+                + [.init(color: Theme.bg, location: 1)], startPoint: .top, endPoint: .bottom)
+        }
     }
+
+    /// An ease-in-out ramp as gradient stops, so the fade has no visible start or end.
+    private static func eased(from start: CGFloat, to end: CGFloat, _ color: (Double) -> Color) -> [Gradient.Stop] {
+        (0...8).map { i in
+            let t = Double(i) / 8
+            let eased = t * t * (3 - 2 * t)
+            return .init(color: color(eased), location: start + (end - start) * t)
+        }
+    }
+
+    /// Text over the hero: light on the art, ink where the page shows through (light mode).
+    private var heroText: Color { colorScheme == .light ? Theme.ink : Theme.onArtwork }
 
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: Metrics.space3) {
-            if let eyebrow { Text(eyebrow).eyebrowStyle(Theme.onArtwork.opacity(0.75)) }
+            if let eyebrow { Text(eyebrow).eyebrowStyle(heroText.opacity(0.75)) }
             Text(title)
                 .font(titleFont)
                 .titleTracking()
-                .foregroundStyle(Theme.onArtwork)
+                .foregroundStyle(heroText)
                 .lineLimit(2)
                 .minimumScaleFactor(0.6)
                 .accessibilityAddTraits(.isHeader)
             if !meta.isEmpty || !badges.isEmpty {
                 HStack(spacing: Metrics.space2) {
                     if !meta.isEmpty {
-                        Text(meta.joined(separator: " · ")).font(.stCallout).foregroundStyle(Theme.onArtwork.opacity(0.8))
+                        Text(meta.joined(separator: " · ")).font(.stCallout).foregroundStyle(heroText.opacity(0.8))
                     }
                     ForEach(badges, id: \.self) { SpecBadge($0) }
                 }
@@ -123,7 +139,7 @@ public struct HeroBillboard<Actions: View>: View {
         if let overview, !overview.isEmpty {
             Text(overview)
                 .font(.stCallout)
-                .foregroundStyle(Theme.onArtwork.opacity(0.8))
+                .foregroundStyle(heroText.opacity(0.8))
                 .lineLimit(overviewLines)
         }
     }

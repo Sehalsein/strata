@@ -54,8 +54,8 @@ YOUR SERVER, YOUR DATA
 Strata doesn't collect anything about you. Your library, accounts and watch history stay on
 the server you run.
 
-Want to try it first? Choose Enter Address, type https://strata-demo.seinsehal.workers.dev and
-sign in as demo / strata-demo to browse and play a demo library of public-domain films.
+Want to try it first? Connect to https://strata-demo.seinsehal.workers.dev and sign in as
+demo / strata-demo to browse and play a demo library of public-domain films.
 
 Strata requires a Strata server, which is free and open source:
 github.com/Sehalsein/strata. Strata doesn't provide or sell any movies or shows; it plays
@@ -78,7 +78,8 @@ a demo server with public-domain films is available:
 - Username: demo
 - Password: strata-demo
 
-Choose **Enter Address**, type the server address, then sign in (on Apple TV, the same).
+iPhone and iPad: type the server address (including https://) on the Connect screen, then
+sign in. Apple TV: choose **Enter Address**, type the address, then sign in.
 The demo server sleeps when idle, so the first connection can take a few seconds. It is
 viewer-only: server settings aren't available to this account.
 

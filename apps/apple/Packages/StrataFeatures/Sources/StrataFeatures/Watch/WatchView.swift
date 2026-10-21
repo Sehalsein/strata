@@ -63,7 +63,8 @@ struct WatchView: View {
 
             stateOverlay
 
-            if chromeVisible {
+            // An error or a download card has its own buttons; the transport over it would clash.
+            if chromeVisible, !showsStateCard {
                 PlayerChrome(engine: engine, onClose: close, onDetails: { showDetails = true },
                              onPiP: pip.isAvailable ? { pip.toggle() } : nil,
                              onInteraction: { scheduleHide(after: 8) })
@@ -102,6 +103,9 @@ struct WatchView: View {
         .sheet(isPresented: $showDetails) {
             StreamDetailsPanel(session: engine.session).presentationDetents([.medium])
         }
+        #if os(iOS)
+        .onAppear { PlayerOrientation.enterPlayer() }
+        #endif
         .task {
             if let client = services.client { engine.configure(client: client) }
             await engine.load(target: request.target, meta: request.meta, candidateId: request.candidateId, startMs: request.startMs)
@@ -114,6 +118,9 @@ struct WatchView: View {
             if status == .paused { showChrome(autoHide: false) } else if status == .playing { scheduleHide() }
         }
         .onDisappear {
+            #if os(iOS)
+            PlayerOrientation.leavePlayer()
+            #endif
             hideTask?.cancel()
             Task {
                 await engine.unload()
@@ -126,6 +133,13 @@ struct WatchView: View {
     private var showUpNext: Bool {
         guard !upNextDismissed, engine.nextEpisode?.available == true, engine.duration > 60 else { return false }
         return engine.duration - engine.position <= 30 && engine.status == .playing
+    }
+
+    private var showsStateCard: Bool {
+        switch engine.status {
+        case .failed, .preparing: true
+        default: false
+        }
     }
 
     @ViewBuilder private var stateOverlay: some View {

@@ -21,6 +21,7 @@ struct ProfilePickerView: View {
     #else
     private let avatarSize: CGFloat = 96
     #endif
+    @State private var rowWidth: CGFloat = 0
 
     var body: some View {
         VStack(spacing: Metrics.space8) {
@@ -34,8 +35,7 @@ struct ProfilePickerView: View {
                 }
             case .loaded(let list):
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: Metrics.space8) { // top: a Kids label mustn't lift its avatar
-                        Spacer(minLength: 0)
+                    HStack(alignment: .top, spacing: Metrics.isPadOrTV ? Metrics.space8 : Metrics.space6) { // top: a Kids label mustn't lift its avatar
                         ForEach(list) { profile in
                             Button {
                                 if profile.hasPin { pin = ""; pinError = nil; pinFor = profile } else { Task { await select(profile, pin: nil) } }
@@ -52,16 +52,21 @@ struct ProfilePickerView: View {
                                         Text("Kids").eyebrowStyle(Theme.accentText)
                                     }
                                 }
+                                .lineLimit(1)
+                                .fixedSize()
                             }
                             .buttonStyle(StrataCardStyle())
                             .focused($focusedProfile, equals: profile.id)
                         }
-                        Spacer(minLength: 0)
                     }
-                    .padding(Metrics.space8)
-                    .containerRelativeFrame(.horizontal) { width, _ in width }
+                    // Three profiles fit across an iPhone; more scroll.
+                    .padding(.vertical, Metrics.space8)
+                    .padding(.horizontal, Metrics.isPadOrTV ? Metrics.space8 : Metrics.gutter)
+                    // At least the screen's width, centred; wider scrolls.
+                    .frame(minWidth: rowWidth)
                 }
                 .scrollClipDisabled()
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
             }
             if !isSheet {
                 Button("Use a different server") {

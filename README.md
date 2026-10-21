@@ -30,10 +30,11 @@ services you connect. The project isn't affiliated with or endorsed by any of th
 ## Try it
 
 A public demo server with public-domain films is at
-**https://strata-demo.seinsehal.workers.dev**. In the app, choose **Enter Address**, type
-that address, and sign in as `demo` / `strata-demo`. It's viewer-only and tightly rate
-limited (a few plays per visitor an hour, a few viewers at once), and it sleeps when idle,
-so the first request can take a few seconds.
+**https://strata-demo.seinsehal.workers.dev**. Type that address on the app's Connect
+screen (on Apple TV, choose **Enter Address** first) and sign in as `demo` /
+`strata-demo`. It's viewer-only and tightly rate limited (a few plays per visitor an hour,
+a few viewers at once), and it sleeps when idle, so the first request can take a few
+seconds.
 
 ## Attribution
 

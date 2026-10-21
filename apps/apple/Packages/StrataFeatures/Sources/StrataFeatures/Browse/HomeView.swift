@@ -293,12 +293,19 @@ struct HeroCarousel: View {
         }
     }
 
+    /// Over the art on the TV; on the page (light or dark) on iPhone and iPad.
+    #if os(tvOS)
+    private let dotColor = Theme.onArtwork
+    #else
+    private let dotColor = Theme.ink
+    #endif
+
     @ViewBuilder private var dots: some View {
         if cards.count > 1 {
             HStack(spacing: 6) {
                 ForEach(cards.indices, id: \.self) { i in
                     Capsule()
-                        .fill(Theme.onArtwork.opacity(i == index ? 0.9 : 0.35))
+                        .fill(dotColor.opacity(i == index ? 0.9 : 0.35))
                         .frame(width: i == index ? 18 : 6, height: 6)
                 }
             }
