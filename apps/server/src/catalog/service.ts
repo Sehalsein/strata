@@ -8,6 +8,13 @@ import { logger } from "../log";
 
 const log = logger("catalog");
 
+/**
+ * TMDB has no anime genre; "Anime" is animation originally in Japanese. Negative so it
+ * can never collide with a TMDB genre id.
+ */
+export const ANIME_GENRE_ID = -1;
+const ANIME_DISCOVER = { with_genres: "16", with_original_language: "ja" };
+
 export type TitleType = "movie" | "show";
 
 export interface TitleCard {
@@ -97,8 +104,9 @@ export class CatalogService {
   }
 
   /** TMDB's genres for movies or shows, in the server's metadata language. */
+  /** TMDB's genres, led by "Anime" (a virtual genre: see ANIME_GENRE_ID). */
   async genres(type: TitleType): Promise<{ id: number; name: string }[]> {
-    return (await this.tmdb.genres(type === "movie" ? "movie" : "tv")).genres;
+    return [{ id: ANIME_GENRE_ID, name: "Anime" }, ...(await this.tmdb.genres(type === "movie" ? "movie" : "tv")).genres];
   }
 
   /** Rails for one genre: new, popular and top rated on TMDB. */
@@ -106,8 +114,9 @@ export class CatalogService {
     const tmdbType = type === "movie" ? "movie" : "tv";
     const today = new Date().toISOString().slice(0, 10);
     const dateKey = type === "movie" ? "primary_release_date" : "first_air_date";
+    const filter = genreId === ANIME_GENRE_ID ? ANIME_DISCOVER : { with_genres: String(genreId) };
     const discover = (params: Record<string, string>) =>
-      this.tmdb.discover(tmdbType, { with_genres: String(genreId), ...params }).then((p) => this.cards(p.results, type));
+      this.tmdb.discover(tmdbType, { ...filter, ...params }).then((p) => this.cards(p.results, type));
     const safe = <T,>(work: Promise<T[]>) => work.catch((err) => (log.warn("Genre shelf failed", err), [] as T[]));
     const [popular, topRated, fresh] = await Promise.all([
       safe(discover({ sort_by: "popularity.desc" })),

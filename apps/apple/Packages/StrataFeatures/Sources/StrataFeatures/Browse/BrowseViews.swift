@@ -19,9 +19,12 @@ struct BrowseView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Metrics.railGap) {
+                #if os(tvOS)
                 if !genres.isEmpty {
-                    GenreChips(genres: genres, selected: $genre)
+                    GenreMenu(genres: genres, selected: $genre)
+                        .padding(.horizontal, Metrics.gutter)
                 }
+                #endif
                 if let genre {
                     genreContent(genre)
                 } else {
@@ -34,7 +37,15 @@ struct BrowseView: View {
         .fullBleedOnTV()
         #if !os(tvOS)
         .navigationTitle(title)
-        .toolbar { ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() } }
+        // The active genre stays visible however far you scroll.
+        .navigationSubtitle(genre?.name ?? "")
+        .toolbar {
+            if !genres.isEmpty {
+                ToolbarItem(placement: .primaryAction) { GenreMenu(genres: genres, selected: $genre) }
+            }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() }
+        }
         .refreshable { await services.client?.clearCache(); await load() }
         #endif
         .task { await load() }
@@ -127,79 +138,34 @@ struct BrowseView: View {
     }
 }
 
-/// "All" plus one chip per genre. The selected chip is filled (apricot marks the
-/// selected segment); tapping it again goes back to All.
-struct GenreChips: View {
+/// One button that names the active genre ("All Genres", "Comedy") and opens the list,
+/// so the current filter is always on screen instead of somewhere in a scrolling row.
+struct GenreMenu: View {
     let genres: [Genre]
     @Binding var selected: Genre?
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Metrics.space2) {
-                chip("All", isOn: selected == nil) { selected = nil }
-                ForEach(genres) { genre in
-                    chip(genre.name, isOn: selected == genre) { selected = selected == genre ? nil : genre }
-                }
+        Menu {
+            Picker("Genre", selection: $selected) {
+                Text("All Genres").tag(Genre?.none)
+                ForEach(genres) { genre in Text(genre.name).tag(Genre?.some(genre)) }
             }
-            .padding(.horizontal, Metrics.gutter)
+            .pickerStyle(.inline)
+        } label: {
             #if os(tvOS)
-            .padding(.vertical, Metrics.space6) // room for the focus lift
+            Label(selected?.name ?? "All Genres", systemImage: "line.3.horizontal.decrease")
+                .font(.stHeadline)
+            #else
+            Label(selected?.name ?? "Genre", systemImage: selected == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
             #endif
         }
-        .scrollClipDisabled()
-    }
-
-    @ViewBuilder private func chip(_ title: String, isOn: Bool, action: @escaping () -> Void) -> some View {
         #if os(tvOS)
-        Button(title, action: action)
-            .buttonStyle(TVChipStyle(isOn: isOn))
-            .accessibilityAddTraits(isOn ? .isSelected : [])
-        #else
-        Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(isOn ? Theme.onAccent : Theme.ink)
-                .padding(.horizontal, Metrics.space4)
-                .frame(minHeight: 36)
-                .background(isOn ? AnyShapeStyle(Theme.apricot) : AnyShapeStyle(Theme.surface2), in: Capsule())
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isOn ? .isSelected : [])
+        .buttonStyle(.glass)
+        .tint(Theme.ink)
         #endif
+        .accessibilityLabel(selected.map { "Genre: \($0.name)" } ?? "Filter by genre")
     }
 }
-
-#if os(tvOS)
-/// tvOS chip: system buttons keep their tint even when focused, so the three states
-/// are spelled out: focused (white, lifted), selected (apricot), resting (surface).
-private struct TVChipStyle: ButtonStyle {
-    let isOn: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        Chip(label: configuration.label, isOn: isOn, pressed: configuration.isPressed)
-    }
-
-    private struct Chip<Label: View>: View {
-        @Environment(\.isFocused) private var focused
-        let label: Label
-        let isOn: Bool
-        let pressed: Bool
-
-        var body: some View {
-            label
-                .font(.stCallout.weight(.semibold))
-                .foregroundStyle(focused ? Theme.bg : isOn ? Theme.onAccent : Theme.ink)
-                .padding(.horizontal, Metrics.space6)
-                .frame(minHeight: 56)
-                .background(focused ? Theme.onArtwork : isOn ? Theme.apricot : Theme.surface2, in: Capsule())
-                .scaleEffect(focused ? (pressed ? 1.02 : 1.08) : 1)
-                .shadow(color: .black.opacity(focused ? 0.4 : 0), radius: 12, y: 8)
-                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: focused)
-        }
-    }
-}
-#endif
 
 /// A full grid of one list ("See all").
 struct BrowseListView: View {

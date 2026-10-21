@@ -58,7 +58,10 @@ export const fakeTmdb: typeof fetch = (async (input: string | URL | Request) => 
   }
   if (path === "/genre/movie/list") return json({ genres: [{ id: 16, name: "Animation" }, { id: 35, name: "Comedy" }] });
   if (path === "/discover/movie") {
-    const results = url.searchParams.get("with_genres") === "16" ? [{ id: 10378, title: "Big Buck Bunny", release_date: "2008-05-30", genre_ids: [16] }] : [];
+    const anime = url.searchParams.get("with_original_language") === "ja";
+    const results = anime
+      ? [{ id: 129, title: "Spirited Away", release_date: "2001-07-20", genre_ids: [16] }]
+      : url.searchParams.get("with_genres") === "16" ? [{ id: 10378, title: "Big Buck Bunny", release_date: "2008-05-30", genre_ids: [16] }] : [];
     return json({ page: 1, results, total_pages: 1, total_results: results.length });
   }
   if (path === "/person/77") {

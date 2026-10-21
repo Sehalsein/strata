@@ -187,7 +187,11 @@ describe("library", () => {
   });
 
   test("genres: the list, and rails for one genre (new first)", async () => {
-    expect((await json(await server.request("/api/genres/movie", { token }))).items).toContainEqual({ id: 35, name: "Comedy" });
+    const genres = (await json(await server.request("/api/genres/movie", { token }))).items;
+    expect(genres[0]).toEqual({ id: -1, name: "Anime" }); // virtual genre, first
+    expect(genres).toContainEqual({ id: 35, name: "Comedy" });
+    const anime = await json(await server.request("/api/browse/movie/genre/-1", { token }));
+    expect(anime.shelves[0].items[0]).toMatchObject({ tmdbId: 129, title: "Spirited Away" });
     const { shelves } = await json(await server.request("/api/browse/movie/genre/16", { token }));
     expect(shelves.map((s: any) => s.id)).toEqual(["new", "popular", "topRated"]);
     expect(shelves[0].items[0]).toMatchObject({ tmdbId: 10378, available: ["local"] });

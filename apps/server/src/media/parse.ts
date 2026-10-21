@@ -1,3 +1,4 @@
+import { anitomy } from "./anitomy";
 export interface ParsedName {
   kind: "movie" | "episode";
   title: string;
@@ -10,6 +11,11 @@ export interface ParsedName {
   videoCodec?: "hevc" | "h264" | "av1";
   hdr?: "dv" | "hdr10+" | "hdr10" | "hlg";
   group?: string;
+  /**
+   * Named like an anime release ("[Group] Title - 12"). Its title is usually romaji and
+   * its episode may be absolute (no season), so matching goes through the anime mappings.
+   */
+  anime?: boolean;
 }
 
 export const VIDEO_EXTENSIONS = new Set(["mkv", "mp4", "m4v", "mov", "avi", "ts", "m2ts", "webm", "wmv", "mpg", "mpeg"]);
@@ -38,7 +44,16 @@ const MARKERS: RegExp[] = [
   /\[[^\]]*\]/,
 ];
 
+/** Fansub-style names: "[Group] Title …", or "Title - 12v2 [1080p]" without SxxEyy. */
+const FANSUB_GROUP = /^\s*\[[^\]]+\]/;
+const DASH_EPISODE = /\s-\s\d{1,4}(?:v\d)?(?:\s|$|\[|\()/;
+
 export function parseFileName(name: string): ParsedName {
+  const fansub = FANSUB_GROUP.test(name) || (DASH_EPISODE.test(name) && !EPISODE_PATTERNS[0]!.test(name.replace(/[._]+/g, " ")));
+  if (fansub) {
+    const anime = parseAnimeName(name);
+    if (anime) return anime;
+  }
   const base = name.replace(/\.[a-z0-9]{2,4}$/i, "");
   const text = base.replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
 
@@ -131,6 +146,33 @@ export function parseMediaPath(segments: string[], hint: "auto" | "movies" | "sh
     }
   }
   return parsed;
+}
+
+/** Anime-style names, via anitomy-ng. Null when it finds no title. */
+function parseAnimeName(name: string): ParsedName | null {
+  const elements = anitomy(name);
+  const first = (kind: string) => elements.find((e) => e.kind === kind)?.value;
+  const all = (kind: string) => elements.filter((e) => e.kind === kind).map((e) => e.value);
+  const title = first("title")?.trim();
+  if (!title) return null;
+  const episodes = all("episode").map(Number).filter((n) => Number.isFinite(n));
+  const season = first("season");
+  const year = first("year");
+  const text = name.replace(/[._]+/g, " ");
+  return {
+    kind: episodes.length ? "episode" : "movie",
+    title,
+    year: year ? Number(year) : undefined,
+    season: season !== undefined ? Number(season) : undefined,
+    episode: episodes[0],
+    episodeEnd: episodes.length > 1 ? episodes[episodes.length - 1] : undefined,
+    resolution: detectResolution(first("video_resolution") ?? text),
+    source: detectSource(text),
+    videoCodec: detectCodec(text),
+    hdr: detectHdr(text),
+    group: first("release_group"),
+    anime: true,
+  };
 }
 
 const isGenericName = (title: string) => /^(?:movie|video|film|main|feature)$/i.test(title);
