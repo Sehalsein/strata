@@ -112,25 +112,38 @@ export class CatalogService {
       }
     };
 
-    const isAnime = (i: TmdbListItem) => i.original_language === "ja" && (i.genre_ids?.includes(16) ?? false);
-    const [cont, nextUp, watchlist, trendingMovies, trendingShows, trendingAnime] = await Promise.all([
+    // Anime gets rails of its own on Home: it's left out of the movie and show rails.
+    await this.anime?.ids.ready().catch(() => {});
+    // Japanese animation, or anything the anime id list knows (Cyberpunk: Edgerunners
+    // is listed as English on TMDB).
+    const japaneseAnimation = (i: TmdbListItem) => i.original_language === "ja" && (i.genre_ids?.includes(16) ?? false);
+    const isAnimeShow = (i: TmdbListItem) => japaneseAnimation(i) || this.isAnimeTitle("show", i.id);
+    const isAnimeFilm = (i: TmdbListItem) => japaneseAnimation(i) || this.isAnimeTitle("movie", i.id);
+    const [cont, nextUp, watchlist, trendingMovieList, trendingShows, trendingAnimeShows] = await Promise.all([
       safe("continue", () => this.continueWatching(profileId)),
       safe("nextUp", () => this.nextUp(profileId)),
       safe("watchlist", () => this.watchlist(profileId)),
-      safe("trendingMovies", async () => this.cards((await this.tmdb.trending("movie")).results, "movie")),
-      safe("trendingShows", async () => this.cards((await this.tmdb.trending("tv")).results.filter((i) => !isAnime(i)), "show")),
-      safe("trendingAnime", () => this.trendingThisWeek("show", isAnime, ANIME_DISCOVER)),
+      safe("trendingMovies", async () => (await this.tmdb.trending("movie")).results),
+      safe("trendingShows", async () => this.cards((await this.tmdb.trending("tv")).results.filter((i) => !isAnimeShow(i)), "show")),
+      safe("trendingAnime", () => this.trendingThisWeek("show", isAnimeShow, ANIME_DISCOVER)),
     ]);
-    const recentMovies = this.libraryCards("movie");
-    const recentShows = this.libraryCards("show");
+    const trendingMovies = trendingMovieList ? this.cards(trendingMovieList.filter((i) => !isAnimeFilm(i)), "movie") : null;
+    // Anime films trending this week join the anime shows, every third card.
+    const animeFilms = trendingMovieList ? this.cards(trendingMovieList.filter(isAnimeFilm), "movie") : [];
+    const trendingAnime = interleave(trendingAnimeShows ?? [], animeFilms, 3).slice(0, 20);
+
+    const recentMovies = this.libraryCards("movie", { anime: false });
+    const recentShows = this.libraryCards("show", { anime: false });
+    const recentAnime = this.recentAnime();
 
     const featured = await safe("featured", () =>
       this.featured([
         { label: "Recently Added", type: "movie", cards: recentMovies, take: 2 },
         { label: "Trending Movie", type: "movie", cards: trendingMovies ?? [], take: 3 },
         { label: "Trending Show", type: "show", cards: trendingShows ?? [], take: 2 },
-        { label: "Trending Anime", type: "show", cards: trendingAnime ?? [], take: 2 },
+        { label: "Trending Anime", type: "show", cards: trendingAnime, take: 2 },
         { label: "Recently Added", type: "show", cards: recentShows, take: 1 },
+        { label: "Recently Added Anime", type: "show", cards: recentAnime.filter((c) => c.type === "show"), take: 1 },
       ]),
     );
     if (featured?.length) shelves.push({ id: "featured", title: "Featured", kind: "titles", items: featured });
@@ -139,9 +152,10 @@ export class CatalogService {
     if (watchlist?.length) shelves.push({ id: "watchlist", title: "My List", kind: "titles", items: watchlist });
     if (recentMovies.length) shelves.push({ id: "libraryMovies", title: "Recently Added Movies", kind: "titles", items: recentMovies });
     if (recentShows.length) shelves.push({ id: "libraryShows", title: "Recently Added Shows", kind: "titles", items: recentShows });
+    if (recentAnime.length) shelves.push({ id: "libraryAnime", title: "Recently Added Anime", kind: "titles", items: recentAnime });
     if (trendingMovies?.length) shelves.push({ id: "trendingMovies", title: "Trending Movies", kind: "titles", items: trendingMovies });
     if (trendingShows?.length) shelves.push({ id: "trendingShows", title: "Trending Shows", kind: "titles", items: trendingShows });
-    if (trendingAnime?.length) shelves.push({ id: "trendingAnime", title: "Trending Anime", kind: "titles", items: trendingAnime });
+    if (trendingAnime.length) shelves.push({ id: "trendingAnime", title: "Trending Anime", kind: "titles", items: trendingAnime });
     return shelves;
   }
 
@@ -172,13 +186,12 @@ export class CatalogService {
   }
 
   async browse(type: TitleType, list: "trending" | "popular" | "topRated" | "library"): Promise<TitleCard[]> {
-    if (list === "library") return this.libraryCards(type, 500);
+    if (list === "library") return this.libraryCards(type, { limit: 500 });
     const tmdbType = type === "movie" ? "movie" : "tv";
     const page = list === "trending" ? await this.tmdb.trending(tmdbType) : list === "popular" ? await this.tmdb.popular(tmdbType) : await this.tmdb.topRated(tmdbType);
     return this.cards(page.results, type);
   }
 
-  /** TMDB's genres for movies or shows, in the server's metadata language. */
   /** TMDB's genres. Anime has its own tab (see `animePage`). */
   async genres(type: TitleType): Promise<{ id: number; name: string }[]> {
     return (await this.tmdb.genres(type === "movie" ? "movie" : "tv")).genres;
@@ -221,7 +234,9 @@ export class CatalogService {
   private async trendingThisWeek(type: TitleType, keep: (item: TmdbListItem) => boolean, discoverFilter: Record<string, string>): Promise<TitleCard[]> {
     const tmdbType = type === "movie" ? "movie" : "tv";
     const pages = await Promise.all([1, 2, 3].map((p) => this.tmdb.trending(tmdbType, p).then((r) => r.results).catch(() => [] as TmdbListItem[])));
-    const items = pages.flat().filter(keep);
+    // The chart can repeat a title across pages.
+    const seenIds = new Set<number>();
+    const items = pages.flat().filter((i) => keep(i) && !seenIds.has(i.id) && seenIds.add(i.id));
     if (items.length < 12) {
       const day = (offset: number) => new Date(Date.now() - offset * 86_400_000).toISOString().slice(0, 10);
       const window: Record<string, string> =
@@ -264,7 +279,7 @@ export class CatalogService {
           { id: "anime-films-popular", title: "Popular Movies", kind: "films", rail: "popular" },
           { id: "anime-films-top", title: "Top Rated Movies", kind: "films", rail: "top" },
         ];
-    const isAnime = (i: TmdbListItem) => i.original_language === "ja" && (i.genre_ids?.includes(16) ?? false);
+    const isAnime = (i: TmdbListItem) => (i.original_language === "ja" && (i.genre_ids?.includes(16) ?? false)) || this.isAnimeTitle("show", i.id);
     const [trending, ...ranked] = await Promise.all([
       category ? Promise.resolve([] as TitleCard[]) : this.trendingThisWeek("show", isAnime, ANIME_DISCOVER).catch(() => [] as TitleCard[]),
       ...plans.map(async (plan): Promise<Shelf> => {
@@ -527,19 +542,47 @@ export class CatalogService {
     return cards.filter((c): c is TitleCard => c !== null);
   }
 
-  private libraryCards(type: TitleType, limit = 20): TitleCard[] {
-    const items = this.library.recentlyAdded(type, limit);
+  /**
+   * Library titles, newest first. `anime` keeps only anime (true) or leaves it out
+   * (false), going by the anime id list.
+   */
+  private libraryCards(type: TitleType, opts: { limit?: number; anime?: boolean } = {}): TitleCard[] {
+    return this.libraryRows(type, opts).map((r) => r.card);
+  }
+
+  private libraryRows(type: TitleType, { limit = 20, anime }: { limit?: number; anime?: boolean } = {}) {
+    // Filtering happens after the query, so read further back to still fill the rail.
+    let items = this.library.recentlyAdded(type, anime === undefined ? limit : limit * 5);
+    if (anime !== undefined) items = items.filter((i) => this.isAnimeTitle(type, i.tmdbId) === anime).slice(0, limit);
     const avail = this.library.availability(type, items.map((i) => i.tmdbId));
     return items.map((i) => ({
-      type,
-      tmdbId: i.tmdbId,
-      title: i.title,
-      year: i.year,
-      posterUrl: imageUrl(i.posterPath, "w342"),
-      backdropUrl: imageUrl(i.backdropPath, "w780"),
-      available: avail.get(i.tmdbId) ?? [],
+      at: i.latestFileAt,
+      card: {
+        type,
+        tmdbId: i.tmdbId,
+        title: i.title,
+        year: i.year,
+        posterUrl: imageUrl(i.posterPath, "w342"),
+        backdropUrl: imageUrl(i.backdropPath, "w780"),
+        available: avail.get(i.tmdbId) ?? [],
+      } satisfies TitleCard,
     }));
   }
+
+  /** Anime series and films in the library, newest first. */
+  private recentAnime(limit = 20): TitleCard[] {
+    return [...this.libraryRows("show", { anime: true, limit }), ...this.libraryRows("movie", { anime: true, limit })]
+      .sort((a, b) => b.at - a.at)
+      .slice(0, limit)
+      .map((r) => r.card);
+  }
+
+  private isAnimeTitle(type: TitleType, tmdbId: number): boolean {
+    const ids = this.anime?.ids;
+    if (!ids) return false;
+    return type === "movie" ? !!ids.movie(tmdbId) : ids.show(tmdbId).length > 0;
+  }
+
 
   private cards(items: TmdbListItem[], type: TitleType): TitleCard[] {
     const avail = this.library.availability(type, items.map((i) => i.id));
@@ -589,4 +632,15 @@ function videosOf(videos?: TmdbMovie["videos"]) {
 function trailerOf(videos?: TmdbMovie["videos"]) {
   const t = videos?.results.find((v) => v.site === "YouTube" && v.type === "Trailer" && v.official) ?? videos?.results.find((v) => v.site === "YouTube" && v.type === "Trailer");
   return t ? { site: "youtube", key: t.key, name: t.name } : null;
+}
+
+/** `extra` mixed into `main`, one after every `every` cards of `main`. */
+function interleave<T>(main: T[], extra: T[], every: number): T[] {
+  const out: T[] = [];
+  let e = 0;
+  main.forEach((item, i) => {
+    out.push(item);
+    if ((i + 1) % every === 0 && e < extra.length) out.push(extra[e++]!);
+  });
+  return out.concat(extra.slice(e));
 }
