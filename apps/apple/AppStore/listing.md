@@ -83,6 +83,11 @@ sign in. Apple TV: choose **Enter Address**, type the address, then sign in.
 The demo server sleeps when idle, so the first connection can take a few seconds. It is
 viewer-only: server settings aren't available to this account.
 
+The demo server is rate limited, per network: about 10 plays and 20 sign-ins an hour,
+60 requests a minute, and a few viewers at once across the whole demo. If the app says to
+try again later, please wait a few minutes. This limit is on our demo server only; a
+user's own server has no such limits.
+
 ## Screenshots
 
 Generated from the demo server (`apps/server/scripts/demo`), which plays public-domain
