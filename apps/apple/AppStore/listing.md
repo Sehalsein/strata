@@ -95,6 +95,6 @@ films and shows only. Files go in `AppStore/screenshots/<device>/` (not in git; 
 
 | Device | Size | Shots |
 |---|---|---|
-| iPhone 6.9" | 1320 x 2868 | Home, Title page, Episodes, Player, Profiles |
+| iPhone 6.3" | 1206 x 2622 (player: 2622 x 1206, landscape) | Home, Title page, Episodes, Player, Profiles |
 | iPad 13" | 2064 x 2752 | Home, Title page, Player |
 | Apple TV | 1920 x 1080 | Home, Title page, Episodes, Player, Profiles |
