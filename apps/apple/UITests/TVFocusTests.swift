@@ -158,6 +158,25 @@ final class TVFocusTests: XCTestCase {
         guard let server = ProcessInfo.processInfo.environment["STRATA_DEMO_SERVER"] else { throw XCTSkip("needs STRATA_DEMO_SERVER") }
         app.launchArguments = ["-StrataServer", server]
         app.launch()
+        // A server that needs an account (the hosted demo): STRATA_DEMO_USER / STRATA_DEMO_PASSWORD.
+        let usePassword = app.buttons["Use Password Instead"]
+        if usePassword.waitForExistence(timeout: 30), let user = ProcessInfo.processInfo.environment["STRATA_DEMO_USER"],
+           let password = ProcessInfo.processInfo.environment["STRATA_DEMO_PASSWORD"] {
+            while !usePassword.hasFocus { press(.down) }
+            press(.select, pause: 1.5)
+            for (field, text) in [(app.textFields["Username"], user), (app.secureTextFields["Password"], password)] {
+                XCTAssertTrue(field.waitForExistence(timeout: 10))
+                var presses = 0
+                while !field.hasFocus && presses < 6 { press(.down); presses += 1 }
+                press(.select, pause: 1)
+                app.typeText(text)
+                press(.menu, pause: 1)
+            }
+            let signIn = app.buttons["Sign In"]
+            var presses = 0
+            while !signIn.hasFocus && presses < 6 { press(.down); presses += 1 }
+            press(.select, pause: 3)
+        }
         XCTAssertTrue(app.staticTexts["Who's watching?"].waitForExistence(timeout: 30))
         Thread.sleep(forTimeInterval: 2)
         snapshot("05-profiles")
@@ -183,7 +202,7 @@ final class TVFocusTests: XCTestCase {
         Thread.sleep(forTimeInterval: 2)
         snapshot("03-episodes")
 
-        open("strata://watch/movie/961") // The General
+        open("strata://watch/movie/992") // Sherlock Jr., resumed mid-scene
         Thread.sleep(forTimeInterval: 14)
         press(.up, pause: 1) // controls
         snapshot("04-player")
