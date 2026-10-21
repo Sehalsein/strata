@@ -85,9 +85,6 @@ struct SettingsView: View {
                     LabeledContent("App version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
                 } header: {
                     Text("About")
-                } footer: {
-                    // Required by TMDB's API terms.
-                    Text("Movie and show data from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.")
                 }
             }
             .navigationTitle("Settings")

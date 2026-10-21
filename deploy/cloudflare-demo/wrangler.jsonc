@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "strata-demo",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "containers": [
+    {
+      "class_name": "StrataDemo",
+      "image": "./Dockerfile",
+      "image_build_context": "../../apps/server",
+      // One small instance, never more: the cost ceiling (see README).
+      "max_instances": 1,
+      "instance_type": "lite"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "STRATA", "class_name": "StrataDemo" },
+      { "name": "GATE", "class_name": "Gate" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StrataDemo", "Gate"] }],
+  // Cheap first filter at the edge; the strict limits are in the Gate (src/limits.ts).
+  "ratelimits": [{ "name": "EDGE_LIMIT", "namespace_id": "4101", "simple": { "limit": 40, "period": 60 } }]
+}

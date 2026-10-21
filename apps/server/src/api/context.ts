@@ -26,6 +26,8 @@ export const requireAuth: MiddlewareHandler<Env> = createMiddleware<Env>(async (
 });
 
 export const requireAdmin: MiddlewareHandler<Env> = createMiddleware<Env>(async (c, next) => {
+  // The hosted public demo (scripts/demo/serve.ts --public) is read-only for everyone.
+  if (process.env.STRATA_DEMO === "1") throw new HTTPException(403, { message: "The demo can't be changed." });
   if (!c.var.session.user.isAdmin) throw new HTTPException(403, { message: "Admin only" });
   await next();
 });
