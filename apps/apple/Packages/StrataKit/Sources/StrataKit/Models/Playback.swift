@@ -43,24 +43,8 @@ public struct PlaybackTarget: Codable, Sendable, Hashable {
 
 // MARK: - Sources
 
-/// A playable source: a library file (`file:<id>`) or a discovered release (`hash:<infohash>`).
+/// A file in the server's library that can play this title (`file:<id>`).
 public struct Candidate: Codable, Sendable, Hashable, Identifiable {
-    public enum Availability: String, Codable, Sendable, Hashable {
-        /// In the library; plays now.
-        case ready
-        /// TorBox has it cached; plays within seconds once added.
-        case cached
-        /// Must download first (play returns `.downloading`).
-        case uncached
-
-        public var label: String {
-            switch self {
-            case .ready: "Ready"
-            case .cached: "Instant"
-            case .uncached: "Download"
-            }
-        }
-    }
 
     public struct AudioInfo: Codable, Sendable, Hashable {
         public var codec: String
@@ -85,14 +69,7 @@ public struct Candidate: Codable, Sendable, Hashable, Identifiable {
     public var audio: [AudioInfo]?
     public var durationMs: Int?
     public var probed: Bool
-    public var availability: Availability
-    public var seeders: Int?
-    /// Torrent name for discovered releases.
-    public var releaseTitle: String?
-    public var isPack: Bool?
 
-    public var isDiscovered: Bool { id.hasPrefix("hash:") }
-    public var isReady: Bool { availability == .ready }
     public var resolutionLabel: String? { Formatting.resolution(resolution) }
     public var sizeLabel: String? { Formatting.size(bytes: size) }
     public var hdrLabel: String? {
@@ -131,7 +108,7 @@ public struct Candidate: Codable, Sendable, Hashable, Identifiable {
     public var specLabels: [String] {
         [resolutionLabel, hdrLabel, codecLabel, sourceLabel].compactMap { $0 }
     }
-    public var displayName: String { releaseTitle ?? name }
+    public var displayName: String { name }
 
     static func channelLayout(_ channels: Int) -> String {
         switch channels {
@@ -267,40 +244,6 @@ public struct PlayResponse: Codable, Sendable, Hashable {
     public var duration: TimeInterval { TimeInterval(durationMs) / 1000 }
     public var startOffset: TimeInterval { TimeInterval(startOffsetMs) / 1000 }
     public var selectedAudio: AudioTrack? { audioTracks.first(where: \.selected) ?? audioTracks.first }
-}
-
-/// The 202 body of `POST /api/play` while a release downloads on TorBox. Poll by repeating the request.
-public struct DownloadingStatus: Codable, Sendable, Hashable {
-    /// Always "downloading".
-    public var status: String
-    public var torrentId: Int
-    /// 0...1
-    public var progress: Double
-    public var etaSeconds: Int?
-    public var name: String
-    /// Human message from the server ("This release is still downloading on TorBox").
-    public var error: String?
-
-    public init(status: String = "downloading", torrentId: Int, progress: Double, etaSeconds: Int?, name: String, error: String? = nil) {
-        self.status = status
-        self.torrentId = torrentId
-        self.progress = progress
-        self.etaSeconds = etaSeconds
-        self.name = name
-        self.error = error
-    }
-
-    public var percentText: String { "\(Int((min(1, max(0, progress)) * 100).rounded()))%" }
-    public var etaText: String? {
-        guard let etaSeconds, etaSeconds > 0 else { return nil }
-        if etaSeconds < 60 { return "\(etaSeconds)s left" }
-        return Formatting.remaining(ms: etaSeconds * 1000)
-    }
-}
-
-public enum PlayOutcome: Sendable, Hashable {
-    case started(PlayResponse)
-    case downloading(DownloadingStatus)
 }
 
 /// `POST /api/progress` response.

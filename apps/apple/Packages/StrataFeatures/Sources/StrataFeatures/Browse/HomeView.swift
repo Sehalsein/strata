@@ -29,7 +29,7 @@ struct HomeView: View {
                     }
                     if list.isEmpty {
                         MessageView(systemImage: "film.stack", title: "Nothing here yet",
-                                    message: "Add media folders or a TorBox key in your server's dashboard.")
+                                    message: "Add media folders in your server's dashboard.")
                             .frame(minHeight: 400)
                     }
                     ForEach(list.filter { $0.id != "featured" }) { shelf in ShelfRail(shelf: shelf) }
@@ -241,7 +241,7 @@ struct HeroCarousel: View {
             .onMoveCommand { direction in
                 // Past the last button goes to the next title, before the first to the previous one.
                 let last: HeroButton = .info
-                let first: HeroButton = cards[index].type == .movie ? .play : .info
+                let first: HeroButton = hasPlay(cards[index]) ? .play : .info
                 if direction == .right, focus == last { step(1) }
                 if direction == .left, focus == first { step(-1) }
             }
@@ -251,7 +251,7 @@ struct HeroCarousel: View {
         let keep = focus
         withAnimation(.easeInOut(duration: 0.4)) { index = (index + by + cards.count) % cards.count }
         // The new title's buttons replace the old ones: keep focus on the same kind.
-        DispatchQueue.main.async { focus = cards[index].type == .movie ? keep : .info }
+        DispatchQueue.main.async { focus = hasPlay(cards[index]) ? keep : .info }
     }
     #elseif os(iOS)
     private var content: some View {
@@ -268,10 +268,14 @@ struct HeroCarousel: View {
     private var content: some View { hero(cards[min(index, cards.count - 1)]) }
     #endif
 
+    /// Movies in the server's library get Play; everything else, More Info only.
+    private func hasPlay(_ card: TitleCard) -> Bool { card.type == .movie && card.isAvailable }
+
     private func hero(_ card: TitleCard) -> some View {
         // Just the name: the carousel is for picking, the title page has the details.
         HeroBillboard(id: card.id, backdropURL: card.backdropUrl, fallbackURL: card.posterUrl, eyebrow: card.eyebrow, title: card.title) {
-            if card.type == .movie {
+            // Only what's in the server's library plays; the rest is for browsing.
+            if hasPlay(card) {
                 PlayButton("Play") {
                     services.play(WatchRequest(target: .movie(card.tmdbId), meta: PlaybackMeta(title: card.title, subtitle: card.yearText, artworkURL: card.backdropUrl)))
                 }

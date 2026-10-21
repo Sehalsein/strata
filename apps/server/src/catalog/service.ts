@@ -528,16 +528,23 @@ export class CatalogService {
     return { season: next.season_number, episode: next.episode_number, name: next.name, stillUrl: imageUrl(next.still_path, "w780") };
   }
 
+  /** `available`: the episode is in the library, so Play plays it (apps offer nothing else). */
   private async showUpNext(show: TmdbShow, watched: ProgressRow[]) {
+    const files = this.library.filesFor("episode", show.id).filter((f) => f.season !== null && f.episode !== null);
+    const has = (season: number, episode: number) => files.some((f) => f.season === season && f.episode === episode);
+    const at = (season: number, episode: number, positionMs = 0) => ({ season, episode, positionMs, available: has(season, episode) });
     const inProgress = watched.filter(isResumable).sort((a, b) => b.updatedAt - a.updatedAt)[0];
-    if (inProgress) return { season: inProgress.season, episode: inProgress.episode, positionMs: inProgress.positionMs };
-    const furthest = watched.filter((w) => w.completed).sort((a, b) => b.season - a.season || b.episode - a.episode)[0];
+    if (inProgress) return at(inProgress.season!, inProgress.episode!, inProgress.positionMs);
+    const furthest = watched.filter((w) => w.completed).sort((a, b) => b.season! - a.season! || b.episode! - a.episode!)[0];
     if (furthest) {
-      const next = await this.episodeAfter(show, furthest.season, furthest.episode).catch(() => null);
-      if (next) return { season: next.season, episode: next.episode, positionMs: 0 };
+      const next = await this.episodeAfter(show, furthest.season!, furthest.episode!).catch(() => null);
+      if (next) return at(next.season, next.episode);
     }
+    // Nothing watched yet: the first episode the library has, else the show's first.
+    const firstOwned = files.filter((f) => f.season! > 0).sort((a, b) => a.season! - b.season! || a.episode! - b.episode!)[0];
+    if (firstOwned) return at(firstOwned.season!, firstOwned.episode!);
     const first = show.seasons.filter((s) => s.season_number > 0).sort((a, b) => a.season_number - b.season_number)[0];
-    return first ? { season: first.season_number, episode: 1, positionMs: 0 } : null;
+    return first ? at(first.season_number, 1) : null;
   }
 
   private async watchlist(profileId: number): Promise<TitleCard[]> {

@@ -1,6 +1,6 @@
 {
   "items": [
-    { "type": "movie", "tmdbId": 10378, "title": "Big Buck Bunny", "year": 2008, "overview": "A giant rabbit takes revenge.", "posterUrl": "https://image.tmdb.org/t/p/w342/bbb.jpg", "backdropUrl": "https://image.tmdb.org/t/p/w780/bbb-bg.jpg", "rating": 6.4, "available": ["local", "torbox"] },
+    { "type": "movie", "tmdbId": 10378, "title": "Big Buck Bunny", "year": 2008, "overview": "A giant rabbit takes revenge.", "posterUrl": "https://image.tmdb.org/t/p/w342/bbb.jpg", "backdropUrl": "https://image.tmdb.org/t/p/w780/bbb-bg.jpg", "rating": 6.4, "available": ["local", "linked"] },
     { "type": "show", "tmdbId": 10378, "title": "Big Buck Bunny: The Series", "year": null, "overview": "", "posterUrl": null, "backdropUrl": null, "rating": 0, "available": [] }
   ]
 }

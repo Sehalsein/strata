@@ -134,15 +134,12 @@ public struct ProviderBadge: View {
 
 /// Whether something can play, in plain words with a symbol (never color alone).
 public enum Availability: Equatable, Sendable {
-    case ready, instant, downloading(Double), download, unavailable, watched
+    case ready, unavailable, watched
 
     public var title: String {
         switch self {
         case .ready: "Ready"
-        case .instant: "Instant"
-        case .downloading(let p): "Downloading \(Int(p * 100))%"
-        case .download: "Download"
-        case .unavailable: "Not available"
+        case .unavailable: "Not in your library"
         case .watched: "Watched"
         }
     }
@@ -151,16 +148,13 @@ public enum Availability: Equatable, Sendable {
         switch self {
         case .ready: "play.circle.fill"
         case .watched: "checkmark.circle.fill"
-        case .instant: "bolt.fill"
-        case .downloading, .download: "arrow.down.circle"
         case .unavailable: "minus.circle"
         }
     }
 
     public var color: Color {
         switch self {
-        case .ready, .instant, .watched: Theme.success
-        case .downloading, .download: Theme.warning
+        case .ready, .watched: Theme.success
         case .unavailable: Theme.ink3
         }
     }

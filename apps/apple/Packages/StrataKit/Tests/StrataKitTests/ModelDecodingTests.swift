@@ -2,7 +2,7 @@ import XCTest
 @testable import StrataKit
 
 /// Decodes JSON captured from the real server (`apps/server`, fake TMDB + ffmpeg fixtures)
-/// plus a few hand-written payloads for paths that need TMDB/TorBox.
+/// plus a few hand-written payloads for paths that need TMDB.
 final class ModelDecodingTests: XCTestCase {
     func testServerInfo() throws {
         let info = try Fixture.decode(ServerInfo.self, "info")
@@ -59,8 +59,9 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(browse.first?.yearText, "2008")
         let search = try Fixture.decode(ItemsResponse<TitleCard>.self, "search").items
         XCTAssertEqual(search.count, 2)
-        XCTAssertEqual(search[0].available, [.local, .torbox])
-        XCTAssertEqual(search[0].availabilityLabel, "Library · TorBox")
+        // Any storage other than the server's own disks decodes as `.linked`; both are "Library".
+        XCTAssertEqual(search[0].available, [.local, .linked])
+        XCTAssertEqual(search[0].availabilityLabel, "Library")
         XCTAssertEqual(search[0].ratingText, "6.4")
         XCTAssertNil(search[1].year)
         XCTAssertNil(search[1].ratingText)
@@ -75,7 +76,7 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(m.imdbId, "tt1254207")
         XCTAssertEqual(m.runtimeText, "10m")
         XCTAssertEqual(m.genres, ["Animation"])
-        XCTAssertEqual(m.sources.first?.availability, .ready)
+        XCTAssertEqual(m.sources.first?.provider, .local)
         XCTAssertEqual(m.progress?.completed, true)
         XCTAssertNil(m.resumeMs)
         XCTAssertTrue(m.inWatchlist)
@@ -122,20 +123,7 @@ final class ModelDecodingTests: XCTestCase {
     func testCandidates() throws {
         let library = try Fixture.decode(ItemsResponse<Candidate>.self, "sources").items
         XCTAssertEqual(library.first?.id, "file:1")
-        XCTAssertEqual(library.first?.isDiscovered, false)
         XCTAssertEqual(library.first?.specLabels.prefix(3), ["1080p", "H.264", "Blu-ray"])
-
-        let all = try Fixture.decode(ItemsResponse<Candidate>.self, "sources_discovered").items
-        XCTAssertEqual(all.map(\.availability), [.ready, .cached, .uncached])
-        let cached = all[1]
-        XCTAssertTrue(cached.isDiscovered)
-        XCTAssertEqual(cached.seeders, 42)
-        XCTAssertEqual(cached.hdrLabel, "Dolby Vision")
-        XCTAssertEqual(cached.resolutionLabel, "4K")
-        XCTAssertEqual(cached.displayName, "Big.Buck.Bunny.2008.2160p.UHD.BluRay.REMUX.DV.HEVC-GRP")
-        XCTAssertEqual(all[2].isPack, true)
-        XCTAssertNil(all[2].sizeLabel)
-        XCTAssertNil(all[2].resolution)
     }
 
     func testPlayDirect() throws {
@@ -179,12 +167,7 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(p.nextEpisode?.available, false)
     }
 
-    func testDownloadingAndProgress() throws {
-        let d = try Fixture.decode(DownloadingStatus.self, "downloading")
-        XCTAssertEqual(d.status, "downloading")
-        XCTAssertEqual(d.torrentId, 123456)
-        XCTAssertEqual(d.percentText, "37%")
-        XCTAssertEqual(d.etaText, "14m left")
+    func testProgress() throws {
         let progress = try Fixture.decode(WatchProgress.self, "progress")
         XCTAssertEqual(progress.positionMs, 13_000)
         XCTAssertTrue(progress.completed)

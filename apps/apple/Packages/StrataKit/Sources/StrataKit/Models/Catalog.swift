@@ -268,7 +268,7 @@ public struct MovieDetail: Codable, Sendable, Hashable, Identifiable {
     public var collection: CollectionRef?
     public var recommendations: [TitleCard]
     public var available: [Provider]
-    /// Library sources only (instant). Use `StrataClient.sources(discover: true)` for releases.
+    /// The library files that can play it.
     public var sources: [Candidate]
     public var progress: WatchProgress?
     public var inWatchlist: Bool
@@ -305,8 +305,11 @@ public struct UpNext: Codable, Sendable, Hashable {
     public var season: Int
     public var episode: Int
     public var positionMs: Int
+    /// In the server's library, so Play can play it. Older servers don't say: treated as not.
+    public var available: Bool?
 
     public var code: String { Formatting.episodeCode(season: season, episode: episode) }
+    public var isAvailable: Bool { available ?? false }
     public var isResume: Bool { positionMs > 0 }
 }
 

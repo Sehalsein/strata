@@ -35,12 +35,12 @@ public enum Theme {
     public static let warning = adaptive(dark: 0xF7C873, light: 0x9A6A00)
     public static let danger = adaptive(dark: 0xFF6B6B, light: 0xC4242C)
     public static let local = adaptive(dark: 0x7DB7FF, light: 0x1F66C9)
-    public static let torbox = adaptive(dark: 0xB9A4FF, light: 0x6A4FD1)
+    public static let violet = adaptive(dark: 0xB9A4FF, light: 0x6A4FD1)
 
     public static let scrim = Color.black.opacity(0.7)
 
     /// Avatar fills, picked stably per profile.
-    public static let avatarFills: [Color] = [sand, apricot, local, torbox]
+    public static let avatarFills: [Color] = [sand, apricot, local, violet]
 
     private static func adaptive(dark: UInt32, light: UInt32, darkAlpha: Double = 1, lightAlpha: Double = 1) -> Color {
         #if os(tvOS)

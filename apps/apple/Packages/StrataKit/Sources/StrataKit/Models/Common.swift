@@ -12,16 +12,22 @@ public enum MediaKind: String, Codable, Sendable, Hashable {
     case movie, episode
 }
 
-/// Where a file lives on the server side.
-public enum Provider: String, Codable, Sendable, Hashable {
-    case local, torbox
+/// Where a file in the server's library is kept: on the server's own disks, or in
+/// storage the server connects to. Either way it plays through the server, so the app
+/// treats both as "in the library".
+public enum Provider: Codable, Sendable, Hashable {
+    case local, linked
 
-    public var label: String {
-        switch self {
-        case .local: "Library"
-        case .torbox: "TorBox"
-        }
+    public init(from decoder: Decoder) throws {
+        self = try decoder.singleValueContainer().decode(String.self) == "local" ? .local : .linked
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(self == .local ? "local" : "linked")
+    }
+
+    public var label: String { "Library" }
 }
 
 /// Saved watch progress for a movie or episode.
@@ -107,6 +113,6 @@ public enum Formatting {
 }
 
 extension Array where Element == Provider {
-    /// Joined provider labels, e.g. "Library · TorBox".
-    public var label: String { map(\.label).joined(separator: " · ") }
+    /// "Library" when the title is in the server's library.
+    public var label: String { isEmpty ? "" : "Library" }
 }

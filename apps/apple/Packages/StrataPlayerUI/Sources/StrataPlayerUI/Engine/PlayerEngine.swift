@@ -29,8 +29,6 @@ public final class PlayerEngine {
         case idle
         /// Asking the server for a stream / waiting for the first frames.
         case loading
-        /// The release is still downloading on TorBox; the engine polls until it's ready.
-        case preparing(DownloadingStatus)
         case ready, playing, paused, ended
         case failed(String)
     }
@@ -132,8 +130,6 @@ public final class PlayerEngine {
     public var progressInterval: TimeInterval = 10
     /// How long rapid scrubs are coalesced before an HLS restart.
     public var restartDebounce: TimeInterval = 0.4
-    /// How often a downloading release is polled.
-    public var preparePollInterval: TimeInterval = 5
 
     public init() {
         if let raw = UserDefaults.standard.string(forKey: Self.videoGravityKey) {
@@ -150,10 +146,10 @@ public final class PlayerEngine {
 
     // MARK: - Loading
 
-    /// Starts playing `target`. `startMs` nil resumes from the server's saved progress;
-    /// `candidateId` picks a specific source (else the server's best). Returns once playback
-    /// has started, failed, or the load was superseded (`unload()` / another `load`).
-    public func load(target: PlaybackTarget, meta: PlaybackMeta, candidateId: String? = nil, startMs: Int? = nil) async {
+    /// Starts playing `target` from the server's library. `startMs` nil resumes from the
+    /// server's saved progress. Returns once playback has started, failed, or the load was
+    /// superseded (`unload()` / another `load`).
+    public func load(target: PlaybackTarget, meta: PlaybackMeta, startMs: Int? = nil) async {
         guard let client else { status = .failed("Not connected to a server."); return }
         await teardown(reportFinal: true)
         generation += 1
@@ -167,7 +163,7 @@ public final class PlayerEngine {
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                let res = try await self.requestPlay(client: client, target: target, candidateId: candidateId, startMs: startMs, audioIndex: nil, gen: gen)
+                let res = try await self.requestPlay(client: client, target: target, candidateId: nil, startMs: startMs, audioIndex: nil, gen: gen)
                 try await self.start(res, gen: gen, newTitle: true, autoplay: true)
             } catch {
                 guard gen == self.generation, !(error is CancellationError) else { return }
@@ -186,19 +182,12 @@ public final class PlayerEngine {
         await load(target: nextTarget, meta: m, startMs: 0)
     }
 
-    /// Calls `/api/play`, polling while the release downloads (status `.preparing`).
+    /// Calls `/api/play`. `candidateId` keeps a restart (seek, audio switch) on the same file.
     private func requestPlay(client: StrataClient, target: PlaybackTarget, candidateId: String?, startMs: Int?, audioIndex: Int?, gen: Int) async throws -> PlayResponse {
-        while true {
-            try Task.checkCancellation()
-            switch try await client.play(target, candidateId: candidateId, startMs: startMs, audioStreamIndex: audioIndex) {
-            case .started(let res):
-                return res
-            case .downloading(let progress):
-                guard gen == generation else { throw CancellationError() }
-                status = .preparing(progress)
-                try await Task.sleep(nanoseconds: UInt64(preparePollInterval * 1_000_000_000))
-            }
-        }
+        try Task.checkCancellation()
+        let res = try await client.play(target, candidateId: candidateId, startMs: startMs, audioStreamIndex: audioIndex)
+        guard gen == generation else { throw CancellationError() }
+        return res
     }
 
     /// Installs a play response as the current item. `newTitle` resets tracks/subtitles;
@@ -331,7 +320,7 @@ public final class PlayerEngine {
     }
 
     /// Waits for the server's first HLS segment. A transcode can take longer than AVPlayer's
-    /// ~20s playlist timeout to start (4K source, TorBox file not yet warm), and AVPlayer
+    /// ~20s playlist timeout to start (a 4K source, a slow disk or network share), and AVPlayer
     /// then fails the item as "resource unavailable"; it gets the URL once it answers.
     private func waitForPlaylist(_ url: URL, gen: Int) async throws {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)

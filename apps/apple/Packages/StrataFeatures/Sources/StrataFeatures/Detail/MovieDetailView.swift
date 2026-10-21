@@ -9,7 +9,6 @@ struct MovieDetailView: View {
     let tmdbId: Int
     @State private var detail: Loadable<MovieDetail> = .loading
     @State private var inWatchlist = false
-    @State private var showSources = false
 
     var body: some View {
         ScrollView {
@@ -51,21 +50,27 @@ struct MovieDetailView: View {
                           meta: [movie.genres.first, movie.yearText, movie.runtimeText, movie.certification, movie.ratingText.map { "★ \($0)" }].compactMap { $0 },
                           badges: movie.sources.first?.specLabels.prefix(3).map { $0 } ?? [],
                           overview: movie.overview) {
-                PlayButton(movie.resumeMs != nil ? "Resume" : "Play") { play(movie, candidateId: nil) }
-                    .glassEffectID("play", in: namespace)
-                    #if os(tvOS)
-                    .focused($playFocused)
-                    #endif
+                // Only what's in the server's library plays.
+                if movie.isAvailable {
+                    PlayButton(movie.resumeMs != nil ? "Resume" : "Play") { play(movie) }
+                        .glassEffectID("play", in: namespace)
+                        #if os(tvOS)
+                        .focused($playFocused)
+                        #endif
+                }
                 GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV) {
                     Task { await toggleWatchlist(movie) }
                 }
-                GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV) { showSources = true }
                 if let trailer = movie.trailer?.youtubeURL { TrailerButton(url: trailer) }
             }
             #if os(tvOS)
             // Part of the hero, so it scrolls away with it instead of floating over the page.
             .overlay(alignment: .topLeading) { TVBackButton { dismiss() } }
             #endif
+
+            if !movie.isAvailable {
+                AvailabilityLabel(.unavailable).padding(.horizontal, Metrics.gutter)
+            }
 
             if let progress = movie.progress, progress.isResumable {
                 HStack(spacing: Metrics.space3) {
@@ -102,11 +107,6 @@ struct MovieDetailView: View {
             ])
         }
         .padding(.bottom, Metrics.space12)
-        .sheet(isPresented: $showSources) {
-            SourcePickerSheet(target: movie.target, title: movie.title) { candidate in
-                play(movie, candidateId: candidate.id)
-            }
-        }
     }
 
     @Namespace private var namespace
@@ -114,10 +114,9 @@ struct MovieDetailView: View {
     @FocusState private var playFocused: Bool
     #endif
 
-    private func play(_ movie: MovieDetail, candidateId: String?) {
+    private func play(_ movie: MovieDetail) {
         services.play(WatchRequest(target: movie.target,
-                                   meta: PlaybackMeta(title: movie.title, subtitle: movie.yearText, artworkURL: movie.backdropUrl ?? movie.posterUrl),
-                                   candidateId: candidateId))
+                                   meta: PlaybackMeta(title: movie.title, subtitle: movie.yearText, artworkURL: movie.backdropUrl ?? movie.posterUrl)))
     }
 
     private func load() async {

@@ -86,15 +86,13 @@ public enum Loadable<T> {
 public struct WatchRequest: Identifiable, Hashable {
     public let target: PlaybackTarget
     public let meta: PlaybackMeta
-    public let candidateId: String?
     /// nil resumes from the server's saved position.
     public let startMs: Int?
     public let id = UUID()
 
-    public init(target: PlaybackTarget, meta: PlaybackMeta, candidateId: String? = nil, startMs: Int? = nil) {
+    public init(target: PlaybackTarget, meta: PlaybackMeta, startMs: Int? = nil) {
         self.target = target
         self.meta = meta
-        self.candidateId = candidateId
         self.startMs = startMs
     }
 }
@@ -109,7 +107,7 @@ public enum Route: Hashable {
 
 public extension TitleCard {
     var route: Route { type == .movie ? .movie(tmdbId) : .show(tmdbId) }
-    var providerKinds: [ProviderKind] { available.compactMap { ProviderKind(rawValue: $0.rawValue) } }
+    var providerKinds: [ProviderKind] { available.kinds }
 
     /// For Continue Watching / Next Up cards.
     func watchRequest(restart: Bool = false) -> WatchRequest? {
@@ -122,7 +120,7 @@ public extension TitleCard {
 }
 
 public extension Array where Element == Provider {
-    var kinds: [ProviderKind] { compactMap { ProviderKind(rawValue: $0.rawValue) } }
+    var kinds: [ProviderKind] { isEmpty ? [] : [.library] }
 }
 
 /// A TV's sign-in code to approve, from a scanned QR code or typed in Settings.

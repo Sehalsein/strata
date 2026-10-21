@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// Where a title can play from. Mirrors the server's providers.
+/// Where a title can play from: the server's library.
 public enum ProviderKind: String, Hashable, Sendable {
-    case local, torbox
+    case library
 
-    public var label: String { self == .local ? "Library" : "TorBox" }
-    public var systemImage: String { self == .local ? "externaldrive.fill" : "bolt.fill" }
-    public var color: Color { self == .local ? Theme.local : Theme.torbox }
+    public var label: String { "Library" }
+    public var systemImage: String { "externaldrive.fill" }
+    public var color: Color { Theme.local }
 }
 
 /// Press/focus treatment for artwork cards: a lift with shadow on tvOS focus,
