@@ -10,9 +10,10 @@
       "class_name": "StrataDemo",
       "image": "./Dockerfile",
       "image_build_context": "../..",
-      // One small instance, never more: the cost ceiling (see README).
+      // One instance, never more: the cost ceiling (see README). "basic" (1/4 vCPU) rather than
+      // "lite" (1/16) so a cold start takes seconds, not most of a minute.
       "max_instances": 1,
-      "instance_type": "lite"
+      "instance_type": "basic"
     }
   ],
   "durable_objects": {
@@ -23,5 +24,5 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StrataDemo", "Gate"] }],
   // Cheap first filter at the edge; the strict limits are in the Gate (src/limits.ts).
-  "ratelimits": [{ "name": "EDGE_LIMIT", "namespace_id": "4101", "simple": { "limit": 40, "period": 60 } }]
+  "ratelimits": [{ "name": "EDGE_LIMIT", "namespace_id": "4101", "simple": { "limit": 80, "period": 60 } }]
 }

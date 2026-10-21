@@ -12,6 +12,8 @@ export interface Env {
   EDGE_LIMIT: RateLimit;
   /** Secret: `wrangler secret put TMDB_API_KEY`. */
   TMDB_API_KEY: string;
+  /** Secret shared with the container for restoring sign-ins: `wrangler secret put DEMO_RESTORE_KEY`. */
+  DEMO_RESTORE_KEY: string;
 }
 
 /** The demo server. One instance at most (wrangler.jsonc), asleep when idle. */
@@ -21,9 +23,11 @@ export class StrataDemo extends Container<Env> {
 
   constructor(ctx: DurableObjectState<{}>, env: Env) {
     super(ctx, env);
-    this.envVars = { TMDB_API_KEY: env.TMDB_API_KEY };
+    this.envVars = { TMDB_API_KEY: env.TMDB_API_KEY, DEMO_RESTORE_KEY: env.DEMO_RESTORE_KEY };
   }
 }
+
+const SESSION_DAYS = 30;
 
 /** How long a video request may stay open; after this it's cut and its Gate slot freed. */
 const IN_FLIGHT_EXPIRY_MS = 10 * 60_000;
@@ -75,7 +79,7 @@ export default {
     const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
     // A cheap first filter at the edge (approximate, per location), then the strict one.
     const edge = await env.EDGE_LIMIT.limit({ key: ip });
-    if (!edge.success) return json(429, "Slow down a little.", 60);
+    if (!edge.success) return json(429, "Too many requests. Wait a minute and try again.", 60);
     const gate = env.GATE.get(env.GATE.idFromName("global"));
     // Streams reserve their bytes before anything is sent (the requested range, or a whole
     // clip), so parallel requests can't overrun the budget; the real count settles it.
@@ -84,15 +88,27 @@ export default {
     const verdict = await gate.admit(kind, ip, bookedAt, reserve);
     if (!verdict.ok) return json(verdict.status, verdict.reason, verdict.retryAfter);
 
-    const forwarded = new Request(request, body !== undefined ? { body } : {});
+    const container = env.STRATA.get(env.STRATA.idFromName("demo"));
+    const send = () => container.fetch(new Request(request, body !== undefined ? { body } : {}));
     let res: Response;
     try {
-      res = await env.STRATA.get(env.STRATA.idFromName("demo")).fetch(forwarded);
+      res = await send();
+      // The container starts from scratch after sleeping, which would sign everyone out.
+      // A sign-in the Gate remembers is put back, and the request tried once more.
+      const token = bearer(request);
+      if (res.status === 401 && token) {
+        const hash = await sha256(token);
+        const session = await gate.session(hash);
+        if (session && (await restore(container, env, hash, session.profileId)).ok) res = await send();
+      }
     } catch (err) {
       if (kind === "stream") ctx.waitUntil(gate.settle(ip, reserve, 0, bookedAt, Date.now()));
       throw err;
     }
-    if (kind !== "stream") return res;
+    if (kind !== "stream") {
+      if (res.ok) ctx.waitUntil(rememberSession(gate, request, url, res.clone()));
+      return res;
+    }
     if (!res.ok || !res.body) {
       ctx.waitUntil(gate.settle(ip, reserve, 0, bookedAt, Date.now()));
       return res;
@@ -114,6 +130,39 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+/** Keeps the Gate's record of sign-ins (by token hash only) in step with the server's. */
+async function rememberSession(gate: DurableObjectStub<Gate>, request: Request, url: URL, res: Response): Promise<void> {
+  const p = url.pathname;
+  if (p === "/api/auth/login") {
+    const { token } = (await res.json().catch(() => ({}))) as { token?: string };
+    if (token) await gate.remember(await sha256(token), null);
+    return;
+  }
+  const token = bearer(request);
+  if (!token) return;
+  const select = /^\/api\/profiles\/(\d+)\/select$/.exec(p);
+  if (select) await gate.remember(await sha256(token), Number(select[1]));
+  else if (p === "/api/auth/logout") await gate.forget(await sha256(token));
+}
+
+/** Recreates a session in a freshly started container (scripts/demo/serve.ts). */
+function restore(container: DurableObjectStub<StrataDemo>, env: Env, tokenHash: string, profileId: number | null): Promise<Response> {
+  return container.fetch(
+    new Request("http://demo/__demo/restore-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Demo-Key": env.DEMO_RESTORE_KEY },
+      body: JSON.stringify({ tokenHash, profileId }),
+    }),
+  );
+}
+
+const bearer = (request: Request) => /^Bearer (.+)$/.exec(request.headers.get("Authorization") ?? "")?.[1] ?? null;
+
+async function sha256(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 type Verdict = { ok: true } | { ok: false; status: number; reason: string; retryAfter?: number };
 
 /**
@@ -132,17 +181,17 @@ export class Gate extends DurableObject<Env> {
     const minute = 60_000;
     const hour = 60 * minute;
     if (!this.hit("g:req", g.requestsPerMinute, minute, now)) return busy("The demo is busy right now. Try again in a minute.", 60);
-    if (!this.hit(`ip:${ip}:req`, v.requestsPerMinute, minute, now)) return slow(60);
+    if (!this.hit(`ip:${ip}:req`, v.requestsPerMinute, minute, now)) return slow("Too many requests. Wait a minute and try again.", 60);
 
     if (kind === "signin") {
-      if (!(await this.hitStored(`ip:${ip}:signin`, v.signInsPerHour, hour, now))) return slow(3600);
+      if (!(await this.hitStored(`ip:${ip}:signin`, v.signInsPerHour, hour, now))) return slow("Too many sign-ins from here. Try again in an hour.", 3600);
       if (!(await this.hitStored("g:signin", g.signInsPerHour, hour, now))) return busy("Too many sign-ins on the demo right now. Try again later.", 3600);
     }
 
     if (kind === "play") {
       this.forgetIdleViewers(now);
       if (!this.viewers.has(ip) && this.viewers.size >= g.concurrentViewers) return busy("The demo is at capacity. Try again in a few minutes.", 180);
-      if (!(await this.hitStored(`ip:${ip}:play`, v.playsPerHour, hour, now))) return slow(3600);
+      if (!(await this.hitStored(`ip:${ip}:play`, v.playsPerHour, hour, now))) return slow("You've played a lot on the demo this hour. Try again later.", 3600);
       const playsKey = `day:${day(now)}:plays`;
       const plays = (await this.ctx.storage.get<number>(playsKey)) ?? 0;
       if (plays >= g.playsPerDay) return busy("The demo has reached today's playback limit. Try again tomorrow.", untilTomorrow(now));
@@ -162,7 +211,7 @@ export class Gate extends DurableObject<Env> {
 
     if (kind === "stream") {
       const open = (this.inFlight.get(ip) ?? []).filter((t) => now - t < IN_FLIGHT_EXPIRY_MS);
-      if (open.length >= v.streamsInFlight) return slow(10);
+      if (open.length >= v.streamsInFlight) return slow("Slow down a little.", 10);
       this.inFlight.set(ip, [...open, now]);
       await this.spend(ip, reserve, now);
       this.viewers.set(ip, now);
@@ -170,8 +219,21 @@ export class Gate extends DurableObject<Env> {
     return { ok: true };
   }
 
-  /** A stream ended: swap its reservation for the bytes actually sent. */
-  /** The reservation is reversed in the day and month it was booked in; what was sent counts now. */
+  /** Sign-ins to restore after the container restarts, by token hash (never the token). */
+  async remember(tokenHash: string, profileId: number | null): Promise<void> {
+    await this.ctx.storage.put(`sess:${tokenHash}`, { profileId, at: Date.now() });
+    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + 60 * 60_000);
+  }
+
+  async session(tokenHash: string): Promise<{ profileId: number | null } | undefined> {
+    return this.ctx.storage.get<{ profileId: number | null; at: number }>(`sess:${tokenHash}`);
+  }
+
+  async forget(tokenHash: string): Promise<void> {
+    await this.ctx.storage.delete(`sess:${tokenHash}`);
+  }
+
+  /** A stream ended: swap its reservation for the bytes actually sent. The reservation is reversed in the day and month it was booked in; what was sent counts now. */
   async settle(ip: string, reserved: number, sent: number, bookedAt: number, now: number): Promise<void> {
     const open = [...(this.inFlight.get(ip) ?? [])];
     const mine = open.indexOf(bookedAt);
@@ -200,9 +262,14 @@ export class Gate extends DurableObject<Env> {
   async alarm(): Promise<void> {
     const now = Date.now();
     const keep = [`day:${day(now)}`, `month:${month(now)}`];
-    const all = await this.ctx.storage.list<number | number[]>();
+    const all = await this.ctx.storage.list<unknown>();
     const stale = [...all.entries()]
-      .filter(([k, v]) => (k.startsWith("win:") ? !(v as unknown as number[]).some((t) => now - t < 60 * 60_000) : !keep.some((prefix) => k.startsWith(prefix))))
+      .filter(([k, v]) => {
+        if (k.startsWith("win:")) return !(v as number[]).some((t) => now - t < 60 * 60_000);
+        // Remembered sign-ins are let go after 30 days.
+        if (k.startsWith("sess:")) return now - (v as { at: number }).at > SESSION_DAYS * 24 * 60 * 60_000;
+        return !keep.some((prefix) => k.startsWith(prefix));
+      })
       .map(([k]) => k);
     for (let i = 0; i < stale.length; i += 128) await this.ctx.storage.delete(stale.slice(i, i + 128));
   }
@@ -240,7 +307,7 @@ export class Gate extends DurableObject<Env> {
   }
 }
 
-const slow = (retryAfter: number): Verdict => ({ ok: false, status: 429, reason: "Slow down a little.", retryAfter });
+const slow = (reason: string, retryAfter: number): Verdict => ({ ok: false, status: 429, reason, retryAfter });
 const busy = (reason: string, retryAfter: number): Verdict => ({ ok: false, status: 503, reason, retryAfter });
 const day = (now: number) => new Date(now).toISOString().slice(0, 10);
 const month = (now: number) => new Date(now).toISOString().slice(0, 7);

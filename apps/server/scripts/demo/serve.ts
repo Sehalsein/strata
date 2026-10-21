@@ -9,12 +9,13 @@
 // --public (the hosted demo): sign in as "demo" / "strata-demo", a viewer-only account;
 // the admin's password is random and never shown, admin routes are refused for everyone,
 // and nothing reaches out (no TorBox, release search, updates or home-network join).
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../../src/api/app";
-import { profiles } from "../../src/db/schema";
+import { profiles, sessions, users } from "../../src/db/schema";
 import { createServices, type Services } from "../../src/services";
 
 const arg = (name: string, fallback: string) => {
@@ -111,14 +112,43 @@ await services.library.matchPending();
 const movies = services.library.recentlyAdded("movie", 20).map((m) => m.tmdbId);
 const shows = services.library.recentlyAdded("show", 20).map((s) => s.tmdbId);
 const minutes = (n: number) => n * 60_000;
-if (movies[0]) services.progress.record(alex!.id, { mediaType: "movie", tmdbId: movies[0] }, minutes(41), minutes(96));
-if (movies[2]) services.progress.record(alex!.id, { mediaType: "movie", tmdbId: movies[2] }, minutes(18), minutes(92));
-if (shows[0]) services.progress.record(alex!.id, { mediaType: "episode", tmdbId: shows[0], season: 1, episode: 7 }, minutes(11), minutes(25));
+// Positions inside the clips, which are 3 minutes long (fetch-media.ts), so resuming plays.
+if (movies[0]) services.progress.record(alex!.id, { mediaType: "movie", tmdbId: movies[0] }, minutes(1.3), minutes(3));
+if (movies[2]) services.progress.record(alex!.id, { mediaType: "movie", tmdbId: movies[2] }, minutes(0.6), minutes(3));
+// An episode the library actually has (the demo carries a few per show, not whole seasons).
+const episode = shows[0] ? services.library.filesFor("episode", shows[0]).sort((a, b) => (a.season! - b.season!) || (a.episode! - b.episode!))[0] : undefined;
+if (episode) services.progress.record(alex!.id, { mediaType: "episode", tmdbId: shows[0]!, season: episode.season!, episode: episode.episode! }, minutes(1), minutes(3));
 for (const id of movies.slice(3, 6)) services.progress.setWatchlist(alex!.id, "movie", id, true);
 if (shows[1]) services.progress.setWatchlist(alex!.id, "show", shows[1], true);
 
 const app = createApp(services);
-Bun.serve({ hostname: "0.0.0.0", port, fetch: app.fetch, idleTimeout: 120 });
+const demoUser = publicDemo ? services.db.select({ id: users.id }).from(users).where(eq(users.username, "demo")).get() : undefined;
+const restoreKey = process.env.DEMO_RESTORE_KEY ?? "";
+
+/**
+ * The hosted demo starts from scratch whenever its container wakes, which would sign
+ * everyone out. Its Worker remembers sign-ins (by token hash) and puts them back here.
+ * Only the Worker can reach this: it never forwards paths outside /api, and the key is
+ * a secret the two share.
+ */
+async function restoreSession(req: Request): Promise<Response> {
+  const key = Buffer.from(req.headers.get("X-Demo-Key") ?? "");
+  if (!demoUser || restoreKey.length < 32 || key.length !== restoreKey.length || !timingSafeEqual(key, Buffer.from(restoreKey))) {
+    return new Response("not found", { status: 404 });
+  }
+  const { tokenHash, profileId } = (await req.json()) as { tokenHash?: unknown; profileId?: unknown };
+  if (typeof tokenHash !== "string" || !/^[a-f0-9]{64}$/.test(tokenHash)) return new Response("bad request", { status: 400 });
+  const profile = typeof profileId === "number" ? services!.db.select({ id: profiles.id }).from(profiles).where(eq(profiles.id, profileId)).get() : undefined;
+  services!.db.insert(sessions).values({ tokenHash, userId: demoUser.id, profileId: profile?.id ?? null, deviceName: "Restored" }).onConflictDoNothing().run();
+  return Response.json({ ok: true });
+}
+
+Bun.serve({
+  hostname: "0.0.0.0",
+  port,
+  idleTimeout: 120,
+  fetch: (req, server) => (new URL(req.url).pathname === "/__demo/restore-session" && req.method === "POST" ? restoreSession(req) : app.fetch(req, server)),
+});
 const matched = movies.length + shows.length;
 const signIn = publicDemo ? "demo / strata-demo (viewer only)" : "Alex / demo-password";
 console.log(`Strata demo ready on port ${port} (${matched} titles; data in ${dataDir}). Sign in as ${signIn}.`);

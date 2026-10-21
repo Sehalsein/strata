@@ -11,14 +11,19 @@ as **demo / strata-demo**, a viewer-only account.
   across all of Cloudflare's locations: requests per minute, sign-ins and plays per hour,
   viewers at once, and daily and monthly bandwidth, per visitor and for the whole demo.
   Requests over a limit never wake the container.
-- **Cost:** at most one `lite` instance, asleep after 5 minutes idle (billed only while
-  awake). Worst case, awake all month: about $4.60 beyond the Workers Paid plan.
+- **Sign-ins survive sleep.** The container starts from scratch each time it wakes. The
+  Worker remembers each sign-in by its token's hash (never the token) and the profile
+  picked, and restores it in the new container on the first request that needs it.
+- **Cost:** at most one `basic` instance (1/4 vCPU, so waking takes seconds), asleep after
+  5 minutes idle and billed only while awake. Worst case, awake all month: about $20
+  beyond the Workers Paid plan.
 
 ```sh
 bun install
 bunx wrangler login                 # once
 bunx wrangler secret put TMDB_API_KEY
+bunx wrangler secret put DEMO_RESTORE_KEY   # any random 64 hex characters: openssl rand -hex 32
 bunx wrangler deploy                # builds the image with Docker and deploys
 ```
 
-Local test: put `TMDB_API_KEY=…` in `.dev.vars` (ignored by git) and run `bunx wrangler dev`.
+Local test: put `TMDB_API_KEY=…` and `DEMO_RESTORE_KEY=…` in `.dev.vars` (ignored by git) and run `bunx wrangler dev`.

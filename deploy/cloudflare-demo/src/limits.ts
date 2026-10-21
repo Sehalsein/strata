@@ -14,13 +14,16 @@ export const LIMITS = {
 
   /** Per visitor (by IP address). */
   perVisitor: {
-    requestsPerMinute: 30,
-    signInsPerHour: 5,
-    playsPerHour: 4,
+    /** Browsing fires a handful of requests per screen. */
+    requestsPerMinute: 60,
+    /** Generous enough for a few people behind one address (App Review, an office). */
+    signInsPerHour: 20,
+    /** Enough to try several titles and episodes (App Review does). */
+    playsPerHour: 10,
     /** Video requests open at once (the player fetches a few ranges in parallel). */
-    streamsInFlight: 3,
-    /** About five clips a day. */
-    bytesPerDay: 120 * 1024 * 1024,
+    streamsInFlight: 4,
+    /** About ten whole clips a day. */
+    bytesPerDay: 250 * 1024 * 1024,
   },
 
   /** The whole demo, all visitors together. */
