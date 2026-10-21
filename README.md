@@ -42,4 +42,5 @@ Anime rankings from [Kitsu](https://kitsu.app), anime details from
 
 ## License
 
-No license has been chosen yet, so all rights are reserved for now.
+[MIT](LICENSE). Vendored third-party code keeps its own license (see
+[apps/server/src/vendor/anitomy/LICENSE](apps/server/src/vendor/anitomy/LICENSE)).
