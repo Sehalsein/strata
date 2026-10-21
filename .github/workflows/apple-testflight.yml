@@ -52,9 +52,9 @@ jobs:
 
       - name: Validate TestFlight configuration
         env:
-          APPSTORE_TEAM_ID: ${{ vars.APPSTORE_TEAM_ID }}
-          APPSTORE_ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
-          APPSTORE_API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+          APPSTORE_TEAM_ID: ${{ secrets.APPSTORE_TEAM_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
           APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
           APPSTORE_CERTIFICATES_FILE_BASE64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
           APPSTORE_CERTIFICATES_PASSWORD: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
@@ -114,8 +114,8 @@ jobs:
         with:
           bundle-id: com.sehalsein.strata
           profile-type: ${{ matrix.profile_type }}
-          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
-          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
 
       - name: Download widget provisioning profile
@@ -124,8 +124,8 @@ jobs:
         with:
           bundle-id: com.sehalsein.strata.widgets
           profile-type: IOS_APP_STORE
-          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
-          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
 
       - name: Archive and export ${{ matrix.name }}
@@ -144,7 +144,7 @@ jobs:
           export-path: ${{ matrix.export_path }}
           build-number: ${{ steps.version.outputs.build_number }}
           build-settings: |
-            DEVELOPMENT_TEAM=${{ vars.APPSTORE_TEAM_ID }}
+            DEVELOPMENT_TEAM=${{ secrets.APPSTORE_TEAM_ID }}
             MARKETING_VERSION=${{ steps.version.outputs.marketing_version }}
           disable-automatic-package-resolution: false
 
@@ -153,8 +153,8 @@ jobs:
         with:
           app-path: apps/apple/${{ steps.build.outputs.ipa-path }}
           app-type: ${{ matrix.app_type }}
-          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
-          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
           wait-for-processing: "true"
 

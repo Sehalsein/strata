@@ -35,18 +35,13 @@ In App Store Connect:
 
 Open the repository's Settings -> Secrets and variables -> Actions.
 
-Add these variables:
+Add these as secrets (all six, so none of them shows up in the public workflow logs):
 
-| Variable | Value |
+| Secret | Value |
 |---|---|
 | `APPSTORE_TEAM_ID` | The 10-character Apple Developer Team ID |
 | `APPSTORE_ISSUER_ID` | The App Store Connect API Issuer ID |
 | `APPSTORE_API_KEY_ID` | The API key's Key ID |
-
-Add these secrets:
-
-| Secret | Value |
-|---|---|
 | `APPSTORE_API_PRIVATE_KEY` | The complete text of `AuthKey_<KEY_ID>.p8` |
 | `APPSTORE_CERTIFICATES_FILE_BASE64` | Base64-encoded Apple Distribution `.p12` |
 | `APPSTORE_CERTIFICATES_PASSWORD` | The `.p12` export password |
