@@ -1,4 +1,5 @@
 import type { ParsedName } from "../media/parse";
+import type { AnimeMatcher } from "./anime/match";
 import { type Tmdb, type TmdbListItem, yearOf } from "./tmdb";
 
 export interface MatchResult {
@@ -9,15 +10,31 @@ export interface MatchResult {
   posterPath: string | null;
   backdropPath: string | null;
   genreIds?: number[] | null;
+  /** TMDB numbering when it differs from the file's (anime: absolute episodes, cours). */
+  season?: number;
+  episode?: number;
 }
 
 /** Maps parsed file names to TMDB ids. Results are memoized per (kind, title, year). */
 export class Matcher {
   private memo = new Map<string, Promise<MatchResult | null>>();
 
-  constructor(private readonly tmdb: Tmdb) {}
+  constructor(
+    private readonly tmdb: Tmdb,
+    private readonly anime?: AnimeMatcher,
+  ) {}
 
-  match(parsed: ParsedName): Promise<MatchResult | null> {
+  async match(parsed: ParsedName): Promise<MatchResult | null> {
+    // Anime names go through AniList and the id list first (their titles are usually
+    // romaji and their episodes may be absolute), then fall back to a TMDB title search.
+    if (parsed.anime && this.anime) {
+      const anime = await this.anime.match(parsed).catch(() => null);
+      if (anime) return anime;
+    }
+    return this.matchTitle(parsed);
+  }
+
+  private matchTitle(parsed: ParsedName): Promise<MatchResult | null> {
     if (!parsed.title) return Promise.resolve(null);
     const type = parsed.kind === "episode" ? "show" : "movie";
     const key = `${type}|${normalize(parsed.title)}|${parsed.year ?? ""}`;
@@ -77,7 +94,7 @@ export function normalize(s: string): string {
     .trim();
 }
 
-function diceCoefficient(a: string, b: string): number {
+export function diceCoefficient(a: string, b: string): number {
   if (a.length < 2 || b.length < 2) return a === b ? 1 : 0;
   const bigrams = (s: string) => {
     const map = new Map<string, number>();

@@ -88,7 +88,7 @@ export class Library {
       try {
         const result = await this.matcher.match(parsed);
         if (result) {
-          this.applyMatch(file.id, result, parsed.season, parsed.episode, "matched");
+          this.applyMatch(file.id, result, result.season ?? parsed.season, result.episode ?? parsed.episode, "matched");
           matched++;
         } else {
           this.db.update(files).set({ matchStatus: "unmatched", updatedAt: Date.now() }).where(eq(files.id, file.id)).run();

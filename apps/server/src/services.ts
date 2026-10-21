@@ -14,6 +14,9 @@ import { detectFfmpeg, type FfmpegInfo } from "./platform/ffmpeg";
 import { KeepAwake } from "./platform/keepAwake";
 import { ProgressStore } from "./progress";
 import { ContentFilter } from "./catalog/contentRating";
+import { Anilist } from "./catalog/anime/anilist";
+import { AnimeIds } from "./catalog/anime/ids";
+import { AnimeMatcher } from "./catalog/anime/match";
 import { TorboxHousekeeping } from "./sources/torbox/cleanup";
 import { DeviceLinks } from "./deviceLink";
 import { SecretBox } from "./secrets";
@@ -82,7 +85,9 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   };
 
   const tmdb = new Tmdb(db, () => settings.getSecret("tmdbApiKey"), () => settings.get().language, fetchImpl);
-  const library = new Library(db, tmdb, new Matcher(tmdb));
+  const animeIds = new AnimeIds(join(paths.root, "cache"), fetchImpl);
+  const anilist = new Anilist(db, fetchImpl);
+  const library = new Library(db, tmdb, new Matcher(tmdb, new AnimeMatcher(anilist, animeIds, tmdb)));
   const progress = new ProgressStore(db);
   const catalog = new CatalogService(tmdb, library, progress, () => settings.get());
   const content = new ContentFilter(db, tmdb, () => settings.get());
@@ -100,6 +105,10 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     return syncTorbox(client, library, report);
   });
   jobs.register("matchPending", (report) => library.matchPending((d, t) => report(d, t, "Matching titles")));
+  jobs.register("refreshAnimeIds", async () => {
+    await animeIds.ready();
+    return { entries: animeIds.size };
+  });
   jobs.register("cleanTorbox", async () => {
     const client = torbox();
     if (!client) return { skipped: "TorBox not configured" };
@@ -147,6 +156,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     applySchedule();
     jobs.schedule("checkUpdates", 6 * 60 * MINUTE, 60_000);
     jobs.schedule("cleanTorbox", 24 * 60 * MINUTE, 10 * MINUTE);
+    jobs.schedule("refreshAnimeIds", 24 * 60 * MINUTE, 30_000);
   }
 
   const shutdown = () => {
