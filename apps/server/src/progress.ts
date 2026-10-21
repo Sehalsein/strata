@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "./db";
-import { progress, watchlist } from "./db/schema";
+import { continueHidden, progress, watchlist } from "./db/schema";
 
 export type ProgressRow = typeof progress.$inferSelect;
 
@@ -87,6 +87,23 @@ export class ProgressStore {
   }
 
   /** Partially watched items, most recent first. */
+  /** Takes a title off Continue Watching and Next Up, keeping its progress. */
+  hideFromContinue(profileId: number, type: "movie" | "show", tmdbId: number) {
+    const hiddenAt = Date.now();
+    this.db.insert(continueHidden).values({ profileId, type, tmdbId, hiddenAt }).onConflictDoUpdate({ target: [continueHidden.profileId, continueHidden.type, continueHidden.tmdbId], set: { hiddenAt } }).run();
+  }
+
+  /** Whether a progress row was hidden (and not watched since). */
+  hiddenFilter(profileId: number): (row: Pick<ProgressRow, "mediaType" | "tmdbId" | "updatedAt">) => boolean {
+    const hidden = new Map(
+      this.db.select().from(continueHidden).where(eq(continueHidden.profileId, profileId)).all().map((h) => [`${h.type}-${h.tmdbId}`, h.hiddenAt]),
+    );
+    return (row) => {
+      const at = hidden.get(`${row.mediaType === "movie" ? "movie" : "show"}-${row.tmdbId}`);
+      return at !== undefined && row.updatedAt <= at;
+    };
+  }
+
   inProgress(profileId: number, limit = 20): ProgressRow[] {
     return this.db
       .select()

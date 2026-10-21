@@ -29,6 +29,12 @@ public struct HeroBillboard<Actions: View>: View {
     }
 
     #if os(tvOS)
+    private static var backdropPixels: Int { 1920 }
+    #else
+    private static var backdropPixels: Int { 1600 }
+    #endif
+
+    #if os(tvOS)
     private let titleFont = Font.stDisplayTV
     private let overviewLines = 4
     #else
@@ -64,13 +70,9 @@ public struct HeroBillboard<Actions: View>: View {
         // aspect-fill image laid out directly would widen the page past the screen.
         return Color.clear
             .overlay {
-                AsyncImage(url: backdropURL ?? fallbackURL, transaction: Transaction(animation: .easeOut(duration: 0.3))) { phase in
-                    if case .success(let image) = phase {
-                        image.resizable().scaledToFill()
-                            .blur(radius: blurred ? 40 : 0, opaque: true)
-                    } else {
-                        StrataPlaceholder.hero(seed: id)
-                    }
+                // A blurred poster needs few pixels; a backdrop, about the screen's width.
+                RemoteImage(url: backdropURL ?? fallbackURL, maxPixel: blurred ? 320 : Self.backdropPixels, blur: blurred ? 40 : 0) {
+                    StrataPlaceholder.hero(seed: id)
                 }
             }
             .clipped()

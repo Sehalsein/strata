@@ -116,8 +116,8 @@ public final class PlayerEngine {
     private var generation = 0
     /// Media time being restarted to; the timeline isn't trusted until the new item plays.
     private var restartTarget: TimeInterval?
-    private var lastReportAt = Date.distantPast
-    private var lastReportedMs: Int?
+    @ObservationIgnored private var lastReportAt = Date.distantPast
+    @ObservationIgnored private var lastReportedMs: Int?
     /// Set once the first item became ready; before that there's no real position to report
     /// (reporting 0 would wipe the saved resume point).
     private var didStartPlayback = false
@@ -531,6 +531,10 @@ public final class PlayerEngine {
 
     // MARK: - Progress
 
+    @ObservationIgnored private var reportChain: Task<Void, Never>?
+    @ObservationIgnored private var nowPlayingAt = Date.distantPast
+    @ObservationIgnored private var nowPlayingRate: Float = -1
+
     private func reportProgress(force: Bool) {
         guard let client, let target, let session, didStartPlayback else { return }
         let ms = timeline.ms(restartTarget ?? position)
@@ -540,7 +544,10 @@ public final class PlayerEngine {
         lastReportedMs = ms
         let durationMs = session.durationMs
         let sessionId = session.sessionId
-        Task.detached {
+        // In order: a slow earlier report must never land after (and overwrite) a later one.
+        let previous = reportChain
+        reportChain = Task.detached {
+            await previous?.value
             do {
                 try await client.reportProgress(target, positionMs: ms, durationMs: durationMs, sessionId: sessionId)
             } catch {
@@ -561,7 +568,14 @@ public final class PlayerEngine {
             MainActor.assumeIsolated {
                 guard let self, self.restartTarget == nil, self.session != nil else { return }
                 self.position = self.timeline.mediaTime(streamTime: time.seconds)
-                self.nowPlaying?.update(meta: self.meta, position: self.position, duration: self.duration, rate: self.player.rate)
+                // The system runs the lock-screen clock from the rate; a refresh every few
+                // seconds (or on a rate change) is plenty, not four times a second.
+                let rate = self.player.rate
+                if rate != self.nowPlayingRate || Date().timeIntervalSince(self.nowPlayingAt) >= 5 {
+                    self.nowPlayingRate = rate
+                    self.nowPlayingAt = Date()
+                    self.nowPlaying?.update(meta: self.meta, position: self.position, duration: self.duration, rate: rate)
+                }
                 if self.status == .playing { self.reportProgress(force: false) }
             }
         }

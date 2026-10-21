@@ -124,6 +124,18 @@ export const progress = sqliteTable(
   (t) => [primaryKey({ columns: [t.profileId, t.mediaType, t.tmdbId, t.season, t.episode] })],
 );
 
+/** Titles taken off Continue Watching / Next Up; they come back when watched again. */
+export const continueHidden = sqliteTable(
+  "continue_hidden",
+  {
+    profileId: integer("profile_id").notNull().references(() => profiles.id, { onDelete: "cascade" }),
+    type: text("type").$type<"movie" | "show">().notNull(),
+    tmdbId: integer("tmdb_id").notNull(),
+    hiddenAt: integer("hidden_at").notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.profileId, t.type, t.tmdbId] })],
+);
+
 export const watchlist = sqliteTable(
   "watchlist",
   {

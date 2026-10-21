@@ -112,6 +112,7 @@ public final class ServerStore {
     private static let serversKey = "strata.servers"
     private static let activeKey = "strata.activeServer"
     private static let legacyCleanupKey = "strata.legacyCleanup.v1"
+    private static let keychainMigrationKey = "strata.keychainOnly.v1"
 
     public init(defaults: UserDefaults = .standard, tokens: TokenStorage = .keychain, session: URLSession = StrataNetworking.apiSession) {
         self.defaults = defaults
@@ -123,9 +124,13 @@ public final class ServerStore {
             // A server whose token is gone can't be used; drop it.
             servers = saved.filter { !$0.addresses.isEmpty && tokens.read($0.id) != nil }
         }
-        // Re-save each token so one stored before the Keychain-only change loses its
+        // Re-save each token once so one stored before the Keychain-only change loses its
         // plaintext UserDefaults copy (the write clears it once the Keychain holds the token).
-        for server in servers { if let token = tokens.read(server.id) { tokens.write(token, server.id) } }
+        // Not on every launch: each re-save is a Keychain delete and add on the main thread.
+        if !defaults.bool(forKey: Self.keychainMigrationKey) {
+            for server in servers { if let token = tokens.read(server.id) { tokens.write(token, server.id) } }
+            defaults.set(true, forKey: Self.keychainMigrationKey)
+        }
         activeID = defaults.string(forKey: Self.activeKey).flatMap { id in servers.contains { $0.id == id } ? id : nil } ?? servers.first?.id
         rebuildClient()
         Log.auth.info("ServerStore hydrated: \(self.servers.count, privacy: .public) server(s), active=\(self.activeID ?? "none", privacy: .public)")

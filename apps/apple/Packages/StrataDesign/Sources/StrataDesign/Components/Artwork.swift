@@ -21,12 +21,9 @@ public struct ArtworkImage: View {
         Color.clear
             .aspectRatio(aspectRatio, contentMode: .fit)
             .overlay {
-                AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
-                    if case .success(let image) = phase {
-                        image.resizable().scaledToFill()
-                    } else {
-                        StrataPlaceholder(seed: seed, title: title)
-                    }
+                // Shrunk to about what a card shows: a poster or a 16:9 still.
+                RemoteImage(url: url, maxPixel: aspectRatio < 1 ? 600 : 960) {
+                    StrataPlaceholder(seed: seed, title: title)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))

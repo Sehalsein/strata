@@ -114,9 +114,10 @@ struct ShelfRail: View {
                         Button { if let r = card.watchRequest(restart: true) { services.play(r) } } label: { Label("Play from Beginning", systemImage: "arrow.counterclockwise") }
                         if let target = card.watchRequest()?.target {
                             Button { setWatched(target, true) } label: { Label("Mark as Watched", systemImage: "checkmark.circle") }
-                            if shelf.id == "continue" {
-                                Button(role: .destructive) { setWatched(target, false) } label: { Label("Remove from Continue Watching", systemImage: "minus.circle") }
-                            }
+                        }
+                        // Off the rail until it's watched again; progress is kept.
+                        Button(role: .destructive) { hide(card) } label: {
+                            Label(shelf.id == "nextUp" ? "Remove from Next Up" : "Remove from Continue Watching", systemImage: "minus.circle")
                         }
                     }
                 } else {
@@ -133,7 +134,14 @@ struct ShelfRail: View {
         }
     }
 
-    /// Watched marks the item done; unwatched clears its progress, so either way it leaves the rail.
+    private func hide(_ card: TitleCard) {
+        Task {
+            _ = await services.load { try await $0.hideFromContinue(card.type, tmdbId: card.tmdbId) }
+            await services.progressChanged()
+        }
+    }
+
+    /// Watched marks the item done, so it leaves the rail.
     private func setWatched(_ target: PlaybackTarget, _ watched: Bool) {
         Task {
             _ = await services.load { try await $0.setWatched(target, watched) }
@@ -178,6 +186,10 @@ struct HeroCarousel: View {
     @Environment(AppServices.self) private var services
     let cards: [TitleCard]
     @State private var index = 0
+    /// Only moves on while it's on screen and the app is active (Home stays alive under
+    /// other tabs and pushed pages).
+    @State private var visible = false
+    @Environment(\.scenePhase) private var scenePhase
     #if os(tvOS)
     @FocusState private var focus: HeroButton?
     enum HeroButton: Hashable { case play, info }
@@ -185,11 +197,35 @@ struct HeroCarousel: View {
 
     private static let interval: Double = 8
 
+    private struct AdvanceKey: Equatable {
+        let index: Int
+        let running: Bool
+    }
+
+    private var running: Bool {
+        #if os(tvOS)
+        // Not while someone's on Play or More Info: the title would change under them.
+        visible && scenePhase == .active && focus == nil
+        #else
+        visible && scenePhase == .active
+        #endif
+    }
+
     var body: some View {
-        content
-            .overlay(alignment: .bottom) { dots }
+        // On the TV the dots sit over the art; on iPhone and iPad, in their own row under
+        // the buttons, with room to breathe.
+        #if os(tvOS)
+        let stack = content.overlay(alignment: .bottom) { dots }
+        #else
+        let stack = VStack(spacing: Metrics.space5) { content; dots }
+        #endif
+        stack
+            .onChange(of: cards.count) { if index >= cards.count { index = 0 } }
+            .onAppear { visible = true }
+            .onDisappear { visible = false }
             // Restarts on every change, manual or not, so a swipe gets a full interval.
-            .task(id: index) {
+            .task(id: AdvanceKey(index: index, running: running)) {
+                guard running else { return }
                 try? await Task.sleep(for: .seconds(Self.interval))
                 guard !Task.isCancelled, cards.count > 1 else { return }
                 withAnimation(.easeInOut(duration: 0.6)) { index = (index + 1) % cards.count }
@@ -220,7 +256,8 @@ struct HeroCarousel: View {
     #elseif os(iOS)
     private var content: some View {
         TabView(selection: $index) {
-            ForEach(Array(cards.enumerated()), id: \.offset) { i, card in
+            // Identity follows the title, so a reload doesn't rebuild every page.
+            ForEach(Array(cards.enumerated()), id: \.element.id) { i, card in
                 hero(card).tag(i)
             }
         }
@@ -268,8 +305,6 @@ struct HeroCarousel: View {
             .animation(.easeInOut(duration: 0.3), value: index)
             #if os(tvOS)
             .padding(.bottom, Metrics.space8)
-            #else
-            .padding(.bottom, -Metrics.space4)
             #endif
             .accessibilityElement()
             .accessibilityLabel("Featured \(index + 1) of \(cards.count)")

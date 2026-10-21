@@ -13,7 +13,7 @@ struct BrowseView: View {
     @State private var genre: Genre?
     @State private var genreShelves: Loadable<[Shelf]> = .loading
 
-    private let order: [BrowseList] = [.library, .trending, .popular, .topRated]
+    private let order: [BrowseList] = [.trending, .popular, .topRated]
     private var title: String { type == .movie ? "Movies" : "Shows" }
 
     var body: some View {

@@ -223,6 +223,13 @@ public final class StrataClient: Sendable {
         await cache.clear()
     }
 
+    /// Takes a title off Continue Watching and Next Up (until it's watched again); its
+    /// progress is kept.
+    public func hideFromContinue(_ type: TitleType, tmdbId: Int) async throws {
+        let _: OKResponse = try await send("DELETE", "/api/continue/\(type.rawValue)/\(tmdbId)")
+        await cache.clear()
+    }
+
     public func setWatchlist(_ type: TitleType, tmdbId: Int, _ on: Bool) async throws {
         let _: OKResponse = try await send("PUT", "/api/watchlist", body: WatchlistBody(type: type, tmdbId: tmdbId, on: on))
         await cache.clear()
@@ -275,10 +282,18 @@ public final class StrataClient: Sendable {
         if cached, let hit = await cache.get(key) {
             return try decode(T.self, from: hit)
         }
-        let (data, _) = try await perform(req)
-        let value = try decode(T.self, from: data)
-        if cached { await cache.set(key, data) }
-        return value
+        guard cached else { return try decode(T.self, from: try await perform(req).0) }
+        // Screens appearing together often ask for the same thing: share one request.
+        let task = await cache.shared(key) { try await self.perform(req).0 }
+        let data: Data
+        do {
+            data = try await task.value
+        } catch {
+            await cache.finished(key, task, data: nil)
+            throw error
+        }
+        await cache.finished(key, task, data: data)
+        return try decode(T.self, from: data)
     }
 
     private func send<T: Decodable>(_ method: String, _ path: String) async throws -> T {
@@ -422,7 +437,27 @@ actor ResponseCache {
         entries[key] = (Date(), data)
     }
 
-    func clear() { entries.removeAll() }
+    func clear() {
+        entries.removeAll()
+        running.removeAll()
+    }
+
+    private var running: [String: Task<Data, Error>] = [:]
+
+    /// The request already on its way for `key`, or a new one.
+    func shared(_ key: String, _ work: @escaping @Sendable () async throws -> Data) -> Task<Data, Error> {
+        if let task = running[key] { return task }
+        let task = Task { try await work() }
+        running[key] = task
+        return task
+    }
+
+    /// Forgets the request (if it's still the current one) and stores its answer.
+    func finished(_ key: String, _ task: Task<Data, Error>, data: Data?) {
+        guard running[key] == task else { return }
+        running[key] = nil
+        if let data { set(key, data) }
+    }
 }
 
 /// Drops the bearer token when a redirect leaves the server's origin, so a

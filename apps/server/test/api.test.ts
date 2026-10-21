@@ -236,6 +236,19 @@ describe("playback", () => {
     expect((await res.arrayBuffer()).byteLength).toBe(100);
   });
 
+  test("Continue Watching: removing a title hides it until it's watched again", async () => {
+    const watch = (positionMs: number) => server.request("/api/progress", { method: "POST", token, json: { mediaType: "movie", tmdbId: 666, positionMs, durationMs: 3_600_000 } });
+    const continuing = async () => ((await json(await server.request("/api/home", { token }))).shelves.find((s: any) => s.id === "continue")?.items ?? []).map((c: any) => c.tmdbId);
+    await watch(600_000);
+    expect(await continuing()).toContain(666);
+    expect((await server.request("/api/continue/movie/666", { method: "DELETE", token })).status).toBe(200);
+    expect(await continuing()).not.toContain(666);
+    await Bun.sleep(5);
+    await watch(700_000); // watched again: back, with its progress
+    expect(await continuing()).toContain(666);
+    expect((await server.request("/api/continue/album/1", { method: "DELETE", token })).status).toBe(400);
+  });
+
   test("mkv remuxes to HLS from the resume point", async () => {
     await server.request("/api/progress", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, positionMs: 90_000, durationMs: 3_600_000 } });
     const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378 } }));

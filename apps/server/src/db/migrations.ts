@@ -106,4 +106,13 @@ export const migrations: string[] = [
   ALTER TABLE profiles ADD COLUMN content_limit TEXT NOT NULL DEFAULT 'none';
   ALTER TABLE profiles ADD COLUMN is_kids INTEGER NOT NULL DEFAULT 0;
   `,
+  /* 7 */ `
+  CREATE TABLE continue_hidden (
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    tmdb_id INTEGER NOT NULL,
+    hidden_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    PRIMARY KEY (profile_id, type, tmdb_id)
+  );
+  `,
 ];

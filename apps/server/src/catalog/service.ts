@@ -467,7 +467,8 @@ export class CatalogService {
   }
 
   private async continueWatching(profileId: number): Promise<ContinueCard[]> {
-    const rows = this.progress.inProgress(profileId);
+    const hidden = this.progress.hiddenFilter(profileId);
+    const rows = this.progress.inProgress(profileId).filter((r) => !hidden(r));
     const cards = await Promise.all(rows.map((row) => this.continueCard(row).catch(() => null)));
     return cards.filter((c): c is ContinueCard => c !== null);
   }
@@ -490,7 +491,8 @@ export class CatalogService {
 
   private async nextUp(profileId: number): Promise<ContinueCard[]> {
     const inProgressShows = new Set(this.progress.inProgress(profileId, 100).filter((r) => r.mediaType === "episode").map((r) => r.tmdbId));
-    const latest = this.progress.recentlyCompletedEpisodes(profileId).filter((r) => !inProgressShows.has(r.tmdbId));
+    const hidden = this.progress.hiddenFilter(profileId);
+    const latest = this.progress.recentlyCompletedEpisodes(profileId).filter((r) => !inProgressShows.has(r.tmdbId) && !hidden(r));
     const cards = await Promise.all(
       latest.map(async (row) => {
         try {

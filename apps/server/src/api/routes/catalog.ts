@@ -137,6 +137,13 @@ export const catalogRoutes = new Hono<Env>()
     return c.json({ ok: true });
   })
 
+  // Off Continue Watching / Next Up until it's watched again; progress is kept.
+  .delete("/continue/:type/:tmdbId", (c) => {
+    const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
+    c.var.services.progress.hideFromContinue(profileOf(c), type, intParam(c, "tmdbId"));
+    return c.json({ ok: true });
+  })
+
   .put("/watchlist", async (c) => {
     const input = await body(c, z.object({ type: z.enum(["movie", "show"]), tmdbId: z.number().int(), on: z.boolean() }));
     c.var.services.progress.setWatchlist(profileOf(c), input.type, input.tmdbId, input.on);
