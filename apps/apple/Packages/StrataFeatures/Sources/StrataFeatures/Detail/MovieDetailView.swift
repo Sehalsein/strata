@@ -92,10 +92,13 @@ struct MovieDetailView: View {
             }
 
             InfoGrid(rows: [
+                ("Original title", movie.anime?.originalTitle ?? ""),
+                ("Studio", movie.anime?.studios.joined(separator: ", ") ?? ""),
                 ("Directed by", movie.directors.joined(separator: ", ")),
                 ("Genres", movie.genres.joined(separator: ", ")),
                 ("Released", Formatting.date(movie.releaseDate)?.formatted(date: .abbreviated, time: .omitted) ?? ""),
                 ("Rating", movie.ratingText.map { "\($0) / 10" } ?? ""),
+                ("AniList score", movie.anime?.scoreText ?? ""),
             ])
         }
         .padding(.bottom, Metrics.space12)

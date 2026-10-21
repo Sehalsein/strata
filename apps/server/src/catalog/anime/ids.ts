@@ -7,6 +7,7 @@ const log = logger("anime");
 /** Fribb/anime-lists: AniList/Kitsu/MAL/AniDB ids mapped to TMDB, refreshed daily. */
 export const ANIME_LIST_URL = "https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json";
 const MAX_AGE_MS = 24 * 60 * 60_000;
+const RETRY_MS = 15 * 60_000;
 
 /** One anime entry (a season or cour on AniList/Kitsu) and where it sits on TMDB. */
 export interface AnimeEntry {
@@ -83,19 +84,23 @@ export class AnimeIds {
     this.byKitsu.clear();
     this.byTv.clear();
     this.byMovie.clear();
+    // Downloaded data: only whole numbers in range go into TMDB paths and episode math.
+    const id = (v: unknown) => (Number.isInteger(v) && (v as number) > 0 && (v as number) < 1e9 ? (v as number) : undefined);
+    const count = (v: unknown) => (Number.isInteger(v) && (v as number) >= 0 && (v as number) < 10_000 ? (v as number) : undefined);
     for (const r of raw) {
-      const tmdb = typeof r.themoviedb_id === "number" ? { tv: r.themoviedb_id } : (r.themoviedb_id ?? {});
+      if (!r || typeof r !== "object") continue;
+      const tmdb = typeof r.themoviedb_id === "number" ? { tv: r.themoviedb_id } : r.themoviedb_id && typeof r.themoviedb_id === "object" ? r.themoviedb_id : {};
       const entry: AnimeEntry = {
-        anilistId: r.anilist_id,
-        kitsuId: r.kitsu_id,
-        malId: r.mal_id,
-        anidbId: r.anidb_id,
-        type: r.type,
-        tmdbTv: tmdb.tv,
-        tmdbMovie: tmdb.movie,
-        tmdbSeason: r.season?.tmdb,
-        tvdbSeason: r.season?.tvdb,
-        tmdbOffset: r.episode_offset?.tmdb ?? 0,
+        anilistId: id(r.anilist_id),
+        kitsuId: id(r.kitsu_id),
+        malId: id(r.mal_id),
+        anidbId: id(r.anidb_id),
+        type: typeof r.type === "string" ? r.type : undefined,
+        tmdbTv: id(tmdb.tv),
+        tmdbMovie: id(tmdb.movie),
+        tmdbSeason: count(r.season?.tmdb),
+        tvdbSeason: count(r.season?.tvdb),
+        tmdbOffset: count(r.episode_offset?.tmdb) ?? 0,
       };
       if (entry.anilistId) this.byAnilist.set(entry.anilistId, entry);
       if (entry.kitsuId) this.byKitsu.set(entry.kitsuId, entry);
@@ -118,9 +123,13 @@ export class AnimeIds {
       try {
         await this.download(file);
       } catch (err) {
-        // Keep working from an older copy when GitHub is unreachable.
+        // Keep working from an older copy when GitHub is unreachable; without one, try
+        // again in 15 minutes rather than on every lookup.
         log.warn("Couldn't refresh the anime id list", err);
-        if (!existsSync(file)) return;
+        if (!existsSync(file)) {
+          this.loadedAt = Date.now() - MAX_AGE_MS + RETRY_MS;
+          return;
+        }
       }
     }
     try {

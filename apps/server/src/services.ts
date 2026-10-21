@@ -89,7 +89,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   const anilist = new Anilist(db, fetchImpl);
   const library = new Library(db, tmdb, new Matcher(tmdb, new AnimeMatcher(anilist, animeIds, tmdb)));
   const progress = new ProgressStore(db);
-  const catalog = new CatalogService(tmdb, library, progress, () => settings.get());
+  const catalog = new CatalogService(tmdb, library, progress, () => settings.get(), { ids: animeIds, anilist });
   const content = new ContentFilter(db, tmdb, () => settings.get());
   const sessions = new SessionManager(paths.transcode, ffmpeg, new KeepAwake(), () => settings.get().maxTranscodes, () => settings.get().hardwareAcceleration);
   const subtitles = new SubtitleService(join(paths.root, "cache", "subtitles"), ffmpeg);

@@ -5,6 +5,8 @@ import type { Settings } from "../settings";
 import { findCandidates, type Candidate } from "../sources/resolver";
 import { imageUrl, yearOf, type Tmdb, type TmdbCredits, type TmdbListItem, type TmdbMovie, type TmdbShow } from "./tmdb";
 import { logger } from "../log";
+import type { Anilist } from "./anime/anilist";
+import type { AnimeIds } from "./anime/ids";
 
 const log = logger("catalog");
 
@@ -63,7 +65,38 @@ export class CatalogService {
     private readonly library: Library,
     private readonly progress: ProgressStore,
     private readonly settings: () => Settings,
+    private readonly anime?: { ids: AnimeIds; anilist: Anilist },
   ) {}
+
+  /**
+   * AniList details for an anime title (romaji/Japanese titles, studio, score, next
+   * airing), or null. Waits at most 1.5s: AniList is slow to call uncached, and the page
+   * shouldn't wait on it; the answer is cached for next time.
+   */
+  private animeInfo(type: TitleType, tmdbId: number) {
+    return Promise.race([this.animeInfoUncapped(type, tmdbId), Bun.sleep(1_500).then(() => null)]);
+  }
+
+  private async animeInfoUncapped(type: TitleType, tmdbId: number) {
+    if (!this.anime) return null;
+    const { ids, anilist } = this.anime;
+    await ids.ready();
+    const entries = type === "movie" ? [ids.movie(tmdbId)].filter((e) => !!e) : ids.show(tmdbId);
+    const first = entries.find((e) => e.anilistId);
+    if (!first) return null;
+    const latest = [...entries].reverse().find((e) => e.anilistId) ?? first;
+    const [media, newest] = await Promise.all([anilist.media(first.anilistId!), latest === first ? null : anilist.media(latest.anilistId!)]);
+    if (!media) return null;
+    const airing = (newest ?? media).nextAiringEpisode;
+    return {
+      anilistId: media.id,
+      romaji: media.title.romaji ?? null,
+      native: media.title.native ?? null,
+      studios: media.studios?.nodes.filter((s) => s.isAnimationStudio).map((s) => s.name) ?? [],
+      score: media.averageScore ?? null,
+      nextEpisode: airing ? { episode: airing.episode, airsAt: airing.airingAt * 1000 } : null,
+    };
+  }
 
   async home(profileId: number): Promise<Shelf[]> {
     const shelves: Shelf[] = [];
@@ -202,6 +235,7 @@ export class CatalogService {
       sources,
       progress: progressDto(this.progress.get(profileId, { mediaType: "movie", tmdbId: id })),
       inWatchlist: this.progress.inWatchlist(profileId, "movie", id),
+      anime: await this.animeInfo("movie", id).catch(() => null),
     };
   }
 
@@ -242,6 +276,7 @@ export class CatalogService {
       /** Where the Play button should go: an in-progress episode, else the next unwatched one. */
       upNext: await this.showUpNext(s, watched),
       inWatchlist: this.progress.inWatchlist(profileId, "show", id),
+      anime: await this.animeInfo("show", id).catch(() => null),
     };
   }
 

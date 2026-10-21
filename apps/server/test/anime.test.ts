@@ -96,3 +96,14 @@ describe("Torrentio anime ids", () => {
     expect(relevant(release("[SubsPlease] Sousou no Frieren - 02 (1080p)", false), target)).toBe(false);
   });
 });
+
+test("malformed entries in the downloaded list are ignored, not trusted", () => {
+  const map = new AnimeIds("/nonexistent");
+  map.index([
+    { anilist_id: 1, themoviedb_id: { tv: "../movie/1" as unknown as number }, season: { tmdb: -3 }, episode_offset: { tmdb: 1.5 } },
+    { anilist_id: 2, themoviedb_id: { tv: 42 }, season: { tvdb: 1, tmdb: 1 } },
+    null as unknown as object,
+  ]);
+  expect(map.anilist(1)).toMatchObject({ tmdbTv: undefined, tmdbSeason: undefined, tmdbOffset: 0 });
+  expect(map.show(42)[0]?.anilistId).toBe(2);
+});

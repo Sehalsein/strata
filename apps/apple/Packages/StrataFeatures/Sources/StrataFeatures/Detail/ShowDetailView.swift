@@ -88,10 +88,14 @@ struct ShowDetailView: View {
             }
 
             InfoGrid(rows: [
+                ("Original title", show.anime?.originalTitle ?? ""),
+                ("Studio", show.anime?.studios.joined(separator: ", ") ?? ""),
                 ("Status", show.status ?? ""),
                 ("Genres", show.genres.joined(separator: ", ")),
                 ("First aired", Formatting.date(show.firstAirDate)?.formatted(date: .abbreviated, time: .omitted) ?? ""),
                 ("Rating", show.ratingText.map { "\($0) / 10" } ?? ""),
+                ("AniList score", show.anime?.scoreText ?? ""),
+                ("Next episode", show.anime?.nextEpisodeText ?? ""),
             ])
         }
         .padding(.bottom, Metrics.space12)

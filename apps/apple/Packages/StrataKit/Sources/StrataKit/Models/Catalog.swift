@@ -165,6 +165,40 @@ public struct Trailer: Codable, Sendable, Hashable {
     public var youtubeURL: URL? { site == "youtube" ? URL(string: "https://www.youtube.com/watch?v=\(key)") : nil }
 }
 
+/// AniList details for an anime title. Absent for everything else (and older servers).
+public struct AnimeInfo: Codable, Sendable, Hashable {
+    public var anilistId: Int
+    public var romaji: String?
+    public var native: String?
+    public var studios: [String]
+    /// 0–100.
+    public var score: Int?
+    public var nextEpisode: NextEpisode?
+
+    public struct NextEpisode: Codable, Sendable, Hashable {
+        public var episode: Int
+        /// Milliseconds since 1970.
+        public var airsAt: Double
+        public var date: Date { Date(timeIntervalSince1970: airsAt / 1000) }
+    }
+
+    /// "葬送のフリーレン (Sousou no Frieren)".
+    public var originalTitle: String? {
+        switch (native, romaji) {
+        case let (n?, r?) where n != r: "\(n) (\(r))"
+        case let (n?, _): n
+        case let (_, r?): r
+        default: nil
+        }
+    }
+
+    public var scoreText: String? { score.map { "\($0)%" } }
+
+    public var nextEpisodeText: String? {
+        nextEpisode.map { "Episode \($0.episode) · \($0.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))" }
+    }
+}
+
 /// A trailer or extra (YouTube), for the "Trailers & Extras" rail.
 public struct TitleVideo: Codable, Sendable, Hashable, Identifiable {
     public var key: String
@@ -217,6 +251,8 @@ public struct MovieDetail: Codable, Sendable, Hashable, Identifiable {
     public var trailer: Trailer?
     /// Absent from older servers.
     public var videos: [TitleVideo]?
+    /// AniList details when this is anime.
+    public var anime: AnimeInfo?
     public var collection: CollectionRef?
     public var recommendations: [TitleCard]
     public var available: [Provider]
@@ -282,6 +318,8 @@ public struct ShowDetail: Codable, Sendable, Hashable, Identifiable {
     public var trailer: Trailer?
     /// Absent from older servers.
     public var videos: [TitleVideo]?
+    /// AniList details when this is anime.
+    public var anime: AnimeInfo?
     public var seasons: [SeasonSummary]
     public var recommendations: [TitleCard]
     public var available: [Provider]

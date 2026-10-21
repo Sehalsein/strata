@@ -6,6 +6,11 @@ import { logger } from "../log";
 const log = logger("tmdb");
 const BASE = "https://api.themoviedb.org/3";
 const HOUR = 3_600_000;
+
+/** Ids go into request paths: whole numbers only (season 0 = specials is allowed). */
+function assertTmdbId(id: number, zeroOk = false) {
+  if (!Number.isInteger(id) || id < (zeroOk ? 0 : 1)) throw new TmdbError("That title isn't in the catalog.", 404);
+}
 const DAY = 24 * HOUR;
 
 export class TmdbError extends Error {
@@ -147,12 +152,16 @@ export class Tmdb {
   }
 
   movie(id: number) {
+    assertTmdbId(id);
     return this.get<TmdbMovie>(`/movie/${id}`, { append_to_response: "credits,recommendations,release_dates,external_ids,videos" }, 3 * DAY);
   }
   show(id: number) {
+    assertTmdbId(id);
     return this.get<TmdbShow>(`/tv/${id}`, { append_to_response: "credits,recommendations,content_ratings,external_ids,videos" }, DAY);
   }
   season(showId: number, season: number) {
+    assertTmdbId(showId);
+    assertTmdbId(season, true);
     return this.get<TmdbSeason>(`/tv/${showId}/season/${season}`, {}, DAY);
   }
   searchMovie(query: string, year?: number) {
