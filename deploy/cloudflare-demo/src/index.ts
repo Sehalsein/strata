@@ -25,6 +25,9 @@ export class StrataDemo extends Container<Env> {
   }
 }
 
+/** A video request still open after this is treated as gone (its settle never arrived). */
+const IN_FLIGHT_EXPIRY_MS = 10 * 60_000;
+
 type Kind = "api" | "signin" | "play" | "stream";
 
 /** What the demo answers, and how each request counts. Everything else is refused. */
@@ -77,7 +80,8 @@ export default {
     // Streams reserve their bytes before anything is sent (the requested range, or a whole
     // clip), so parallel requests can't overrun the budget; the real count settles it.
     const reserve = kind === "stream" ? rangeLength(request.headers.get("Range")) ?? LIMITS.maxClipBytes : 0;
-    const verdict = await gate.admit(kind, ip, Date.now(), reserve);
+    const bookedAt = Date.now();
+    const verdict = await gate.admit(kind, ip, bookedAt, reserve);
     if (!verdict.ok) return json(verdict.status, verdict.reason, verdict.retryAfter);
 
     const forwarded = new Request(request, body !== undefined ? { body } : {});
@@ -85,12 +89,12 @@ export default {
     try {
       res = await env.STRATA.get(env.STRATA.idFromName("demo")).fetch(forwarded);
     } catch (err) {
-      if (kind === "stream") ctx.waitUntil(gate.settle(ip, reserve, 0, Date.now()));
+      if (kind === "stream") ctx.waitUntil(gate.settle(ip, reserve, 0, bookedAt, Date.now()));
       throw err;
     }
     if (kind !== "stream") return res;
     if (!res.ok || !res.body) {
-      ctx.waitUntil(gate.settle(ip, reserve, 0, Date.now()));
+      ctx.waitUntil(gate.settle(ip, reserve, 0, bookedAt, Date.now()));
       return res;
     }
     // Count what actually goes out, and settle when the response ends (or is cut off).
@@ -101,7 +105,7 @@ export default {
         controller.enqueue(chunk);
       },
     });
-    ctx.waitUntil(res.body.pipeTo(counter.writable).catch(() => {}).finally(() => gate.settle(ip, reserve, sent, Date.now())));
+    ctx.waitUntil(res.body.pipeTo(counter.writable).catch(() => {}).finally(() => gate.settle(ip, reserve, sent, bookedAt, Date.now())));
     return new Response(counter.readable, res);
   },
 } satisfies ExportedHandler<Env>;
@@ -116,7 +120,8 @@ type Verdict = { ok: true } | { ok: false; status: number; reason: string; retry
 export class Gate extends DurableObject<Env> {
   private windows = new Map<string, number[]>();
   private viewers = new Map<string, number>();
-  private inFlight = new Map<string, number>();
+  /** Start times of each visitor's open video requests; a stale one (its settle lost) expires. */
+  private inFlight = new Map<string, number[]>();
 
   async admit(kind: Kind, ip: string, now: number, reserve = 0): Promise<Verdict> {
     const { perVisitor: v, global: g } = LIMITS;
@@ -152,9 +157,9 @@ export class Gate extends DurableObject<Env> {
     }
 
     if (kind === "stream") {
-      const open = this.inFlight.get(ip) ?? 0;
-      if (open >= v.streamsInFlight) return slow(10);
-      this.inFlight.set(ip, open + 1);
+      const open = (this.inFlight.get(ip) ?? []).filter((t) => now - t < IN_FLIGHT_EXPIRY_MS);
+      if (open.length >= v.streamsInFlight) return slow(10);
+      this.inFlight.set(ip, [...open, now]);
       await this.spend(ip, reserve, now);
       this.viewers.set(ip, now);
     }
@@ -162,11 +167,18 @@ export class Gate extends DurableObject<Env> {
   }
 
   /** A stream ended: swap its reservation for the bytes actually sent. */
-  async settle(ip: string, reserved: number, sent: number, now: number): Promise<void> {
-    const open = (this.inFlight.get(ip) ?? 1) - 1;
-    if (open > 0) this.inFlight.set(ip, open);
+  /** The reservation is reversed in the day and month it was booked in; what was sent counts now. */
+  async settle(ip: string, reserved: number, sent: number, bookedAt: number, now: number): Promise<void> {
+    const open = [...(this.inFlight.get(ip) ?? [])];
+    const mine = open.indexOf(bookedAt);
+    if (mine >= 0) open.splice(mine, 1);
+    if (open.length > 0) this.inFlight.set(ip, open);
     else this.inFlight.delete(ip);
-    await this.spend(ip, sent - reserved, now);
+    if (day(bookedAt) === day(now)) await this.spend(ip, sent - reserved, now);
+    else {
+      await this.spend(ip, -reserved, bookedAt);
+      await this.spend(ip, sent, now);
+    }
   }
 
   /** Adds (or, settling a reservation, takes back) bytes on the visitor's and the demo's budgets. */
@@ -175,7 +187,7 @@ export class Gate extends DurableObject<Env> {
     const keys = [`day:${day(now)}:bytes:${ip}`, `day:${day(now)}:bytes`, `month:${month(now)}:bytes`];
     const values = await this.ctx.storage.get<number>(keys);
     const next: Record<string, number> = {};
-    for (const key of keys) next[key] = Math.max(0, (values.get(key) ?? 0) + bytes);
+    for (const key of keys) next[key] = (values.get(key) ?? 0) + bytes;
     await this.ctx.storage.put(next);
     // Old daily and monthly counters aren't needed once their period is over: sweep daily.
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(now + 24 * 60 * 60_000);
@@ -220,6 +232,7 @@ export class Gate extends DurableObject<Env> {
 
   private forgetIdleViewers(now: number) {
     for (const [ip, at] of this.viewers) if (now - at > 3 * 60_000) this.viewers.delete(ip);
+    for (const [ip, starts] of this.inFlight) if (starts.every((t) => now - t >= IN_FLIGHT_EXPIRY_MS)) this.inFlight.delete(ip);
   }
 }
 
