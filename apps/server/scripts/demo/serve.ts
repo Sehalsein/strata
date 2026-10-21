@@ -16,6 +16,8 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../../src/api/app";
 import { profiles, sessions, users } from "../../src/db/schema";
+import type { Shelf, TitleCard } from "../../src/catalog/service";
+import { imageUrl, type TmdbListItem } from "../../src/catalog/tmdb";
 import { createServices, type Services } from "../../src/services";
 
 const arg = (name: string, fallback: string) => {
@@ -42,6 +44,7 @@ async function libraryItems(type: "movie" | "tv"): Promise<unknown[]> {
     .map((d) => ({ ...d, media_type: type, genre_ids: d.genres.map((g) => g.id) }));
 }
 
+const isJapanese = (i: unknown) => (i as { original_language?: string }).original_language === "ja";
 const page = (results: unknown[]) => Response.json({ page: 1, results, total_pages: 1, total_results: results.length });
 const LISTS = /^\/3\/(trending\/(movie|tv)\/week|discover\/(movie|tv)|(movie|tv)\/(popular|top_rated|now_playing|on_the_air))$/;
 
@@ -52,9 +55,9 @@ const demoFetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit
     const list = LISTS.exec(url.pathname);
     if (list) {
       const type = url.pathname.includes("/tv") ? "tv" : "movie";
-      // Japanese animation (the anime rails) has no public-domain stand-in here.
-      if (url.searchParams.get("with_original_language") === "ja") return page([]);
       let items = await libraryItems(type);
+      // Japanese animation (the anime rails): the library's own, from before 1946.
+      if (url.searchParams.get("with_original_language") === "ja") items = items.filter(isJapanese);
       const genre = url.searchParams.get("with_genres");
       if (genre) items = items.filter((i) => (i as { genre_ids: number[] }).genre_ids.includes(Number(genre)));
       if (url.searchParams.get("page") && url.searchParams.get("page") !== "1") items = [];
@@ -109,7 +112,9 @@ await services.jobs.run("scanLocal");
 await services.library.matchPending();
 
 // Something to continue, something next up, and a few saved for later (Alex's profile).
-const movies = services.library.recentlyAdded("movie", 20).map((m) => m.tmdbId);
+// The anime keeps to its own rails, so these stay the same as the screenshots show.
+const anime = new Set(((await libraryItems("movie")) as TmdbListItem[]).filter(isJapanese).map((f) => f.id));
+const movies = services.library.recentlyAdded("movie", 20).map((m) => m.tmdbId).filter((id) => !anime.has(id));
 const shows = services.library.recentlyAdded("show", 20).map((s) => s.tmdbId);
 const minutes = (n: number) => n * 60_000;
 // Positions inside the clips, which are 3 minutes long (fetch-media.ts), so resuming plays.
@@ -120,6 +125,27 @@ const episode = shows[0] ? services.library.filesFor("episode", shows[0]).sort((
 if (episode) services.progress.record(alex!.id, { mediaType: "episode", tmdbId: shows[0]!, season: episode.season!, episode: episode.episode! }, minutes(1), minutes(3));
 for (const id of movies.slice(3, 6)) services.progress.setWatchlist(alex!.id, "movie", id, true);
 if (shows[1]) services.progress.setWatchlist(alex!.id, "show", shows[1], true);
+
+// The Anime tab ranks titles with Kitsu, which the demo can't reach: here it's the
+// library's Japanese animation, with no categories to filter by.
+services.catalog.animeCategories = () => [];
+services.catalog.animePage = async (category?: string): Promise<Shelf[]> => {
+  if (category) return [];
+  const films = ((await libraryItems("movie")) as TmdbListItem[]).filter(isJapanese);
+  const available = services!.library.availability("movie", films.map((f) => f.id));
+  const items: TitleCard[] = films.map((f) => ({
+    type: "movie",
+    tmdbId: f.id,
+    title: f.title ?? "",
+    year: f.release_date ? Number(f.release_date.slice(0, 4)) : null,
+    overview: f.overview,
+    posterUrl: imageUrl(f.poster_path, "w342"),
+    backdropUrl: imageUrl(f.backdrop_path, "w780"),
+    rating: f.vote_average,
+    available: available.get(f.id) ?? [],
+  }));
+  return items.length ? [{ id: "anime-demo-classics", title: "Classic Anime", kind: "titles", items }] : [];
+};
 
 const app = createApp(services);
 const demoUser = publicDemo ? services.db.select({ id: users.id }).from(users).where(eq(users.username, "demo")).get() : undefined;
