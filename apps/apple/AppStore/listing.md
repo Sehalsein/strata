@@ -54,9 +54,6 @@ Strata connects only to the server you choose and plays only what's in that serv
 library. It doesn't collect anything about you, and it doesn't provide, sell or stream any
 movies or shows of its own.
 
-Want to try it first? Connect to https://strata-demo.seinsehal.workers.dev and sign in as
-demo / strata-demo to browse and play a demo library of public-domain films.
-
 Strata requires a Strata server, which is free and open source:
 github.com/Sehalsein/strata.
 
