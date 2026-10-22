@@ -198,7 +198,9 @@ final class TVFocusTests: XCTestCase {
         open("strata://show/1018") // Bonanza
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume'")).firstMatch.waitForExistence(timeout: 20))
         Thread.sleep(forTimeInterval: 2)
-        press(.down, 2, pause: 1.5)
+        // Down to the season picker: the header and the first episodes stay on screen
+        // (episodes not in the library can't take focus, so a further press skips ahead).
+        press(.down, pause: 1.5)
         Thread.sleep(forTimeInterval: 2)
         snapshot("03-episodes")
 
