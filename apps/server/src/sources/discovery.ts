@@ -10,6 +10,8 @@ import { ingestItem } from "./torbox/sync";
 
 const log = logger("discovery");
 const RELEASE_TTL_MS = 20 * 60_000;
+/** Lookups kept at once (each is a few KB of releases). */
+const RELEASE_CACHE_MAX = 300;
 const SCRAPER_TIMEOUT_MS = 12_000;
 const SCRAPER_BACKOFF_MS = 5 * 60_000;
 const READY_WAIT_MS = 20_000;
@@ -109,9 +111,21 @@ export class Discovery {
     const hit = this.cache.get(key);
     if (hit && Date.now() - hit.at < RELEASE_TTL_MS) return hit.releases;
     const releases = this.search(target);
+    this.pruneCache();
     this.cache.set(key, { at: Date.now(), releases });
     releases.catch(() => this.cache.delete(key));
     return releases;
+  }
+
+  /** Drops expired lookups, then the oldest beyond a cap, so browsing doesn't grow it forever. */
+  private pruneCache() {
+    const now = Date.now();
+    for (const [key, entry] of this.cache) if (now - entry.at >= RELEASE_TTL_MS) this.cache.delete(key);
+    // Map keeps insertion order, so the first keys are the oldest.
+    for (const key of this.cache.keys()) {
+      if (this.cache.size < RELEASE_CACHE_MAX) break;
+      this.cache.delete(key);
+    }
   }
 
   /**

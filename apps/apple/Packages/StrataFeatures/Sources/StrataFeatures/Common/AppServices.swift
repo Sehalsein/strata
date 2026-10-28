@@ -70,10 +70,12 @@ public final class AppServices {
         }
     }
 
-    /// What the server can play a title from, including releases it finds where it's set up
-    /// to. Empty when it has nothing (or the request fails): the app then offers nothing.
-    public func sources(for target: PlaybackTarget) async -> [Candidate] {
-        await load { try await $0.sources(target, discover: true) }.value ?? []
+    /// What the server can play a title from. `discover` lets it look beyond its library where
+    /// it's set up to (a few seconds, and calls whatever services it uses), so it's asked for
+    /// only when the library alone can't answer. Empty when it has nothing (or the request
+    /// fails): the app then offers nothing.
+    public func sources(for target: PlaybackTarget, discover: Bool) async -> [Candidate] {
+        await load { try await $0.sources(target, discover: discover) }.value ?? []
     }
 }
 

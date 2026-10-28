@@ -9,8 +9,11 @@ struct SourcePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     let target: PlaybackTarget
     let title: String
-    /// Sources the page already has; nil loads them here.
-    var initial: [Candidate]? = nil
+    /// Sources the page already has.
+    var known: [Candidate] = []
+    /// Ask the server to look further than `known` (its library) when the sheet opens; if it
+    /// can't or won't, `known` is what's shown.
+    var lookFurther = true
     let onChoose: (Candidate) -> Void
 
     @State private var sources: Loadable<[Candidate]> = .loading
@@ -81,7 +84,10 @@ struct SourcePickerSheet: View {
         }
         .presentationDetents([.medium, .large])
         .task {
-            if let initial { sources = .loaded(initial) } else { sources = await services.load { try await $0.sources(target, discover: true) } }
+            guard lookFurther else { sources = .loaded(known); return }
+            if !known.isEmpty { sources = .loaded(known) } // shown while the server looks further
+            let found = await services.sources(for: target, discover: true)
+            sources = .loaded(found.isEmpty ? known : found)
         }
     }
 }

@@ -115,11 +115,13 @@ struct MovieDetailView: View {
         }
         .padding(.bottom, Metrics.space12)
         .sheet(isPresented: $showSources) {
-            SourcePickerSheet(target: movie.target, title: movie.title, initial: sources) { candidate in
+            // In the library, the page has only library sources: the sheet asks the server for more.
+            SourcePickerSheet(target: movie.target, title: movie.title, known: sources ?? [], lookFurther: movie.isAvailable) { candidate in
                 play(movie, candidateId: candidate.id)
             }
         }
-        .task(id: movie.tmdbId) { sources = await services.sources(for: movie.target) }
+        // Looking further than the library only where that decides whether it can play.
+        .task(id: movie.tmdbId) { sources = await services.sources(for: movie.target, discover: !movie.isAvailable) }
     }
 
     @Namespace private var namespace

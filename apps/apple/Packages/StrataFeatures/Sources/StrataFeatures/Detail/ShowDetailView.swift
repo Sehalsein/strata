@@ -118,7 +118,7 @@ struct ShowDetailView: View {
         .sheet(isPresented: $showUpNextSources) {
             if let upNext = show.upNext {
                 SourcePickerSheet(target: .episode(show: show.tmdbId, season: upNext.season, episode: upNext.episode),
-                                  title: "\(show.title) · \(code(upNext.season, upNext.episode))", initial: upNextSources) { candidate in
+                                  title: "\(show.title) · \(code(upNext.season, upNext.episode))", known: upNextSources ?? [], lookFurther: upNext.isAvailable) { candidate in
                     play(show, season: upNext.season, episode: upNext.episode, name: nil, still: nil, candidateId: candidate.id)
                 }
             }
@@ -128,7 +128,8 @@ struct ShowDetailView: View {
         }
         .task(id: show.upNext.map { "\($0.season)x\($0.episode)" }) {
             guard let upNext = show.upNext else { upNextSources = nil; return }
-            upNextSources = await services.sources(for: .episode(show: show.tmdbId, season: upNext.season, episode: upNext.episode))
+            // Looking further than the library only where that decides whether it can play.
+            upNextSources = await services.sources(for: .episode(show: show.tmdbId, season: upNext.season, episode: upNext.episode), discover: !upNext.isAvailable)
         }
     }
 
@@ -236,7 +237,7 @@ struct ShowDetailView: View {
         guard !episode.isAvailable else {
             return play(show, season: episode.season, episode: episode.episode, name: episode.name, still: episode.stillUrl)
         }
-        let found = await services.sources(for: episode.target(show: show.tmdbId))
+        let found = await services.sources(for: episode.target(show: show.tmdbId), discover: true)
         if let first = found.first {
             play(show, season: episode.season, episode: episode.episode, name: episode.name, still: episode.stillUrl, candidateId: first.id)
         } else {
