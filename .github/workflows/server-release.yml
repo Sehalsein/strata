@@ -107,7 +107,6 @@ jobs:
       VERSION: ${{ matrix.version }}
       REPO: ${{ github.repository }}
       PUBLISH: ${{ needs.channel.outputs.publish }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -115,10 +114,11 @@ jobs:
         with:
           bun-version: 1.2.20
 
+      # No dependency lifecycle scripts: a release build runs only code from this repository.
       - name: Install
         run: |
-          bun install --frozen-lockfile
-          bun install --frozen-lockfile --cwd apps/server/web
+          bun install --frozen-lockfile --ignore-scripts
+          bun install --frozen-lockfile --ignore-scripts --cwd apps/server/web
 
       - name: Build
         working-directory: apps/server
@@ -146,9 +146,12 @@ jobs:
           bun scripts/release-manifest.ts --version "$VERSION" --channel "$CHANNEL" --dir dist \
             --base-url "https://github.com/$REPO/releases/download/$assets" --out dist/feed
 
+      # The only step that holds a write-capable token.
       - name: Publish
         if: env.PUBLISH == 'true'
         working-directory: apps/server/dist
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           feed="server-$CHANNEL"
