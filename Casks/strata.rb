@@ -1,4 +1,5 @@
 # brew tap sehalsein/strata https://github.com/Sehalsein/strata
+# brew trust sehalsein/strata
 # brew install --cask strata
 cask "strata" do
   # Always the current stable Strata.dmg; the app keeps its server up to date after that.

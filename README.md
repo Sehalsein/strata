@@ -15,6 +15,7 @@ drag Strata to Applications and open it. Or with Homebrew:
 
 ```sh
 brew tap sehalsein/strata https://github.com/Sehalsein/strata
+brew trust sehalsein/strata   # Homebrew asks before loading casks from other taps
 brew install --cask strata
 ```
 
