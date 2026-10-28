@@ -7,8 +7,25 @@ shows and anime, and play what's in your own library on iPhone, iPad and Apple T
   macOS it ships as `Strata.app`, a menu bar app you install like any other.
 - **Apple apps** ([apps/apple](apps/apple)): iPhone, iPad and Apple TV, in SwiftUI.
 
-See [apps/server/README.md](apps/server/README.md) to install the server (prebuilt, with
-automatic updates) and [apps/apple/README.md](apps/apple/README.md) to build the apps.
+## Install the server
+
+**Mac** (Apple silicon, macOS 14 or later): download
+[Strata.dmg](https://github.com/Sehalsein/strata/releases/download/server-stable/Strata.dmg),
+drag Strata to Applications and open it. Or with Homebrew:
+
+```sh
+brew tap sehalsein/strata https://github.com/Sehalsein/strata
+brew install --cask strata
+```
+
+Strata runs from the menu bar, starts at login, sets up ffmpeg on its own and keeps itself
+up to date. Open `http://localhost:8420` (or choose **Open Dashboard** from the menu bar) to
+finish setup.
+
+**Linux:** a single binary that installs itself as a service; see
+[apps/server/README.md](apps/server/README.md#install).
+
+To build the apps yourself, see [apps/apple/README.md](apps/apple/README.md).
 
 **Try it without a server:** enter `https://strata-demo.seinsehal.workers.dev` in the app
 and sign in as `demo` / `strata-demo` (see [Try it](#try-it)).

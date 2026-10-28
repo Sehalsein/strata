@@ -109,5 +109,7 @@ cpSync(APP, join(staging, "Strata.app"), { recursive: true });
 symlinkSync("/Applications", join(staging, "Applications"));
 await sh(["hdiutil", "create", "-volname", "Strata", "-srcfolder", staging, "-ov", "-format", "UDZO", dmg]);
 rmSync(staging, { recursive: true, force: true });
+// Gatekeeper checks the disk image's own signature before anything inside it.
+if (identity !== "-") await sh(["codesign", "--sign", identity, "--timestamp", dmg]);
 
 console.log(`\nBuilt ${APP}\n      ${dmg}`);
