@@ -244,6 +244,29 @@ jobs:
           fi
           echo "::notice::Published $CHANNEL $VERSION"
 
+      # brew install --cask sehalsein/strata/strata: point the cask at this release's DMG.
+      # Its own token, which can write to the tap repository and nothing else.
+      - name: Update the Homebrew cask
+        if: env.PUBLISH == 'true' && env.CHANNEL == 'stable' && steps.macapp.outputs.dmg == 'true'
+        working-directory: apps/server/dist
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAP_TOKEN:-}" ]; then
+            echo "::warning::No HOMEBREW_TAP_TOKEN: the Homebrew cask wasn't updated"
+            exit 0
+          fi
+          sha="$(shasum -a 256 "Strata-$VERSION.dmg" | cut -d' ' -f1)"
+          tap="$RUNNER_TEMP/tap"
+          git clone -q "https://x-access-token:$TAP_TOKEN@github.com/Sehalsein/homebrew-strata.git" "$tap"
+          cd "$tap"
+          sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 .*/  sha256 \"$sha\"/" Casks/strata.rb
+          grep -q "version \"$VERSION\"" Casks/strata.rb && grep -q "$sha" Casks/strata.rb
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -am "Strata $VERSION"
+          git push -q origin HEAD:main
+
       - name: Keep the build (dry run)
         if: env.PUBLISH != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
