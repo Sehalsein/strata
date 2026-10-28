@@ -23,6 +23,27 @@ export interface Candidate {
   /** Torrent name, for discovered releases. */
   releaseTitle?: string;
   isPack?: boolean;
+  // For the apps to show as they are (they know nothing about providers).
+  /** The source's name. */
+  label: string;
+  /** Where it comes from: "Library", or the service it would play from. */
+  originLabel: string;
+  /** Size and other facts, e.g. "48.3 GB · 42 seeders". */
+  detail?: string;
+}
+
+const PROVIDER_LABEL: Record<FileProvider, string> = { local: "Library", torbox: "TorBox" };
+
+/** "48.3 GB", "700 MB"; undefined when unknown. */
+export function sizeLabel(bytes: number): string | undefined {
+  if (!bytes || bytes <= 0) return undefined;
+  const gb = bytes / 1024 ** 3;
+  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
+}
+
+/** The detail line under a source: size, then seeders for found releases. */
+export function detailLabel(size: number, seeders?: number): string | undefined {
+  return [sizeLabel(size), seeders !== undefined ? `${seeders} seeder${seeders === 1 ? "" : "s"}` : undefined].filter(Boolean).join(" · ") || undefined;
 }
 
 const SOURCE_RANK: Record<NonNullable<ParsedName["source"]>, number> = { remux: 5, bluray: 4, web: 3, hdtv: 2, dvd: 1, cam: 0 };
@@ -44,6 +65,9 @@ export function toCandidate(file: FileRow): Candidate {
     durationMs: probe?.durationMs,
     probed: !!probe,
     availability: "ready",
+    label: file.name,
+    originLabel: PROVIDER_LABEL[file.provider],
+    detail: detailLabel(file.size),
   };
 }
 

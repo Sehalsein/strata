@@ -69,6 +69,12 @@ public final class AppServices {
             return .failed(StrataError.wrap(error).message)
         }
     }
+
+    /// What the server can play a title from, including releases it finds where it's set up
+    /// to. Empty when it has nothing (or the request fails): the app then offers nothing.
+    public func sources(for target: PlaybackTarget) async -> [Candidate] {
+        await load { try await $0.sources(target, discover: true) }.value ?? []
+    }
 }
 
 public enum Loadable<T> {
@@ -86,13 +92,16 @@ public enum Loadable<T> {
 public struct WatchRequest: Identifiable, Hashable {
     public let target: PlaybackTarget
     public let meta: PlaybackMeta
+    /// A source the server listed; nil lets the server choose.
+    public let candidateId: String?
     /// nil resumes from the server's saved position.
     public let startMs: Int?
     public let id = UUID()
 
-    public init(target: PlaybackTarget, meta: PlaybackMeta, startMs: Int? = nil) {
+    public init(target: PlaybackTarget, meta: PlaybackMeta, candidateId: String? = nil, startMs: Int? = nil) {
         self.target = target
         self.meta = meta
+        self.candidateId = candidateId
         self.startMs = startMs
     }
 }

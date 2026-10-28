@@ -44,7 +44,8 @@ export function createApp(services: Services) {
   app.onError((err, c) => {
     if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
     // Not an error for the client: the release is downloading; poll by repeating the request.
-    if (err instanceof NotReadyError) return c.json({ ...err.info, error: err.message }, 202);
+    // `title` and `message` are what the apps show while they wait.
+    if (err instanceof NotReadyError) return c.json({ ...err.info, title: "Getting it ready", message: err.message, error: err.message }, 202);
     if (err instanceof ZodError) return c.json({ error: "Invalid request", issues: err.issues }, 400);
     if (err instanceof TmdbError || err instanceof PlaybackError || err instanceof TorboxError) {
       return c.json({ error: err.message }, err.status as 400);

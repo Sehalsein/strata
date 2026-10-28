@@ -4,7 +4,7 @@ import type { FileRow, Library } from "../library";
 import { logger } from "../log";
 import { isVideoFile, parseFileName, type ParsedName } from "../media/parse";
 import type { Settings } from "../settings";
-import type { Candidate } from "./resolver";
+import { detailLabel, type Candidate } from "./resolver";
 import type { TorboxClient, TorboxItem } from "./torbox/client";
 import { ingestItem } from "./torbox/sync";
 
@@ -91,6 +91,9 @@ export class Discovery {
         seeders: r.seeders,
         releaseTitle: r.title,
         isPack: r.isPack,
+        label: r.title,
+        originLabel: "TorBox",
+        detail: detailLabel(r.size ?? 0, r.seeders),
       }));
   }
 

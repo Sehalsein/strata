@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_CAPS, decide } from "../src/playback/decide";
 import type { MediaInfo } from "../src/media/probe";
-import { rankCandidates, type Candidate } from "../src/sources/resolver";
+import { detailLabel, rankCandidates, type Candidate } from "../src/sources/resolver";
 
 const media = (over: Partial<Omit<MediaInfo, "video">> & { video?: Partial<NonNullable<MediaInfo["video"]>> } = {}): MediaInfo => ({
   container: "mkv",
@@ -63,7 +63,7 @@ describe("decide", () => {
 });
 
 describe("rankCandidates", () => {
-  const c = (over: Partial<Candidate>): Candidate => ({ id: "x", fileId: 1, provider: "local", name: "", size: 1, probed: false, availability: "ready", ...over });
+  const c = (over: Partial<Candidate>): Candidate => ({ id: "x", fileId: 1, provider: "local", name: "", size: 1, probed: false, availability: "ready", label: "", originLabel: "Library", ...over });
 
   test("source priority, then resolution, then quality", () => {
     const ranked = rankCandidates(
@@ -76,5 +76,14 @@ describe("rankCandidates", () => {
   test("max resolution demotes but doesn't drop", () => {
     const ranked = rankCandidates([c({ id: "4k", resolution: 2160 }), c({ id: "hd", resolution: 1080 })], { sourcePriority: ["local"], maxResolution: 1080 });
     expect(ranked.map((r) => r.id)).toEqual(["hd", "4k"]);
+  });
+});
+
+describe("source labels", () => {
+  test("detail lines read naturally", () => {
+    expect(detailLabel(48318382080, 42)).toBe("45.0 GB · 42 seeders");
+    expect(detailLabel(734003200)).toBe("700 MB");
+    expect(detailLabel(0, 1)).toBe("1 seeder");
+    expect(detailLabel(0)).toBeUndefined();
   });
 });

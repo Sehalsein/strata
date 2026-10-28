@@ -1,0 +1,7 @@
+{
+  "items": [
+    { "id": "file:1", "fileId": 1, "provider": "local", "name": "Big.Buck.Bunny.2008.1080p.BluRay.x264.mkv", "size": 6981110, "resolution": 1080, "source": "bluray", "videoCodec": "h264", "hdr": null, "probed": false, "availability": "ready", "label": "Big.Buck.Bunny.2008.1080p.BluRay.x264.mkv", "originLabel": "Library", "detail": "7 MB" },
+    { "id": "hash:0123456789abcdef0123456789abcdef01234567", "fileId": 0, "provider": "cloud", "name": "Big.Buck.Bunny.2008.2160p.UHD.BluRay.REMUX.DV.HEVC.mkv", "size": 48318382080, "resolution": 2160, "source": "remux", "videoCodec": "hevc", "hdr": "dv", "probed": false, "availability": "cached", "label": "Big.Buck.Bunny.2008.2160p.UHD.BluRay.REMUX.DV.HEVC-GRP", "originLabel": "Cloud", "detail": "45.0 GB · Remux" },
+    { "id": "hash:89abcdef0123456789abcdef0123456789abcdef", "fileId": 0, "provider": "cloud", "name": "Big Buck Bunny Collection", "size": 0, "probed": false, "availability": "uncached", "label": "Big Buck Bunny Collection", "originLabel": "Cloud", "hdr": null }
+  ]
+}

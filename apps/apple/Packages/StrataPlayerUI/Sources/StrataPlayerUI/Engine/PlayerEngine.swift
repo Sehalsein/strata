@@ -29,6 +29,8 @@ public final class PlayerEngine {
         case idle
         /// Asking the server for a stream / waiting for the first frames.
         case loading
+        /// The server is getting the source ready; the engine asks again until it is.
+        case preparing(PreparingStatus)
         case ready, playing, paused, ended
         case failed(String)
     }
@@ -130,6 +132,8 @@ public final class PlayerEngine {
     public var progressInterval: TimeInterval = 10
     /// How long rapid scrubs are coalesced before an HLS restart.
     public var restartDebounce: TimeInterval = 0.4
+    /// How often a source the server is getting ready is asked about again.
+    public var preparePollInterval: TimeInterval = 5
 
     public init() {
         if let raw = UserDefaults.standard.string(forKey: Self.videoGravityKey) {
@@ -146,10 +150,10 @@ public final class PlayerEngine {
 
     // MARK: - Loading
 
-    /// Starts playing `target` from the server's library. `startMs` nil resumes from the
-    /// server's saved progress. Returns once playback has started, failed, or the load was
-    /// superseded (`unload()` / another `load`).
-    public func load(target: PlaybackTarget, meta: PlaybackMeta, startMs: Int? = nil) async {
+    /// Starts playing `target`. `startMs` nil resumes from the server's saved progress;
+    /// `candidateId` picks a source the server listed (else the server's choice). Returns once
+    /// playback has started, failed, or the load was superseded (`unload()` / another `load`).
+    public func load(target: PlaybackTarget, meta: PlaybackMeta, candidateId: String? = nil, startMs: Int? = nil) async {
         guard let client else { status = .failed("Not connected to a server."); return }
         await teardown(reportFinal: true)
         generation += 1
@@ -163,7 +167,7 @@ public final class PlayerEngine {
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                let res = try await self.requestPlay(client: client, target: target, candidateId: nil, startMs: startMs, audioIndex: nil, gen: gen)
+                let res = try await self.requestPlay(client: client, target: target, candidateId: candidateId, startMs: startMs, audioIndex: nil, gen: gen)
                 try await self.start(res, gen: gen, newTitle: true, autoplay: true)
             } catch {
                 guard gen == self.generation, !(error is CancellationError) else { return }
@@ -182,12 +186,21 @@ public final class PlayerEngine {
         await load(target: nextTarget, meta: m, startMs: 0)
     }
 
-    /// Calls `/api/play`. `candidateId` keeps a restart (seek, audio switch) on the same file.
+    /// Calls `/api/play`, asking again while the server gets the source ready (`.preparing`).
+    /// `candidateId` keeps a restart (seek, audio switch) on the same file.
     private func requestPlay(client: StrataClient, target: PlaybackTarget, candidateId: String?, startMs: Int?, audioIndex: Int?, gen: Int) async throws -> PlayResponse {
-        try Task.checkCancellation()
-        let res = try await client.play(target, candidateId: candidateId, startMs: startMs, audioStreamIndex: audioIndex)
-        guard gen == generation else { throw CancellationError() }
-        return res
+        while true {
+            try Task.checkCancellation()
+            switch try await client.play(target, candidateId: candidateId, startMs: startMs, audioStreamIndex: audioIndex) {
+            case .started(let res):
+                guard gen == generation else { throw CancellationError() }
+                return res
+            case .preparing(let progress):
+                guard gen == generation else { throw CancellationError() }
+                status = .preparing(progress)
+                try await Task.sleep(nanoseconds: UInt64(preparePollInterval * 1_000_000_000))
+            }
+        }
     }
 
     /// Installs a play response as the current item. `newTitle` resets tracks/subtitles;

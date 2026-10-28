@@ -43,7 +43,8 @@ final class ClientTests: XCTestCase {
 
     func testPlayStartedResolvesURLsAndSendsBody() async throws {
         StubProtocol.reset { _ in .fixture("play_remux") }
-        let res = try await client().play(.episode(show: 9001, season: 1, episode: 2), candidateId: "file:3", startMs: 12_000, audioStreamIndex: 2)
+        let outcome = try await client().play(.episode(show: 9001, season: 1, episode: 2), candidateId: "file:3", startMs: 12_000, audioStreamIndex: 2)
+        guard case .started(let res) = outcome else { return XCTFail("expected started") }
         XCTAssertEqual(res.url.absoluteString, "http://strata.test:8420/api/stream/a83f4d9d1b7e1f6bf8b6b7a81fd81607/stream.m3u8")
         XCTAssertEqual(res.subtitleTracks[0].url?.absoluteString, "http://strata.test:8420/api/stream/a83f4d9d1b7e1f6bf8b6b7a81fd81607/subtitles/s2.vtt")
 
@@ -75,14 +76,13 @@ final class ClientTests: XCTestCase {
         XCTAssertNil(body["candidateId"])
     }
 
-    func testPlay202IsNotReady() async throws {
-        StubProtocol.reset { _ in .json(202, ["status": "downloading"]) }
-        do {
-            _ = try await client().play(.movie(10378))
-            XCTFail("expected an error")
-        } catch let e as StrataError {
-            XCTAssertEqual(e.status, 202)
-        }
+    func testPlay202IsPreparing() async throws {
+        StubProtocol.reset { _ in .fixture("preparing", status: 202) }
+        let outcome = try await client().play(.movie(10378), candidateId: "hash:abc")
+        guard case .preparing(let status) = outcome else { return XCTFail("expected preparing") }
+        XCTAssertEqual(status.title, "Getting it ready")
+        XCTAssertEqual(status.progress, 0.37, accuracy: 0.0001)
+        XCTAssertEqual(status.etaText, "14m left")
     }
 
     func testErrorShapeSurfacesServerMessage() async throws {
@@ -151,11 +151,11 @@ final class ClientTests: XCTestCase {
     }
 
     func testSourcesQuery() async throws {
-        StubProtocol.reset { _ in .fixture("sources") }
-        let items = try await client().sources(.episode(show: 9001, season: 2, episode: 3))
-        XCTAssertEqual(items.count, 1)
+        StubProtocol.reset { _ in .fixture("sources_discovered") }
+        let items = try await client().sources(.episode(show: 9001, season: 2, episode: 3), discover: true)
+        XCTAssertEqual(items.count, 3)
         let q = try XCTUnwrap(StubProtocol.recorded.first?.url?.query)
-        XCTAssertEqual(q, "mediaType=episode&tmdbId=9001&season=2&episode=3")
+        XCTAssertEqual(q, "mediaType=episode&tmdbId=9001&season=2&episode=3&discover=1")
     }
 
     func testMutationsSendJSON() async throws {

@@ -1,6 +1,6 @@
 # Strata for Apple platforms
 
-The SwiftUI client for Strata servers on **iPhone, iPad and Apple TV** (iOS / iPadOS / tvOS 26+). It browses the server's catalog, plays what's in the server's library, and keeps progress per profile. It can be signed in to several Strata servers at once. The design follows the [Strata Design System](https://claude.ai/artifact/QefputW8ZwjL9kcAjqX8tu): a dark-first look, SF Pro, and Liquid Glass for every control that floats over content.
+The SwiftUI client for Strata servers on **iPhone, iPad and Apple TV** (iOS / iPadOS / tvOS 26+). It browses the server's catalog, plays what the server offers, and keeps progress per profile. Sources are server-driven: the app shows a title's sources (and lets you pick one) only when the server lists some, and shows the server's own labels. It can be signed in to several Strata servers at once. The design follows the [Strata Design System](https://claude.ai/artifact/QefputW8ZwjL9kcAjqX8tu): a dark-first look, SF Pro, and Liquid Glass for every control that floats over content.
 
 | Package | What it does |
 |---|---|

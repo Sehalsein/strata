@@ -43,8 +43,22 @@ public struct PlaybackTarget: Codable, Sendable, Hashable {
 
 // MARK: - Sources
 
-/// A file in the server's library that can play this title (`file:<id>`).
+/// Something the server can play a title from: a library file, or (when the server is set
+/// up to find them) a release it found. The app shows the server's labels as they are.
 public struct Candidate: Codable, Sendable, Hashable, Identifiable {
+    /// How soon it plays: now (`ready`), shortly after the server fetches it (`instant`), or
+    /// once the server has downloaded it (`download`). Unknown values read as `ready`.
+    public enum Readiness: Sendable, Hashable {
+        case ready, instant, download
+
+        init(_ raw: String?) {
+            switch raw {
+            case "cached": self = .instant
+            case "uncached": self = .download
+            default: self = .ready
+            }
+        }
+    }
 
     public struct AudioInfo: Codable, Sendable, Hashable {
         public var codec: String
@@ -69,6 +83,14 @@ public struct Candidate: Codable, Sendable, Hashable, Identifiable {
     public var audio: [AudioInfo]?
     public var durationMs: Int?
     public var probed: Bool
+    /// "ready" | "cached" | "uncached", as the server sends it (see `readiness`).
+    public var availability: String?
+    /// The server's name for this source, where it's from ("Library", …) and a detail line.
+    public var label: String?
+    public var originLabel: String?
+    public var detail: String?
+
+    public var readiness: Readiness { Readiness(availability) }
 
     public var resolutionLabel: String? { Formatting.resolution(resolution) }
     public var sizeLabel: String? { Formatting.size(bytes: size) }
@@ -108,7 +130,7 @@ public struct Candidate: Codable, Sendable, Hashable, Identifiable {
     public var specLabels: [String] {
         [resolutionLabel, hdrLabel, codecLabel, sourceLabel].compactMap { $0 }
     }
-    public var displayName: String { name }
+    public var displayName: String { label ?? name }
 
     static func channelLayout(_ channels: Int) -> String {
         switch channels {
@@ -244,6 +266,35 @@ public struct PlayResponse: Codable, Sendable, Hashable {
     public var duration: TimeInterval { TimeInterval(durationMs) / 1000 }
     public var startOffset: TimeInterval { TimeInterval(startOffsetMs) / 1000 }
     public var selectedAudio: AudioTrack? { audioTracks.first(where: \.selected) ?? audioTracks.first }
+}
+
+/// What `POST /api/play` answers while the server gets a source ready (HTTP 202). Shown as
+/// sent; the request is repeated until it starts.
+public struct PreparingStatus: Codable, Sendable, Hashable {
+    public var title: String?
+    public var message: String?
+    /// 0...1
+    public var progress: Double
+    public var etaSeconds: Int?
+
+    public init(title: String? = nil, message: String? = nil, progress: Double, etaSeconds: Int? = nil) {
+        self.title = title
+        self.message = message
+        self.progress = progress
+        self.etaSeconds = etaSeconds
+    }
+
+    public var percentText: String { "\(Int((min(1, max(0, progress)) * 100).rounded()))%" }
+    public var etaText: String? {
+        guard let etaSeconds, etaSeconds > 0 else { return nil }
+        if etaSeconds < 60 { return "\(etaSeconds)s left" }
+        return Formatting.remaining(ms: etaSeconds * 1000)
+    }
+}
+
+public enum PlayOutcome: Sendable, Hashable {
+    case started(PlayResponse)
+    case preparing(PreparingStatus)
 }
 
 /// `POST /api/progress` response.

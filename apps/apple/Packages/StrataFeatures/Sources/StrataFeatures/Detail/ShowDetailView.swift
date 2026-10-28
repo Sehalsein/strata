@@ -11,6 +11,12 @@ struct ShowDetailView: View {
     @State private var selectedSeason: Int?
     @State private var season: Loadable<SeasonDetail> = .loading
     @State private var inWatchlist = false
+    /// What the server can play Up Next from; nil until it answers.
+    @State private var upNextSources: [Candidate]?
+    @State private var sourcesFor: EpisodeItem?
+    @State private var showUpNextSources = false
+    /// "Not in your library" after asking the server about an episode it has nothing for.
+    @State private var notice: String?
     #if os(tvOS)
     @FocusState private var playFocused: Bool
     #endif
@@ -54,10 +60,11 @@ struct ShowDetailView: View {
                           title: show.title,
                           meta: [show.genres.first, show.yearRangeText, show.certification, seasonCount(show), show.ratingText.map { "★ \($0)" }].compactMap { $0 },
                           overview: show.overview) {
-                // Only what's in the server's library plays.
-                if let upNext = show.upNext, upNext.isAvailable {
+                // Plays when it's in the library or the server lists a source for it.
+                if let upNext = show.upNext, upNext.isAvailable || upNextSources?.isEmpty == false {
                     PlayButton(upNext.isResume ? "Resume \(code(upNext.season, upNext.episode))" : "Play \(code(upNext.season, upNext.episode))") {
-                        play(show, season: upNext.season, episode: upNext.episode, name: nil, still: nil)
+                        play(show, season: upNext.season, episode: upNext.episode, name: nil, still: nil,
+                             candidateId: upNext.isAvailable ? nil : upNextSources?.first?.id)
                     }
                     #if os(tvOS)
                     .focused($playFocused)
@@ -65,6 +72,10 @@ struct ShowDetailView: View {
                 }
                 GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV) {
                     Task { await toggleWatchlist(show) }
+                }
+                // Only when the server has sources to show.
+                if let upNextSources, !upNextSources.isEmpty {
+                    GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV) { showUpNextSources = true }
                 }
                 if let trailer = show.trailer?.youtubeURL { TrailerButton(url: trailer) }
             }
@@ -99,6 +110,26 @@ struct ShowDetailView: View {
             ])
         }
         .padding(.bottom, Metrics.space12)
+        .sheet(item: $sourcesFor) { episode in
+            SourcePickerSheet(target: episode.target(show: show.tmdbId), title: "\(show.title) · \(episode.code)") { candidate in
+                play(show, season: episode.season, episode: episode.episode, name: episode.name, still: episode.stillUrl, candidateId: candidate.id)
+            }
+        }
+        .sheet(isPresented: $showUpNextSources) {
+            if let upNext = show.upNext {
+                SourcePickerSheet(target: .episode(show: show.tmdbId, season: upNext.season, episode: upNext.episode),
+                                  title: "\(show.title) · \(code(upNext.season, upNext.episode))", initial: upNextSources) { candidate in
+                    play(show, season: upNext.season, episode: upNext.episode, name: nil, still: nil, candidateId: candidate.id)
+                }
+            }
+        }
+        .alert(notice ?? "", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
+            Button("OK", role: .cancel) { notice = nil }
+        }
+        .task(id: show.upNext.map { "\($0.season)x\($0.episode)" }) {
+            guard let upNext = show.upNext else { upNextSources = nil; return }
+            upNextSources = await services.sources(for: .episode(show: show.tmdbId, season: upNext.season, episode: upNext.episode))
+        }
     }
 
     @ViewBuilder private func seasonSection(_ show: ShowDetail) -> some View {
@@ -128,7 +159,7 @@ struct ShowDetailView: View {
                 LazyVStack(spacing: 0) {
                     ForEach(detail.episodes) { episode in
                         Button {
-                            play(show, season: episode.season, episode: episode.episode, name: episode.name, still: episode.stillUrl)
+                            Task { await playEpisode(show, episode) }
                         } label: {
                             EpisodeRow(id: "\(show.tmdbId)-\(episode.id)",
                                        number: episode.episode,
@@ -148,7 +179,7 @@ struct ShowDetailView: View {
                             }
                         }
                         .buttonStyle(FocusLiftStyle())
-                        .disabled(episode.isUpcoming || !episode.isAvailable)
+                        .disabled(episode.isUpcoming)
                         .contextMenu {
                             Button { Task { await setWatched(show, episode, !episode.isWatched) } } label: {
                                 Label(episode.isWatched ? "Mark as Unwatched" : "Mark as Watched", systemImage: episode.isWatched ? "eye.slash" : "eye")
@@ -157,6 +188,9 @@ struct ShowDetailView: View {
                                 Button { play(show, season: episode.season, episode: episode.episode, name: episode.name, still: episode.stillUrl, startMs: 0) } label: {
                                     Label("Play from Beginning", systemImage: "arrow.counterclockwise")
                                 }
+                            }
+                            if !episode.isUpcoming {
+                                Button { sourcesFor = episode } label: { Label("Choose Source", systemImage: "rectangle.stack") }
                             }
                         }
                         if episode.id != detail.episodes.last?.id { Divider().overlay(Theme.hairline).padding(.leading, Metrics.space4) }
@@ -190,11 +224,24 @@ struct ShowDetailView: View {
     }
     private func currentSeason(_ show: ShowDetail) -> Int { selectedSeason ?? show.orderedSeasons.first?.season ?? 1 }
 
-    private func play(_ show: ShowDetail, season: Int, episode: Int, name: String?, still: URL?, startMs: Int? = nil) {
+    private func play(_ show: ShowDetail, season: Int, episode: Int, name: String?, still: URL?, candidateId: String? = nil, startMs: Int? = nil) {
         let subtitle = [code(season, episode), name].compactMap { $0 }.joined(separator: " · ")
         services.play(WatchRequest(target: .episode(show: show.tmdbId, season: season, episode: episode),
                                    meta: PlaybackMeta(title: show.title, subtitle: subtitle, artworkURL: still ?? show.backdropUrl),
-                                   startMs: startMs))
+                                   candidateId: candidateId, startMs: startMs))
+    }
+
+    /// An episode in the library plays; otherwise the server is asked what it can play it from.
+    private func playEpisode(_ show: ShowDetail, _ episode: EpisodeItem) async {
+        guard !episode.isAvailable else {
+            return play(show, season: episode.season, episode: episode.episode, name: episode.name, still: episode.stillUrl)
+        }
+        let found = await services.sources(for: episode.target(show: show.tmdbId))
+        if let first = found.first {
+            play(show, season: episode.season, episode: episode.episode, name: episode.name, still: episode.stillUrl, candidateId: first.id)
+        } else {
+            notice = "\(code(episode.season, episode.episode)) isn't in your library."
+        }
     }
 
     private func load() async {

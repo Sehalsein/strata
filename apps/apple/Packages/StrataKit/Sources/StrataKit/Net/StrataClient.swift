@@ -171,34 +171,37 @@ public final class StrataClient: Sendable {
         try await get("/api/titles/show/\(tmdbId)/seasons/\(season)")
     }
 
-    /// The library files that can play a title.
-    public func sources(_ target: PlaybackTarget) async throws -> [Candidate] {
-        let res: ItemsResponse<Candidate> = try await get("/api/sources", query: target.queryItems, cached: false)
+    /// What the server can play a title from. `discover` asks it to look further than its
+    /// library where it's set up to (takes a few seconds); the list is whatever it returns.
+    public func sources(_ target: PlaybackTarget, discover: Bool = false) async throws -> [Candidate] {
+        var query = target.queryItems
+        if discover { query.append(URLQueryItem(name: "discover", value: "1")) }
+        let res: ItemsResponse<Candidate> = try await get("/api/sources", query: query, cached: false)
         return res.items
     }
 
     // MARK: - Playback
 
-    /// Starts a playback session. `startMs` nil resumes from saved progress.
+    /// Starts a playback session. `startMs` nil resumes from saved progress. Returns
+    /// `.preparing` (HTTP 202) while the server gets the source ready; repeat to follow it.
     public func play(_ target: PlaybackTarget,
                      candidateId: String? = nil,
                      startMs: Int? = nil,
                      audioStreamIndex: Int? = nil,
-                     caps: ClientCaps = .current) async throws -> PlayResponse {
+                     caps: ClientCaps = .current) async throws -> PlayOutcome {
         let body = PlayBody(mediaType: target.mediaType, tmdbId: target.tmdbId, season: target.season, episode: target.episode,
                             candidateId: candidateId, startMs: startMs, audioStreamIndex: audioStreamIndex, caps: caps)
         let (data, status) = try await perform(request("POST", "/api/play", body: body))
-        // 202: the server is still fetching the file. The app only plays what's in the
-        // library, so this shouldn't happen; say so rather than wait.
+        // 202: the server is getting the source ready; repeat the call to follow it.
         if status == 202 {
-            throw StrataError(kind: .http, status: 202, message: "This title isn't ready on your server yet. Try again later.")
+            return .preparing(try decode(PreparingStatus.self, from: data))
         }
         var res = try decode(PlayResponse.self, from: data)
         res.url = resolve(res.url)
         for i in res.subtitleTracks.indices {
             res.subtitleTracks[i].url = res.subtitleTracks[i].url.map(resolve)
         }
-        return res
+        return .started(res)
     }
 
     /// Ends a session (stops its ffmpeg job). Best-effort callers can ignore errors.

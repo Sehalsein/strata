@@ -50,9 +50,9 @@ On your home network, the app finds your server on its own. On Apple TV, scan a 
 your iPhone and you're in.
 
 YOUR SERVER, YOUR DATA
-Strata connects only to the server you choose and plays only what's in that server's
-library. It doesn't collect anything about you, and it doesn't provide, sell or stream any
-movies or shows of its own.
+Strata connects only to the server you choose and plays what that server offers: its
+library, and any other sources its owner has set it up with. It doesn't collect anything
+about you, and it doesn't provide, sell or stream any movies or shows of its own.
 
 Strata requires a Strata server, which is free and open source:
 github.com/Sehalsein/strata.
@@ -68,9 +68,11 @@ The first release of Strata for iPhone, iPad and Apple TV.
 ## App Review notes
 
 Strata is a client for a self-hosted media server. It connects only to the server the user
-chooses and plays only media already in that server's library; it has no content, store or
-way of obtaining media of its own. For review, a demo server with public-domain films is
-available:
+chooses and shows what that server offers; it has no content or store of its own. A server
+can list more than one source for a title (the Sources button) and, if its owner has set it
+up to, play titles from services the owner has connected; the app only shows what the
+server returns. The demo server below has public-domain films only and no other sources,
+so the Sources button doesn't appear there. For review:
 
 - Server address: https://strata-demo.seinsehal.workers.dev
 - Username: demo

@@ -9,6 +9,9 @@ struct MovieDetailView: View {
     let tmdbId: Int
     @State private var detail: Loadable<MovieDetail> = .loading
     @State private var inWatchlist = false
+    /// What the server can play this from; nil until it answers.
+    @State private var sources: [Candidate]?
+    @State private var showSources = false
 
     var body: some View {
         ScrollView {
@@ -50,9 +53,9 @@ struct MovieDetailView: View {
                           meta: [movie.genres.first, movie.yearText, movie.runtimeText, movie.certification, movie.ratingText.map { "★ \($0)" }].compactMap { $0 },
                           badges: movie.sources.first?.specLabels.prefix(3).map { $0 } ?? [],
                           overview: movie.overview) {
-                // Only what's in the server's library plays.
-                if movie.isAvailable {
-                    PlayButton(movie.resumeMs != nil ? "Resume" : "Play") { play(movie) }
+                // Plays when it's in the library or the server lists a source for it.
+                if canPlay(movie) {
+                    PlayButton(movie.resumeMs != nil ? "Resume" : "Play") { play(movie, candidateId: movie.isAvailable ? nil : sources?.first?.id) }
                         .glassEffectID("play", in: namespace)
                         #if os(tvOS)
                         .focused($playFocused)
@@ -61,6 +64,10 @@ struct MovieDetailView: View {
                 GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV) {
                     Task { await toggleWatchlist(movie) }
                 }
+                // Only when the server has sources to show.
+                if let sources, !sources.isEmpty {
+                    GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV) { showSources = true }
+                }
                 if let trailer = movie.trailer?.youtubeURL { TrailerButton(url: trailer) }
             }
             #if os(tvOS)
@@ -68,7 +75,7 @@ struct MovieDetailView: View {
             .overlay(alignment: .topLeading) { TVBackButton { dismiss() } }
             #endif
 
-            if !movie.isAvailable {
+            if !movie.isAvailable, sources?.isEmpty == true {
                 AvailabilityLabel(.unavailable).padding(.horizontal, Metrics.gutter)
             }
 
@@ -107,16 +114,25 @@ struct MovieDetailView: View {
             ])
         }
         .padding(.bottom, Metrics.space12)
+        .sheet(isPresented: $showSources) {
+            SourcePickerSheet(target: movie.target, title: movie.title, initial: sources) { candidate in
+                play(movie, candidateId: candidate.id)
+            }
+        }
+        .task(id: movie.tmdbId) { sources = await services.sources(for: movie.target) }
     }
 
     @Namespace private var namespace
+
+    private func canPlay(_ movie: MovieDetail) -> Bool { movie.isAvailable || sources?.isEmpty == false }
     #if os(tvOS)
     @FocusState private var playFocused: Bool
     #endif
 
-    private func play(_ movie: MovieDetail) {
+    private func play(_ movie: MovieDetail, candidateId: String? = nil) {
         services.play(WatchRequest(target: movie.target,
-                                   meta: PlaybackMeta(title: movie.title, subtitle: movie.yearText, artworkURL: movie.backdropUrl ?? movie.posterUrl)))
+                                   meta: PlaybackMeta(title: movie.title, subtitle: movie.yearText, artworkURL: movie.backdropUrl ?? movie.posterUrl),
+                                   candidateId: candidateId))
     }
 
     private func load() async {

@@ -117,6 +117,21 @@ public struct SpecBadge: View {
     }
 }
 
+/// Where a source comes from, in the server's words ("Library", …).
+public struct OriginBadge: View {
+    let label: String
+    public init(_ label: String) { self.label = label }
+
+    public var body: some View {
+        Text(label)
+            .font(.stSpec)
+            .foregroundStyle(Theme.local)
+            .padding(.horizontal, 6)
+            .frame(minHeight: 20)
+            .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Metrics.radiusXS, style: .continuous))
+    }
+}
+
 public struct ProviderBadge: View {
     let kind: ProviderKind
     public init(_ kind: ProviderKind) { self.kind = kind }
@@ -134,11 +149,14 @@ public struct ProviderBadge: View {
 
 /// Whether something can play, in plain words with a symbol (never color alone).
 public enum Availability: Equatable, Sendable {
-    case ready, unavailable, watched
+    case ready, instant, downloading(Double), download, unavailable, watched
 
     public var title: String {
         switch self {
         case .ready: "Ready"
+        case .instant: "Instant"
+        case .downloading(let p): "Downloading \(Int(p * 100))%"
+        case .download: "Download"
         case .unavailable: "Not in your library"
         case .watched: "Watched"
         }
@@ -148,13 +166,16 @@ public enum Availability: Equatable, Sendable {
         switch self {
         case .ready: "play.circle.fill"
         case .watched: "checkmark.circle.fill"
+        case .instant: "bolt.fill"
+        case .downloading, .download: "arrow.down.circle"
         case .unavailable: "minus.circle"
         }
     }
 
     public var color: Color {
         switch self {
-        case .ready, .watched: Theme.success
+        case .ready, .instant, .watched: Theme.success
+        case .downloading, .download: Theme.warning
         case .unavailable: Theme.ink3
         }
     }

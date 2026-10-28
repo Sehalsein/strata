@@ -228,6 +228,8 @@ describe("playback", () => {
     expect(play.nextEpisode).toMatchObject({ season: 1, episode: 2, name: "Second", available: true });
     // The next episode's file gets probed in the background.
     const nextFile = (await json(await server.request("/api/sources?mediaType=episode&tmdbId=9001&season=1&episode=2", { token }))).items[0];
+    // Sources carry the labels the apps show as they are.
+    expect(nextFile).toMatchObject({ availability: "ready", originLabel: "Library", label: expect.any(String) });
     for (let i = 0; i < 50 && !server.services.library.get(nextFile.fileId)?.probeJson; i++) await Bun.sleep(100);
     expect(server.services.library.get(nextFile.fileId)?.probeJson).toBeTruthy();
     const res = await server.request(play.url, { headers: { Range: "bytes=0-99" } });

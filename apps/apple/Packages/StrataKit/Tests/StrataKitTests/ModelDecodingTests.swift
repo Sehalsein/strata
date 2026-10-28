@@ -124,6 +124,18 @@ final class ModelDecodingTests: XCTestCase {
         let library = try Fixture.decode(ItemsResponse<Candidate>.self, "sources").items
         XCTAssertEqual(library.first?.id, "file:1")
         XCTAssertEqual(library.first?.specLabels.prefix(3), ["1080p", "H.264", "Blu-ray"])
+        // Older servers send no labels: the file name stands in and it reads as ready.
+        XCTAssertEqual(library.first?.readiness, .ready)
+
+        // The server's labels are shown as they are.
+        let all = try Fixture.decode(ItemsResponse<Candidate>.self, "sources_discovered").items
+        XCTAssertEqual(all.map(\.readiness), [.ready, .instant, .download])
+        XCTAssertEqual(all.map(\.originLabel), ["Library", "Cloud", "Cloud"])
+        XCTAssertEqual(all[1].displayName, "Big.Buck.Bunny.2008.2160p.UHD.BluRay.REMUX.DV.HEVC-GRP")
+        XCTAssertEqual(all[1].detail, "45.0 GB · Remux")
+        XCTAssertEqual(all[1].provider, .linked)
+        XCTAssertEqual(all[1].hdrLabel, "Dolby Vision")
+        XCTAssertNil(all[2].detail)
     }
 
     func testPlayDirect() throws {

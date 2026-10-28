@@ -5,7 +5,7 @@ import StrataDesign
 import StrataPlayerUI
 
 /// Full-screen player: video, subtitles, glass chrome that hides after 3s,
-/// errors, and Up Next for episodes.
+/// the server's "getting it ready" state, errors, and Up Next for episodes.
 struct WatchView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
@@ -63,7 +63,7 @@ struct WatchView: View {
 
             stateOverlay
 
-            // The error card has its own buttons; the transport over it would clash.
+            // The error and preparing cards have their own buttons; the transport over them would clash.
             if chromeVisible, !showsStateCard {
                 PlayerChrome(engine: engine, onClose: close, onDetails: { showDetails = true },
                              onPiP: pip.isAvailable ? { pip.toggle() } : nil,
@@ -108,7 +108,7 @@ struct WatchView: View {
         #endif
         .task {
             if let client = services.client { engine.configure(client: client) }
-            await engine.load(target: request.target, meta: request.meta, startMs: request.startMs)
+            await engine.load(target: request.target, meta: request.meta, candidateId: request.candidateId, startMs: request.startMs)
             scheduleHide()
         }
         .onChange(of: engine.status) { _, status in
@@ -137,7 +137,7 @@ struct WatchView: View {
 
     private var showsStateCard: Bool {
         switch engine.status {
-        case .failed: true
+        case .failed, .preparing: true
         default: false
         }
     }
@@ -151,6 +151,19 @@ struct WatchView: View {
             #else
             if !chromeVisible { ProgressView().controlSize(.large).tint(.white) }
             #endif
+        case .preparing(let status):
+            VStack(spacing: Metrics.space4) {
+                Image(systemName: "arrow.down.circle").font(.system(size: 44)).foregroundStyle(Theme.warning)
+                Text(status.title ?? "Getting it ready").font(.stTitle2).foregroundStyle(Theme.onArtwork)
+                ProgressBar(status.progress, track: .white.opacity(0.2)).frame(width: 280)
+                Text([status.percentText, status.etaText].compactMap { $0 }.joined(separator: " · "))
+                    .font(.stFootnote).foregroundStyle(Theme.onArtwork.opacity(0.7))
+                Text(status.message ?? "It will start playing as soon as it's ready.")
+                    .font(.stCallout).foregroundStyle(Theme.onArtwork.opacity(0.7)).multilineTextAlignment(.center).frame(maxWidth: 420)
+                GlassButton("Close", action: close)
+            }
+            .padding(Metrics.space8)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Metrics.radiusLG, style: .continuous))
         case .failed(let message):
             VStack(spacing: Metrics.space4) {
                 Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 40)).foregroundStyle(Theme.danger)
@@ -159,7 +172,7 @@ struct WatchView: View {
                 GlassEffectContainer(spacing: Metrics.space2) {
                     HStack(spacing: Metrics.space2) {
                         PlayButton("Try Again", systemImage: "arrow.clockwise") {
-                            Task { await engine.load(target: request.target, meta: request.meta, startMs: request.startMs) }
+                            Task { await engine.load(target: request.target, meta: request.meta, candidateId: request.candidateId, startMs: request.startMs) }
                         }
                         GlassButton("Close", action: close)
                     }
