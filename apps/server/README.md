@@ -8,7 +8,13 @@ dashboard in your browser. See [DESIGN.md](DESIGN.md) for the architecture.
 
 Prebuilt binaries for Linux (x64, arm64) and macOS (Apple silicon), with the dashboard built
 in and automatic updates available, are on the
-[releases page](https://github.com/Sehalsein/strata/releases). On a home server:
+[releases page](https://github.com/Sehalsein/strata/releases).
+
+**Mac:** download [Strata.dmg](https://github.com/Sehalsein/strata/releases/download/server-stable/Strata.dmg),
+drag Strata to Applications and open it. It runs from the menu bar, starts at login, sets up
+ffmpeg and updates itself.
+
+**Linux** (or a Mac without the app):
 
 ```sh
 curl -fLo strata-server https://github.com/Sehalsein/strata/releases/download/server-stable/strata-server-linux-x64
