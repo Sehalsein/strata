@@ -1,0 +1,185 @@
+name: Server Release
+
+# Publishes signed strata-server builds to the update feed that installed servers poll
+# (https://updates.strata.sehalsein.com/server, a public Cloudflare R2 bucket).
+#
+# - **Nightly**, on every server change merged to main: `<next patch>-nightly.<run>` under
+#   `server/nightly/`. Versioned against the next patch so a nightly always outranks the
+#   release it came after: 0.1.0 < 0.1.1-nightly.7 < 0.1.1.
+# - **Stable**, when `apps/server/package.json` has a version with no `server-v<version>`
+#   tag yet: published under `server/`, tagged, with a GitHub release holding the binaries.
+#   To ship one, bump that version and merge.
+#
+# The feed URL is baked into each binary at build time, so a stable server polls the stable
+# manifest and a nightly one the nightly manifest. Manifests are signed with the key whose
+# public half is in apps/server/src/update/publicKey.ts; servers refuse anything else, so the
+# bucket itself doesn't need to be trusted.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/server/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/server-release.yml"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish to the update feed (off = build and sign only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # the stable tag and its GitHub release
+
+# Two merges in quick succession must not race to the same feed; never cancel half an upload.
+concurrency:
+  group: server-release
+  cancel-in-progress: false
+
+jobs:
+  channel:
+    name: Channel
+    runs-on: ubuntu-latest
+    outputs:
+      builds: ${{ steps.check.outputs.builds }}
+      publish: ${{ steps.check.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - id: check
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+          REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+          PUBLISH_INPUT: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          base="$(jq -r .version apps/server/package.json)"
+          IFS=. read -r major minor patch <<< "$base"
+          nightly="$major.$minor.$((patch + 1))-nightly.$RUN_NUMBER"
+
+          builds='[]'
+          add() {
+            builds="$(jq -c --arg channel "$1" --arg version "$2" --arg path "$3" '. + [{channel: $channel, version: $version, path: $path}]' <<< "$builds")"
+            echo "::notice::$1 build, version $2"
+          }
+          # The tag records what has shipped, so it survives re-runs and empty merges.
+          if ! git rev-parse -q --verify "refs/tags/server-v$base" >/dev/null; then
+            add stable "$base" ""
+          fi
+          add nightly "$nightly" "/nightly"
+          echo "builds=$builds" >> "$GITHUB_OUTPUT"
+
+          # Only main reaches the feed; a manual run publishes only when asked to.
+          publish=true
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::notice::$REF is not main: building only"
+            publish=false
+          elif [ "$EVENT" = "workflow_dispatch" ] && [ "$PUBLISH_INPUT" != "true" ]; then
+            echo "::notice::manual run without publish: building only"
+            publish=false
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: ${{ matrix.channel }} ${{ matrix.version }}
+    needs: channel
+    # macOS: the darwin binary has to be ad-hoc signed with codesign; Linux ones cross-compile.
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJSON(needs.channel.outputs.builds) }}
+    env:
+      CHANNEL: ${{ matrix.channel }}
+      VERSION: ${{ matrix.version }}
+      FEED_URL: ${{ format('{0}{1}', 'https://updates.strata.sehalsein.com/server', matrix.path) }}
+      FEED_DIR: ${{ format('server{0}', matrix.path) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.20
+
+      - name: Install
+        run: |
+          bun install --frozen-lockfile
+          bun install --frozen-lockfile --cwd apps/server/web
+
+      - name: Build
+        working-directory: apps/server
+        run: bun scripts/build.ts --all --version "$VERSION" --update-url "$FEED_URL"
+
+      - name: Check the build reports its version
+        working-directory: apps/server
+        run: |
+          reported="$(./dist/strata-server-darwin-arm64 --version)"
+          echo "$reported"
+          case "$reported" in *"$VERSION"*) ;; *) echo "::error::expected $VERSION"; exit 1 ;; esac
+
+      - name: Sign the manifest
+        working-directory: apps/server
+        env:
+          STRATA_UPDATE_PRIVATE_KEY: ${{ secrets.STRATA_UPDATE_PRIVATE_KEY }}
+        run: bun scripts/release-manifest.ts --version "$VERSION" --channel "$CHANNEL" --dir dist --base-url "$FEED_URL" --out dist/feed
+
+      # Cloudflare R2 over the S3 API.
+      - name: Upload to the update feed
+        if: needs.channel.outputs.publish == 'true'
+        working-directory: apps/server/dist
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # R2 rejects the checksum headers newer AWS CLIs send by default.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET: strata-updates
+        run: |
+          set -euo pipefail
+          s3() { aws s3 cp "$@" --endpoint-url "$R2_ENDPOINT" --only-show-errors; }
+          # Binaries first, under versioned names (cacheable forever): a manifest published
+          # before the files it names would hand every server a download that 404s.
+          for platform in darwin-arm64 linux-x64 linux-arm64; do
+            s3 "strata-server-$platform" "s3://$R2_BUCKET/$FEED_DIR/strata-server-$VERSION-$platform" \
+              --cache-control "public, max-age=31536000, immutable" --content-type application/octet-stream
+          done
+          # The manifest is what servers poll, so it must change quickly.
+          s3 feed/manifest.json.sig "s3://$R2_BUCKET/$FEED_DIR/manifest.json.sig" --cache-control "public, max-age=300" --content-type text/plain
+          s3 feed/manifest.json "s3://$R2_BUCKET/$FEED_DIR/manifest.json" --cache-control "public, max-age=300" --content-type application/json
+          # Fixed names for first installs ("the current build" has an address).
+          for platform in darwin-arm64 linux-x64 linux-arm64; do
+            s3 "strata-server-$platform" "s3://$R2_BUCKET/$FEED_DIR/latest/strata-server-$platform" \
+              --cache-control "public, max-age=300" --content-type application/octet-stream
+          done
+          echo "::notice::Published $CHANNEL $VERSION to $FEED_URL"
+
+      - name: Tag and GitHub release (stable)
+        if: needs.channel.outputs.publish == 'true' && matrix.channel == 'stable'
+        working-directory: apps/server/dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for platform in darwin-arm64 linux-x64 linux-arm64; do cp "strata-server-$platform" "strata-server-$VERSION-$platform"; done
+          gh release create "server-v$VERSION" --target "$GITHUB_SHA" --title "Strata Server $VERSION" \
+            --notes "Strata Server $VERSION. Installed servers on the stable channel update to this on their own." \
+            strata-server-"$VERSION"-darwin-arm64 strata-server-"$VERSION"-linux-x64 strata-server-"$VERSION"-linux-arm64
+
+      - name: Keep the build (dry run)
+        if: needs.channel.outputs.publish != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: strata-server-${{ matrix.channel }}
+          retention-days: 5
+          path: |
+            apps/server/dist/strata-server-*
+            apps/server/dist/feed/

@@ -1,0 +1,58 @@
+name: Server CI
+
+# Typecheck, test and build-check the server and its dashboard on every change to them.
+on:
+  push:
+    branches: [main, strata-server]
+    paths:
+      - "apps/server/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/server-ci.yml"
+  pull_request:
+    paths:
+      - "apps/server/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/server-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.20
+
+      # The tests generate small media fixtures with ffmpeg and probe them with ffprobe.
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Install
+        run: |
+          bun install --frozen-lockfile
+          bun install --frozen-lockfile --cwd apps/server/web
+
+      - name: Typecheck
+        working-directory: apps/server
+        run: bun run typecheck
+
+      - name: Test
+        working-directory: apps/server
+        run: bun test
+
+      # The dashboard is embedded in every release binary: a broken build should fail here, not there.
+      - name: Build the dashboard and a Linux binary
+        working-directory: apps/server
+        run: bun scripts/build.ts --target bun-linux-x64

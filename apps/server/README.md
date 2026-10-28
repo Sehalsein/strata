@@ -4,6 +4,22 @@ A self-hosted media server. You browse one catalog (from TMDB), and each title p
 your local folders or your TorBox account. It runs headless and is configured from a web
 dashboard in your browser. See [DESIGN.md](DESIGN.md) for the architecture.
 
+## Install
+
+Prebuilt binaries for Linux (x64, arm64) and macOS (Apple silicon), with the dashboard built
+in and automatic updates available. On a home server:
+
+```sh
+curl -fLo strata-server https://updates.strata.sehalsein.com/server/latest/strata-server-linux-x64
+chmod +x strata-server
+sudo apt install ffmpeg avahi-utils          # or: brew install ffmpeg
+sudo ./strata-server service install --system   # macOS: ./strata-server service install
+```
+
+Then open `http://<server>:8420` to run setup. Other builds: `strata-server-linux-arm64`,
+`strata-server-darwin-arm64`. For the nightly channel, use `server/nightly/latest/…` instead.
+Each GitHub release (`server-v*`) carries the same binaries.
+
 ## Run
 
 ```sh
@@ -123,9 +139,20 @@ offline backup, since without it no update will be accepted by existing servers.
 
 ### Releases
 
-Not set up yet. Planned: release CI that publishes signed builds to a public Cloudflare R2
-feed (stable under `server/`, nightly under `server/nightly/`), the same model as dispatch-ai's
-desktop updates.
+`.github/workflows/server-release.yml` publishes to `https://updates.strata.sehalsein.com/server`
+(the `strata-updates` R2 bucket):
+
+- **Nightly** on every server change merged to `main`: version `<next patch>-nightly.<run>`,
+  under `server/nightly/`. A server on the nightly channel picks it up within 6 hours.
+- **Stable** when `apps/server/package.json` has a version with no `server-v<version>` tag:
+  under `server/`, tagged, with a GitHub release. To ship one, bump that version and merge.
+
+Each build has its channel's feed baked in, and every manifest is signed in CI with the
+`STRATA_UPDATE_PRIVATE_KEY` secret. The workflow also needs `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY` (an R2 token with write access to the bucket) and
+`CLOUDFLARE_ACCOUNT_ID`. A manual run (Actions → Server Release) builds and signs without
+publishing unless *Publish* is ticked. `.github/workflows/server-ci.yml` typechecks, tests and
+build-checks every server change.
 
 ## Develop
 

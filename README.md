@@ -7,8 +7,8 @@ shows and anime, and play what's in your own library on iPhone, iPad and Apple T
   macOS it ships as `Strata.app`, a menu bar app you install like any other.
 - **Apple apps** ([apps/apple](apps/apple)): iPhone, iPad and Apple TV, in SwiftUI.
 
-See [apps/server/README.md](apps/server/README.md) to run the server and
-[apps/apple/README.md](apps/apple/README.md) to build the apps.
+See [apps/server/README.md](apps/server/README.md) to install the server (prebuilt, with
+automatic updates) and [apps/apple/README.md](apps/apple/README.md) to build the apps.
 
 **Try it without a server:** enter `https://strata-demo.seinsehal.workers.dev` in the app
 and sign in as `demo` / `strata-demo` (see [Try it](#try-it)).
