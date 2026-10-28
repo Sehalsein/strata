@@ -89,9 +89,6 @@ writeFileSync(entitlements, `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict>
   <key>com.apple.security.cs.allow-jit</key><true/>
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
-  <key>com.apple.security.cs.disable-executable-page-protection</key><true/>
-  <key>com.apple.security.cs.allow-dyld-environment-variables</key><true/>
-  <key>com.apple.security.cs.disable-library-validation</key><true/>
 </dict></plist>
 `);
 for (const binary of [join(resources, "ffmpeg", "ffmpeg"), join(resources, "ffmpeg", "ffprobe")]) {

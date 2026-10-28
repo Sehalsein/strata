@@ -132,7 +132,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let process = Process()
         process.executableURL = try installedServer()
         process.arguments = ["serve", "--port", String(port)]
-        var env = ProcessInfo.processInfo.environment
+        // No loader variables reach the server.
+        var env = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("DYLD_") }
         // The server stops itself if this app disappears without stopping it (crash, force quit).
         env["STRATA_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         env["STRATA_LAUNCH_SECRET"] = launchSecret

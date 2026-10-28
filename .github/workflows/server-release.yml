@@ -238,7 +238,8 @@ jobs:
           if [ "$CHANNEL" = nightly ]; then
             gh release view "$feed" --repo "$REPO" --json assets --jq '.assets[].name' \
               | { grep -E '^(strata-server-[0-9].*-(darwin-arm64|linux-x64|linux-arm64)|Strata-[0-9].*\.dmg)$' || true; } \
-              | { grep -v -F -- "-$VERSION-" || true; } \
+              | { grep -v -x -F -e "strata-server-$VERSION-darwin-arm64" -e "strata-server-$VERSION-linux-x64" \
+                  -e "strata-server-$VERSION-linux-arm64" -e "Strata-$VERSION.dmg" || true; } \
               | while read -r old; do gh release delete-asset "$feed" "$old" --repo "$REPO" --yes; done
           fi
           echo "::notice::Published $CHANNEL $VERSION"
