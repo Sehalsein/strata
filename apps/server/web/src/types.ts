@@ -128,6 +128,7 @@ export interface AdminStatus {
   dataDir: string;
   uptimeMs: number;
   ffmpeg: { version: string; path: string; hwEncoder: string | null } | null;
+  ffmpegSetup?: { state: "idle" | "downloading" | "unsupported" } | { state: "failed"; error: string };
   tmdb: { configured: boolean };
   torbox: { configured: boolean };
   jobs: JobStatus[];

@@ -44,6 +44,7 @@ export const adminRoutes = new Hono<Env>()
       dataDir: s.paths.root,
       uptimeMs: Date.now() - s.startedAt,
       ffmpeg: ff ? { version: ff.version, path: ff.ffmpeg, hwEncoder: ff.hwEncoder ?? null } : null,
+      ffmpegSetup: s.ffmpegSetup(),
       tmdb: { configured: s.tmdb.configured },
       torbox: { configured: !!s.torbox() },
       jobs: s.jobs.status(),

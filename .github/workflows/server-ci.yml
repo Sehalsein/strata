@@ -58,3 +58,60 @@ jobs:
       - name: Build the dashboard and a Linux binary
         working-directory: apps/server
         run: bun scripts/build.ts --target bun-linux-x64
+
+  # A fresh install on a machine with no ffmpeg: the server sets up its own (pinned and
+  # checksummed) on first start, and that ffmpeg works on this platform.
+  first-run:
+    name: First run sets up ffmpeg (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.2.20
+
+      - name: Build
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun install --frozen-lockfile --ignore-scripts --cwd apps/server/web
+          cd apps/server && bun scripts/build.ts
+        shell: bash
+
+      - name: Start with no ffmpeg on the machine
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tool in ffmpeg ffprobe; do
+            if path="$(command -v "$tool")"; then sudo rm -f "$path"; fi
+          done
+          ! command -v ffmpeg
+          data="$RUNNER_TEMP/strata-data"
+          bin="$(ls apps/server/dist/strata-server-*)"
+          "$bin" --data-dir "$data" --port 18420 > "$RUNNER_TEMP/server.log" 2>&1 &
+          for _ in $(seq 1 120); do
+            grep -q "Using ffmpeg" "$RUNNER_TEMP/server.log" && break
+            grep -q "Job installFfmpeg failed" "$RUNNER_TEMP/server.log" && break
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/server.log"
+          grep -q "Using ffmpeg" "$RUNNER_TEMP/server.log"
+          curl -fsS http://127.0.0.1:18420/api/info
+          echo "DATA=$data" >> "$GITHUB_ENV"
+
+      - name: The installed ffmpeg works
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$DATA/bin/ffmpeg" -hide_banner -version | head -1
+          "$DATA/bin/ffmpeg" -hide_banner -encoders | grep -E "videotoolbox|vaapi|qsv" | head -5
+          "$DATA/bin/ffmpeg" -hide_banner -loglevel error -f lavfi -i testsrc=duration=2:size=640x360:rate=24 \
+            -f lavfi -i sine=duration=2 -c:v libx264 -c:a aac -shortest "$RUNNER_TEMP/clip.mp4"
+          "$DATA/bin/ffprobe" -v error -show_entries stream=codec_name -of csv=p=0 "$RUNNER_TEMP/clip.mp4"

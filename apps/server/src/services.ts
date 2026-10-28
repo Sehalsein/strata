@@ -13,6 +13,7 @@ import { logger, setLogDir } from "./log";
 import { PlaybackService } from "./playback/service";
 import { SessionManager } from "./playback/sessions";
 import { detectFfmpeg, type FfmpegInfo } from "./platform/ffmpeg";
+import { installFfmpeg, type FfmpegSetup } from "./platform/ffmpegInstall";
 import { KeepAwake } from "./platform/keepAwake";
 import { ProgressStore } from "./progress";
 import { ContentFilter } from "./catalog/contentRating";
@@ -59,6 +60,8 @@ export interface Services {
   bonjour: Bonjour;
   updater: Updater;
   ffmpeg: () => FfmpegInfo | null;
+  /** The one-time ffmpeg download, when the server had to set ffmpeg up itself. */
+  ffmpegSetup: () => FfmpegSetup;
   torbox: () => TorboxClient | null;
   startedAt: number;
   shutdown: () => void;
@@ -133,6 +136,25 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     ffmpegInfo = await detectFfmpeg(paths.root);
     return { found: !!ffmpegInfo };
   });
+  // No ffmpeg on the machine: the server fetches its own (pinned, checksummed) into <data-dir>/bin.
+  let ffmpegSetup: FfmpegSetup = { state: "idle" };
+  jobs.register("installFfmpeg", async () => {
+    if (ffmpegInfo) return { skipped: "ffmpeg is already available" };
+    ffmpegSetup = { state: "downloading" };
+    try {
+      if (!(await installFfmpeg(paths.root, fetchImpl))) {
+        ffmpegSetup = { state: "unsupported" };
+        return { skipped: `no ffmpeg build for ${process.platform}-${process.arch}` };
+      }
+      ffmpegInfo = await detectFfmpeg(paths.root);
+      ffmpegSetup = { state: "idle" };
+      return { installed: !!ffmpegInfo };
+    } catch (err) {
+      ffmpegSetup = { state: "failed", error: err instanceof Error ? err.message : String(err) };
+      throw err;
+    }
+  });
+  if (!ffmpegInfo && overrides.ffmpeg === undefined && process.env.STRATA_NO_FFMPEG_DOWNLOAD !== "1") void jobs.run("installFfmpeg");
 
   const serverId = loadServerId(paths.root);
   const updater = createUpdater({ dataDir: paths.root, dbPath: paths.db, backupsDir: paths.backups, db, settings, activeSessions: () => sessions.list().length, fetch: fetchImpl });
@@ -177,5 +199,5 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     log.info("Stopped");
   };
 
-  return { config, paths, db, settings, auth: new Auth(db), deviceLinks: new DeviceLinks(), tmdb, library, progress, catalog, content, sessions, playback, discovery, subtitles, jobs, serverId, bonjour, updater, ffmpeg, torbox, startedAt: Date.now(), shutdown };
+  return { config, paths, db, settings, auth: new Auth(db), deviceLinks: new DeviceLinks(), tmdb, library, progress, catalog, content, sessions, playback, discovery, subtitles, jobs, serverId, bonjour, updater, ffmpeg, ffmpegSetup: () => ffmpegSetup, torbox, startedAt: Date.now(), shutdown };
 }

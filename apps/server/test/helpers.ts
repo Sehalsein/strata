@@ -93,6 +93,7 @@ export interface TestServer {
 export async function startTestServer(fetchImpl: typeof fetch = fakeTmdb): Promise<TestServer> {
   const dataDir = mkdtempSync(join(tmpdir(), "strata-test-"));
   process.env.TMDB_API_KEY = "test-key";
+  process.env.STRATA_NO_FFMPEG_DOWNLOAD = "1"; // tests use the machine's ffmpeg, never a download
   const services = await createServices({ dataDir, port: 0, host: "127.0.0.1" }, { fetch: fetchImpl });
   const app = createApp(services);
   /** `ip` simulates the client address (otherwise the request has none, i.e. not local). */

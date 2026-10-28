@@ -37,9 +37,17 @@ export function OverviewPage() {
             {data.update.state === "downloading" && " Downloading…"}
           </Notice>
         )}
-        {!data.ffmpeg && (
-          <Notice tone="warn" title="ffmpeg not found">
-            Files that can't direct-play (MKV, DTS/TrueHD audio, some codecs) need ffmpeg. Install it on the server and restart Strata — on a Mac: <code className="code-inline">brew install ffmpeg</code>
+        {!data.ffmpeg && data.ffmpegSetup?.state === "downloading" && (
+          <Notice tone="info" title="Setting up ffmpeg">
+            A one-time download of the ffmpeg Strata uses to play files that can't direct-play (MKV, DTS/TrueHD audio, some codecs). It only takes a minute.
+          </Notice>
+        )}
+        {!data.ffmpeg && data.ffmpegSetup?.state !== "downloading" && (
+          <Notice tone="warn" title="ffmpeg isn't set up">
+            Files that can't direct-play (MKV, DTS/TrueHD audio, some codecs) need ffmpeg.{" "}
+            {data.ffmpegSetup?.state === "failed"
+              ? <>Strata couldn't download it ({data.ffmpegSetup.error}). Run “Set up ffmpeg” under Jobs to try again, or install ffmpeg on the server and restart Strata.</>
+              : <>There's no build for this platform; install ffmpeg on the server and restart Strata.</>}
           </Notice>
         )}
         {!data.tmdb.configured && (

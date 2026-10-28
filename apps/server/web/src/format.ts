@@ -46,6 +46,7 @@ const JOB_LABELS: Record<string, string> = {
   syncTorbox: "Sync TorBox library",
   matchPending: "Match pending files",
   detectFfmpeg: "Detect ffmpeg",
+  installFfmpeg: "Set up ffmpeg",
 };
 
 export function jobLabel(name: string): string {

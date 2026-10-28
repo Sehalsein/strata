@@ -30,7 +30,7 @@ export async function detectFfmpeg(dataDir: string): Promise<FfmpegInfo | null> 
   const ffmpeg = locate("ffmpeg", dataDir);
   const ffprobe = locate("ffprobe", dataDir);
   if (!ffmpeg || !ffprobe) {
-    log.warn("ffmpeg/ffprobe not found; install ffmpeg (e.g. `brew install ffmpeg`) for remux and probing");
+    log.warn("ffmpeg/ffprobe not found; Strata sets up its own (or install ffmpeg on the system)");
     return null;
   }
   const version = (await run([ffmpeg, "-hide_banner", "-version"])).split("\n")[0]?.replace(/^ffmpeg version /, "").split(" ")[0] ?? "unknown";

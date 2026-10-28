@@ -13,13 +13,15 @@ in and automatic updates available, are on the
 ```sh
 curl -fLo strata-server https://github.com/Sehalsein/strata/releases/download/server-stable/strata-server-linux-x64
 chmod +x strata-server
-sudo apt install ffmpeg avahi-utils             # or: brew install ffmpeg
 sudo ./strata-server service install --system   # macOS: ./strata-server service install
 ```
 
-Then open `http://<server>:8420` to run setup. Other builds: `strata-server-linux-arm64`,
-`strata-server-darwin-arm64`; for the nightly channel, download from `server-nightly` instead
-of `server-stable`. Each of those releases has a `SHA256SUMS` to check the download against.
+Then open `http://<server>:8420` to run setup. ffmpeg comes with it (set up on first start).
+On Linux, `sudo apt install avahi-utils` lets the apps find the server on the network.
+
+Other builds: `strata-server-linux-arm64`, `strata-server-darwin-arm64`. For the nightly
+channel, download from `server-nightly` instead of `server-stable`. Each of those releases
+has a `SHA256SUMS` to check the download against.
 
 ## Run
 
@@ -40,8 +42,13 @@ of `server-stable`. Each of those releases has a `SHA256SUMS` to check the downl
 | | `STRATA_DOCKER=1` | disables self-update (the image tag is the update mechanism) |
 | | `STRATA_DEBUG=1` | debug logging (includes ffmpeg command lines) |
 
-You need ffmpeg and ffprobe for probing and remuxing (`brew install ffmpeg`). The server
-looks for them in `$PATH`, `/opt/homebrew/bin`, `/usr/local/bin`, and `<data-dir>/bin`.
+ffmpeg and ffprobe (for probing, remuxing and transcoding) come with it: the server looks in
+`<data-dir>/bin`, `$PATH`, `/opt/homebrew/bin` and `/usr/local/bin`, and when there's none it
+sets up its own on first start, a one-time download of
+[jellyfin-ffmpeg](https://github.com/jellyfin/jellyfin-ffmpeg) (static, with VideoToolbox,
+VAAPI and QSV) into `<data-dir>/bin`, pinned by version and SHA-256
+(`src/platform/ffmpegInstall.ts`). An ffmpeg already on the machine is used instead.
+`STRATA_NO_FFMPEG_DOWNLOAD=1` turns the download off.
 
 Port and bind address are deliberately CLI/env-only (the dashboard shows them read-only), so
 a settings change can never cut the dashboard off. The server advertises itself on the LAN
