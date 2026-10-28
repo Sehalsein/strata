@@ -12,7 +12,12 @@ in and automatic updates available, are on the
 
 **Mac:** download [Strata.dmg](https://github.com/Sehalsein/strata/releases/download/server-stable/Strata.dmg),
 drag Strata to Applications and open it. It runs from the menu bar, starts at login, sets up
-ffmpeg and updates itself.
+ffmpeg and updates itself. Or with Homebrew:
+
+```sh
+brew tap sehalsein/strata https://github.com/Sehalsein/strata
+brew install --cask strata
+```
 
 **Linux** (or a Mac without the app):
 
