@@ -53,13 +53,15 @@ export function manifestUrlFor(template: string, channel: Channel): string {
 
 /**
  * Where to read the manifest: the dashboard override when set, otherwise the feed baked into
- * the binary (`<base>/manifest.json` for stable, `<base>/nightly/manifest.json` for nightly).
- * Null when there is neither (a dev build).
+ * the binary. A feed naming `{channel}` (GitHub releases: `…/download/server-{channel}`) gets
+ * `<feed>/manifest.json` with the channel filled in; a plain base gets `<base>/manifest.json`
+ * for stable and `<base>/nightly/manifest.json` for nightly. Null when there is neither (a dev build).
  */
 export function resolveManifestUrl(baseUrl: string, override: string, channel: Channel): string | null {
   if (override.trim()) return manifestUrlFor(override.trim(), channel);
   const base = baseUrl.replace(/\/+$/, "");
   if (!base) return null;
+  if (base.includes("{channel}")) return `${manifestUrlFor(base, channel)}/manifest.json`;
   return channel === "nightly" ? `${base}/nightly/manifest.json` : `${base}/manifest.json`;
 }
 

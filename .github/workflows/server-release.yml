@@ -1,19 +1,21 @@
 name: Server Release
 
-# Publishes signed strata-server builds to the update feed that installed servers poll
-# (https://updates.strata.sehalsein.com/server, a public Cloudflare R2 bucket).
+# Publishes signed strata-server builds as GitHub releases, which installed servers poll for
+# updates (the repository is public, so release files download without a login).
 #
-# - **Nightly**, on every server change merged to main: `<next patch>-nightly.<run>` under
-#   `server/nightly/`. Versioned against the next patch so a nightly always outranks the
-#   release it came after: 0.1.0 < 0.1.1-nightly.7 < 0.1.1.
+# - **Nightly**, on every server change merged to main: version `<next patch>-nightly.<run>`,
+#   in the rolling `server-nightly` prerelease. Versioned against the next patch so a nightly
+#   always outranks the release it came after: 0.1.0 < 0.1.1-nightly.7 < 0.1.1.
 # - **Stable**, when `apps/server/package.json` has a version with no `server-v<version>`
-#   tag yet: published under `server/`, tagged, with a GitHub release holding the binaries.
-#   To ship one, bump that version and merge.
+#   tag yet: a `server-v<version>` release with the binaries, and its signed manifest in the
+#   rolling `server-stable` release. To ship one, bump that version and merge.
 #
-# The feed URL is baked into each binary at build time, so a stable server polls the stable
-# manifest and a nightly one the nightly manifest. Manifests are signed with the key whose
-# public half is in apps/server/src/update/publicKey.ts; servers refuse anything else, so the
-# bucket itself doesn't need to be trusted.
+# Each binary is built with the feed `…/releases/download/server-{channel}` and its channel,
+# so it reads `server-<channel>/manifest.json`. Manifests are signed with the key whose public
+# half is in apps/server/src/update/publicKey.ts; servers refuse anything else.
+#
+# The signing key is an environment secret of `server-release`, which only `main` may deploy
+# to, and signing only runs for publishing runs, so no other branch's code ever holds it.
 on:
   push:
     branches: [main]
@@ -25,14 +27,14 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish to the update feed (off = build and sign only)
+        description: Publish (off = build only, unsigned)
         type: boolean
         default: false
 
 permissions:
-  contents: write # the stable tag and its GitHub release
+  contents: read
 
-# Two merges in quick succession must not race to the same feed; never cancel half an upload.
+# Two merges in quick succession must not race each other; never cancel half a publish.
 concurrency:
   group: server-release
   cancel-in-progress: false
@@ -45,7 +47,7 @@ jobs:
       builds: ${{ steps.check.outputs.builds }}
       publish: ${{ steps.check.outputs.publish }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -64,17 +66,17 @@ jobs:
 
           builds='[]'
           add() {
-            builds="$(jq -c --arg channel "$1" --arg version "$2" --arg path "$3" '. + [{channel: $channel, version: $version, path: $path}]' <<< "$builds")"
+            builds="$(jq -c --arg channel "$1" --arg version "$2" '. + [{channel: $channel, version: $version}]' <<< "$builds")"
             echo "::notice::$1 build, version $2"
           }
           # The tag records what has shipped, so it survives re-runs and empty merges.
           if ! git rev-parse -q --verify "refs/tags/server-v$base" >/dev/null; then
-            add stable "$base" ""
+            add stable "$base"
           fi
-          add nightly "$nightly" "/nightly"
+          add nightly "$nightly"
           echo "builds=$builds" >> "$GITHUB_OUTPUT"
 
-          # Only main reaches the feed; a manual run publishes only when asked to.
+          # Only main publishes; a manual run publishes only when asked to.
           publish=true
           if [ "$REF" != "refs/heads/main" ]; then
             echo "::notice::$REF is not main: building only"
@@ -91,6 +93,10 @@ jobs:
     # macOS: the darwin binary has to be ad-hoc signed with codesign; Linux ones cross-compile.
     runs-on: macos-15
     timeout-minutes: 30
+    # Deployment branches: main only. Its secrets (the signing key) exist for nothing else.
+    environment: server-release
+    permissions:
+      contents: write # releases and tags
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -99,12 +105,13 @@ jobs:
     env:
       CHANNEL: ${{ matrix.channel }}
       VERSION: ${{ matrix.version }}
-      FEED_URL: ${{ format('{0}{1}', 'https://updates.strata.sehalsein.com/server', matrix.path) }}
-      FEED_DIR: ${{ format('server{0}', matrix.path) }}
+      REPO: ${{ github.repository }}
+      PUBLISH: ${{ needs.channel.outputs.publish }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.2.20
 
@@ -115,71 +122,78 @@ jobs:
 
       - name: Build
         working-directory: apps/server
-        run: bun scripts/build.ts --all --version "$VERSION" --update-url "$FEED_URL"
-
-      - name: Check the build reports its version
-        working-directory: apps/server
         run: |
+          bun scripts/build.ts --all --version "$VERSION" --channel "$CHANNEL" \
+            --update-url "https://github.com/$REPO/releases/download/server-{channel}"
           reported="$(./dist/strata-server-darwin-arm64 --version)"
-          echo "$reported"
-          case "$reported" in *"$VERSION"*) ;; *) echo "::error::expected $VERSION"; exit 1 ;; esac
+          case "$reported" in *"$VERSION"*) ;; *) echo "::error::built $reported, expected $VERSION"; exit 1 ;; esac
+          # Versioned names (what manifests point at) plus checksums for checking a first install.
+          cd dist
+          for platform in darwin-arm64 linux-x64 linux-arm64; do
+            cp "strata-server-$platform" "strata-server-$VERSION-$platform"
+          done
+          shasum -a 256 strata-server-darwin-arm64 strata-server-linux-x64 strata-server-linux-arm64 > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Sign the manifest
+        if: env.PUBLISH == 'true'
         working-directory: apps/server
         env:
           STRATA_UPDATE_PRIVATE_KEY: ${{ secrets.STRATA_UPDATE_PRIVATE_KEY }}
-        run: bun scripts/release-manifest.ts --version "$VERSION" --channel "$CHANNEL" --dir dist --base-url "$FEED_URL" --out dist/feed
+        run: |
+          # Stable binaries stay in their versioned release; nightly ones in the rolling one.
+          if [ "$CHANNEL" = stable ]; then assets="server-v$VERSION"; else assets="server-nightly"; fi
+          bun scripts/release-manifest.ts --version "$VERSION" --channel "$CHANNEL" --dir dist \
+            --base-url "https://github.com/$REPO/releases/download/$assets" --out dist/feed
 
-      # Cloudflare R2 over the S3 API.
-      - name: Upload to the update feed
-        if: needs.channel.outputs.publish == 'true'
+      - name: Publish
+        if: env.PUBLISH == 'true'
         working-directory: apps/server/dist
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          # R2 rejects the checksum headers newer AWS CLIs send by default.
-          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
-          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
-          R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
-          R2_BUCKET: strata-updates
         run: |
           set -euo pipefail
-          s3() { aws s3 cp "$@" --endpoint-url "$R2_ENDPOINT" --only-show-errors; }
-          # Binaries first, under versioned names (cacheable forever): a manifest published
-          # before the files it names would hand every server a download that 404s.
-          for platform in darwin-arm64 linux-x64 linux-arm64; do
-            s3 "strata-server-$platform" "s3://$R2_BUCKET/$FEED_DIR/strata-server-$VERSION-$platform" \
-              --cache-control "public, max-age=31536000, immutable" --content-type application/octet-stream
-          done
-          # The manifest is what servers poll, so it must change quickly.
-          s3 feed/manifest.json.sig "s3://$R2_BUCKET/$FEED_DIR/manifest.json.sig" --cache-control "public, max-age=300" --content-type text/plain
-          s3 feed/manifest.json "s3://$R2_BUCKET/$FEED_DIR/manifest.json" --cache-control "public, max-age=300" --content-type application/json
-          # Fixed names for first installs ("the current build" has an address).
-          for platform in darwin-arm64 linux-x64 linux-arm64; do
-            s3 "strata-server-$platform" "s3://$R2_BUCKET/$FEED_DIR/latest/strata-server-$platform" \
-              --cache-control "public, max-age=300" --content-type application/octet-stream
-          done
-          echo "::notice::Published $CHANNEL $VERSION to $FEED_URL"
+          feed="server-$CHANNEL"
+          versioned=(strata-server-"$VERSION"-darwin-arm64 strata-server-"$VERSION"-linux-x64 strata-server-"$VERSION"-linux-arm64)
+          fixed=(strata-server-darwin-arm64 strata-server-linux-x64 strata-server-linux-arm64 SHA256SUMS)
 
-      - name: Tag and GitHub release (stable)
-        if: needs.channel.outputs.publish == 'true' && matrix.channel == 'stable'
-        working-directory: apps/server/dist
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          for platform in darwin-arm64 linux-x64 linux-arm64; do cp "strata-server-$platform" "strata-server-$VERSION-$platform"; done
-          gh release create "server-v$VERSION" --target "$GITHUB_SHA" --title "Strata Server $VERSION" \
-            --notes "Strata Server $VERSION. Installed servers on the stable channel update to this on their own." \
-            strata-server-"$VERSION"-darwin-arm64 strata-server-"$VERSION"-linux-x64 strata-server-"$VERSION"-linux-arm64
+          if [ "$CHANNEL" = stable ]; then
+            # The release people download from: versioned binaries and checksums.
+            gh release create "server-v$VERSION" --repo "$REPO" --target "$GITHUB_SHA" --latest \
+              --title "Strata Server $VERSION" \
+              --notes "Strata Server $VERSION. Servers on the stable channel update to it on their own; see apps/server/README.md to install." \
+              "${versioned[@]}" "${fixed[@]}"
+          fi
+
+          # The rolling feed release: created once, its files replaced on every publish.
+          if ! gh release view "$feed" --repo "$REPO" >/dev/null 2>&1; then
+            flags=(--latest=false)
+            [ "$CHANNEL" = nightly ] && flags+=(--prerelease)
+            gh release create "$feed" --repo "$REPO" --target "$GITHUB_SHA" "${flags[@]}" \
+              --title "Strata Server ($CHANNEL feed)" \
+              --notes "The $CHANNEL update feed that installed servers poll, and the current $CHANNEL binaries under fixed names."
+          fi
+          if [ "$CHANNEL" = nightly ]; then
+            gh release upload "$feed" --repo "$REPO" --clobber "${versioned[@]}"
+          fi
+          gh release upload "$feed" --repo "$REPO" --clobber "${fixed[@]}"
+          # The manifest last: published before the files it names, it would hand servers a 404.
+          gh release upload "$feed" --repo "$REPO" --clobber feed/manifest.json.sig
+          gh release upload "$feed" --repo "$REPO" --clobber feed/manifest.json
+
+          # Older nightly binaries are no longer named by the manifest.
+          if [ "$CHANNEL" = nightly ]; then
+            gh release view "$feed" --repo "$REPO" --json assets --jq '.assets[].name' \
+              | { grep -E '^strata-server-[0-9].*-(darwin-arm64|linux-x64|linux-arm64)$' || true; } \
+              | { grep -v -F -- "-$VERSION-" || true; } \
+              | while read -r old; do gh release delete-asset "$feed" "$old" --repo "$REPO" --yes; done
+          fi
+          echo "::notice::Published $CHANNEL $VERSION"
 
       - name: Keep the build (dry run)
-        if: needs.channel.outputs.publish != 'true'
-        uses: actions/upload-artifact@v4
+        if: env.PUBLISH != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: strata-server-${{ matrix.channel }}
           retention-days: 5
           path: |
             apps/server/dist/strata-server-*
-            apps/server/dist/feed/
+            apps/server/dist/SHA256SUMS

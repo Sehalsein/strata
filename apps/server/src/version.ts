@@ -1,8 +1,9 @@
 import pkg from "../package.json" with { type: "json" };
 
-// Defined at compile time by scripts/build.ts (`--version`, `--update-url`); absent in dev.
+// Defined at compile time by scripts/build.ts (`--version`, `--update-url`, `--channel`); absent in dev.
 declare const STRATA_BUILD_VERSION: string | undefined;
 declare const STRATA_UPDATE_URL: string | undefined;
+declare const STRATA_BUILD_CHANNEL: string | undefined;
 
 export const VERSION: string = typeof STRATA_BUILD_VERSION === "string" ? STRATA_BUILD_VERSION : pkg.version;
 
@@ -10,14 +11,21 @@ export const VERSION: string = typeof STRATA_BUILD_VERSION === "string" ? STRATA
 export const API_VERSION = 1;
 
 /**
- * The update feed this binary was built for, e.g. `https://updates.example.com/server` (stable)
- * or `…/server/nightly` (nightly). Empty in dev builds, which therefore never self-update.
+ * The update feed this binary was built for. Either a template naming the channel, e.g.
+ * `https://github.com/<owner>/<repo>/releases/download/server-{channel}`, or a base like
+ * `https://updates.example.com/server` (stable) / `…/server/nightly` (nightly). Empty in dev
+ * builds, which therefore never self-update.
  */
 const BAKED_UPDATE_URL = (typeof STRATA_UPDATE_URL === "string" ? STRATA_UPDATE_URL : "").replace(/\/+$/, "");
 const NIGHTLY_SUFFIX = /\/nightly$/;
+const STRATA_CHANNEL_DEFINED = typeof STRATA_BUILD_CHANNEL === "string" ? STRATA_BUILD_CHANNEL : "";
 
 /** The channel the binary was published to; the default for the `updateChannel` setting. */
-export const BUILD_CHANNEL: "stable" | "nightly" = NIGHTLY_SUFFIX.test(BAKED_UPDATE_URL) ? "nightly" : "stable";
+export const BUILD_CHANNEL: "stable" | "nightly" =
+  STRATA_CHANNEL_DEFINED === "nightly" || STRATA_CHANNEL_DEFINED === "stable" ? STRATA_CHANNEL_DEFINED : NIGHTLY_SUFFIX.test(BAKED_UPDATE_URL) ? "nightly" : "stable";
 
-/** Feed root shared by both channels: `<base>/manifest.json` is stable, `<base>/nightly/manifest.json` nightly. */
-export const UPDATE_BASE_URL: string = BAKED_UPDATE_URL.replace(NIGHTLY_SUFFIX, "");
+/**
+ * Feed root shared by both channels: a `{channel}` template as is, otherwise the base
+ * (`<base>/manifest.json` is stable, `<base>/nightly/manifest.json` nightly).
+ */
+export const UPDATE_BASE_URL: string = BAKED_UPDATE_URL.includes("{channel}") ? BAKED_UPDATE_URL : BAKED_UPDATE_URL.replace(NIGHTLY_SUFFIX, "");

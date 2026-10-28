@@ -7,18 +7,19 @@ dashboard in your browser. See [DESIGN.md](DESIGN.md) for the architecture.
 ## Install
 
 Prebuilt binaries for Linux (x64, arm64) and macOS (Apple silicon), with the dashboard built
-in and automatic updates available. On a home server:
+in and automatic updates available, are on the
+[releases page](https://github.com/Sehalsein/strata/releases). On a home server:
 
 ```sh
-curl -fLo strata-server https://updates.strata.sehalsein.com/server/latest/strata-server-linux-x64
+curl -fLo strata-server https://github.com/Sehalsein/strata/releases/download/server-stable/strata-server-linux-x64
 chmod +x strata-server
-sudo apt install ffmpeg avahi-utils          # or: brew install ffmpeg
+sudo apt install ffmpeg avahi-utils             # or: brew install ffmpeg
 sudo ./strata-server service install --system   # macOS: ./strata-server service install
 ```
 
 Then open `http://<server>:8420` to run setup. Other builds: `strata-server-linux-arm64`,
-`strata-server-darwin-arm64`. For the nightly channel, use `server/nightly/latest/…` instead.
-Each GitHub release (`server-v*`) carries the same binaries.
+`strata-server-darwin-arm64`; for the nightly channel, download from `server-nightly` instead
+of `server-stable`. Each of those releases has a `SHA256SUMS` to check the download against.
 
 ## Run
 
@@ -139,19 +140,21 @@ offline backup, since without it no update will be accepted by existing servers.
 
 ### Releases
 
-`.github/workflows/server-release.yml` publishes to `https://updates.strata.sehalsein.com/server`
-(the `strata-updates` R2 bucket):
+`.github/workflows/server-release.yml` publishes GitHub releases (the repository is public, so
+servers download them without a login):
 
 - **Nightly** on every server change merged to `main`: version `<next patch>-nightly.<run>`,
-  under `server/nightly/`. A server on the nightly channel picks it up within 6 hours.
-- **Stable** when `apps/server/package.json` has a version with no `server-v<version>` tag:
-  under `server/`, tagged, with a GitHub release. To ship one, bump that version and merge.
+  in the rolling `server-nightly` prerelease.
+- **Stable** when `apps/server/package.json` has a version with no `server-v<version>` tag: a
+  `server-v<version>` release with the binaries, and its manifest in the rolling
+  `server-stable` release. To ship one, bump that version and merge.
 
-Each build has its channel's feed baked in, and every manifest is signed in CI with the
-`STRATA_UPDATE_PRIVATE_KEY` secret. The workflow also needs `R2_ACCESS_KEY_ID`,
-`R2_SECRET_ACCESS_KEY` (an R2 token with write access to the bucket) and
-`CLOUDFLARE_ACCOUNT_ID`. A manual run (Actions → Server Release) builds and signs without
-publishing unless *Publish* is ticked. `.github/workflows/server-ci.yml` typechecks, tests and
+Builds use the feed `https://github.com/Sehalsein/strata/releases/download/server-{channel}`
+(`--update-url … --channel <channel>`), so a server reads `server-<channel>/manifest.json`.
+Manifests are signed in CI with `STRATA_UPDATE_PRIVATE_KEY`, a secret of the
+`server-release` environment, which only `main` can deploy to; signing only runs when
+publishing. A manual run (Actions → Server Release) builds without signing or publishing
+unless *Publish* is ticked. `.github/workflows/server-ci.yml` typechecks, tests and
 build-checks every server change.
 
 ## Develop

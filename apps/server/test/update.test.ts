@@ -116,6 +116,9 @@ describe("feed URL", () => {
   test("derives the channel's manifest from the baked base", () => {
     expect(resolveManifestUrl("https://updates.example.com/server", "", "stable")).toBe("https://updates.example.com/server/manifest.json");
     expect(resolveManifestUrl("https://updates.example.com/server/", "", "nightly")).toBe("https://updates.example.com/server/nightly/manifest.json");
+    const github = "https://github.com/o/r/releases/download/server-{channel}";
+    expect(resolveManifestUrl(github, "", "stable")).toBe("https://github.com/o/r/releases/download/server-stable/manifest.json");
+    expect(resolveManifestUrl(github, "", "nightly")).toBe("https://github.com/o/r/releases/download/server-nightly/manifest.json");
   });
 
   test("the override wins, with {channel} substituted", () => {
