@@ -8,6 +8,8 @@
 //                                                    # bundle ffmpeg + ffprobe (static builds)
 //   STRATA_SIGN_IDENTITY="Developer ID Application: …" bun scripts/package-mac.ts
 //                                                    # sign for other Macs (default: ad hoc)
+//   bun scripts/package-mac.ts --skip-build --version 0.2.0-nightly.4
+//                                                    # the version the built server has (release CI)
 //
 // Output: dist/Strata.app and dist/Strata-<version>.dmg
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -21,7 +23,8 @@ const SERVER = join(DIST, "strata-server-darwin-arm64");
 const APP = join(DIST, "Strata.app");
 
 const args = process.argv.slice(2);
-const version = (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { version: string }).version;
+const versionArg = args.flatMap((a, i) => (a === "--version" && args[i + 1] ? [args[i + 1]!] : []))[0];
+const version = versionArg ?? (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { version: string }).version;
 
 async function sh(cmd: string[], cwd = ROOT) {
   const proc = Bun.spawn(cmd, { cwd, stdout: "inherit", stderr: "inherit" });
@@ -48,7 +51,7 @@ cpSync(SERVER, join(macos, "strata-server"));
 chmodSync(join(macos, "strata-server"), 0o755);
 
 // 3. ffmpeg: bundled when FFMPEG_DIR points at static ffmpeg/ffprobe builds; otherwise the
-//    server falls back to one installed on the Mac (Homebrew) and the dashboard says if none is found.
+//    server uses one installed on the Mac, or sets up its own on first start.
 const ffmpegDir = process.env.FFMPEG_DIR;
 if (ffmpegDir) {
   const dest = join(resources, "ffmpeg");
@@ -61,7 +64,7 @@ if (ffmpegDir) {
   }
   console.log(`Bundled ffmpeg from ${ffmpegDir}`);
 } else {
-  console.log("No FFMPEG_DIR: Strata.app will use ffmpeg installed on the Mac (e.g. Homebrew).");
+  console.log("No FFMPEG_DIR: the server uses the Mac's ffmpeg or sets up its own.");
 }
 
 // 4. Icon: the app icon at every size macOS asks for
@@ -76,11 +79,27 @@ await sh(["iconutil", "-c", "icns", iconset, "-o", join(resources, "AppIcon.icns
 rmSync(iconset, { recursive: true, force: true });
 
 // 5. Sign: ad hoc runs on this Mac; other Macs need a Developer ID (and notarization).
+//    Notarization needs the hardened runtime, which forbids the JIT Bun's runtime uses
+//    unless the server binary is entitled to it.
 const identity = process.env.STRATA_SIGN_IDENTITY ?? "-";
 const options = identity === "-" ? [] : ["--options", "runtime", "--timestamp"];
-for (const binary of [join(resources, "ffmpeg", "ffmpeg"), join(resources, "ffmpeg", "ffprobe"), join(macos, "strata-server")]) {
+const entitlements = join(DIST, "strata-server.entitlements");
+writeFileSync(entitlements, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+  <key>com.apple.security.cs.disable-executable-page-protection</key><true/>
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key><true/>
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict></plist>
+`);
+for (const binary of [join(resources, "ffmpeg", "ffmpeg"), join(resources, "ffmpeg", "ffprobe")]) {
   if (existsSync(binary)) await sh(["codesign", "--force", "--sign", identity, ...options, binary]);
 }
+const server = join(macos, "strata-server");
+await sh(["codesign", "--force", "--sign", identity, ...options, ...(identity === "-" ? [] : ["--entitlements", entitlements]), server]);
+rmSync(entitlements, { force: true });
 await sh(["codesign", "--force", "--sign", identity, ...options, APP]);
 
 // 6. Disk image with the usual drag-to-Applications layout

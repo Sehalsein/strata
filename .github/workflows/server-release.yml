@@ -149,17 +149,66 @@ jobs:
           bun scripts/release-manifest.ts --version "$VERSION" --channel "$CHANNEL" --dir dist \
             --base-url "https://github.com/$REPO/releases/download/$assets" --out dist/feed
 
+      # Strata.app for the Mac: Developer ID signed and notarized, so it opens like any app.
+      # Skipped (with a warning) until the Developer ID certificate is set up.
+      - name: Mac app
+        id: macapp
+        if: env.PUBLISH == 'true'
+        working-directory: apps/server
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEVELOPER_ID_P12:-}" ]; then
+            echo "::warning::No Developer ID certificate (DEVELOPER_ID_P12_BASE64): no Mac app this time"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/devid.keychain-db"
+          kpass="$(uuidgen)"
+          security create-keychain -p "$kpass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$kpass" "$keychain"
+          echo "$DEVELOPER_ID_P12" | base64 --decode > "$RUNNER_TEMP/devid.p12"
+          security import "$RUNNER_TEMP/devid.p12" -k "$keychain" -P "$DEVELOPER_ID_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/devid.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kpass" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity="$(security find-identity -v -p codesigning "$keychain" | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"')"
+          [ -n "$identity" ] || { echo "::error::The certificate isn't a Developer ID Application identity"; exit 1; }
+
+          STRATA_SIGN_IDENTITY="$identity" bun scripts/package-mac.ts --skip-build --version "$VERSION"
+
+          key="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$ASC_PRIVATE_KEY" > "$key"
+          xcrun notarytool submit "dist/Strata-$VERSION.dmg" --key "$key" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait
+          rm -f "$key"
+          xcrun stapler staple "dist/Strata-$VERSION.dmg"
+          spctl --assess --type open --context context:primary-signature -v "dist/Strata-$VERSION.dmg"
+          cp "dist/Strata-$VERSION.dmg" dist/Strata.dmg
+          security delete-keychain "$keychain"
+          echo "dmg=true" >> "$GITHUB_OUTPUT"
+
       # The only step that holds a write-capable token.
       - name: Publish
         if: env.PUBLISH == 'true'
         working-directory: apps/server/dist
         env:
           GH_TOKEN: ${{ github.token }}
+          DMG: ${{ steps.macapp.outputs.dmg }}
         run: |
           set -euo pipefail
           feed="server-$CHANNEL"
           versioned=(strata-server-"$VERSION"-darwin-arm64 strata-server-"$VERSION"-linux-x64 strata-server-"$VERSION"-linux-arm64)
           fixed=(strata-server-darwin-arm64 strata-server-linux-x64 strata-server-linux-arm64 SHA256SUMS)
+          if [ "$DMG" = true ]; then
+            versioned+=("Strata-$VERSION.dmg")
+            fixed+=(Strata.dmg)
+            shasum -a 256 Strata.dmg >> SHA256SUMS
+          fi
 
           if [ "$CHANNEL" = stable ]; then
             # The release people download from: versioned binaries and checksums.
@@ -188,7 +237,7 @@ jobs:
           # Older nightly binaries are no longer named by the manifest.
           if [ "$CHANNEL" = nightly ]; then
             gh release view "$feed" --repo "$REPO" --json assets --jq '.assets[].name' \
-              | { grep -E '^strata-server-[0-9].*-(darwin-arm64|linux-x64|linux-arm64)$' || true; } \
+              | { grep -E '^(strata-server-[0-9].*-(darwin-arm64|linux-x64|linux-arm64)|Strata-[0-9].*\.dmg)$' || true; } \
               | { grep -v -F -- "-$VERSION-" || true; } \
               | while read -r old; do gh release delete-asset "$feed" "$old" --repo "$REPO" --yes; done
           fi

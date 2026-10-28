@@ -1,16 +1,23 @@
 // Strata.app: runs the Strata server in the background with a menu bar item,
-// the way Jellyfin's Mac app does. No Dock icon, no login item; quitting stops
-// the server. The server itself (Contents/MacOS/strata-server) stays headless,
-// so the same binary also runs on a NAS or from a terminal.
+// the way Jellyfin's Mac app does. No Dock icon; starts at login (a menu toggle);
+// quitting stops the server. The server itself (Contents/MacOS/strata-server) stays
+// headless, so the same binary also runs on a NAS or from a terminal.
+//
+// The app runs a copy of its server from Application Support, so the server can update
+// itself without touching this signed app; installing a newer Strata.app refreshes the copy.
 
 import AppKit
 import CryptoKit
+import ServiceManagement
 
 private let port = 8420
 // 127.0.0.1, not localhost: another program could sit on the IPv6 address.
 private let dashboardURL = URL(string: "http://127.0.0.1:\(port)")!
 private let logURL = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Logs/Strata/server.log")
+/// The server copy the app runs (and updates replace), next to the server's own data.
+private let installDir = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Application Support/Strata/app")
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -18,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var stateItem: NSMenuItem!
     private var openItem: NSMenuItem!
     private var restartItem: NSMenuItem!
+    private var loginItem: NSMenuItem!
     /// The server this app started. The app only ever opens the dashboard of this one.
     private var server: Process?
     /// Shared with the server it starts (as hex text, which is also the HMAC key on both
@@ -37,6 +45,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             signalSources.append(source)
         }
         buildMenu()
+        // A home server should come back on its own: on by default the first time, then it's the toggle's.
+        if !UserDefaults.standard.bool(forKey: "loginItemSetUp") {
+            UserDefaults.standard.set(true, forKey: "loginItemSetUp")
+            try? SMAppService.mainApp.register()
+        }
+        updateLoginItem()
         Task { await start(openDashboard: !UserDefaults.standard.bool(forKey: "openedOnce")) }
     }
 
@@ -89,10 +103,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setState("Port \(port) is in use by another program. Quit it, then choose Restart Server.", running: false)
     }
 
+    /// The server to run: the copy in Application Support, put there (or refreshed) from this
+    /// app whenever this app's version differs from the one that copy came from. Updates
+    /// the server installs on its own replace the copy and leave the marker alone.
+    private func installedServer() throws -> URL {
+        let fm = FileManager.default
+        let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/strata-server")
+        let installed = installDir.appendingPathComponent("strata-server")
+        let marker = installDir.appendingPathComponent("installed-from")
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let installedFrom = try? String(contentsOf: marker, encoding: .utf8)
+        if !fm.fileExists(atPath: installed.path) || installedFrom != appVersion {
+            try fm.createDirectory(at: installDir, withIntermediateDirectories: true)
+            let staging = installDir.appendingPathComponent("strata-server.installing")
+            try? fm.removeItem(at: staging)
+            try fm.copyItem(at: bundled, to: staging)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staging.path)
+            if fm.fileExists(atPath: installed.path) { _ = try fm.replaceItemAt(installed, withItemAt: staging) }
+            else { try fm.moveItem(at: staging, to: installed) }
+            try appVersion.write(to: marker, atomically: true, encoding: .utf8)
+            NSLog("Strata: installed server %@ to %@", appVersion, installed.path)
+        }
+        return installed
+    }
+
     private func launchServer() throws {
         let bundle = Bundle.main.bundleURL
         let process = Process()
-        process.executableURL = bundle.appendingPathComponent("Contents/MacOS/strata-server")
+        process.executableURL = try installedServer()
         process.arguments = ["serve", "--port", String(port)]
         var env = ProcessInfo.processInfo.environment
         // The server stops itself if this app disappears without stopping it (crash, force quit).
@@ -169,6 +207,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(item("Show Logs", #selector(showLogs), "l"))
         restartItem = item("Restart Server", #selector(restart), "r")
         menu.addItem(restartItem)
+        loginItem = item("Start at Login", #selector(toggleLoginItem), "")
+        menu.addItem(loginItem)
         menu.addItem(.separator())
         menu.addItem(item("Quit Strata", #selector(NSApplication.terminate(_:)), "q"))
         statusItem.menu = menu
@@ -199,6 +239,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showLogs() { NSWorkspace.shared.open(logURL) }
+
+    @objc private func toggleLoginItem() {
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled { try service.unregister() } else { try service.register() }
+        } catch {
+            NSLog("Strata: login item: %@", error.localizedDescription)
+        }
+        updateLoginItem()
+    }
+
+    private func updateLoginItem() {
+        loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+    }
 
     @objc private func restart() {
         server?.terminationHandler = nil
