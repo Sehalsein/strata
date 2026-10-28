@@ -43,12 +43,15 @@ export async function installFfmpeg(
   try {
     const url = `${BUNDLED_FFMPEG.source}/releases/download/v${BUNDLED_FFMPEG.version}/${build.file}`;
     log.info(`Setting up ffmpeg ${BUNDLED_FFMPEG.version} (one-time download)`);
-    const res = await fetchImpl(url);
+    const res = await fetchImpl(url, { signal: AbortSignal.timeout(10 * 60_000) });
     if (!res.ok) throw new Error(`GET ${url} failed (${res.status})`);
-    const archive = join(work, build.file);
-    await Bun.write(archive, res);
-    const sha256 = createHash("sha256").update(new Uint8Array(await Bun.file(archive).arrayBuffer())).digest("hex");
+    // Read whole (33–60 MB), then hash and write those same bytes. (Bun.write(file, response)
+    // stalls on this redirected download in Bun 1.2.)
+    const body = new Uint8Array(await res.arrayBuffer());
+    const sha256 = createHash("sha256").update(body).digest("hex");
     if (sha256 !== build.sha256) throw new Error(`ffmpeg download doesn't match its checksum (got ${sha256})`);
+    const archive = join(work, build.file);
+    await Bun.write(archive, body);
 
     const tar = Bun.spawn(["tar", "-xJf", archive, "-C", work], { stdout: "ignore", stderr: "pipe" });
     if ((await tar.exited) !== 0) throw new Error(`Couldn't unpack ffmpeg: ${(await new Response(tar.stderr).text()).trim()}`);
