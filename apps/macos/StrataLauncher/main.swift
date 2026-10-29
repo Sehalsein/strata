@@ -169,20 +169,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Whether the server answering on the port is the one this app started: it must
     /// return the HMAC of a fresh random challenge under the secret only it was given.
     private func isOurs() async -> Bool {
-        guard server?.isRunning == true else { return false }
+        await proveOurs() != nil
+    }
+
+    /// `isOurs`, returning the version the server signed with its proof ("" from servers
+    /// that don't sign one).
+    private func proveOurs() async -> String? {
+        guard server?.isRunning == true else { return nil }
         let challenge = (0..<32).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
         var request = URLRequest(url: dashboardURL.appendingPathComponent("api/launcher/proof"))
         request.timeoutInterval = 2
         request.setValue(challenge, forHTTPHeaderField: "X-Strata-Challenge")
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200, data.count < 1_024,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let proofHex = json["proof"] as? String,
               let proof = Data(hexString: proofHex), proof.count == SHA256.byteCount
-        else { return false }
+        else { return nil }
         // The proof covers the port too; checked in constant time.
-        return HMAC<SHA256>.isValidAuthenticationCode(proof, authenticating: Data("\(challenge)|\(port)".utf8),
-                                                     using: SymmetricKey(data: Data(launchSecret.utf8)))
+        let key = SymmetricKey(data: Data(launchSecret.utf8))
+        guard HMAC<SHA256>.isValidAuthenticationCode(proof, authenticating: Data("\(challenge)|\(port)".utf8), using: key) else { return nil }
+        guard let version = json["version"] as? String,
+              version.range(of: "^[0-9A-Za-z.+-]{1,32}$", options: .regularExpression) != nil,
+              let signed = (json["versionProof"] as? String).flatMap({ Data(hexString: $0) }),
+              HMAC<SHA256>.isValidAuthenticationCode(signed, authenticating: Data("\(challenge)|\(port)|\(version)".utf8), using: key)
+        else { return "" }
+        return version
     }
 
     private func isServing() async -> Bool {
@@ -220,28 +233,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// The running server's version (it updates itself, so this app's own can be older).
-    /// Only from the server this app started (the same proof as Open Dashboard), and only
-    /// while it's still running.
+    /// Only as signed by the server this app started (with the proof Open Dashboard checks),
+    /// and only while it's still running.
     func menuWillOpen(_ menu: NSMenu) {
         guard isUp, server?.isRunning == true else { return }
         Task {
-            guard await isOurs(), let version = await serverVersion(),
-                  isUp, server?.isRunning == true else { return }
+            guard let version = await proveOurs(), !version.isEmpty, isUp, server?.isRunning == true else { return }
             stateItem.title = "Strata \(version): \(stateText)"
         }
-    }
-
-    private func serverVersion() async -> String? {
-        var request = URLRequest(url: dashboardURL.appendingPathComponent("api/info"))
-        request.timeoutInterval = 1
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200, data.count < 1_024,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              json["name"] as? String == "strata",
-              let version = json["version"] as? String,
-              version.range(of: "^[0-9A-Za-z.+-]{1,32}$", options: .regularExpression) != nil
-        else { return nil }
-        return version
     }
 
     private func item(_ title: String, _ action: Selector, _ key: String) -> NSMenuItem {
