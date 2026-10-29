@@ -2,10 +2,15 @@ import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { Dialog } from "../components/Dialog";
 import { Badge, ErrorText, Field, PageHeader, Spinner, useResource } from "../components/ui";
-import { formatBytes, resolutionLabel } from "../format";
-import type { LibraryFile, MatchStatus, Provider, TmdbResult } from "../types";
+import { formatBytes, relativeTime, resolutionLabel } from "../format";
+import type { LibraryFile, LibrarySort, MatchStatus, Provider, TmdbResult } from "../types";
 
 const PAGE = 50;
+const SORTS: { value: LibrarySort; label: string }[] = [
+  { value: "lastAccessed", label: "Last accessed" }, { value: "added", label: "Date added" },
+  { value: "title", label: "Title" }, { value: "name", label: "Filename" },
+  { value: "size", label: "File size" }, { value: "year", label: "Release year" },
+];
 
 const TABS: { value: MatchStatus | ""; label: string }[] = [
   { value: "", label: "All" },
@@ -29,6 +34,12 @@ function initialFilters() {
   const status = p.get("status") as MatchStatus | null;
   const provider = p.get("provider") as Provider | null;
   return {
+    q: p.get("q")?.slice(0, 200) ?? "",
+    searchIn: p.get("searchIn") === "title" ? "title" as const : p.get("searchIn") === "filename" ? "filename" as const : "all" as const,
+    mediaType: p.get("mediaType") === "movie" ? "movie" as const : p.get("mediaType") === "episode" ? "episode" as const : "" as const,
+    accessed: p.get("accessed") === "yes" ? "yes" as const : p.get("accessed") === "no" ? "no" as const : "" as const,
+    sort: SORTS.some((s) => s.value === p.get("sort")) ? p.get("sort") as LibrarySort : "lastAccessed" as const,
+    direction: p.get("direction") === "asc" ? "asc" as const : "desc" as const,
     status: status && TABS.some((t) => t.value === status) ? status : ("" as const),
     provider: provider === "local" || provider === "torbox" ? provider : ("" as const),
   };
@@ -37,6 +48,13 @@ function initialFilters() {
 export function LibraryPage() {
   const [status, setStatus] = useState<MatchStatus | "">(() => initialFilters().status);
   const [provider, setProvider] = useState<Provider | "">(() => initialFilters().provider);
+  const [query, setQuery] = useState(() => initialFilters().q);
+  const [search, setSearch] = useState(() => initialFilters().q);
+  const [searchIn, setSearchIn] = useState<"all" | "title" | "filename">(() => initialFilters().searchIn);
+  const [mediaType, setMediaType] = useState<"" | "movie" | "episode">(() => initialFilters().mediaType);
+  const [accessed, setAccessed] = useState<"" | "yes" | "no">(() => initialFilters().accessed);
+  const [sort, setSort] = useState<LibrarySort>(() => initialFilters().sort);
+  const [direction, setDirection] = useState<"asc" | "desc">(() => initialFilters().direction);
   const [offset, setOffset] = useState(0);
   const [fixing, setFixing] = useState<LibraryFile | null>(null);
   const [rowError, setRowError] = useState<{ id: number; message: string } | null>(null);
@@ -46,11 +64,17 @@ export function LibraryPage() {
     const p = new URLSearchParams();
     if (status) p.set("status", status);
     if (provider) p.set("provider", provider);
+    if (search) p.set("q", search);
+    if (searchIn !== "all") p.set("searchIn", searchIn);
+    if (mediaType) p.set("mediaType", mediaType);
+    if (accessed) p.set("accessed", accessed);
+    p.set("sort", sort);
+    p.set("direction", direction);
     const qs = p.toString();
     history.replaceState(null, "", `/library${qs ? `?${qs}` : ""}`);
-  }, [status, provider]);
+  }, [status, provider, search, searchIn, mediaType, accessed, sort, direction]);
 
-  const { data, error, loading, refresh } = useResource(() => api.files({ status: status || undefined, provider: provider || undefined, limit: PAGE, offset }), { deps: [status, provider, offset] });
+  const { data, error, loading, refresh } = useResource(() => api.files({ status: status || undefined, provider: provider || undefined, q: search || undefined, searchIn, mediaType: mediaType || undefined, accessed: accessed || undefined, sort, direction, limit: PAGE, offset }), { deps: [status, provider, search, searchIn, mediaType, accessed, sort, direction, offset] });
 
   const toggleIgnore = async (f: LibraryFile) => {
     setRowError(null);
@@ -69,6 +93,15 @@ export function LibraryPage() {
     <div className="page">
       <PageHeader title="Library" subtitle="Every file Strata knows about, local and TorBox. Fix wrong or missing matches here." />
 
+      <form className="library-search" role="search" onSubmit={(e) => { e.preventDefault(); setSearch(query.trim()); setOffset(0); }}>
+        <label htmlFor="library-query" className="sr-only">Search library</label>
+        <input id="library-query" className="input" type="search" placeholder="Search titles, filenames, or paths…" maxLength={200} value={query} onChange={(e) => setQuery(e.target.value)} />
+        <label htmlFor="library-search-in" className="sr-only">Search in</label>
+        <select id="library-search-in" className="input" value={searchIn} onChange={(e) => { setSearchIn(e.target.value as typeof searchIn); setOffset(0); }}>
+          <option value="all">All fields</option><option value="title">Titles</option><option value="filename">Filenames</option>
+        </select>
+        <button type="submit" className="btn btn-secondary">Search</button>
+      </form>
       <div className="toolbar">
         <div className="tabs" role="tablist" aria-label="Match status">
           {TABS.map((t) => (
@@ -107,6 +140,31 @@ export function LibraryPage() {
         </div>
       </div>
 
+      <div className="library-filters">
+        <label className="field">Type
+          <select className="input input-sm" value={mediaType} onChange={(e) => { setMediaType(e.target.value as typeof mediaType); setOffset(0); }}>
+            <option value="">All types</option><option value="movie">Movies</option><option value="episode">Episodes</option>
+          </select>
+        </label>
+        <label className="field">Activity
+          <select className="input input-sm" value={accessed} onChange={(e) => { setAccessed(e.target.value as typeof accessed); setOffset(0); }}>
+            <option value="">All activity</option><option value="yes">Accessed</option><option value="no">Never accessed</option>
+          </select>
+        </label>
+        <label className="field">Sort by
+          <select className="input input-sm" value={sort} onChange={(e) => { const next = e.target.value as LibrarySort; setSort(next); setDirection(next === "title" || next === "name" ? "asc" : "desc"); setOffset(0); }}>
+            {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+        </label>
+        <label className="field">Order
+          <select className="input input-sm" value={direction} onChange={(e) => { setDirection(e.target.value as typeof direction); setOffset(0); }}>
+            <option value="desc">{sort === "title" || sort === "name" ? "Z–A" : sort === "size" ? "Largest first" : "Newest first"}</option>
+            <option value="asc">{sort === "title" || sort === "name" ? "A–Z" : sort === "size" ? "Smallest first" : "Oldest first"}</option>
+          </select>
+        </label>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setQuery(""); setSearch(""); setSearchIn("all"); setStatus(""); setProvider(""); setMediaType(""); setAccessed(""); setSort("lastAccessed"); setDirection("desc"); setOffset(0); }}>Reset</button>
+      </div>
+      <p className="small muted" role="status">{loading ? "Loading files…" : `${total} file${total === 1 ? "" : "s"}${search ? ` matching “${search}”` : ""}`} · Last accessed uses playback activity across all profiles; never-accessed files appear last.</p>
       <ErrorText error={error} />
 
       <div className="table-wrap" aria-busy={loading}>
@@ -116,7 +174,7 @@ export function LibraryPage() {
           </div>
         ) : items.length === 0 ? (
           <div className="empty-state small-empty">
-            <p className="muted">{offset > 0 ? "No more files." : status === "unmatched" ? "Nothing unmatched. Every file has a title." : "No files here yet."}</p>
+            <p className="muted">{offset > 0 ? "No more files." : search || status || provider || mediaType || accessed ? "No files match these filters. Try a different search or reset the filters." : "No files here yet."}</p>
           </div>
         ) : (
           <table className="table files-table">
@@ -128,6 +186,7 @@ export function LibraryPage() {
                 <th scope="col" className="num">
                   Size
                 </th>
+                <th scope="col">Last accessed</th>
                 <th scope="col">Match</th>
                 <th scope="col">
                   <span className="sr-only">Actions</span>
@@ -159,6 +218,10 @@ export function LibraryPage() {
                   </td>
                   <td data-label="Size" className="num mono small">
                     {formatBytes(f.size)}
+                  </td>
+                  <td data-label="Last accessed" className="small">
+                    <span title={f.lastAccessedAt ? new Date(f.lastAccessedAt).toLocaleString() : "No recorded playback for this title or episode"}>{f.lastAccessedAt ? relativeTime(f.lastAccessedAt) : "Never"}</span>
+                    <span className="file-parsed" title={new Date(f.addedAt).toLocaleString()}>Added {relativeTime(f.addedAt)}</span>
                   </td>
                   <td data-label="Match">
                     <div className="match-cell">

@@ -1242,7 +1242,7 @@ input[type="checkbox"] {
   flex-wrap: nowrap;
 }
 
-/* Six columns need room beside the sidebar; below that, rows become cards. */
+/* File columns need room beside the sidebar; below that, rows become cards. */
 @media (max-width: 1100px) {
   .table thead {
     display: none;
@@ -2104,3 +2104,11 @@ input[type="checkbox"] {
   margin-top: 3px;
   accent-color: var(--accent);
 }
+
+/* Library search and filters share the dashboard's compact form controls. */
+.library-search { display: flex; gap: 10px; flex-wrap: wrap; }
+.library-search input { flex: 1 1 260px; min-width: 0; }
+.library-search select { width: auto; }
+.library-filters { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.library-filters .field { flex: 1 1 150px; }
+.library-filters .btn { margin-bottom: 2px; }

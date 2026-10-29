@@ -2,10 +2,9 @@ import type {
   AdminStatus,
   FsListing,
   LibraryFile,
+  LibraryFilters,
   LogEntry,
-  MatchStatus,
   Profile,
-  Provider,
   SecretKey,
   ServerInfo,
   Settings,
@@ -116,8 +115,8 @@ export const api = {
   fs: (path?: string) => request<FsListing>("GET", `/admin/fs${q({ path })}`),
   runJob: (name: string) => request<{ ok: true }>("POST", `/admin/jobs/${encodeURIComponent(name)}/run`),
 
-  files: (params: { status?: MatchStatus; provider?: Provider; limit?: number; offset?: number }) =>
-    request<{ items: LibraryFile[]; total: number }>("GET", `/admin/files${q(params)}`),
+  files: (params: LibraryFilters) =>
+    request<{ items: LibraryFile[]; total: number }>("GET", `/admin/files${q({ ...params })}`),
   matchFile: (fileId: number, input: { type: "movie" | "show"; tmdbId: number; season?: number; episode?: number }) =>
     request<{ ok: true }>("POST", `/admin/files/${fileId}/match`, input),
   ignoreFile: (fileId: number) => request<{ ok: true }>("POST", `/admin/files/${fileId}/ignore`),

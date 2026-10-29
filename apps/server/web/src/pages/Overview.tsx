@@ -19,7 +19,10 @@ export function OverviewPage() {
 
   return (
     <div className="page">
-      <PageHeader title="Overview" subtitle={<>Up {formatDuration(data.uptimeMs)}</>} actions={error ? <Badge tone="error">Connection lost — retrying</Badge> : <LiveDot />} />
+      <PageHeader title="Overview" subtitle={<>Up {formatDuration(data.uptimeMs)}</>} actions={<div className="row-gap">
+        {error ? <Badge tone="error">Connection lost — retrying</Badge> : <LiveDot />}
+        <a href="/settings?checkUpdate=1#updates" className="btn btn-secondary btn-sm" onClick={linkClick}>Check for Updates</a>
+      </div>} />
 
       <div className="notices">
         {data.update?.updateAvailable && (
