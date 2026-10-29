@@ -2,9 +2,8 @@ import SwiftUI
 import StrataKit
 import StrataDesign
 
-/// The Anime tab, laid out as the server sends it: a spotlight carousel, a numbered
-/// ranking, rails of episodes and titles, and short lists side by side; with its own
-/// category menu (Isekai, Slice of Life…).
+/// The Anime tab, as the server sends it: a spotlight carousel, then rails (trending,
+/// latest episodes, top airing…), with its own category menu (Isekai, Slice of Life…).
 struct AnimeView: View {
     @Environment(AppServices.self) private var services
     @State private var categories: [AnimeCategory] = []
@@ -77,14 +76,8 @@ struct AnimeView: View {
         case .loaded(let list) where list.isEmpty:
             MessageView(systemImage: "film.stack", title: "Nothing in \(category?.name ?? "Anime") yet").frame(minHeight: 400)
         case .loaded(let list):
-            ForEach(ShelfBlock.blocks(list)) { block in
-                switch block {
-                case .hero: EmptyView() // above the category menu
-                case .ranked(let shelf): RankedRail(shelf: shelf)
-                case .rail(let shelf): ShelfRail(shelf: shelf)
-                case .compact(let shelves): CompactShelves(shelves: shelves)
-                }
-            }
+            // The hero sits above the category menu.
+            ForEach(list.filter { $0.style != .hero }) { shelf in ShelfRail(shelf: shelf) }
         }
     }
 

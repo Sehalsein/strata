@@ -214,26 +214,25 @@ describe("anime tab sections", () => {
     }).animePage();
     expect(shelves.map((s) => [s.id, s.style ?? null])).toEqual([
       ["anime-spotlight", "hero"],
-      ["anime-trending", "ranked"],
+      ["anime-trending", null],
       ["anime-latest-episodes", null],
-      ["anime-top-airing", "compact"],
-      ["anime-most-popular", "compact"],
-      ["anime-most-favorite", "compact"],
-      ["anime-latest-completed", "compact"],
+      ["anime-top-airing", null],
+      ["anime-most-popular", null],
+      ["anime-most-favorite", null],
+      ["anime-latest-completed", null],
     ]); // Top Upcoming has nothing, so it's left out
     // Frieren's two seasons are one card; the title AniList has but TMDB doesn't is skipped.
     expect(shelves[1]!.items.map((c) => c.title)).toEqual(["Frieren", "One Piece", "Your Name."]);
     expect(shelves[0]!.items.map((c) => c.eyebrow)).toEqual(["#1 Spotlight", "#2 Spotlight", "#3 Spotlight"]);
     expect(shelves[2]!.items.map((c) => c.badge)).toEqual(["Episode 4", "Episode 1150", undefined]);
-    expect(shelves[3]!.items.map((c) => c.badge)).toEqual(["TV · 28 episodes", "TV", "Movie"]);
+    expect(shelves[3]!.items.map((c) => c.badge)).toEqual([undefined, undefined, undefined]);
   });
 
-  test("a later season is labelled as one: no episode count of its own, \"New season\" when upcoming", async () => {
-    // Frieren S2 alone (TMDB S1 E29+): AniList counts its 10 episodes, TMDB counts it in the show.
+  test("an upcoming later season is labelled \"New season\"", async () => {
+    // Frieren S2 alone (TMDB S1 E29+): a new season of a show TMDB already has.
     const later = [all[1]!, all[2]!, all[3]!];
-    const shelves = await catalog({ trending: [], airing: later, popular: [], favourites: [], completed: [], upcoming: later, latest: [] }).animePage();
+    const shelves = await catalog({ trending: [], airing: [], popular: [], favourites: [], completed: [], upcoming: later, latest: [] }).animePage();
     const badges = (id: string) => shelves.find((s) => s.id === id)!.items.map((c) => c.badge);
-    expect(badges("anime-top-airing")).toEqual(["TV", "TV", "Movie"]);
     expect(badges("anime-upcoming")).toEqual(["New season", undefined, undefined]);
 
   });

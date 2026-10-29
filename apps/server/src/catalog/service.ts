@@ -16,16 +16,6 @@ const log = logger("catalog");
  * can never collide with a TMDB genre id.
  */
 export const ANIME_GENRE_ID = -1;
-const FORMATS: Record<string, string> = { TV: "TV", TV_SHORT: "TV", MOVIE: "Movie", OVA: "OVA", ONA: "ONA", SPECIAL: "Special" };
-/**
- * "TV · 24 episodes", "Movie": what an AniList title is, for the Anime tab's short lists.
- * A later season's episode count isn't the show's, so it's left out there.
- */
-const formatLabel = (i: AnilistHomeItem, laterSeason: boolean) => {
-  const format = i.format ? FORMATS[i.format] : undefined;
-  const episodes = i.format !== "MOVIE" && i.episodes && !laterSeason ? `${i.episodes} episode${i.episodes === 1 ? "" : "s"}` : undefined;
-  return [format, episodes].filter(Boolean).join(" · ") || undefined;
-};
 const ANIME_DISCOVER = { with_genres: "16", with_original_language: "ja" };
 /** Donghua and Korean animation: on the anime id list, but not what "Anime" means here. */
 const NOT_ANIME_LANGUAGES = new Set(["zh", "cn", "ko"]);
@@ -65,11 +55,8 @@ export interface Shelf {
   id: string;
   title: string;
   kind: "continue" | "titles";
-  /**
-   * How the apps lay it out: a hero carousel, a numbered ranking, or a short list beside
-   * its siblings. Absent: an ordinary rail (and what apps that don't know a style show).
-   */
-  style?: "hero" | "ranked" | "compact";
+  /** "hero": the apps show it as a carousel at the top of the page. Absent: a rail. */
+  style?: "hero";
   items: (TitleCard | ContinueCard)[];
 }
 
@@ -327,9 +314,9 @@ export class CatalogService {
   }
 
   /**
-   * The Anime tab from AniList's lists: a spotlight of what's trending, the trending top 10,
-   * episodes aired in the last two days, then top airing, most popular, most favourited and
-   * recently completed side by side, and the most anticipated upcoming titles.
+   * The Anime tab from AniList's lists: a spotlight of what's trending, then rails of the
+   * trending top 10, episodes aired in the last two days, top airing, most popular, most
+   * favourited, recently completed and the most anticipated upcoming titles.
    */
   private async animeSections(): Promise<Shelf[] | null> {
     const home = await this.anime?.anilist.home();
@@ -337,10 +324,10 @@ export class CatalogService {
     const [trending, latest, airing, popular, favourites, completed, upcoming] = await Promise.all([
       this.anilistCards(home.trending, 20),
       this.anilistCards(home.latest, 20, (i) => (i.aired ? `Episode ${i.aired.episode}` : undefined)),
-      this.anilistCards(home.airing, 5, formatLabel),
-      this.anilistCards(home.popular, 5, formatLabel),
-      this.anilistCards(home.favourites, 5, formatLabel),
-      this.anilistCards(home.completed, 5, formatLabel),
+      this.anilistCards(home.airing, 15),
+      this.anilistCards(home.popular, 15),
+      this.anilistCards(home.favourites, 15),
+      this.anilistCards(home.completed, 15),
       this.anilistCards(home.upcoming, 15, (_, laterSeason) => (laterSeason ? "New season" : undefined)),
     ]);
     const spotlight = trending
@@ -349,12 +336,12 @@ export class CatalogService {
       .map((c, i) => ({ ...c, eyebrow: `#${i + 1} Spotlight` }));
     const shelves: Shelf[] = [
       { id: "anime-spotlight", title: "Spotlight", kind: "titles", style: "hero", items: spotlight },
-      { id: "anime-trending", title: "Trending", kind: "titles", style: "ranked", items: trending.slice(0, 10) },
+      { id: "anime-trending", title: "Trending", kind: "titles", items: trending.slice(0, 10) },
       { id: "anime-latest-episodes", title: "Latest Episodes", kind: "titles", items: latest },
-      { id: "anime-top-airing", title: "Top Airing", kind: "titles", style: "compact", items: airing },
-      { id: "anime-most-popular", title: "Most Popular", kind: "titles", style: "compact", items: popular },
-      { id: "anime-most-favorite", title: "Most Favorite", kind: "titles", style: "compact", items: favourites },
-      { id: "anime-latest-completed", title: "Latest Completed", kind: "titles", style: "compact", items: completed },
+      { id: "anime-top-airing", title: "Top Airing", kind: "titles", items: airing },
+      { id: "anime-most-popular", title: "Most Popular", kind: "titles", items: popular },
+      { id: "anime-most-favorite", title: "Most Favorite", kind: "titles", items: favourites },
+      { id: "anime-latest-completed", title: "Latest Completed", kind: "titles", items: completed },
       { id: "anime-upcoming", title: "Top Upcoming", kind: "titles", items: upcoming },
     ];
     return shelves.filter((s) => s.items.length >= 3);

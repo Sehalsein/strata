@@ -58,10 +58,10 @@ const LIST = "id format episodes";
 const JP = "type: ANIME, isAdult: false, countryOfOrigin: JP";
 const HOME = `query ($since: Int, $now: Int) {
   trending: Page(perPage: 20) { media(${JP}, sort: TRENDING_DESC) { ${LIST} } }
-  airing: Page(perPage: 15) { media(${JP}, status: RELEASING, sort: POPULARITY_DESC) { ${LIST} } }
-  popular: Page(perPage: 15) { media(${JP}, sort: POPULARITY_DESC) { ${LIST} } }
-  favourites: Page(perPage: 15) { media(${JP}, sort: FAVOURITES_DESC) { ${LIST} } }
-  completed: Page(perPage: 15) { media(${JP}, status: FINISHED, popularity_greater: 15000, sort: END_DATE_DESC) { ${LIST} } }
+  airing: Page(perPage: 20) { media(${JP}, status: RELEASING, sort: POPULARITY_DESC) { ${LIST} } }
+  popular: Page(perPage: 20) { media(${JP}, sort: POPULARITY_DESC) { ${LIST} } }
+  favourites: Page(perPage: 20) { media(${JP}, sort: FAVOURITES_DESC) { ${LIST} } }
+  completed: Page(perPage: 20) { media(${JP}, status: FINISHED, popularity_greater: 15000, sort: END_DATE_DESC) { ${LIST} } }
   upcoming: Page(perPage: 15) { media(${JP}, status: NOT_YET_RELEASED, sort: POPULARITY_DESC) { ${LIST} } }
   latest: Page(perPage: 50) {
     airingSchedules(airingAt_greater: $since, airingAt_lesser: $now, sort: TIME_DESC) {

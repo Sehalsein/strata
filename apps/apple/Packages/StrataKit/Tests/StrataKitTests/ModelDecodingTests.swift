@@ -56,12 +56,12 @@ final class ModelDecodingTests: XCTestCase {
 
     func testShelfStylesAndBadges() throws {
         let json = Data(#"""
-        [{"id":"a","title":"Trending","kind":"titles","style":"ranked","items":[{"type":"show","tmdbId":1,"title":"X","year":null,"posterUrl":null,"backdropUrl":null,"available":[],"badge":"Episode 4"}]},
+        [{"id":"a","title":"Trending","kind":"titles","style":"hero","items":[{"type":"show","tmdbId":1,"title":"X","year":null,"posterUrl":null,"backdropUrl":null,"available":[],"badge":"Episode 4"}]},
          {"id":"b","title":"Later","kind":"titles","style":"carousel3d","items":[]},
          {"id":"c","title":"Plain","kind":"titles","items":[]}]
         """#.utf8)
         let shelves = try JSONDecoder().decode([Shelf].self, from: json)
-        XCTAssertEqual(shelves.map(\.style), [.ranked, nil, nil]) // an unknown style is a rail
+        XCTAssertEqual(shelves.map(\.style), [.hero, nil, nil]) // an unknown style is a rail
         XCTAssertEqual(shelves[0].items[0].badge, "Episode 4")
     }
 

@@ -98,12 +98,8 @@ public struct Shelf: Codable, Sendable, Hashable, Identifiable {
 
     /// How the server wants a shelf laid out; `nil` (or one this app doesn't know) is a rail.
     public enum Style: String, Sendable, Hashable {
-        /// A carousel of large artwork with each title's overview and buttons.
+        /// A carousel of large artwork, each title with its buttons, at the top of the page.
         case hero
-        /// Numbered, in the server's order.
-        case ranked
-        /// A short list of small rows, shown beside the compact shelves around it.
-        case compact
     }
 
     public var id: String
