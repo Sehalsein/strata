@@ -220,10 +220,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// The running server's version (it updates itself, so this app's own can be older).
+    /// Only from the server this app started (the same proof as Open Dashboard), and only
+    /// while it's still running.
     func menuWillOpen(_ menu: NSMenu) {
-        guard isUp else { return }
+        guard isUp, server?.isRunning == true else { return }
         Task {
-            guard let version = await serverVersion() else { return }
+            guard await isOurs(), let version = await serverVersion(),
+                  isUp, server?.isRunning == true else { return }
             stateItem.title = "Strata \(version): \(stateText)"
         }
     }
@@ -231,10 +234,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func serverVersion() async -> String? {
         var request = URLRequest(url: dashboardURL.appendingPathComponent("api/info"))
         request.timeoutInterval = 1
-        guard let (data, _) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200, data.count < 1_024,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              json["name"] as? String == "strata" else { return nil }
-        return json["version"] as? String
+              json["name"] as? String == "strata",
+              let version = json["version"] as? String,
+              version.range(of: "^[0-9A-Za-z.+-]{1,32}$", options: .regularExpression) != nil
+        else { return nil }
+        return version
     }
 
     private func item(_ title: String, _ action: Selector, _ key: String) -> NSMenuItem {
@@ -280,6 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func restart() {
+        isUp = false
         server?.terminationHandler = nil
         server?.terminate()
         server?.waitUntilExit()
