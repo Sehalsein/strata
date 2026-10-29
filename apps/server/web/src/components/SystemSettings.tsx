@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
 import { relativeTime } from "../format";
 import type { AdminStatus, Settings, UpdateStatus } from "../types";
@@ -119,6 +119,7 @@ const BUSY: UpdateStatus["state"][] = ["checking", "downloading", "waiting-for-i
 
 export function UpdatesCard({ draft, set }: { draft: Settings; set: SetFn }) {
   const [busyPoll, setBusyPoll] = useState(false);
+  const autoCheckStarted = useRef(false);
   const { data: status, error, setData, refresh } = useResource<UpdateStatus>(api.updateStatus, { pollMs: busyPoll ? 2000 : undefined });
   const [actionError, setActionError] = useState<string | null>(null);
   const [pending, setPending] = useState<"check" | "apply" | null>(null);
@@ -144,6 +145,17 @@ export function UpdatesCard({ draft, set }: { draft: Settings; set: SetFn }) {
       setPending(null);
     }
   };
+
+  // Menu-bar and overview links check once, after admin authentication and status load.
+  useEffect(() => {
+    if (!status || busy || autoCheckStarted.current) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("checkUpdate") !== "1") return;
+    autoCheckStarted.current = true;
+    url.searchParams.delete("checkUpdate");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    void check();
+  }, [status, busy]);
 
   const apply = async () => {
     if (!status?.latest) return;
@@ -204,7 +216,7 @@ export function UpdatesCard({ draft, set }: { draft: Settings; set: SetFn }) {
 
         <div className="row-gap">
           <button type="button" className="btn btn-secondary btn-sm" onClick={check} disabled={pending !== null || busy}>
-            {pending === "check" || status?.state === "checking" ? "Checking…" : "Check now"}
+            {pending === "check" || status?.state === "checking" ? "Checking…" : "Check for Updates"}
           </button>
           {status?.updateAvailable && !status.disabledReason && (
             <button type="button" className="btn btn-primary btn-sm" onClick={apply} disabled={pending !== null || busy}>

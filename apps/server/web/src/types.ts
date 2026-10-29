@@ -158,7 +158,16 @@ export interface ParsedName {
   group?: string;
 }
 
+export type LibrarySort = "lastAccessed" | "added" | "title" | "name" | "size" | "year";
+export interface LibraryFilters {
+  status?: MatchStatus; provider?: Provider; q?: string; searchIn?: "all" | "title" | "filename";
+  mediaType?: "movie" | "episode"; accessed?: "yes" | "no"; sort?: LibrarySort; direction?: "asc" | "desc";
+  limit?: number; offset?: number;
+}
+
 export interface LibraryFile {
+  lastAccessedAt: number | null;
+  addedAt: number;
   id: string;
   fileId: number;
   provider: Provider;

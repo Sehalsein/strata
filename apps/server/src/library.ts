@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import type { Db } from "./db";
-import { files, mediaItems, type FileProvider, type MatchStatus } from "./db/schema";
+import { files, mediaItems, progress, type FileProvider, type MatchStatus } from "./db/schema";
 import type { Matcher, MatchResult } from "./catalog/matcher";
 import type { Tmdb } from "./catalog/tmdb";
 import { yearOf } from "./catalog/tmdb";
@@ -220,21 +220,35 @@ export class Library {
   }
 
 
-  list(opts: { status?: MatchStatus; provider?: FileProvider; limit: number; offset: number }) {
+  list(opts: { status?: MatchStatus; provider?: FileProvider; q?: string; searchIn?: "all" | "title" | "filename"; mediaType?: "movie" | "episode"; accessed?: "yes" | "no"; sort?: "lastAccessed" | "added" | "title" | "name" | "size" | "year"; direction?: "asc" | "desc"; limit: number; offset: number }) {
+    // Playback history is per title/episode and profile, not per physical file.
+    const lastAccessedAt = sql<number | null>`(SELECT MAX(${progress.updatedAt}) FROM ${progress}
+      WHERE ${progress.mediaType} = ${files.mediaType} AND ${progress.tmdbId} = ${files.tmdbId}
+      AND ${progress.season} = COALESCE(${files.season}, 0) AND ${progress.episode} = COALESCE(${files.episode}, 0))`;
+    const addedAt = sql<number>`CASE WHEN ${files.provider} = 'torbox' THEN COALESCE(${files.mtime}, ${files.addedAt}) ELSE ${files.addedAt} END`;
+    const title = sql<string>`COALESCE(${mediaItems.title}, json_extract(${files.parsedJson}, '$.title'), ${files.name})`;
     const conditions = [eq(files.missing, false)];
     if (opts.status) conditions.push(eq(files.matchStatus, opts.status));
     if (opts.provider) conditions.push(eq(files.provider, opts.provider));
+    if (opts.mediaType) conditions.push(sql`COALESCE(${files.mediaType}, json_extract(${files.parsedJson}, '$.kind')) = ${opts.mediaType}`);
+    if (opts.accessed) conditions.push(opts.accessed === "yes" ? sql`${lastAccessedAt} IS NOT NULL` : sql`${lastAccessedAt} IS NULL`);
+    // Literal substring matches: % and _ in filenames are not SQL wildcards.
+    for (const term of (opts.q ?? "").trim().split(/\s+/).filter(Boolean)) {
+      const haystack = opts.searchIn === "title" ? title : opts.searchIn === "filename" ? files.name
+        : sql`${title} || ' ' || ${files.name} || ' ' || ${files.ref}`;
+      conditions.push(sql`instr(lower(${haystack}), lower(${term})) > 0`);
+    }
     const where = and(...conditions);
+    const join = and(eq(mediaItems.tmdbId, files.tmdbId), eq(mediaItems.type, sql`CASE ${files.mediaType} WHEN 'movie' THEN 'movie' ELSE 'show' END`));
+    const sort = opts.sort ?? "lastAccessed";
+    const key = { lastAccessed: lastAccessedAt, added: addedAt, title: sql`${title} COLLATE NOCASE`, name: sql`${files.name} COLLATE NOCASE`, size: files.size, year: mediaItems.year }[sort];
+    const order = opts.direction === "asc" ? asc(key) : desc(key);
     const rows = this.db
-      .select({ file: files, title: mediaItems.title, year: mediaItems.year })
-      .from(files)
-      .leftJoin(mediaItems, and(eq(mediaItems.tmdbId, files.tmdbId), eq(mediaItems.type, sql`CASE ${files.mediaType} WHEN 'movie' THEN 'movie' ELSE 'show' END`)))
-      .where(where)
-      .orderBy(files.name)
-      .limit(opts.limit)
-      .offset(opts.offset)
-      .all();
-    const total = this.db.select({ n: sql<number>`count(*)` }).from(files).where(where).get()?.n ?? 0;
+      .select({ file: files, title: mediaItems.title, year: mediaItems.year, lastAccessedAt, addedAt })
+      .from(files).leftJoin(mediaItems, join).where(where)
+      .orderBy(sql`${key} IS NULL`, order, files.id)
+      .limit(opts.limit).offset(opts.offset).all();
+    const total = this.db.select({ n: sql<number>`count(*)` }).from(files).leftJoin(mediaItems, join).where(where).get()?.n ?? 0;
     return { rows, total };
   }
 

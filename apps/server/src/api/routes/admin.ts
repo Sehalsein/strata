@@ -125,10 +125,18 @@ export const adminRoutes = new Hono<Env>()
     const provider = z.enum(["local", "torbox"]).optional().parse(c.req.query("provider") || undefined);
     const limit = Math.min(optionalInt(c.req.query("limit")) ?? 100, 500);
     const offset = optionalInt(c.req.query("offset")) ?? 0;
-    const { rows, total } = c.var.services.library.list({ status, provider, limit, offset });
+    const filters = z.object({
+      q: z.string().trim().max(200).optional(),
+      searchIn: z.enum(["all", "title", "filename"]).optional(),
+      mediaType: z.enum(["movie", "episode"]).optional(),
+      accessed: z.enum(["yes", "no"]).optional(),
+      sort: z.enum(["lastAccessed", "added", "title", "name", "size", "year"]).optional(),
+      direction: z.enum(["asc", "desc"]).optional(),
+    }).parse(c.req.query());
+    const { rows, total } = c.var.services.library.list({ status, provider, limit, offset, ...filters });
     return c.json({
       total,
-      items: rows.map(({ file: f, title, year }) => ({
+      items: rows.map(({ file: f, title, year, lastAccessedAt, addedAt }) => ({
         ...toCandidate(f),
         ref: f.provider === "local" ? f.ref : undefined,
         matchStatus: f.matchStatus,
@@ -138,6 +146,8 @@ export const adminRoutes = new Hono<Env>()
         episode: f.episode,
         title,
         year,
+        lastAccessedAt,
+        addedAt,
         parsed: f.parsedJson ? JSON.parse(f.parsedJson) : null,
       })),
     });
