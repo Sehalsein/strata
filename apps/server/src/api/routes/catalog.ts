@@ -149,6 +149,8 @@ export const catalogRoutes = new Hono<Env>()
 
   .put("/watchlist", async (c) => {
     const input = await body(c, z.object({ type: z.enum(["movie", "show"]), tmdbId: z.number().int(), on: z.boolean() }));
+    // Nothing above the profile's content limit goes on its list (taking it off is fine).
+    if (input.on) await c.var.services.content.assertAllowed(profileOf(c), input.type, input.tmdbId);
     c.var.services.progress.setWatchlist(profileOf(c), input.type, input.tmdbId, input.on);
     return c.json({ ok: true });
   });

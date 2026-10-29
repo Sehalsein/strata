@@ -27,7 +27,7 @@ const tmdb = {
   season: async (id: number, n: number) => SEASONS[`${id}:${n}`] ?? Promise.reject(new Error("404")),
 } as unknown as Tmdb;
 
-function service(watchlist: number[], airing: AiringEpisode[], inLibrary: string[] = []) {
+function service(watchlist: number[], airing: AiringEpisode[], inLibrary: string[] = [], allowed: (id: number) => boolean = () => true) {
   const ids = new AnimeIds("/nonexistent");
   // Frieren S2 (AniList 182255) is TMDB S1 from episode 29.
   ids.index([
@@ -39,7 +39,7 @@ function service(watchlist: number[], airing: AiringEpisode[], inLibrary: string
   const anilist = { airing: async (mediaIds: number[], from: number, to: number) => (asked.push({ ids: mediaIds, from, to }), airing) } as unknown as Anilist;
   const library = { filesFor: (_: string, id: number, s: number, e: number) => (inLibrary.includes(`${id}:${s}:${e}`) ? [{}] : []) } as never;
   const progress = { watchlist: () => watchlist.map((tmdbId) => ({ type: "show", tmdbId })) } as never;
-  return { calendar: new CalendarService(tmdb, library, progress, { ids, anilist }), asked };
+  return { calendar: new CalendarService(tmdb, library, progress, { ids, anilist }, async (_, id) => allowed(id)), asked };
 }
 
 describe("calendar", () => {
@@ -63,6 +63,13 @@ describe("calendar", () => {
     expect(items.find((i) => i.episode === 30)!.name).toBe("Episode 30");
     // Only the anime asks AniList, for the whole window in one request.
     expect(asked).toEqual([{ ids: [154587, 182255], from: at("2026-10-22T00:00:00Z"), to: at("2026-10-29T00:00:00Z") + 31 * DAY }]);
+  });
+
+  test("shows above the profile's content limit stay off its calendar, without being looked up", async () => {
+    const { calendar, asked } = service([1, 209867], [{ mediaId: 182255, episode: 3, airingAt: at("2026-10-31T15:00:00Z") }], [], (id) => id !== 209867);
+    const items = await calendar.episodes(1, NOW);
+    expect(new Set(items.map((i) => i.title))).toEqual(new Set(["The Drama"]));
+    expect(asked).toEqual([]);
   });
 
   test("an empty list, or shows TMDB can't find, make an empty calendar", async () => {

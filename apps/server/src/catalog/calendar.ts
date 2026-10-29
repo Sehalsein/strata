@@ -41,6 +41,8 @@ export class CalendarService {
     private readonly library: Library,
     private readonly progress: ProgressStore,
     private readonly anime?: { ids: AnimeIds; anilist: Anilist },
+    /** The profile's content limit: shows above it stay off its calendar. */
+    private readonly allowed: (profileId: number, tmdbId: number) => Promise<boolean> = async () => true,
   ) {}
 
   async episodes(profileId: number, now = Date.now()): Promise<CalendarEpisode[]> {
@@ -48,7 +50,8 @@ export class CalendarService {
     const today = Math.floor(now / 1000 / DAY_S) * DAY_S;
     const from = today - CALENDAR_PAST_DAYS * DAY_S;
     const to = today + (CALENDAR_FUTURE_DAYS + 1) * DAY_S;
-    const showIds = this.progress.watchlist(profileId).filter((r) => r.type === "show").map((r) => r.tmdbId);
+    const listed = this.progress.watchlist(profileId).filter((r) => r.type === "show").map((r) => r.tmdbId);
+    const showIds = (await Promise.all(listed.map(async (id) => ((await this.allowed(profileId, id).catch(() => false)) ? id : null)))).filter((id): id is number => id !== null);
     await this.anime?.ids.ready().catch(() => {});
 
     const shows = (await Promise.all(showIds.map((id) => this.tmdb.show(id).catch(() => null)))).filter((s): s is TmdbShow => !!s);
@@ -67,6 +70,7 @@ export class CalendarService {
   private async animeEpisodes(shows: TmdbShow[], entries: Map<number, AnimeEntry[]>, from: number, to: number): Promise<CalendarEpisode[]> {
     const byAnilist = new Map<number, { show: TmdbShow; entry: AnimeEntry }>();
     for (const show of shows) for (const entry of entries.get(show.id)!) byAnilist.set(entry.anilistId!, { show, entry });
+    if (!byAnilist.size) return [];
     const airing = (await this.anime!.anilist.airing([...byAnilist.keys()], from, to)) ?? [];
     const seasons = new Map<string, Promise<TmdbSeason | null>>();
     return Promise.all(
