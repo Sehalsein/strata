@@ -52,12 +52,13 @@ public struct RootView: View {
     }
 }
 
-enum AppTab: String, Hashable { case home, movies, shows, anime, search, profile }
+enum AppTab: String, Hashable { case home, movies, shows, anime, calendar, search, profile }
 
 /// The signed-in app: a floating Liquid Glass tab bar (iPhone), a sidebar
 /// that adapts to a tab bar (iPad), or the top tab bar (tvOS).
 struct MainShell: View {
     @Environment(AppServices.self) private var services
+    @Environment(\.scenePhase) private var scenePhase
     @State private var tab: AppTab = Self.launchTab
     @State private var showSettings = Self.launchSettings
 
@@ -68,6 +69,14 @@ struct MainShell: View {
         UserDefaults.standard.string(forKey: "StrataTab").flatMap(AppTab.init(rawValue:)) ?? .home
         #else
         .home
+        #endif
+    }
+
+    private static var calendarTab: Bool {
+        #if os(iOS)
+        Metrics.isPad
+        #else
+        true
         #endif
     }
 
@@ -93,6 +102,12 @@ struct MainShell: View {
             Tab("Anime", image: "StrawHat", value: AppTab.anime) {
                 StackHost { AnimeView() }
             }
+            // iPhone's tab bar has room for five: there it's a button on Home instead.
+            if Self.calendarTab {
+                Tab("Calendar", systemImage: "calendar", value: AppTab.calendar) {
+                    StackHost { CalendarView() }
+                }
+            }
             Tab(value: AppTab.search, role: .search) {
                 StackHost { SearchView() }
             }
@@ -113,6 +128,11 @@ struct MainShell: View {
         .tint(Theme.ink)
         .sheet(isPresented: $showSettings) { SettingsView() }
         #endif
+        // Episode notifications follow the calendar: on launch, profile switches and return.
+        .task(id: services.store.active.map { "\($0.id)/\($0.profileName ?? "")" }) { await services.refreshEpisodeAlerts() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await services.refreshEpisodeAlerts() } }
+        }
     }
 }
 
@@ -158,6 +178,7 @@ extension View {
             case .browse(let type, let list): BrowseListView(type: type, list: list)
             case .person(let id): PersonView(personId: id)
             case .myList: MyListView()
+            case .calendar: CalendarView()
             }
         }
     }

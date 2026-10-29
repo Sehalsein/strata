@@ -65,6 +65,20 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(shelves[0].items[0].badge, "Episode 4")
     }
 
+    func testCalendarEpisodes() throws {
+        let json = Data(#"""
+        {"items":[{"tmdbId":1,"title":"Frieren","posterUrl":null,"backdropUrl":null,"season":null,"episode":32,"name":null,"airsAt":"2026-11-07T15:00:00.000Z","airDate":"2026-11-07","available":false},
+                  {"tmdbId":2,"title":"The Drama","posterUrl":null,"backdropUrl":null,"season":2,"episode":3,"name":"Three","airsAt":null,"airDate":"2026-11-03","available":true}]}
+        """#.utf8)
+        let items = try JSONDecoder().decode(ItemsResponse<CalendarEpisode>.self, from: json).items
+        XCTAssertEqual(items[0].date, Date(timeIntervalSince1970: 1_794_063_600))
+        XCTAssertTrue(items[0].hasTime)
+        XCTAssertEqual(items[0].code, "Episode 32")
+        XCTAssertFalse(items[1].hasTime)
+        XCTAssertEqual(items[1].code, "S2 · E3")
+        XCTAssertEqual(Calendar.current.dateComponents([.year, .month, .day, .hour], from: items[1].date), DateComponents(year: 2026, month: 11, day: 3, hour: 0))
+    }
+
     func testBrowseAndSearch() throws {
         let browse = try Fixture.decode(ItemsResponse<TitleCard>.self, "browse").items
         XCTAssertEqual(browse.first?.yearText, "2008")

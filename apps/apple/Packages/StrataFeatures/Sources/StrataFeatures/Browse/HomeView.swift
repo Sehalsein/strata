@@ -45,6 +45,14 @@ struct HomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
+            #if os(iOS)
+            // A tab in iPad's sidebar; on iPhone, here (its tab bar is full).
+            if !Metrics.isPad {
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink(value: Route.calendar) { Label("Calendar", systemImage: "calendar") }
+                }
+            }
+            #endif
             ToolbarItem(placement: .primaryAction) {
                 NavigationLink(value: Route.myList) { Label("My List", systemImage: "bookmark") }
             }

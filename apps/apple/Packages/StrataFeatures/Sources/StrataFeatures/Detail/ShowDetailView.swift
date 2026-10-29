@@ -273,6 +273,8 @@ struct ShowDetailView: View {
     private func toggleWatchlist(_ show: ShowDetail) async {
         inWatchlist.toggle()
         let on = inWatchlist
-        if case .failed = await services.load({ try await $0.setWatchlist(.show, tmdbId: show.tmdbId, on) }) { inWatchlist = !on }
+        if case .failed = await services.load({ try await $0.setWatchlist(.show, tmdbId: show.tmdbId, on) }) { inWatchlist = !on; return }
+        // Its episodes join (or leave) the calendar and its notifications.
+        await services.refreshEpisodeAlerts()
     }
 }

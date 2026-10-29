@@ -148,6 +148,12 @@ public final class StrataClient: Sendable {
         return res.shelves
     }
 
+    /// Episodes of the shows on this profile's list: the last week and the next month.
+    public func calendar() async throws -> [CalendarEpisode] {
+        let res: ItemsResponse<CalendarEpisode> = try await get("/api/calendar")
+        return res.items
+    }
+
     public func person(_ id: Int) async throws -> PersonDetail {
         try await get("/api/person/\(id)")
     }

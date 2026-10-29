@@ -114,6 +114,7 @@ public enum Route: Hashable {
     case browse(TitleType, BrowseList)
     case person(Int)
     case myList
+    case calendar
 }
 
 public extension TitleCard {

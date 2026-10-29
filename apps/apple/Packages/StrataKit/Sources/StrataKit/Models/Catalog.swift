@@ -427,3 +427,52 @@ public struct SeasonDetail: Codable, Sendable, Hashable, Identifiable {
 
     public var id: Int { season }
 }
+
+/// `GET /api/calendar`: an episode of a show on the profile's list, aired in the last
+/// week or coming up in the next month.
+public struct CalendarEpisode: Codable, Sendable, Hashable, Identifiable {
+    public var tmdbId: Int
+    public var title: String
+    public var posterUrl: URL?
+    public var backdropUrl: URL?
+    /// TMDB numbering; nil for an anime episode TMDB doesn't list yet.
+    public var season: Int?
+    public var episode: Int
+    public var name: String?
+    /// The broadcast time when the server knows it (anime), as an ISO instant.
+    public var airsAt: String?
+    /// The air date, `YYYY-MM-DD`.
+    public var airDate: String
+    /// In the server's library.
+    public var available: Bool
+
+    public var id: String { "\(tmdbId)-\(season.map(String.init) ?? "x")-\(episode)-\(airDate)" }
+
+    /// When it airs: the exact time, or the start of its air date here.
+    public var date: Date {
+        if let airsAt, let time = Self.instant(airsAt) { return time }
+        return Self.day(airDate) ?? .distantPast
+    }
+
+    /// Whether `date` is a time of day, not just the day.
+    public var hasTime: Bool { airsAt.flatMap(Self.instant) != nil }
+
+    /// "S2 · E3" or "Episode 32".
+    public var code: String {
+        if let season { return "S\(season) · E\(episode)" }
+        return "Episode \(episode)"
+    }
+
+    private static func instant(_ s: String) -> Date? {
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return withFraction.date(from: s) ?? ISO8601DateFormatter().date(from: s)
+    }
+
+    /// A TMDB air date is a calendar day, not an instant: midnight here.
+    private static func day(_ s: String) -> Date? {
+        let parts = s.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+    }
+}

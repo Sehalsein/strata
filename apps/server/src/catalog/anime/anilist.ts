@@ -76,6 +76,19 @@ type HomeResponse = Record<Exclude<keyof AnilistHome, "latest">, { media: Anilis
   };
 };
 
+const AIRING = `query ($ids: [Int], $from: Int, $to: Int) {
+  Page(perPage: 50) {
+    airingSchedules(mediaId_in: $ids, airingAt_greater: $from, airingAt_lesser: $to, sort: TIME) { mediaId episode airingAt }
+  }
+}`;
+
+export interface AiringEpisode {
+  mediaId: number;
+  episode: number;
+  /** Unix seconds. */
+  airingAt: number;
+}
+
 /** Below this many AniList users, a just-aired episode is too obscure for Latest Episodes. */
 const LATEST_MIN_POPULARITY = 2_000;
 
@@ -130,6 +143,17 @@ export class Anilist {
       upcoming: data.upcoming.media,
       latest,
     };
+  }
+
+  /**
+   * When these titles' episodes air between `from` and `to` (Unix seconds), soonest first:
+   * one request for all of them, cached an hour. At most 50 episodes.
+   */
+  async airing(mediaIds: number[], from: number, to: number): Promise<AiringEpisode[]> {
+    if (!mediaIds.length) return [];
+    const ids = [...new Set(mediaIds)].sort((a, b) => a - b);
+    const data = await this.request<{ Page: { airingSchedules: AiringEpisode[] } }>(AIRING, { ids, from, to }, `anilist:airing:${ids.join(",")}:${from}:${to}`, 60 * 60_000);
+    return data?.Page.airingSchedules ?? [];
   }
 
   private async request<T>(query: string, variables: Record<string, unknown>, cacheKey: string, ttl: number): Promise<T | null> {

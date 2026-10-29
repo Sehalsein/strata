@@ -3,6 +3,7 @@ import { tmdbCache } from "./db/schema";
 import { join } from "node:path";
 import { Auth } from "./auth";
 import { CatalogService } from "./catalog/service";
+import { CalendarService } from "./catalog/calendar";
 import { Matcher } from "./catalog/matcher";
 import { Tmdb } from "./catalog/tmdb";
 import { dataPaths, type DataPaths, type RuntimeConfig } from "./config";
@@ -49,6 +50,7 @@ export interface Services {
   library: Library;
   progress: ProgressStore;
   catalog: CatalogService;
+  calendar: CalendarService;
   content: ContentFilter;
   sessions: SessionManager;
   playback: PlaybackService;
@@ -97,6 +99,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   const library = new Library(db, tmdb, new Matcher(tmdb, new AnimeMatcher(anilist, animeIds, tmdb, kitsu)));
   const progress = new ProgressStore(db);
   const catalog = new CatalogService(tmdb, library, progress, () => settings.get(), { ids: animeIds, anilist, kitsu });
+  const calendar = new CalendarService(tmdb, library, progress, { ids: animeIds, anilist });
   const content = new ContentFilter(db, tmdb, () => settings.get());
   const sessions = new SessionManager(paths.transcode, ffmpeg, new KeepAwake(), () => settings.get().maxTranscodes, () => settings.get().hardwareAcceleration);
   const subtitles = new SubtitleService(join(paths.root, "cache", "subtitles"), ffmpeg);
@@ -199,5 +202,5 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     log.info("Stopped");
   };
 
-  return { config, paths, db, settings, auth: new Auth(db), deviceLinks: new DeviceLinks(), tmdb, library, progress, catalog, content, sessions, playback, discovery, subtitles, jobs, serverId, bonjour, updater, ffmpeg, ffmpegSetup: () => ffmpegSetup, torbox, startedAt: Date.now(), shutdown };
+  return { config, paths, db, settings, auth: new Auth(db), deviceLinks: new DeviceLinks(), tmdb, library, progress, catalog, calendar, content, sessions, playback, discovery, subtitles, jobs, serverId, bonjour, updater, ffmpeg, ffmpegSetup: () => ffmpegSetup, torbox, startedAt: Date.now(), shutdown };
 }
