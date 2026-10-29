@@ -20,9 +20,12 @@ private let installDir = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Application Support/Strata/app")
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var stateItem: NSMenuItem!
+    /// What the status line says after "Strata", and whether our server is up.
+    private var stateText = "Starting…"
+    private var isUp = false
     private var openItem: NSMenuItem!
     private var restartItem: NSMenuItem!
     private var loginItem: NSMenuItem!
@@ -212,7 +215,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(loginItem)
         menu.addItem(.separator())
         menu.addItem(item("Quit Strata", #selector(NSApplication.terminate(_:)), "q"))
+        menu.delegate = self
         statusItem.menu = menu
+    }
+
+    /// The running server's version (it updates itself, so this app's own can be older).
+    func menuWillOpen(_ menu: NSMenu) {
+        guard isUp else { return }
+        Task {
+            guard let version = await serverVersion() else { return }
+            stateItem.title = "Strata \(version): \(stateText)"
+        }
+    }
+
+    private func serverVersion() async -> String? {
+        var request = URLRequest(url: dashboardURL.appendingPathComponent("api/info"))
+        request.timeoutInterval = 1
+        guard let (data, _) = try? await URLSession.shared.data(for: request),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              json["name"] as? String == "strata" else { return nil }
+        return json["version"] as? String
     }
 
     private func item(_ title: String, _ action: Selector, _ key: String) -> NSMenuItem {
@@ -224,6 +246,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setState(_ text: String, running: Bool) {
         NSLog("Strata: %@", text) // visible in Console.app
         stateItem.title = "Strata: \(text)"
+        stateText = text
+        isUp = running
         openItem.isEnabled = running
         statusItem.button?.appearsDisabled = !running
     }
