@@ -40,16 +40,21 @@ jobs:
           persist-credentials: false
       - id: check
         run: |
+          set -euo pipefail
           version="$(awk -F'"' '/MARKETING_VERSION:/ {print $2; exit}' apps/apple/project.yml)"
+          if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then echo "::error::Invalid MARKETING_VERSION: $version"; exit 1; fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_EVENT_NAME" != push ] || [ "$GITHUB_REF_TYPE" = tag ]; then
             echo "upload=true" >> "$GITHUB_OUTPUT"
-          elif git ls-remote --exit-code --tags origin "refs/tags/apple-v$version" >/dev/null; then
-            echo "::notice::$version is already on TestFlight (apple-v$version)"
-            echo "upload=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "upload=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          # 0: tagged (uploaded before), 2: no such tag. Anything else is an error, not a "no".
+          rc=0; git ls-remote --exit-code --tags origin "refs/tags/apple-v$version" >/dev/null || rc=$?
+          case $rc in
+            0) echo "::notice::$version is already on TestFlight (apple-v$version)"; echo "upload=false" >> "$GITHUB_OUTPUT" ;;
+            2) echo "upload=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::Couldn't check for apple-v$version"; exit "$rc" ;;
+          esac
 
   upload:
     name: Upload ${{ matrix.name }}
