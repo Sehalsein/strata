@@ -61,31 +61,101 @@ public struct PosterGrid<Content: View>: View {
 public struct SkeletonRail: View {
     let aspectRatio: CGFloat
     let width: CGFloat
-    @State private var dim = false
+    let circle: Bool
 
-    public init(aspectRatio: CGFloat = 2 / 3, width: CGFloat) {
+    /// `circle` for avatar rails (Cast).
+    public init(aspectRatio: CGFloat = 2 / 3, width: CGFloat, circle: Bool = false) {
         self.aspectRatio = aspectRatio
         self.width = width
+        self.circle = circle
     }
+
+    private var cardHeight: CGFloat { circle ? width : width / aspectRatio }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space4) {
-            RoundedRectangle(cornerRadius: 6).fill(Theme.surface2).frame(width: 160, height: 18)
+            SkeletonBar(width: 160, height: 18)
                 .padding(.horizontal, Metrics.gutter)
-            HStack(spacing: Metrics.cardGap) {
-                ForEach(0..<6, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
-                        .fill(Theme.surface1)
-                        .frame(width: width)
-                        .aspectRatio(aspectRatio, contentMode: .fit)
+            // More cards than fit, drawn over a row of the cards' height so the
+            // overflow is cut off rather than widening the page.
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: cardHeight)
+                .overlay(alignment: .leading) {
+                    HStack(spacing: Metrics.cardGap) {
+                        ForEach(0..<6, id: \.self) { _ in
+                            RoundedRectangle(cornerRadius: circle ? width / 2 : Metrics.cardRadius, style: .continuous)
+                                .fill(Theme.surface1)
+                                .frame(width: width, height: cardHeight)
+                        }
+                    }
+                    .padding(.horizontal, Metrics.gutter)
                 }
-            }
-            .padding(.horizontal, Metrics.gutter)
+                .clipped()
         }
-        .opacity(dim ? 0.5 : 1)
-        .animation(.easeInOut(duration: 0.9).repeatForever(), value: dim)
-        .onAppear { dim = true }
+        .skeletonPulse()
+        .accessibilityElement()
         .accessibilityLabel("Loading")
+    }
+}
+
+/// A rounded bar standing in for a line of text. Without a width, it fills the line.
+public struct SkeletonBar: View {
+    let width: CGFloat?
+    let height: CGFloat
+
+    public init(width: CGFloat? = nil, height: CGFloat) {
+        self.width = width
+        self.height = height
+    }
+
+    public var body: some View {
+        RoundedRectangle(cornerRadius: min(Metrics.radiusXS, height / 2), style: .continuous)
+            .fill(Theme.surface2)
+            .frame(width: width, height: height)
+            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+    }
+}
+
+private struct SkeletonPulse: ViewModifier {
+    @State private var dim = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            // Scoped to the opacity: an `.animation(_:value:)` here would also catch the
+            // page's own layout as it settles and repeat that forever.
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever()) {
+                $0.opacity(dim ? 0.5 : 1)
+            }
+            .onAppear { dim = true }
+    }
+}
+
+public extension View {
+    /// The slow fade placeholders breathe with while their content loads.
+    func skeletonPulse() -> some View { modifier(SkeletonPulse()) }
+
+    /// For a scroll view whose hero art runs up under the navigation bar. On iOS the
+    /// bar's scroll edge effect is hidden while the page sits at the top (it cuts a hard
+    /// band across the art; the hero shades the top itself) and comes back once the
+    /// page scrolls, so the bar still reads over rails. Apply it to the ScrollView.
+    func heroUnderBar(_ enabled: Bool = true) -> some View { modifier(HeroUnderBar(enabled: enabled)) }
+}
+
+private struct HeroUnderBar: ViewModifier {
+    let enabled: Bool
+    @State private var atTop = true
+
+    func body(content: Content) -> some View {
+        content
+            #if os(iOS)
+            .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top < 4 } action: { _, top in
+                atTop = top
+            }
+            .scrollEdgeEffectHidden(enabled && atTop, for: .top)
+            #endif
+            .ignoresSafeArea(edges: enabled ? .top : [])
     }
 }
 

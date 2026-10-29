@@ -25,7 +25,7 @@ struct ShowDetailView: View {
         ScrollView {
             switch detail {
             case .loading:
-                ProgressView().frame(maxWidth: .infinity, minHeight: 500)
+                DetailSkeleton()
             case .failed(let message):
                 MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load this show", message: message, actionTitle: "Try Again") {
                     Task { await load() }
@@ -35,9 +35,9 @@ struct ShowDetailView: View {
                 content(show)
             }
         }
+        .heroUnderBar()
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
-        .ignoresSafeArea(edges: .top)
         #if os(tvOS)
         .toolbar(.hidden, for: .tabBar)
         // Content loads after the page appears, so focus Play once it's there.
@@ -153,7 +153,7 @@ struct ShowDetailView: View {
 
             switch season {
             case .loading:
-                ProgressView().frame(maxWidth: .infinity, minHeight: 160)
+                SkeletonEpisodeRows()
             case .failed(let message):
                 Text(message).font(.stCallout).foregroundStyle(Theme.danger).padding(.horizontal, Metrics.gutter)
             case .loaded(let detail):
@@ -248,7 +248,12 @@ struct ShowDetailView: View {
     private func load() async {
         let result = await services.load { try await $0.show(tmdbId) }
         if case .loading = result { return }
-        detail = result
+        // Fades in over the skeleton the first time; later reloads swap in place.
+        if case .loading = detail {
+            withAnimation(.easeOut(duration: 0.25)) { detail = result }
+        } else {
+            detail = result
+        }
         if let show = result.value {
             inWatchlist = show.inWatchlist
             if selectedSeason == nil { selectedSeason = show.upNext?.season ?? show.orderedSeasons.first?.season }

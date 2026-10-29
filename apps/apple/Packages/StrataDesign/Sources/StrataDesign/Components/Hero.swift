@@ -85,6 +85,12 @@ public struct HeroBillboard<Actions: View>: View {
         // A left-side wash keeps the title legible over bright art; it sits under
         // the bottom fade so the hero ends in plain `bg` with no seam.
         LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .leading, endPoint: .center)
+        #else
+        // Under the status bar and navigation bar: a soft shade so they read over the
+        // art, standing in for the bar's edge effect, which `heroUnderBar()` hides
+        // while the page is at the top (it cuts a hard band across the art).
+        LinearGradient(stops: Self.eased(from: 0, to: 0.3) { (colorScheme == .light ? Theme.bg : .black).opacity(0.45 * (1 - $0)) },
+                       startPoint: .top, endPoint: .bottom)
         #endif
         if colorScheme == .light {
             // Light: the art dissolves straight into the page (no dark step, which turns
@@ -169,6 +175,98 @@ public struct HeroBillboard<Actions: View>: View {
         .padding(.bottom, Metrics.space2)
     }
     #endif
+}
+
+/// The shape of a `HeroBillboard` while its page loads: same height, with bars where
+/// the eyebrow, title, metadata, overview and buttons will be, so nothing moves when
+/// the page arrives.
+public struct SkeletonHero: View {
+    public init() {}
+
+    #if os(tvOS)
+    private let titleSize = CGSize(width: 720, height: 76)
+    private let button = CGSize(width: 220, height: 66)
+    #else
+    private var height: CGFloat { Metrics.isPad ? 620 : 520 }
+    private let titleSize = CGSize(width: 240, height: 36)
+    private let button = CGSize(width: 120, height: 50)
+    #endif
+
+    public var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            LinearGradient(colors: [Theme.surface1, Theme.surface1, Theme.bg], startPoint: .top, endPoint: .bottom)
+            info
+        }
+        #if os(tvOS)
+        .frame(height: UIScreen.main.bounds.height)
+        #else
+        .frame(height: height)
+        #endif
+        .accessibilityElement()
+        .accessibilityLabel("Loading")
+    }
+
+    private var info: some View {
+        VStack(alignment: .leading, spacing: Metrics.space3) {
+            SkeletonBar(width: 80, height: 12)
+            SkeletonBar(width: titleSize.width, height: titleSize.height)
+            SkeletonBar(width: 200, height: 14)
+            VStack(alignment: .leading, spacing: 6) {
+                SkeletonBar(height: 13)
+                SkeletonBar(height: 13)
+                SkeletonBar(width: 180, height: 13)
+            }
+            .frame(maxWidth: 620, alignment: .leading)
+            HStack(spacing: Metrics.space3) {
+                Capsule().fill(Theme.surface2).frame(width: button.width, height: button.height)
+                Circle().fill(Theme.surface2).frame(width: button.height, height: button.height)
+            }
+            .padding(.top, Metrics.space2)
+        }
+        .padding(.horizontal, Metrics.gutter)
+        #if os(tvOS)
+        .padding(.bottom, Metrics.space20)
+        #else
+        .padding(.bottom, Metrics.space2)
+        #endif
+        .skeletonPulse()
+    }
+}
+
+/// Episode-row-shaped placeholders for a season that's loading.
+public struct SkeletonEpisodeRows: View {
+    let count: Int
+    public init(count: Int = 4) { self.count = count }
+
+    #if os(tvOS)
+    private let stillWidth: CGFloat = 320
+    #else
+    private var stillWidth: CGFloat { Metrics.isPad ? 220 : 140 }
+    #endif
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            ForEach(0..<count, id: \.self) { _ in
+                HStack(alignment: .top, spacing: Metrics.space4) {
+                    RoundedRectangle(cornerRadius: Metrics.radiusSM, style: .continuous)
+                        .fill(Theme.surface1)
+                        .frame(width: stillWidth)
+                        .aspectRatio(16 / 9, contentMode: .fit)
+                    VStack(alignment: .leading, spacing: 6) {
+                        SkeletonBar(width: 160, height: 15)
+                        SkeletonBar(height: 12)
+                        SkeletonBar(width: 70, height: 11)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.vertical, Metrics.space3)
+                .padding(.horizontal, Metrics.space4)
+            }
+        }
+        .skeletonPulse()
+        .accessibilityElement()
+        .accessibilityLabel("Loading")
+    }
 }
 
 /// One episode in a season list.

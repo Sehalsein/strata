@@ -38,7 +38,7 @@ struct HomeView: View {
             .padding(.bottom, Metrics.space12)
         }
         // The hero runs to the top edge, under the bar, like a title page.
-        .ignoresSafeArea(edges: hasHero ? .top : [])
+        .heroUnderBar(hasHero)
         #if !os(tvOS)
         .navigationTitle("Home")
         #if os(iOS)
@@ -282,6 +282,8 @@ struct HeroCarousel: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
+        // A horizontal pager: the bar's edge effect is the page's, not the carousel's.
+        .scrollEdgeEffectHidden(true, for: .all)
         .frame(height: Metrics.isPad ? 620 : 520)
     }
     #else
