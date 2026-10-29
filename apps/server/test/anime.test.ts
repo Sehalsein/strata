@@ -4,6 +4,7 @@ import { relevant, type Release } from "../src/sources/discovery";
 import { AnimeMatcher, pickAnime, resolveEpisode } from "../src/catalog/anime/match";
 import type { Anilist } from "../src/catalog/anime/anilist";
 import type { Tmdb } from "../src/catalog/tmdb";
+import { CatalogService } from "../src/catalog/service";
 import { parseFileName } from "../src/media/parse";
 
 // Real entries from Fribb/anime-lists (trimmed).
@@ -185,4 +186,59 @@ test("an unreadable anime id list is thrown away and retried later, not reread o
   await map.ready();
   await map.ready();
   expect(downloads).toBe(0); // fresh-looking copy wasn't downloaded; and no retry yet
+});
+
+describe("anime tab sections", () => {
+  const detail = (id: number, name: string) => ({ id, name, title: name, overview: `${name}.`, poster_path: "/p.jpg", backdrop_path: "/b.jpg", first_air_date: "2023-09-29", release_date: "2016-08-26" });
+  const tmdb = {
+    show: async (id: number) => (id === 209867 ? detail(id, "Frieren") : id === 37854 ? detail(id, "One Piece") : Promise.reject(new Error("404"))),
+    movie: async (id: number) => (id === 372058 ? detail(id, "Your Name.") : Promise.reject(new Error("404"))),
+  } as unknown as Tmdb;
+  const library = { availability: () => new Map() } as never;
+  const catalog = (home: unknown) => {
+    const map = ids();
+    map.ready = async () => {};
+    return new CatalogService(tmdb, library, {} as never, () => ({}) as never, { ids: map, anilist: { home: async () => home } as unknown as Anilist });
+  };
+  const all = [{ id: 154587, format: "TV", episodes: 28 }, { id: 182255, format: "TV", episodes: 10 }, { id: 21, format: "TV" }, { id: 21519, format: "MOVIE", episodes: 1 }, { id: 999, format: "TV" }];
+
+  test("AniList's lists become the hero, a ranking, short lists and rails, matched to TMDB", async () => {
+    const shelves = await catalog({
+      trending: all,
+      airing: all,
+      popular: all,
+      favourites: all,
+      completed: all,
+      upcoming: [],
+      latest: [{ id: 182255, format: "TV", aired: { episode: 4, airingAt: 0 } }, { id: 21, format: "TV", aired: { episode: 1150, airingAt: 0 } }, { id: 21519, format: "MOVIE" }],
+    }).animePage();
+    expect(shelves.map((s) => [s.id, s.style ?? null])).toEqual([
+      ["anime-spotlight", "hero"],
+      ["anime-trending", "ranked"],
+      ["anime-latest-episodes", null],
+      ["anime-top-airing", "compact"],
+      ["anime-most-popular", "compact"],
+      ["anime-most-favorite", "compact"],
+      ["anime-latest-completed", "compact"],
+    ]); // Top Upcoming has nothing, so it's left out
+    // Frieren's two seasons are one card; the title AniList has but TMDB doesn't is skipped.
+    expect(shelves[1]!.items.map((c) => c.title)).toEqual(["Frieren", "One Piece", "Your Name."]);
+    expect(shelves[0]!.items.map((c) => c.eyebrow)).toEqual(["#1 Spotlight", "#2 Spotlight", "#3 Spotlight"]);
+    expect(shelves[2]!.items.map((c) => c.badge)).toEqual(["Episode 4", "Episode 1150", undefined]);
+    expect(shelves[3]!.items.map((c) => c.badge)).toEqual(["TV · 28 episodes", "TV", "Movie"]);
+  });
+
+  test("a later season is labelled as one: no episode count of its own, \"New season\" when upcoming", async () => {
+    // Frieren S2 alone (TMDB S1 E29+): AniList counts its 10 episodes, TMDB counts it in the show.
+    const later = [all[1]!, all[2]!, all[3]!];
+    const shelves = await catalog({ trending: [], airing: later, popular: [], favourites: [], completed: [], upcoming: later, latest: [] }).animePage();
+    const badges = (id: string) => shelves.find((s) => s.id === id)!.items.map((c) => c.badge);
+    expect(badges("anime-top-airing")).toEqual(["TV", "TV", "Movie"]);
+    expect(badges("anime-upcoming")).toEqual(["New season", undefined, undefined]);
+
+  });
+
+  test("when AniList can't answer, the tab falls back to Kitsu's rails (none here)", async () => {
+    expect(await catalog(null).animePage()).toEqual([]);
+  });
 });

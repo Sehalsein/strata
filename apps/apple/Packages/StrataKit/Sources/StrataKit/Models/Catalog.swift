@@ -38,6 +38,8 @@ public struct TitleCard: Codable, Sendable, Hashable, Identifiable {
     public var role: String? = nil
     /// In the Home hero: why it's featured ("Recently Added", "Trending Anime").
     public var eyebrow: String? = nil
+    /// A short label from the server, shown as is ("Episode 12", "TV · 24 episodes").
+    public var badge: String? = nil
 
     public init(type: TitleType, tmdbId: Int, title: String, year: Int? = nil, overview: String? = nil,
                 posterUrl: URL? = nil, backdropUrl: URL? = nil, rating: Double? = nil, available: [Provider] = [],
@@ -94,10 +96,36 @@ public struct Shelf: Codable, Sendable, Hashable, Identifiable {
         case titles
     }
 
+    /// How the server wants a shelf laid out; `nil` (or one this app doesn't know) is a rail.
+    public enum Style: String, Sendable, Hashable {
+        /// A carousel of large artwork with each title's overview and buttons.
+        case hero
+        /// Numbered, in the server's order.
+        case ranked
+        /// A short list of small rows, shown beside the compact shelves around it.
+        case compact
+    }
+
     public var id: String
     public var title: String
     public var kind: Kind
     public var items: [TitleCard]
+    /// The server's word for the layout, kept as sent so unknown ones still decode.
+    public var styleName: String?
+    public var style: Style? { styleName.flatMap(Style.init(rawValue:)) }
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, kind, items
+        case styleName = "style"
+    }
+
+    public init(id: String, title: String, kind: Kind, items: [TitleCard], style: Style? = nil) {
+        self.id = id
+        self.title = title
+        self.kind = kind
+        self.items = items
+        self.styleName = style?.rawValue
+    }
 }
 
 /// `GET /api/browse/:type/:list`

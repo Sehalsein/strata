@@ -2,8 +2,9 @@ import SwiftUI
 import StrataKit
 import StrataDesign
 
-/// The Anime tab: trending and seasonal series, then series and films ranked by an
-/// anime catalog, with its own category menu (Isekai, Slice of Life…).
+/// The Anime tab, laid out as the server sends it: a spotlight carousel, a numbered
+/// ranking, rails of episodes and titles, and short lists side by side; with its own
+/// category menu (Isekai, Slice of Life…).
 struct AnimeView: View {
     @Environment(AppServices.self) private var services
     @State private var categories: [AnimeCategory] = []
@@ -13,11 +14,14 @@ struct AnimeView: View {
     var body: some View {
         ScrollView {
             PageStack {
+                if let hero {
+                    HeroCarousel(cards: hero.items)
+                }
                 #if os(tvOS)
-                Color.clear.frame(height: 120) // clear the top tab bar
+                if hero == nil { Color.clear.frame(height: 120) } // clear the top tab bar
                 if !categories.isEmpty {
-                    // A full-width section: pressing down from the tab bar lands here
-                    // first, rather than on whichever poster sits under the tab.
+                    // A full-width section: pressing down from the tab bar (or the hero)
+                    // lands here first, rather than on whichever poster sits under it.
                     HStack { menu; Spacer() }
                         .padding(.horizontal, Metrics.gutter)
                         .focusSection()
@@ -26,7 +30,8 @@ struct AnimeView: View {
                 content
             }
             #if !os(tvOS)
-            .padding(.vertical, Metrics.space4)
+            .padding(.top, hero == nil ? Metrics.space4 : 0)
+            .padding(.bottom, Metrics.space4)
             #endif
             .padding(.bottom, Metrics.space12)
         }
@@ -35,8 +40,13 @@ struct AnimeView: View {
         #if os(tvOS)
         .ignoresSafeArea(edges: .top)
         #else
+        // The spotlight runs to the top edge, under the bar, like Home's hero.
+        .ignoresSafeArea(edges: hero == nil ? [] : .top)
         .navigationTitle("Anime")
         .navigationSubtitle(category?.name ?? "")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(hero == nil ? .automatic : .inline)
+        #endif
         .toolbar {
             if !categories.isEmpty { ToolbarItem(placement: .primaryAction) { menu } }
             ToolbarSpacer(.fixed, placement: .primaryAction)
@@ -67,8 +77,20 @@ struct AnimeView: View {
         case .loaded(let list) where list.isEmpty:
             MessageView(systemImage: "film.stack", title: "Nothing in \(category?.name ?? "Anime") yet").frame(minHeight: 400)
         case .loaded(let list):
-            ForEach(list) { shelf in ShelfRail(shelf: shelf) }
+            ForEach(ShelfBlock.blocks(list)) { block in
+                switch block {
+                case .hero: EmptyView() // above the category menu
+                case .ranked(let shelf): RankedRail(shelf: shelf)
+                case .rail(let shelf): ShelfRail(shelf: shelf)
+                case .compact(let shelves): CompactShelves(shelves: shelves)
+                }
+            }
         }
+    }
+
+    /// The spotlight, when the server sends one (not for a category).
+    private var hero: Shelf? {
+        shelves.value?.first { $0.style == .hero && !$0.items.isEmpty }
     }
 
     private func load() async {

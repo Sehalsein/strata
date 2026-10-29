@@ -5,7 +5,7 @@ import type { Settings } from "../settings";
 import { findCandidates, type Candidate } from "../sources/resolver";
 import { imageUrl, yearOf, type Tmdb, type TmdbCredits, type TmdbListItem, type TmdbMovie, type TmdbShow } from "./tmdb";
 import { logger } from "../log";
-import type { Anilist } from "./anime/anilist";
+import type { Anilist, AnilistHomeItem } from "./anime/anilist";
 import type { AnimeIds } from "./anime/ids";
 import { ANIME_CATEGORIES, type Kitsu, type KitsuRail } from "./anime/kitsu";
 
@@ -16,6 +16,16 @@ const log = logger("catalog");
  * can never collide with a TMDB genre id.
  */
 export const ANIME_GENRE_ID = -1;
+const FORMATS: Record<string, string> = { TV: "TV", TV_SHORT: "TV", MOVIE: "Movie", OVA: "OVA", ONA: "ONA", SPECIAL: "Special" };
+/**
+ * "TV · 24 episodes", "Movie": what an AniList title is, for the Anime tab's short lists.
+ * A later season's episode count isn't the show's, so it's left out there.
+ */
+const formatLabel = (i: AnilistHomeItem, laterSeason: boolean) => {
+  const format = i.format ? FORMATS[i.format] : undefined;
+  const episodes = i.format !== "MOVIE" && i.episodes && !laterSeason ? `${i.episodes} episode${i.episodes === 1 ? "" : "s"}` : undefined;
+  return [format, episodes].filter(Boolean).join(" · ") || undefined;
+};
 const ANIME_DISCOVER = { with_genres: "16", with_original_language: "ja" };
 /** Donghua and Korean animation: on the anime id list, but not what "Anime" means here. */
 const NOT_ANIME_LANGUAGES = new Set(["zh", "cn", "ko"]);
@@ -34,6 +44,8 @@ export interface TitleCard {
   available: FileProvider[];
   /** Why a title is in the Home hero ("Recently Added", "Trending Anime"). */
   eyebrow?: string;
+  /** A short label the apps show with the card as is ("Episode 12", "TV · 24 episodes"). */
+  badge?: string;
 }
 
 export interface EpisodeRef {
@@ -53,6 +65,11 @@ export interface Shelf {
   id: string;
   title: string;
   kind: "continue" | "titles";
+  /**
+   * How the apps lay it out: a hero carousel, a numbered ranking, or a short list beside
+   * its siblings. Absent: an ordinary rail (and what apps that don't know a style show).
+   */
+  style?: "hero" | "ranked" | "compact";
   items: (TitleCard | ContinueCard)[];
 }
 
@@ -268,8 +285,13 @@ export class CatalogService {
    */
   async animePage(category?: string): Promise<Shelf[]> {
     const { ids, kitsu } = this.anime ?? {};
-    if (!ids || !kitsu) return [];
+    if (!ids) return [];
     await ids.ready();
+    if (!category) {
+      const sections = await this.animeSections().catch((err) => (log.warn("Anime sections failed", err), null));
+      if (sections?.length) return sections;
+    }
+    if (!kitsu) return [];
     type Plan = { id: string; title: string; kind: "series" | "films"; rail: KitsuRail };
     const plans: Plan[] = category
       ? [
@@ -302,6 +324,75 @@ export class CatalogService {
     const shelves = ranked.filter((s) => s.items.length >= 3);
     if (trending.length >= 3) shelves.unshift({ id: "anime-series-trending", title: "Trending This Week", kind: "titles", items: trending });
     return shelves;
+  }
+
+  /**
+   * The Anime tab from AniList's lists: a spotlight of what's trending, the trending top 10,
+   * episodes aired in the last two days, then top airing, most popular, most favourited and
+   * recently completed side by side, and the most anticipated upcoming titles.
+   */
+  private async animeSections(): Promise<Shelf[] | null> {
+    const home = await this.anime?.anilist.home();
+    if (!home) return null;
+    const [trending, latest, airing, popular, favourites, completed, upcoming] = await Promise.all([
+      this.anilistCards(home.trending, 20),
+      this.anilistCards(home.latest, 20, (i) => (i.aired ? `Episode ${i.aired.episode}` : undefined)),
+      this.anilistCards(home.airing, 5, formatLabel),
+      this.anilistCards(home.popular, 5, formatLabel),
+      this.anilistCards(home.favourites, 5, formatLabel),
+      this.anilistCards(home.completed, 5, formatLabel),
+      this.anilistCards(home.upcoming, 15, (_, laterSeason) => (laterSeason ? "New season" : undefined)),
+    ]);
+    const spotlight = trending
+      .filter((c) => c.backdropUrl && c.overview)
+      .slice(0, 8)
+      .map((c, i) => ({ ...c, eyebrow: `#${i + 1} Spotlight` }));
+    const shelves: Shelf[] = [
+      { id: "anime-spotlight", title: "Spotlight", kind: "titles", style: "hero", items: spotlight },
+      { id: "anime-trending", title: "Trending", kind: "titles", style: "ranked", items: trending.slice(0, 10) },
+      { id: "anime-latest-episodes", title: "Latest Episodes", kind: "titles", items: latest },
+      { id: "anime-top-airing", title: "Top Airing", kind: "titles", style: "compact", items: airing },
+      { id: "anime-most-popular", title: "Most Popular", kind: "titles", style: "compact", items: popular },
+      { id: "anime-most-favorite", title: "Most Favorite", kind: "titles", style: "compact", items: favourites },
+      { id: "anime-latest-completed", title: "Latest Completed", kind: "titles", style: "compact", items: completed },
+      { id: "anime-upcoming", title: "Top Upcoming", kind: "titles", items: upcoming },
+    ];
+    return shelves.filter((s) => s.items.length >= 3);
+  }
+
+  /**
+   * Cards for AniList titles that have a TMDB match, in AniList's order, one per TMDB
+   * title (seasons and cours of one show are one card), at most `limit`.
+   */
+  private async anilistCards(items: AnilistHomeItem[], limit: number, badge?: (i: AnilistHomeItem, laterSeason: boolean) => string | undefined): Promise<TitleCard[]> {
+    const ids = this.anime!.ids;
+    const seen = new Set<string>();
+    const wanted: { type: TitleType; tmdbId: number; item: AnilistHomeItem; laterSeason: boolean }[] = [];
+    for (const item of items) {
+      const entry = ids.anilist(item.id);
+      const type: TitleType = item.format === "MOVIE" ? "movie" : "show";
+      const tmdbId = type === "movie" ? entry?.tmdbMovie : entry?.tmdbTv;
+      if (!tmdbId || seen.has(`${type}-${tmdbId}`)) continue;
+      seen.add(`${type}-${tmdbId}`);
+      // A sequel or a later cour: AniList counts it on its own, TMDB as part of the show.
+      const laterSeason = type === "show" && !!entry && ((entry.tmdbSeason ?? 1) > 1 || entry.tmdbOffset > 0);
+      wanted.push({ type, tmdbId, item, laterSeason });
+      // A few spare: some TMDB lookups fail.
+      if (wanted.length >= limit + 3) break;
+    }
+    const byType = async (type: TitleType) => {
+      const cards = await this.detailCards(type, wanted.filter((w) => w.type === type).map((w) => w.tmdbId));
+      return new Map(cards.map((c) => [c.tmdbId, c]));
+    };
+    const [shows, movies] = await Promise.all([byType("show"), byType("movie")]);
+    return wanted
+      .map(({ type, tmdbId, item, laterSeason }) => {
+        const card = (type === "movie" ? movies : shows).get(tmdbId);
+        const label = badge?.(item, laterSeason);
+        return card && label ? { ...card, badge: label } : card;
+      })
+      .filter((c): c is TitleCard => !!c)
+      .slice(0, limit);
   }
 
   /** Cards from TMDB details (cached), a few lookups at a time; ones that fail are left out. */

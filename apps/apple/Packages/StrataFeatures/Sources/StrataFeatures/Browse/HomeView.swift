@@ -160,6 +160,18 @@ struct PosterCardLabel: View {
         VStack(alignment: .leading, spacing: Metrics.space2) {
             // No title on the placeholder: the caption below already names it.
             ArtworkImage(url: card.posterUrl, aspectRatio: 2 / 3, seed: card.id)
+                .overlay(alignment: .bottomLeading) {
+                    // The server's label ("Episode 12"), on the art.
+                    if let badge = card.badge {
+                        Text(badge)
+                            .font(.stFootnote.weight(.semibold))
+                            .foregroundStyle(Theme.onArtwork)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.55), in: Capsule())
+                            .padding(Metrics.space2)
+                    }
+                }
             VStack(alignment: .leading, spacing: 2) {
                 Text(card.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                 // On a person's page the role ("Tony Lip", "Director") says more than the year.

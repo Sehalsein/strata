@@ -54,6 +54,17 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(Set(home.map(\.id)), ["continue", "watchlist", "libraryMovies", "libraryShows", "trendingMovies", "trendingShows"])
     }
 
+    func testShelfStylesAndBadges() throws {
+        let json = Data(#"""
+        [{"id":"a","title":"Trending","kind":"titles","style":"ranked","items":[{"type":"show","tmdbId":1,"title":"X","year":null,"posterUrl":null,"backdropUrl":null,"available":[],"badge":"Episode 4"}]},
+         {"id":"b","title":"Later","kind":"titles","style":"carousel3d","items":[]},
+         {"id":"c","title":"Plain","kind":"titles","items":[]}]
+        """#.utf8)
+        let shelves = try JSONDecoder().decode([Shelf].self, from: json)
+        XCTAssertEqual(shelves.map(\.style), [.ranked, nil, nil]) // an unknown style is a rail
+        XCTAssertEqual(shelves[0].items[0].badge, "Episode 4")
+    }
+
     func testBrowseAndSearch() throws {
         let browse = try Fixture.decode(ItemsResponse<TitleCard>.self, "browse").items
         XCTAssertEqual(browse.first?.yearText, "2008")

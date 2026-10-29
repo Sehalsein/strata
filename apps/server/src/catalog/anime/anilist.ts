@@ -43,6 +43,42 @@ const DETAILS = `query ($id: Int) {
   }
 }`;
 
+/** A ranked list on the Anime tab: AniList media, with the episode that aired for schedules. */
+export interface AnilistHomeItem {
+  id: number;
+  format?: string | null;
+  episodes?: number | null;
+  /** Latest Episodes: the episode that aired. */
+  aired?: { episode: number; airingAt: number };
+}
+
+export type AnilistHome = Record<"trending" | "airing" | "popular" | "favourites" | "completed" | "upcoming" | "latest", AnilistHomeItem[]>;
+
+const LIST = "id format episodes";
+const JP = "type: ANIME, isAdult: false, countryOfOrigin: JP";
+const HOME = `query ($since: Int, $now: Int) {
+  trending: Page(perPage: 20) { media(${JP}, sort: TRENDING_DESC) { ${LIST} } }
+  airing: Page(perPage: 15) { media(${JP}, status: RELEASING, sort: POPULARITY_DESC) { ${LIST} } }
+  popular: Page(perPage: 15) { media(${JP}, sort: POPULARITY_DESC) { ${LIST} } }
+  favourites: Page(perPage: 15) { media(${JP}, sort: FAVOURITES_DESC) { ${LIST} } }
+  completed: Page(perPage: 15) { media(${JP}, status: FINISHED, popularity_greater: 15000, sort: END_DATE_DESC) { ${LIST} } }
+  upcoming: Page(perPage: 15) { media(${JP}, status: NOT_YET_RELEASED, sort: POPULARITY_DESC) { ${LIST} } }
+  latest: Page(perPage: 50) {
+    airingSchedules(airingAt_greater: $since, airingAt_lesser: $now, sort: TIME_DESC) {
+      episode airingAt media { ${LIST} isAdult countryOfOrigin popularity }
+    }
+  }
+}`;
+
+type HomeResponse = Record<Exclude<keyof AnilistHome, "latest">, { media: AnilistHomeItem[] }> & {
+  latest: {
+    airingSchedules: { episode: number; airingAt: number; media: AnilistHomeItem & { isAdult?: boolean; countryOfOrigin?: string; popularity?: number } }[];
+  };
+};
+
+/** Below this many AniList users, a just-aired episode is too obscure for Latest Episodes. */
+const LATEST_MIN_POPULARITY = 2_000;
+
 /**
  * Minimal AniList client: title search (for matching fansub names) and details for
  * title pages. Responses are cached (a day) and requests spaced to the rate limit.
@@ -67,6 +103,33 @@ export class Anilist {
   async media(id: number): Promise<AnilistMedia | null> {
     const data = await this.request<{ Media: AnilistMedia }>(DETAILS, { id }, `anilist:media:${id}`, DAY);
     return data?.Media ?? null;
+  }
+
+  /**
+   * Every list the Anime tab shows, in one request (cached an hour): trending, top airing,
+   * most popular and favourited, recently completed, upcoming, and episodes aired in the
+   * last two days.
+   */
+  async home(): Promise<AnilistHome | null> {
+    // Rounded to the hour, so the variables (and the cache key) are stable within it.
+    const now = Math.floor(Date.now() / 3_600_000) * 3_600;
+    const data = await this.request<HomeResponse>(HOME, { since: now - 2 * 86_400, now }, "anilist:home", 60 * 60_000);
+    if (!data) return null;
+    const seen = new Set<number>();
+    const latest = data.latest.airingSchedules
+      .filter((s) => !s.media.isAdult && s.media.countryOfOrigin === "JP" && (s.media.popularity ?? 0) >= LATEST_MIN_POPULARITY)
+      // Newest first: a show that aired twice keeps its latest episode.
+      .filter((s) => !seen.has(s.media.id) && !!seen.add(s.media.id))
+      .map((s) => ({ id: s.media.id, format: s.media.format, episodes: s.media.episodes, aired: { episode: s.episode, airingAt: s.airingAt } }));
+    return {
+      trending: data.trending.media,
+      airing: data.airing.media,
+      popular: data.popular.media,
+      favourites: data.favourites.media,
+      completed: data.completed.media,
+      upcoming: data.upcoming.media,
+      latest,
+    };
   }
 
   private async request<T>(query: string, variables: Record<string, unknown>, cacheKey: string, ttl: number): Promise<T | null> {
