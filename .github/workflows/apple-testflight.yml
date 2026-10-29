@@ -1,7 +1,14 @@
 name: Apple TestFlight
 
+# A new app version on main uploads by itself: when MARKETING_VERSION in project.yml has
+# no apple-v<version> tag yet. The tag is added once both uploads succeed, so a version
+# goes up once. A tag push or a manual run uploads whatever it names.
 on:
   push:
+    branches: [main]
+    paths:
+      - "apps/apple/**"
+      - ".github/workflows/apple-testflight.yml"
     tags:
       - "apple-v*"
   workflow_dispatch:
@@ -19,8 +26,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  version:
+    name: New version?
+    runs-on: ubuntu-latest
+    outputs:
+      upload: ${{ steps.check.outputs.upload }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-tags: true
+          fetch-depth: 1
+          persist-credentials: false
+      - id: check
+        run: |
+          version="$(awk -F'"' '/MARKETING_VERSION:/ {print $2; exit}' apps/apple/project.yml)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" != push ] || [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "upload=true" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --tags origin "refs/tags/apple-v$version" >/dev/null; then
+            echo "::notice::$version is already on TestFlight (apple-v$version)"
+            echo "upload=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "upload=true" >> "$GITHUB_OUTPUT"
+          fi
+
   upload:
     name: Upload ${{ matrix.name }}
+    needs: version
+    if: needs.version.outputs.upload == 'true'
     runs-on: macos-15
     timeout-minutes: 60
     strategy:
@@ -167,3 +201,17 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
           path: apps/apple/.build/*.log
+
+  # Records that this version is on TestFlight, so later pushes to main don't upload it again.
+  tag:
+    name: Tag the version
+    needs: [version, upload]
+    if: github.event_name == 'push' && github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/apple-v$VERSION" -f sha="$GITHUB_SHA"
