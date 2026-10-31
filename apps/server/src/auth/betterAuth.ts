@@ -68,6 +68,16 @@ export function isAdminEmail(email: string | null | undefined): boolean {
 const ownsHousehold = async (db: Db, userId: string) =>
   (await db.select({ id: schema.member.id }).from(schema.member).where(and(eq(schema.member.userId, userId), like(schema.member.role, "%owner%"))).limit(1)).length > 0;
 
+/**
+ * Whether an account is the system admin: it runs the server (the backoffice: server
+ * settings, logs, households). Home: the account made at setup (role "admin"). Cloud: the
+ * environment decides, every request: an email in STRATA_ADMIN_EMAILS, so taking one off
+ * the list takes the access away at once.
+ */
+export function isSystemAdmin(user: { role?: string | null; email?: string | null }): boolean {
+  return isCloud ? isAdminEmail(user.email) : user.role === "admin";
+}
+
 export function signInMethods() {
   const google = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET } : null;
   let passkeys: { rpID: string; origin: string } | null = null;
@@ -102,10 +112,10 @@ export async function assertMayManage(db: Db, getSession: (headers: Headers) => 
   };
   if (!caller || session?.viewerOnly) refuse("Sign in with your password to do that.");
   if (caller!.user.id === userId) refuse("That's your own account: use your account menu.");
-  const [target] = await db.select({ role: schema.user.role, name: schema.user.name }).from(schema.user).where(eq(schema.user.id, userId));
+  const [target] = await db.select({ role: schema.user.role, email: schema.user.email, name: schema.user.name }).from(schema.user).where(eq(schema.user.id, userId));
   if (!target) refuse("No such account.");
-  if ((caller!.user as { role?: string | null }).role === "admin") return;
-  if (target!.role === "admin") refuse("Only the server's admin can manage that account.");
+  if (isSystemAdmin(caller!.user as { role?: string | null; email?: string | null })) return;
+  if (isSystemAdmin(target!)) refuse("Only the server's admin can manage that account.");
   const household = session?.activeOrganizationId;
   if (!household) refuse("Choose a household first.");
   const roles = await db
@@ -325,10 +335,12 @@ export function createAuth(options: AuthOptions) {
         create: {
           // A new sign-in opens in the account's household when it has just one.
           before: async (session) => {
-            // …and an account whose email was named after it signed up becomes one on its next sign-in.
-            if (isCloud && process.env.STRATA_ADMIN_EMAILS) {
+            // …and on each sign-in the role follows the list (Better Auth's admin plugin reads
+            // it): added after signing up, or taken off.
+            if (isCloud) {
               const [u] = await db.select({ email: schema.user.email, role: schema.user.role }).from(schema.user).where(eq(schema.user.id, session.userId));
-              if (u && u.role !== "admin" && isAdminEmail(u.email)) await db.update(schema.user).set({ role: "admin" }).where(eq(schema.user.id, session.userId));
+              const role = u && isAdminEmail(u.email) ? "admin" : "user";
+              if (u && (u.role ?? "user") !== role) await db.update(schema.user).set({ role }).where(eq(schema.user.id, session.userId));
             }
             if ((session as { activeOrganizationId?: string | null }).activeOrganizationId) return;
             const rows = await db.select({ id: schema.member.organizationId }).from(schema.member).where(eq(schema.member.userId, session.userId)).limit(2);
@@ -455,7 +467,7 @@ export function createAuth(options: AuthOptions) {
         sendInvitationEmail: async () => {},
         // Households are made by the server admin (or setup); in the cloud, also one by each
         // new account (its own, see the sign-up `after` hook).
-        allowUserToCreateOrganization: async (user) => (user as { role?: string }).role === "admin" || (isCloud && !(await ownsHousehold(db, user.id))),
+        allowUserToCreateOrganization: async (user) => isSystemAdmin(user as { role?: string | null; email?: string | null }) || (isCloud && !(await ownsHousehold(db, user.id))),
         creatorRole: "owner",
         membershipLimit: 50,
         schema: {

@@ -17,6 +17,7 @@ import { Connections } from "./connections";
 import { SettingRow, SettingsSection, ToggleRow } from "./layout";
 import { UpdatesCard } from "./updates-card";
 import { useSession } from "@/app/session";
+import { navigate } from "@/lib/router";
 
 const PROVIDER_LABEL: Record<Provider, string> = { local: "Local folders", torbox: "TorBox" };
 
@@ -34,28 +35,36 @@ const ALIASES: Record<string, SectionId> = { keys: "connections", playback: "dis
 function sectionFromHash(available: Section[]): SectionId {
   const h = location.hash.slice(1);
   const id = (ALIASES[h] ?? h) as SectionId;
-  return available.some((s) => s.id === id) ? id : "general";
+  return available.some((s) => s.id === id) ? id : available[0]!.id;
 }
 
 /**
- * Settings, split by whose they are: this household's (its owner and admins) and the
- * server's (its admin). Each section is a list of rows; changes collect in a bar at the
- * bottom until saved. Keys save on their own (they're checked with the provider first).
+ * Settings, by whose they are: this household's (its owner and admins, under Settings) or
+ * the server's (the system admin, in the backoffice). Each section is a list of rows;
+ * changes collect in a bar at the bottom until saved. Keys save on their own (they're
+ * checked with the provider first).
  */
-export default function SettingsPage() {
+export default function SettingsPage({ scope = "household" }: { scope?: "household" | "server" }) {
   const { isServerAdmin, cloud } = useSession();
-  const sections: Section[] = [
-    { id: "general", label: "General", icon: Globe, group: "household" },
-    { id: "library", label: "Library", icon: Library, group: "household" },
-    { id: "discovery", label: "Discovery", icon: Compass, group: "household" },
-    { id: "connections", label: "Connections", icon: Cable, group: "household" },
-    ...(isServerAdmin
-      ? ([
-          { id: "server", label: "Server", icon: Server, group: "server" },
-          ...(!cloud ? [{ id: "network", label: "Network", icon: Network, group: "server" } as Section, { id: "updates", label: "Updates", icon: RefreshCw, group: "server" } as Section] : []),
-        ] as Section[])
-      : []),
-  ];
+  const sections: Section[] = (
+    [
+      { id: "general", label: "General", icon: Globe, group: "household" },
+      { id: "library", label: "Library", icon: Library, group: "household" },
+      { id: "discovery", label: "Discovery", icon: Compass, group: "household" },
+      { id: "connections", label: "Connections", icon: Cable, group: "household" },
+      ...(isServerAdmin
+        ? ([
+            { id: "server", label: "Server", icon: Server, group: "server" },
+            ...(!cloud ? [{ id: "network", label: "Network", icon: Network, group: "server" } as Section, { id: "updates", label: "Updates", icon: RefreshCw, group: "server" } as Section] : []),
+          ] as Section[])
+        : []),
+    ] as Section[]
+  ).filter((s) => s.group === scope);
+  const title = scope === "server" ? "Server settings" : "Settings";
+  // The server's sections moved to the backoffice: old links (/settings#updates) follow.
+  useEffect(() => {
+    if (scope === "household" && ["server", "network", "updates"].includes(location.hash.slice(1))) navigate(`/backoffice/settings${location.search}${location.hash}`, { replace: true });
+  }, [scope]);
   const settings = useQuery({ queryKey: queryKeys.settings, queryFn: api.settings, staleTime: Infinity });
   const [draft, setDraft] = useState<Settings | null>(null);
   const [section, setSection] = useState<SectionId>(() => sectionFromHash(sections));
@@ -72,7 +81,7 @@ export default function SettingsPage() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isServerAdmin, cloud]);
+  }, [isServerAdmin, cloud, scope]);
 
   const dirty = useMemo(() => !!data && !!draft && JSON.stringify(data.settings) !== JSON.stringify(draft), [data, draft]);
 
@@ -80,7 +89,7 @@ export default function SettingsPage() {
   if (!data || !draft) {
     return (
       <Page>
-        <PageHeader title="Settings" />
+        <PageHeader title={title} />
         <ErrorAlert error={settings.error} title="Couldn't load settings" onRetry={() => void settings.refetch()} />
       </Page>
     );
@@ -88,14 +97,14 @@ export default function SettingsPage() {
 
   const go = (id: SectionId) => {
     setSection(id);
-    history.replaceState(null, "", `${location.pathname}${location.search}${id === "general" ? "" : `#${id}`}`);
+    history.replaceState(null, "", `${location.pathname}${location.search}${id === sections[0]!.id ? "" : `#${id}`}`);
   };
 
   const set: SetFn = (key, value) => setDraft((d) => (d ? { ...d, [key]: value } : d));
 
   const save = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (isServerAdmin && !draft.serverName.trim()) {
+    if (scope === "server" && !draft.serverName.trim()) {
       go("server");
       setSaveError("Give the server a name.");
       return;
@@ -126,13 +135,13 @@ export default function SettingsPage() {
 
   return (
     <Page className="max-w-5xl pb-24">
-      <PageHeader title="Settings" />
+      <PageHeader title={title} description={scope === "server" ? "For the whole server and every household on it." : undefined} />
 
       <div className="flex flex-col gap-6 md:flex-row md:items-start md:gap-10">
-        <SettingsNav sections={sections} current={section} onChange={go} />
+        {sections.length > 1 && <SettingsNav sections={sections} current={section} onChange={go} />}
 
         <div className="flex min-w-0 flex-1 flex-col gap-6">
-          <h2 className="text-xl font-semibold">{current.label}</h2>
+          {sections.length > 1 && <h2 className="text-xl font-semibold">{current.label}</h2>}
 
           {section === "general" && (
             <SettingsSection title="Catalog" description="How titles and dates are shown.">

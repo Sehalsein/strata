@@ -1,5 +1,5 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
-import { LayoutDashboard, Library, MonitorSmartphone, ScrollText, Settings, Tv, Users, type LucideIcon } from "lucide-react";
+import { Activity, LayoutDashboard, Library, MonitorSmartphone, ScrollText, Server, Settings, Tv, Users, type LucideIcon } from "lucide-react";
 import type { Access } from "./session";
 
 /**
@@ -18,11 +18,14 @@ export interface AppRoute {
   access: Access;
   /** Reached by a link, not the sidebar (a TV's QR code opens /link). */
   hidden?: boolean;
+  /** The backoffice: the system admin's pages, with a sidebar of their own. */
+  backoffice?: boolean;
   component: LazyExoticComponent<ComponentType>;
 }
 
-export type NavGroup = "Dashboard" | "Media" | "People" | "System";
+export type NavGroup = "Dashboard" | "Media" | "People" | "System" | "Server";
 export const NAV_GROUPS: NavGroup[] = ["Dashboard", "Media", "People", "System"];
+export const BACKOFFICE_GROUPS: NavGroup[] = ["Server"];
 
 export const routes: AppRoute[] = [
   { path: "/", aliases: ["/overview"], title: "Overview", icon: LayoutDashboard, group: "Dashboard", access: "any", component: lazy(() => import("@/features/overview/overview-page")) },
@@ -31,13 +34,20 @@ export const routes: AppRoute[] = [
   { path: "/devices", title: "Devices", icon: MonitorSmartphone, group: "People", access: "any", component: lazy(() => import("@/features/devices/devices-page")) },
   { path: "/link", title: "Link a TV", icon: Tv, group: "People", access: "any", hidden: true, component: lazy(() => import("@/features/link/link-page")) },
   { path: "/settings", title: "Settings", icon: Settings, group: "System", access: "householdAdmin", component: lazy(() => import("@/features/settings/settings-page")) },
-  { path: "/logs", title: "Logs", icon: ScrollText, group: "System", access: "serverAdmin", component: lazy(() => import("@/features/logs/logs-page")) },
+  { path: "/backoffice", title: "Status", icon: Activity, group: "Server", access: "systemAdmin", backoffice: true, component: lazy(() => import("@/features/backoffice/status-page")) },
+  { path: "/backoffice/settings", title: "Server settings", icon: Server, group: "Server", access: "systemAdmin", backoffice: true, component: lazy(() => import("@/features/backoffice/server-settings-page")) },
+  { path: "/backoffice/logs", aliases: ["/logs"], title: "Logs", icon: ScrollText, group: "Server", access: "systemAdmin", backoffice: true, component: lazy(() => import("@/features/logs/logs-page")) },
 ];
 
+/** The route owning `pathname`: the longest path that matches (/backoffice/logs over /backoffice). */
 export function matchRoute(pathname: string): AppRoute | undefined {
   const p = pathname.replace(/\/+$/, "") || "/";
-  return routes.find((r) => {
-    const paths = [r.path, ...(r.aliases ?? [])];
-    return paths.some((rp) => (rp === "/" ? p === "/" : p === rp || p.startsWith(`${rp}/`)));
-  });
+  let best: { route: AppRoute; length: number } | undefined;
+  for (const r of routes) {
+    for (const rp of [r.path, ...(r.aliases ?? [])]) {
+      const hit = rp === "/" ? p === "/" : p === rp || p.startsWith(`${rp}/`);
+      if (hit && (!best || rp.length > best.length)) best = { route: r, length: rp.length };
+    }
+  }
+  return best?.route;
 }

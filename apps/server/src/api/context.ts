@@ -5,6 +5,7 @@ import type { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { member, session as sessionTable } from "../db/schema";
 import { describeDevice, deviceChanges } from "./deviceInfo";
+import { isSystemAdmin } from "../auth/betterAuth";
 import type { Household } from "../household";
 import type { Services } from "../services";
 
@@ -56,7 +57,7 @@ export const requireAuth: MiddlewareHandler<Env> = createMiddleware<Env>(async (
   }
   c.set("session", {
     token: s.token,
-    user: { id: u.id, username: u.username ?? null, name: u.name, email: u.email, image: u.image ?? null, isServerAdmin: u.role === "admin" && !viewerOnly },
+    user: { id: u.id, username: u.username ?? null, name: u.name, email: u.email, image: u.image ?? null, isServerAdmin: isSystemAdmin(u) && !viewerOnly },
     organizationId: s.activeOrganizationId ?? null,
     role: null,
     viewerOnly,

@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useState } from "react";
-import { ChevronsUpDown, Fingerprint, KeyRound, ShieldCheck, Lock, LogOut, SearchX, UserPlus, UserRound } from "lucide-react";
+import { ArrowLeft, ChevronsUpDown, Fingerprint, KeyRound, ShieldCheck, Lock, LogOut, SearchX, ShieldEllipsis, UserPlus, UserRound } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { errorMessage } from "@/lib/api";
@@ -33,13 +33,20 @@ import { ChangePasswordDialog } from "@/features/auth/change-password-dialog";
 import { SignInMethodsDialog } from "@/features/auth/sign-in-methods-dialog";
 import { YourDataDialog } from "@/features/account/your-data-dialog";
 import { HouseholdSwitcher } from "@/features/households/household-switcher";
-import { matchRoute, NAV_GROUPS, routes } from "./routes";
+import { BACKOFFICE_GROUPS, matchRoute, NAV_GROUPS, routes } from "./routes";
 import { useSession } from "./session";
+
+/** The route for `path` as this account sees it: to anyone but the system admin the backoffice doesn't exist. */
+function useRoute(path: string) {
+  const { can } = useSession();
+  const route = matchRoute(path);
+  return route?.backoffice && !can("systemAdmin") ? undefined : route;
+}
 
 export default function AppLayout() {
   const path = usePath();
   const { can } = useSession();
-  const route = matchRoute(path);
+  const route = useRoute(path);
   const allowed = !!route && can(route.access);
   const Page_ = allowed ? route.component : undefined;
 
@@ -67,18 +74,48 @@ export default function AppLayout() {
   );
 }
 
+/**
+ * The household's pages, or (under /backoffice) the system admin's: the backoffice has a
+ * sidebar of its own, with the way back to the household at the top.
+ */
 function AppSidebar({ path }: { path: string }) {
   const { info, can } = useSession();
   const { isMobile, setOpenMobile } = useSidebar();
-  const active = matchRoute(path);
+  const active = useRoute(path);
+  const backoffice = !!active?.backoffice;
+  const close = () => isMobile && setOpenMobile(false);
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <HouseholdSwitcher />
+        {backoffice ? (
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <div className="flex items-center gap-2 px-2 py-1.5 group-data-[collapsible=icon]:hidden">
+                <div className="bg-primary text-primary-foreground flex size-8 items-center justify-center rounded-lg">
+                  <ShieldEllipsis className="size-4" />
+                </div>
+                <div className="min-w-0 leading-tight">
+                  <p className="truncate text-sm font-semibold">Backoffice</p>
+                  <p className="text-muted-foreground truncate text-xs">{info.serverName}</p>
+                </div>
+              </div>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild tooltip="Back to the dashboard">
+                <Link href="/" onClick={close}>
+                  <ArrowLeft />
+                  <span>Back to the dashboard</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        ) : (
+          <HouseholdSwitcher />
+        )}
       </SidebarHeader>
       <SidebarContent>
-        {NAV_GROUPS.map((group) => {
-          const items = routes.filter((r) => r.group === group && !r.hidden && can(r.access));
+        {(backoffice ? BACKOFFICE_GROUPS : NAV_GROUPS).map((group) => {
+          const items = routes.filter((r) => r.group === group && !r.hidden && !!r.backoffice === backoffice && can(r.access));
           if (items.length === 0) return null;
           return (
             <SidebarGroup key={group}>
@@ -88,7 +125,7 @@ function AppSidebar({ path }: { path: string }) {
                   {items.map((r) => (
                     <SidebarMenuItem key={r.path}>
                       <SidebarMenuButton asChild isActive={active === r} tooltip={r.title}>
-                        <Link href={r.path} aria-current={active === r ? "page" : undefined} onClick={() => isMobile && setOpenMobile(false)}>
+                        <Link href={r.path} aria-current={active === r ? "page" : undefined} onClick={close}>
                           <r.icon />
                           <span>{r.title}</span>
                         </Link>
@@ -100,9 +137,25 @@ function AppSidebar({ path }: { path: string }) {
             </SidebarGroup>
           );
         })}
+        {!backoffice && can("systemAdmin") && (
+          <SidebarGroup className="mt-auto">
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Backoffice">
+                    <Link href="/backoffice" onClick={close}>
+                      <ShieldEllipsis />
+                      <span>Backoffice</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       <SidebarFooter>
-        <Link href="/" className="text-muted-foreground flex items-center gap-2 px-2 text-xs" onClick={() => isMobile && setOpenMobile(false)} title={`Strata v${info.version}`}>
+        <Link href="/" className="text-muted-foreground flex items-center gap-2 px-2 text-xs" onClick={close} title={`Strata v${info.version}`}>
           <BrandMark size={16} />
           <span className="truncate group-data-[collapsible=icon]:hidden">
             Strata <span className="font-mono">v{info.version}</span>
@@ -154,7 +207,7 @@ function AccountMenu() {
   const others = (accounts.data ?? []).filter((a) => a.user.id !== me.user.id);
   const current = (accounts.data ?? []).find((a) => a.user.id === me.user.id);
   const name = me.user.name || me.user.username || "Account";
-  const subtitle = [isServerAdmin ? "Server admin" : null, me.household ? `${roleLabel(me.household.role)} · ${me.household.name}` : "No household"].filter(Boolean).join(" · ");
+  const subtitle = [isServerAdmin ? "System admin" : null, me.household ? `${roleLabel(me.household.role)} · ${me.household.name}` : "No household"].filter(Boolean).join(" · ");
 
   const run = async (fn: () => Promise<void>, done?: string) => {
     try {
@@ -192,6 +245,16 @@ function AccountMenu() {
                   <span className="truncate">{a.user.name}</span>
                 </DropdownMenuItem>
               ))}
+            </>
+          )}
+          {isServerAdmin && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href="/backoffice">
+                  <ShieldEllipsis /> Backoffice
+                </Link>
+              </DropdownMenuItem>
             </>
           )}
           <DropdownMenuSeparator />

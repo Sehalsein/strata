@@ -1,12 +1,13 @@
 import { createContext, useContext } from "react";
 import type { Me, ServerInfo } from "@/lib/types";
 
-export type Access = "any" | "householdAdmin" | "serverAdmin";
+/** "systemAdmin": the backoffice, for whoever runs the server (set by the environment on the cloud). */
+export type Access = "any" | "householdAdmin" | "serverAdmin" | "systemAdmin";
 
 export interface Session {
   info: ServerInfo;
   me: Me;
-  /** The server admin (made at setup): server settings, provider keys, households. */
+  /** The system admin (made at setup; on the cloud, an email in STRATA_ADMIN_EMAILS): the backoffice. */
   isServerAdmin: boolean;
   /** The active household's owner or an admin: its library, settings, members. */
   isHouseholdAdmin: boolean;

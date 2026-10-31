@@ -280,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 setState("Couldn't verify the server on port \(port). Choose Restart Server.", running: false)
                 return
             }
-            NSWorkspace.shared.open(URL(string: "settings?checkUpdate=1#updates", relativeTo: dashboardURL)!.absoluteURL)
+            NSWorkspace.shared.open(URL(string: "backoffice/settings?checkUpdate=1#updates", relativeTo: dashboardURL)!.absoluteURL)
         }
     }
 

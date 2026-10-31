@@ -76,7 +76,8 @@ export function App() {
     const m = me.data;
     const isServerAdmin = m.user.isServerAdmin;
     const householdAdmin = !m.viewerOnly && isHouseholdAdmin(m.household?.role);
-    const can = (access: Access) => (access === "any" ? true : access === "serverAdmin" ? isServerAdmin && householdAdmin : householdAdmin);
+    const can = (access: Access) =>
+      access === "any" ? true : access === "systemAdmin" ? isServerAdmin : access === "serverAdmin" ? isServerAdmin && householdAdmin : householdAdmin;
     return { info: info.data, me: m, isServerAdmin, isHouseholdAdmin: householdAdmin, cloud: info.data.mode === "cloud", can, authChanged, addAccount: () => setAddingAccount(true) };
   }, [info.data, me.data, authChanged]);
 

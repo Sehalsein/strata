@@ -44,6 +44,15 @@ try {
   const boss = await signUp("Boss@Example.com", "boss");
   const bossMe = await json(await server.request("/api/me", { token: boss.headers.get("set-auth-token")! }));
   expect(bossMe.user.isServerAdmin).toBe(true);
+  const bossToken = boss.headers.get("set-auth-token")!;
+  expect((await server.request("/api/admin/logs", { token: bossToken })).status).toBe(200);
+  expect((await server.request("/api/admin/logs", { token: annToken })).status).toBe(403);
+  // The environment decides, every request: off the list, no backoffice.
+  const admins = process.env.STRATA_ADMIN_EMAILS;
+  process.env.STRATA_ADMIN_EMAILS = "other@example.com";
+  expect((await json(await server.request("/api/me", { token: bossToken }))).user.isServerAdmin).toBe(false);
+  expect((await server.request("/api/admin/logs", { token: bossToken })).status).toBe(403);
+  process.env.STRATA_ADMIN_EMAILS = admins;
   console.log("cloud scenario passed");
   server.services.shutdown();
   process.exit(0);

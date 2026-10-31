@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { Download, Info, MonitorSmartphone, RefreshCw, TriangleAlert, Tv } from "lucide-react";
+import { MonitorSmartphone, TriangleAlert, Tv } from "lucide-react";
 import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
-import { formatDuration } from "@/lib/format";
 import { queryKeys } from "@/lib/query";
 import { Link } from "@/lib/router";
 import { useSession } from "@/app/session";
@@ -12,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { JobsCard } from "./jobs-card";
 import { SessionsCard } from "./sessions-card";
 import { SetupChecklist } from "./setup-checklist";
-import { LibraryCard, ProvidersCard, ServerCard } from "./status-cards";
+import { LibraryCard, ProvidersCard } from "./status-cards";
 
 export default function OverviewPage() {
   const { isHouseholdAdmin } = useSession();
@@ -66,7 +65,7 @@ function MemberOverview() {
 }
 
 function AdminOverview() {
-  const { isServerAdmin, cloud } = useSession();
+  const { isServerAdmin, me } = useSession();
   const status = useQuery({ queryKey: queryKeys.status, queryFn: api.status, refetchInterval: 3000 });
   const data = status.data;
 
@@ -84,61 +83,11 @@ function AdminOverview() {
     <Page>
       <PageHeader
         title="Overview"
-        description={<>Up {formatDuration(data.uptimeMs)}</>}
-        actions={
-          <>
-            <LiveIndicator lost={status.isError} />
-            {isServerAdmin && !cloud && (
-              <Button variant="outline" size="sm" asChild>
-                <Link href="/settings?checkUpdate=1#updates">
-                  <RefreshCw /> Check for updates
-                </Link>
-              </Button>
-            )}
-          </>
-        }
+        description={me.household?.name}
+        actions={<LiveIndicator lost={status.isError} />}
       />
 
       <div className="flex flex-col gap-3 empty:hidden">
-        {isServerAdmin && !cloud && data.update?.updateAvailable && (
-          <Alert variant="info">
-            <Download />
-            <AlertTitle>Update available</AlertTitle>
-            <AlertDescription>
-              <p>
-                Strata v{data.update.latestVersion} is ready to install (running v{data.version}).
-                {data.update.state === "waiting-for-idle" && " It installs when the last stream stops."}
-                {data.update.state === "downloading" && " Downloading…"}
-              </p>
-              <Button size="sm" variant="outline" asChild className="mt-1">
-                <Link href="/settings#updates">{data.update.state === "available" ? "Update now" : "View"}</Link>
-              </Button>
-            </AlertDescription>
-          </Alert>
-        )}
-        {!cloud && !data.ffmpeg && data.ffmpegSetup?.state === "downloading" && (
-          <Alert variant="info">
-            <Info />
-            <AlertTitle>Setting up ffmpeg</AlertTitle>
-            <AlertDescription>A one-time download of the ffmpeg Strata uses to play files that can't direct-play (MKV, DTS/TrueHD audio, some codecs). It only takes a minute.</AlertDescription>
-          </Alert>
-        )}
-        {!cloud && !data.ffmpeg && data.ffmpegSetup?.state !== "downloading" && (
-          <Alert variant="warning">
-            <TriangleAlert />
-            <AlertTitle>ffmpeg isn't set up</AlertTitle>
-            <AlertDescription>
-              <p>
-                Files that can't direct-play (MKV, DTS/TrueHD audio, some codecs) need ffmpeg.{" "}
-                {data.ffmpegSetup?.state === "failed" ? (
-                  <>Strata couldn't download it ({data.ffmpegSetup.error}). Run “Set up ffmpeg” under Jobs to try again, or install ffmpeg on the server and restart Strata.</>
-                ) : (
-                  <>There's no build for this platform; install ffmpeg on the server and restart Strata.</>
-                )}
-              </p>
-            </AlertDescription>
-          </Alert>
-        )}
         {!data.tmdb.configured && (
           <Alert variant="warning">
             <TriangleAlert />
@@ -155,14 +104,13 @@ function AdminOverview() {
 
       <SetupChecklist status={data} isServerAdmin={isServerAdmin} />
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <ServerCard status={data} />
+      <div className="grid gap-4 md:grid-cols-2">
         <LibraryCard stats={data.library} />
         <ProvidersCard status={data} />
       </div>
 
       <SessionsCard sessions={data.sessions} />
-      <JobsCard jobs={data.jobs} isServerAdmin={isServerAdmin} />
+      {data.jobs.length > 0 && <JobsCard jobs={data.jobs} scope="household" />}
     </Page>
   );
 }

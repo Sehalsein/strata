@@ -116,7 +116,8 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   };
 
   const jobs = new Jobs();
-  jobs.register("scanLocal", () => eachHousehold("Scanning folders", (h) => scanLocal(h.library, h.settings().mediaFolders, () => {})));
+  // Local folders, the bundled database, ffmpeg and self-updates are a home server's only.
+  if (!isCloud) jobs.register("scanLocal", () => eachHousehold("Scanning folders", (h) => scanLocal(h.library, h.settings().mediaFolders, () => {})));
   // Each household with a key, at most every `torboxSyncMinutes` (the job itself runs every 15).
   const lastSync = new Map<string, number>();
   jobs.register("syncTorbox", () =>
@@ -164,17 +165,17 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   });
   // A home server's bundled database, copied once a day into <data-dir>/backups (the last
   // week kept). Elsewhere the database's own host backs it up (Neon keeps a history).
-  jobs.register("backupDatabase", async () => {
+  if (!isCloud) jobs.register("backupDatabase", async () => {
     const file = await backupDatabase(db, paths.backups, "daily");
     return file ? { file } : { skipped: "the database isn't the bundled one" };
   });
-  jobs.register("detectFfmpeg", async () => {
+  if (!isCloud) jobs.register("detectFfmpeg", async () => {
     ffmpegInfo = await detectFfmpeg(paths.root);
     return { found: !!ffmpegInfo };
   });
   // No ffmpeg on the machine: the server fetches its own (pinned, checksummed) into <data-dir>/bin.
   let ffmpegSetup: FfmpegSetup = { state: "idle" };
-  jobs.register("installFfmpeg", async () => {
+  if (!isCloud) jobs.register("installFfmpeg", async () => {
     if (ffmpegInfo) return { skipped: "ffmpeg is already available" };
     ffmpegSetup = { state: "downloading" };
     try {
@@ -196,7 +197,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   const serverId = await loadServerId(db, paths.root);
   // Only local streams run through this server; TorBox plays don't mind an update.
   const updater = runtime.name === "workers" ? workersUpdater() : createUpdater({ dataDir: paths.root, dbPath: paths.db, backupsDir: paths.backups, db, settings, activeSessions: () => sessions.activeTranscodes(), fetch: fetchImpl });
-  jobs.register("checkUpdates", () => updater.checkAndMaybeApply());
+  if (!isCloud) jobs.register("checkUpdates", () => updater.checkAndMaybeApply());
   // Started by main.ts once the HTTP server is listening; refreshed when the name/toggle changes.
   const bonjour = new Bonjour(() => {
     const s = settings.get();
