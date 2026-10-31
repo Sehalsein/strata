@@ -6,6 +6,7 @@ import { logger } from "../log";
 import type { Settings } from "../settings";
 import type { TitleType } from "./service";
 import type { Tmdb, TmdbMovie, TmdbShow } from "./tmdb";
+import { shareInFlight } from "../inFlight";
 
 const log = logger("ratings");
 
@@ -154,9 +155,14 @@ export class ContentFilter {
         const cert = showCertification(s, region);
         return { age: cert ? certificationAge(cert, region) : null, genres: s.genres.map((g) => g.id) };
       })();
-      pending.catch(() => this.ages.delete(key));
       if (this.ages.size > 5_000) this.ages.clear();
-      this.ages.set(key, pending);
+      if (shareInFlight) {
+        this.ages.set(key, pending);
+        pending.catch(() => this.ages.delete(key));
+      } else {
+        // Only a finished lookup is shared (see inFlight.ts).
+        pending.then((v) => this.ages.set(key, Promise.resolve(v))).catch(() => {});
+      }
     }
     return pending;
   }

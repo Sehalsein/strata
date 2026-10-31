@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writ
 import type { ApiCache } from "../apiCache";
 import { join } from "node:path";
 import { logger } from "../../log";
+import { shareInFlight } from "../../inFlight";
 
 const log = logger("anime");
 
@@ -63,6 +64,7 @@ export class AnimeIds {
   /** Loads the cached list (downloading it when missing or older than a day). */
   ready(): Promise<void> {
     if (this.loadedAt && Date.now() - this.loadedAt < MAX_AGE_MS) return Promise.resolve();
+    if (!shareInFlight) return this.load();
     this.loading ??= this.load().finally(() => (this.loading = null));
     return this.loading;
   }

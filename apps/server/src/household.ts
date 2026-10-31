@@ -102,22 +102,21 @@ export class Household {
  * are reloaded when older than a minute, in case another server changed them.
  */
 export class Households {
-  private loaded = new Map<string, Promise<Household>>();
+  private loaded = new Map<string, Household>();
 
   constructor(private readonly shared: Shared) {}
 
   async get(organizationId: string): Promise<Household> {
-    let pending = this.loaded.get(organizationId);
-    if (!pending) {
-      pending = (async () => {
-        const store = new SettingsStore(this.shared.db, this.shared.box, householdSettingsSchema, HOUSEHOLD_SECRET_KEYS, { kind: "household", organizationId });
-        await store.load();
-        return new Household(organizationId, this.shared, store);
-      })();
-      pending.catch(() => this.loaded.delete(organizationId));
-      this.loaded.set(organizationId, pending);
+    // Only a loaded household is shared: on Workers a load still running in another request
+    // could be cancelled with it, and never finish.
+    let household = this.loaded.get(organizationId);
+    if (!household) {
+      const store = new SettingsStore(this.shared.db, this.shared.box, householdSettingsSchema, HOUSEHOLD_SECRET_KEYS, { kind: "household", organizationId });
+      await store.load();
+      household = this.loaded.get(organizationId) ?? new Household(organizationId, this.shared, store);
+      this.loaded.set(organizationId, household);
+      return household;
     }
-    const household = await pending;
     await household.settingsStore.reloadIfOlderThan(60_000);
     return household;
   }

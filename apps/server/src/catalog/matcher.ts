@@ -1,6 +1,7 @@
 import type { ParsedName } from "../media/parse";
 import type { AnimeMatcher } from "./anime/match";
 import { type Tmdb, type TmdbListItem, yearOf } from "./tmdb";
+import { shareInFlight } from "../inFlight";
 
 export interface MatchResult {
   type: "movie" | "show";
@@ -41,9 +42,14 @@ export class Matcher {
     let pending = this.memo.get(key);
     if (!pending) {
       pending = this.lookup(type, parsed.title, parsed.year);
-      this.memo.set(key, pending);
-      // Don't memoize failures (network errors etc.) so the next scan retries.
-      pending.catch(() => this.memo.delete(key));
+      if (shareInFlight) {
+        this.memo.set(key, pending);
+        // Don't memoize failures (network errors etc.) so the next scan retries.
+        pending.catch(() => this.memo.delete(key));
+      } else {
+        // Only a finished lookup is shared (see inFlight.ts).
+        pending.then((v) => this.memo.set(key, Promise.resolve(v))).catch(() => {});
+      }
     }
     return pending;
   }

@@ -36,28 +36,32 @@ interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
 }
 
-let booting: Promise<{ services: Services; app: ReturnType<typeof createApp> }> | undefined;
+type Booted = { services: Services; app: ReturnType<typeof createApp> };
+let booted: Booted | undefined;
 
-/** Builds the services on the instance's first request (inside its database scope). */
-function boot(env: Env) {
-  booting ??= (async () => {
-    // The server reads its configuration from the environment, as on Bun.
-    Object.assign(process.env, {
-      STRATA_NO_JOBS: "1", // Cron Triggers run the jobs (see `scheduled`)
-      DATABASE_URL: env.DATABASE_URL,
-      STRATA_SECRET_KEY: env.STRATA_SECRET_KEY,
-      ...(env.STRATA_PUBLIC_URL ? { STRATA_PUBLIC_URL: env.STRATA_PUBLIC_URL } : {}),
-      ...Object.fromEntries((["RESEND_API_KEY", "STRATA_EMAIL_FROM", "STRATA_OPERATOR", "STRATA_PRIVACY_CONTACT", "SENTRY_DSN", "STRATA_ADMIN_EMAILS"] as const).filter((k) => env[k]).map((k) => [k, env[k]!])),
-      ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET ? { GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET } : {}),
-    });
-    const { createServices } = await import("./services");
-    const { parseArgs } = await import("./config");
-    const { config } = parseArgs([]);
-    const services = await createServices(config, { ffmpeg: null });
-    return { services, app: createApp(services) };
-  })();
-  booting.catch(() => (booting = undefined)); // a failed boot is tried again next request
-  return booting;
+/**
+ * Builds the services on the instance's first request (inside its database scope). Only a
+ * finished boot is shared: Workers cancel a request's I/O when its client goes away, so a
+ * boot shared while still running could never finish, and every request waiting on it
+ * would hang. Requests that arrive together each boot; the first to finish is kept.
+ */
+async function boot(env: Env): Promise<Booted> {
+  if (booted) return booted;
+  // The server reads its configuration from the environment, as on Bun.
+  Object.assign(process.env, {
+    STRATA_NO_JOBS: "1", // Cron Triggers run the jobs (see `scheduled`)
+    DATABASE_URL: env.DATABASE_URL,
+    STRATA_SECRET_KEY: env.STRATA_SECRET_KEY,
+    ...(env.STRATA_PUBLIC_URL ? { STRATA_PUBLIC_URL: env.STRATA_PUBLIC_URL } : {}),
+    ...Object.fromEntries((["RESEND_API_KEY", "STRATA_EMAIL_FROM", "STRATA_OPERATOR", "STRATA_PRIVACY_CONTACT", "SENTRY_DSN", "STRATA_ADMIN_EMAILS"] as const).filter((k) => env[k]).map((k) => [k, env[k]!])),
+    ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET ? { GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET } : {}),
+  });
+  const { createServices } = await import("./services");
+  const { parseArgs } = await import("./config");
+  const { config } = parseArgs([]);
+  const services = await createServices(config, { ffmpeg: null });
+  booted ??= { services, app: createApp(services) };
+  return booted;
 }
 
 /** Runs `fn` with a database connection of its own, closed once the work is done. */

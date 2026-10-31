@@ -1,6 +1,7 @@
 import { logger } from "../../log";
 import { runtime } from "#runtime";
 import type { ApiCache } from "../apiCache";
+import { shareInFlight } from "../../inFlight";
 
 const log = logger("anilist");
 const ENDPOINT = "https://graphql.anilist.co";
@@ -169,7 +170,8 @@ export class Anilist {
   /** One request at a time, at least MIN_INTERVAL_MS apart (AniList's rate limit). */
   private async fetchQueued<T>(query: string, variables: Record<string, unknown>): Promise<T | null> {
     this.pending++;
-    const run = this.queue.then(async () => {
+    // One at a time, spaced to the rate limit (on Workers, per request: see inFlight.ts).
+    const run = (shareInFlight ? this.queue : Promise.resolve()).then(async () => {
       const wait = this.last + MIN_INTERVAL_MS - Date.now();
       if (wait > 0) await runtime.sleep(wait);
       this.last = Date.now();

@@ -2,6 +2,7 @@ import { eq, lt } from "drizzle-orm";
 import type { Db } from "../db";
 import { apiCache } from "../db/schema";
 import { logger } from "../log";
+import { shareInFlight } from "../inFlight";
 
 const log = logger("cache");
 
@@ -119,7 +120,7 @@ export class ApiCache {
         throw err;
       }
     })().finally(() => this.inflight.delete(key));
-    this.inflight.set(key, work);
+    if (shareInFlight) this.inflight.set(key, work);
     return work;
   }
 
