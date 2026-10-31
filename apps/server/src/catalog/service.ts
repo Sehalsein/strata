@@ -8,6 +8,7 @@ import { logger } from "../log";
 import type { Anilist, AnilistHomeItem } from "./anime/anilist";
 import type { AnimeIds } from "./anime/ids";
 import { ANIME_CATEGORIES, type Kitsu, type KitsuRail } from "./anime/kitsu";
+import type { Omdb, Ratings } from "./omdb";
 
 const log = logger("catalog");
 
@@ -75,7 +76,24 @@ export class CatalogService {
     private readonly progress: ProgressStore,
     private readonly settings: () => Settings,
     private readonly anime?: { ids: AnimeIds; anilist: Anilist; kitsu?: Kitsu },
+    private readonly omdb?: Omdb,
   ) {}
+
+  /** IMDb / Rotten Tomatoes ratings, or null; like AniList, the page waits at most 1.5s. */
+  private ratings(imdbId: string | null | undefined): Promise<Ratings | null> {
+    if (!this.omdb?.configured || !imdbId) return Promise.resolve(null);
+    return Promise.race([this.omdb.ratings(imdbId).catch(() => null), Bun.sleep(1_500).then(() => null)]);
+  }
+
+  /** IMDb rating per episode of one season (empty without an OMDb key). */
+  private async episodeRatings(showId: number, seasonNumber: number): Promise<Map<number, number>> {
+    if (!this.omdb?.configured) return new Map();
+    const lookup = async () => {
+      const imdbId = (await this.tmdb.show(showId)).external_ids?.imdb_id;
+      return this.omdb!.episodeRatings(imdbId, seasonNumber);
+    };
+    return Promise.race([lookup().catch(() => new Map<number, number>()), Bun.sleep(1_500).then(() => new Map<number, number>())]);
+  }
 
   /**
    * AniList details for an anime title (romaji/Japanese titles, studio, score, next
@@ -512,6 +530,8 @@ export class CatalogService {
 
   async movie(profileId: number, id: number) {
     const m = await this.tmdb.movie(id);
+    const imdbId = m.imdb_id ?? m.external_ids?.imdb_id ?? null;
+    const [anime, ratings] = await Promise.all([this.animeInfo("movie", id).catch(() => null), this.ratings(imdbId)]);
     const sources = findCandidates(this.library, this.settings(), "movie", id);
     const region = this.settings().region;
     const certification =
@@ -519,7 +539,7 @@ export class CatalogService {
     return {
       type: "movie" as const,
       tmdbId: m.id,
-      imdbId: m.imdb_id ?? m.external_ids?.imdb_id ?? null,
+      imdbId,
       title: m.title,
       tagline: m.tagline || null,
       overview: m.overview ?? "",
@@ -528,6 +548,8 @@ export class CatalogService {
       runtimeMinutes: m.runtime ?? null,
       genres: m.genres.map((g) => g.name),
       rating: m.vote_average ?? null,
+      /** IMDb and Rotten Tomatoes, when the server has an OMDb key. */
+      ratings,
       certification,
       posterUrl: imageUrl(m.poster_path, "w500"),
       backdropUrl: imageUrl(m.backdrop_path, "w1280"),
@@ -541,7 +563,7 @@ export class CatalogService {
       sources,
       progress: progressDto(this.progress.get(profileId, { mediaType: "movie", tmdbId: id })),
       inWatchlist: this.progress.inWatchlist(profileId, "movie", id),
-      anime: await this.animeInfo("movie", id).catch(() => null),
+      anime,
     };
   }
 
@@ -550,10 +572,12 @@ export class CatalogService {
     const watched = this.progress.forShow(profileId, id);
     const available = this.library.filesFor("episode", id);
     const region = this.settings().region;
+    const imdbId = s.external_ids?.imdb_id ?? null;
+    const [anime, ratings, upNext] = await Promise.all([this.animeInfo("show", id).catch(() => null), this.ratings(imdbId), this.showUpNext(s, watched)]);
     return {
       type: "show" as const,
       tmdbId: s.id,
-      imdbId: s.external_ids?.imdb_id ?? null,
+      imdbId,
       title: s.name,
       tagline: s.tagline || null,
       overview: s.overview ?? "",
@@ -563,6 +587,8 @@ export class CatalogService {
       status: s.status ?? null,
       genres: s.genres.map((g) => g.name),
       rating: s.vote_average ?? null,
+      /** IMDb and Rotten Tomatoes, when the server has an OMDb key. */
+      ratings,
       certification: s.content_ratings?.results.find((r) => r.iso_3166_1 === region)?.rating || null,
       posterUrl: imageUrl(s.poster_path, "w500"),
       backdropUrl: imageUrl(s.backdrop_path, "w1280"),
@@ -580,14 +606,14 @@ export class CatalogService {
       recommendations: this.cards(s.recommendations?.results ?? [], "show"),
       available: [...new Set(available.map((f) => f.provider))],
       /** Where the Play button should go: an in-progress episode, else the next unwatched one. */
-      upNext: await this.showUpNext(s, watched),
+      upNext,
       inWatchlist: this.progress.inWatchlist(profileId, "show", id),
-      anime: await this.animeInfo("show", id).catch(() => null),
+      anime,
     };
   }
 
   async season(profileId: number, showId: number, seasonNumber: number) {
-    const season = await this.tmdb.season(showId, seasonNumber);
+    const [season, imdbRatings] = await Promise.all([this.tmdb.season(showId, seasonNumber), this.episodeRatings(showId, seasonNumber)]);
     const files = this.library.filesFor("episode", showId, seasonNumber);
     const watched = new Map(this.progress.forShow(profileId, showId).filter((p) => p.season === seasonNumber).map((p) => [p.episode, p]));
     return {
@@ -605,6 +631,7 @@ export class CatalogService {
         runtimeMinutes: e.runtime ?? null,
         stillUrl: imageUrl(e.still_path, "w780"),
         rating: e.vote_average ?? null,
+        imdbRating: imdbRatings.get(e.episode_number) ?? null,
         available: [...new Set(files.filter((f) => f.episode === e.episode_number).map((f) => f.provider))],
         progress: progressDto(watched.get(e.episode_number)),
       })),

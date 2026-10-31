@@ -58,7 +58,8 @@ struct ShowDetailView: View {
                           fallbackURL: show.posterUrl,
                           eyebrow: show.availabilityLabel ?? "Show",
                           title: show.title,
-                          meta: [show.genres.first, show.yearRangeText, show.certification, seasonCount(show), show.ratingText.map { "★ \($0)" }].compactMap { $0 },
+                          meta: [show.genres.first, show.yearRangeText, show.certification, seasonCount(show), show.ratings.tmdbStar(show.ratingText)].compactMap { $0 },
+                          ratings: show.ratings.badges,
                           overview: show.overview) {
                 // Plays when it's in the library or the server lists a source for it.
                 if let upNext = show.upNext, upNext.isAvailable || upNextSources?.isEmpty == false {
@@ -167,6 +168,7 @@ struct ShowDetailView: View {
                                        title: episode.name,
                                        overview: episode.overview,
                                        foot: foot(episode),
+                                       imdbRating: episode.imdbRating,
                                        stillURL: episode.stillUrl,
                                        progress: episode.progressFraction,
                                        isCurrent: show.upNext.map { $0.season == episode.season && $0.episode == episode.episode } ?? false) {

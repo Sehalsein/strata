@@ -62,7 +62,7 @@ export interface UpdateStatus {
   lastUpdate: { result: "ok" | "rolled-back"; fromVersion: string; toVersion: string; at: string; message?: string } | null;
 }
 
-export type SecretKey = "tmdbApiKey" | "torboxApiKey";
+export type SecretKey = "tmdbApiKey" | "torboxApiKey" | "omdbApiKey";
 
 export interface SettingsResponse {
   settings: Settings;

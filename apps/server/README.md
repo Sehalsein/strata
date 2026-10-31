@@ -50,7 +50,7 @@ has a `SHA256SUMS` to check the download against.
 | `--host` | `STRATA_HOST` | `0.0.0.0` |
 | `--data-dir` | `STRATA_DATA_DIR` | `~/Library/Application Support/Strata` (macOS), `~/.local/share/strata` (Linux) |
 | `--web-dir` | `STRATA_WEB_DIR` | embedded dashboard |
-| | `TMDB_API_KEY`, `TORBOX_API_KEY` | override keys saved in the dashboard |
+| | `TMDB_API_KEY`, `TORBOX_API_KEY`, `OMDB_API_KEY` | override keys saved in the dashboard (OMDb is optional: IMDb and Rotten Tomatoes ratings) |
 | | `STRATA_DOCKER=1` | disables self-update (the image tag is the update mechanism) |
 | | `STRATA_DEBUG=1` | debug logging (includes ffmpeg command lines) |
 

@@ -6,6 +6,7 @@ import { CatalogService } from "./catalog/service";
 import { CalendarService } from "./catalog/calendar";
 import { Matcher } from "./catalog/matcher";
 import { Tmdb } from "./catalog/tmdb";
+import { Omdb } from "./catalog/omdb";
 import { dataPaths, type DataPaths, type RuntimeConfig } from "./config";
 import { openDatabase, type Db } from "./db";
 import { Jobs } from "./jobs";
@@ -47,6 +48,7 @@ export interface Services {
   auth: Auth;
   deviceLinks: DeviceLinks;
   tmdb: Tmdb;
+  omdb: Omdb;
   library: Library;
   progress: ProgressStore;
   catalog: CatalogService;
@@ -93,12 +95,13 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   };
 
   const tmdb = new Tmdb(db, () => settings.getSecret("tmdbApiKey"), () => settings.get().language, fetchImpl);
+  const omdb = new Omdb(db, () => settings.getSecret("omdbApiKey"), fetchImpl);
   const animeIds = new AnimeIds(join(paths.root, "cache"), fetchImpl);
   const anilist = new Anilist(db, fetchImpl);
   const kitsu = new Kitsu(db, fetchImpl);
   const library = new Library(db, tmdb, new Matcher(tmdb, new AnimeMatcher(anilist, animeIds, tmdb, kitsu)));
   const progress = new ProgressStore(db);
-  const catalog = new CatalogService(tmdb, library, progress, () => settings.get(), { ids: animeIds, anilist, kitsu });
+  const catalog = new CatalogService(tmdb, library, progress, () => settings.get(), { ids: animeIds, anilist, kitsu }, omdb);
   const content = new ContentFilter(db, tmdb, () => settings.get());
   const calendar = new CalendarService(tmdb, library, progress, { ids: animeIds, anilist }, (profileId, id) => content.allowed(profileId, "show", id));
   const sessions = new SessionManager(paths.transcode, ffmpeg, new KeepAwake(), () => settings.get().maxTranscodes, () => settings.get().hardwareAcceleration);
@@ -202,5 +205,5 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     log.info("Stopped");
   };
 
-  return { config, paths, db, settings, auth: new Auth(db), deviceLinks: new DeviceLinks(), tmdb, library, progress, catalog, calendar, content, sessions, playback, discovery, subtitles, jobs, serverId, bonjour, updater, ffmpeg, ffmpegSetup: () => ffmpegSetup, torbox, startedAt: Date.now(), shutdown };
+  return { config, paths, db, settings, auth: new Auth(db), deviceLinks: new DeviceLinks(), tmdb, omdb, library, progress, catalog, calendar, content, sessions, playback, discovery, subtitles, jobs, serverId, bonjour, updater, ffmpeg, ffmpegSetup: () => ffmpegSetup, torbox, startedAt: Date.now(), shutdown };
 }

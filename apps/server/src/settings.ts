@@ -51,7 +51,7 @@ export const settingsSchema = z.object({
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
-export const SECRET_KEYS = ["tmdbApiKey", "torboxApiKey"] as const;
+export const SECRET_KEYS = ["tmdbApiKey", "torboxApiKey", "omdbApiKey"] as const;
 export type SecretKey = (typeof SECRET_KEYS)[number];
 
 /**
@@ -98,7 +98,7 @@ export class SettingsStore {
   }
 
   getSecret(key: SecretKey): string | undefined {
-    const env = key === "tmdbApiKey" ? process.env.TMDB_API_KEY : process.env.TORBOX_API_KEY;
+    const env = { tmdbApiKey: process.env.TMDB_API_KEY, torboxApiKey: process.env.TORBOX_API_KEY, omdbApiKey: process.env.OMDB_API_KEY }[key];
     if (env) return env;
     const row = this.db.select().from(settingsTable).where(eq(settingsTable.key, key)).get();
     return row ? this.box.open(row.value) : undefined;

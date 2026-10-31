@@ -267,6 +267,19 @@ public struct CollectionRef: Codable, Sendable, Hashable, Identifiable {
 
 // MARK: - Movie
 
+/// IMDb and Rotten Tomatoes scores, when the server has an OMDb key.
+public struct ExternalRatings: Codable, Sendable, Hashable {
+    /// IMDb user rating, 0–10.
+    public var imdb: Double?
+    /// Rotten Tomatoes Tomatometer, 0–100.
+    public var rottenTomatoes: Int?
+
+    public init(imdb: Double? = nil, rottenTomatoes: Int? = nil) {
+        self.imdb = imdb
+        self.rottenTomatoes = rottenTomatoes
+    }
+}
+
 public struct MovieDetail: Codable, Sendable, Hashable, Identifiable {
     public var type: TitleType
     public var tmdbId: Int
@@ -279,6 +292,8 @@ public struct MovieDetail: Codable, Sendable, Hashable, Identifiable {
     public var runtimeMinutes: Int?
     public var genres: [String]
     public var rating: Double?
+    /// Absent from older servers and servers without an OMDb key.
+    public var ratings: ExternalRatings?
     public var certification: String?
     public var posterUrl: URL?
     public var backdropUrl: URL?
@@ -350,6 +365,8 @@ public struct ShowDetail: Codable, Sendable, Hashable, Identifiable {
     public var status: String?
     public var genres: [String]
     public var rating: Double?
+    /// Absent from older servers and servers without an OMDb key.
+    public var ratings: ExternalRatings?
     public var certification: String?
     public var posterUrl: URL?
     public var backdropUrl: URL?
@@ -399,6 +416,8 @@ public struct EpisodeItem: Codable, Sendable, Hashable, Identifiable {
     public var runtimeMinutes: Int?
     public var stillUrl: URL?
     public var rating: Double?
+    /// The episode's IMDb rating; absent from older servers and without an OMDb key.
+    public var imdbRating: Double?
     public var available: [Provider]
     public var progress: WatchProgress?
 

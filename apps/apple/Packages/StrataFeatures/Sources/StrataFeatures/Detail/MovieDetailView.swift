@@ -50,8 +50,9 @@ struct MovieDetailView: View {
                           fallbackURL: movie.posterUrl,
                           eyebrow: movie.availabilityLabel ?? "Movie",
                           title: movie.title,
-                          meta: [movie.genres.first, movie.yearText, movie.runtimeText, movie.certification, movie.ratingText.map { "★ \($0)" }].compactMap { $0 },
+                          meta: [movie.genres.first, movie.yearText, movie.runtimeText, movie.certification, movie.ratings.tmdbStar(movie.ratingText)].compactMap { $0 },
                           badges: movie.sources.first?.specLabels.prefix(3).map { $0 } ?? [],
+                          ratings: movie.ratings.badges,
                           overview: movie.overview) {
                 // Plays when it's in the library or the server lists a source for it.
                 if canPlay(movie) {

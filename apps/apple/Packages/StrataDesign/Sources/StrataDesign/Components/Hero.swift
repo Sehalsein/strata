@@ -13,6 +13,8 @@ public struct HeroBillboard<Actions: View>: View {
     let title: String
     let meta: [String]
     let badges: [String]
+    /// IMDb / Rotten Tomatoes, after the metadata line.
+    let ratings: [ExternalRating]
     let overview: String?
     /// A page of a horizontal pager: the art slides at a slower pace than the page.
     let paged: Bool
@@ -20,7 +22,7 @@ public struct HeroBillboard<Actions: View>: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    public init(id: String, backdropURL: URL?, fallbackURL: URL? = nil, eyebrow: String? = nil, title: String, meta: [String] = [], badges: [String] = [], overview: String? = nil, paged: Bool = false, @ViewBuilder actions: @escaping () -> Actions) {
+    public init(id: String, backdropURL: URL?, fallbackURL: URL? = nil, eyebrow: String? = nil, title: String, meta: [String] = [], badges: [String] = [], ratings: [ExternalRating] = [], overview: String? = nil, paged: Bool = false, @ViewBuilder actions: @escaping () -> Actions) {
         self.id = id
         // Full size: list-sized TMDB art (w780) is soft across a whole screen.
         self.backdropURL = backdropURL.map(TMDBImage.original)
@@ -30,6 +32,7 @@ public struct HeroBillboard<Actions: View>: View {
         self.title = title
         self.meta = meta
         self.badges = badges
+        self.ratings = ratings
         self.overview = overview
         self.actions = actions
     }
@@ -157,13 +160,33 @@ public struct HeroBillboard<Actions: View>: View {
                 .lineLimit(2)
                 .minimumScaleFactor(0.6)
                 .accessibilityAddTraits(.isHeader)
-            if !meta.isEmpty || !badges.isEmpty {
-                HStack(spacing: Metrics.space2) {
-                    if !meta.isEmpty {
-                        Text(meta.joined(separator: " · ")).font(.stCallout).foregroundStyle(heroText.opacity(0.8))
+            if !meta.isEmpty || !badges.isEmpty || !ratings.isEmpty {
+                // One line when it fits; on a phone the badges wrap under the metadata.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Metrics.space2) {
+                        metaText
+                        badgeRow
                     }
-                    ForEach(badges, id: \.self) { SpecBadge($0) }
+                    VStack(alignment: .leading, spacing: Metrics.space2) {
+                        metaText
+                        badgeRow
+                    }
                 }
+            }
+        }
+    }
+
+    @ViewBuilder private var metaText: some View {
+        if !meta.isEmpty {
+            Text(meta.joined(separator: " · ")).font(.stCallout).foregroundStyle(heroText.opacity(0.8))
+        }
+    }
+
+    @ViewBuilder private var badgeRow: some View {
+        if !ratings.isEmpty || !badges.isEmpty {
+            HStack(spacing: Metrics.space2) {
+                ForEach(ratings, id: \.self) { RatingBadge($0) }
+                ForEach(badges, id: \.self) { SpecBadge($0) }
             }
         }
     }
@@ -328,17 +351,20 @@ public struct EpisodeRow<Trailing: View>: View {
     let title: String
     let overview: String?
     let foot: String?
+    /// The episode's IMDb rating, beside the foot line.
+    let imdbRating: Double?
     let stillURL: URL?
     let progress: Double?
     let isCurrent: Bool
     @ViewBuilder let trailing: () -> Trailing
 
-    public init(id: String, number: Int, title: String, overview: String?, foot: String?, stillURL: URL?, progress: Double?, isCurrent: Bool = false, @ViewBuilder trailing: @escaping () -> Trailing) {
+    public init(id: String, number: Int, title: String, overview: String?, foot: String?, imdbRating: Double? = nil, stillURL: URL?, progress: Double?, isCurrent: Bool = false, @ViewBuilder trailing: @escaping () -> Trailing) {
         self.id = id
         self.number = number
         self.title = title
         self.overview = overview
         self.foot = foot
+        self.imdbRating = imdbRating
         self.stillURL = stillURL
         self.progress = progress
         self.isCurrent = isCurrent
@@ -364,7 +390,13 @@ public struct EpisodeRow<Trailing: View>: View {
                 if let overview, !overview.isEmpty {
                     Text(overview).font(.stCallout).foregroundStyle(Theme.ink2).lineLimit(Metrics.isPadOrTV ? 2 : 1)
                 }
-                if let foot { Text(foot).font(.stFootnote).foregroundStyle(Theme.ink3) }
+                if foot != nil || imdbRating != nil {
+                    HStack(spacing: Metrics.space2) {
+                        if let foot { Text(foot).font(.stFootnote).foregroundStyle(Theme.ink3) }
+                        if let imdbRating { RatingBadge(.imdb(imdbRating)) }
+                    }
+                    .padding(.top, imdbRating != nil ? 2 : 0)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             trailing()

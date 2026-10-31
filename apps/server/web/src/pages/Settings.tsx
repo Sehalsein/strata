@@ -238,6 +238,21 @@ export function SettingsPage({ onServerNameChange }: { onServerNameChange: (name
                 </>
               }
             />
+            <SecretKeyForm
+              secretKey="omdbApiKey"
+              label="OMDb API key"
+              configured={data.secrets.omdbApiKey}
+              onChanged={(v) => setData({ ...data, secrets: { ...data.secrets, omdbApiKey: v } })}
+              description={
+                <>
+                  Optional. Shows IMDb and Rotten Tomatoes ratings on movies, shows and episodes. A free key from{" "}
+                  <a href="https://www.omdbapi.com/apikey.aspx" target="_blank" rel="noreferrer">
+                    omdbapi.com
+                  </a>
+                  {" "}allows 1,000 lookups a day; Strata caches them.
+                </>
+              }
+            />
           </div>
         </Card>
       </section>

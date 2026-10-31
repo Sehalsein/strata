@@ -73,6 +73,7 @@ export const adminRoutes = new Hono<Env>()
     const { value } = await body(c, z.object({ value: z.string().trim().max(512).nullable() }));
     if (value) {
       if (key === "tmdbApiKey" && !(await s.tmdb.testKey(value))) throw new HTTPException(400, { message: "TMDB rejected that key" });
+      if (key === "omdbApiKey" && !(await s.omdb.testKey(value))) throw new HTTPException(400, { message: "OMDb rejected that key" });
       if (key === "torboxApiKey") {
         try {
           await new TorboxClient(value).me();
