@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, LoaderCircle, Mail, QrCode as QrCodeIcon, Trash, UserPlus, Users, X } from "lucide-react";
+import { Check, Copy, LoaderCircle, Mail, Pencil, QrCode as QrCodeIcon, Trash, UserPlus, Users, X } from "lucide-react";
 import { toast } from "sonner";
+import { useSession } from "@/app/session";
 import { api } from "@/lib/api";
 import { authClient, invitationLink } from "@/lib/auth-client";
 import { relativeTime } from "@/lib/format";
@@ -64,15 +65,17 @@ export function useHousehold() {
 
 /** The active household's people: role, kids flag and content limit, removal. */
 export function MemberList({ selfId }: { selfId: string }) {
+  const { authChanged } = useSession();
   const household = useHousehold();
   const [removing, setRemoving] = useState<Member | null>(null);
   const [showingCode, setShowingCode] = useState<{ id: string; name: string } | null>(null);
+  const [renaming, setRenaming] = useState<Member | null>(null);
   const setRole = useApiMutation(({ m, role }: { m: Member; role: HouseholdRole }) => authClient.setMemberRole(m.id, role), {
     success: (_, { m, role }) => `${m.user.name}'s role is now ${ROLE_LABELS[role].label}`,
     invalidate: [queryKeys.household],
   });
-  const update = useApiMutation(({ m, patch }: { m: Member; patch: { contentLimit?: ContentLimit; isKids?: boolean } }) => api.updateMember(m.id, patch), {
-    success: (_, { m }) => `Saved ${m.user.name}`,
+  const update = useApiMutation(({ m, patch }: { m: Member; patch: { name?: string; contentLimit?: ContentLimit; isKids?: boolean } }) => api.updateMember(m.id, patch), {
+    success: (res, { m }) => (res.name && res.name !== m.user.name ? `Renamed ${m.user.name} to ${res.name}` : `Saved ${m.user.name}`),
     invalidate: [queryKeys.household],
   });
   const remove = useApiMutation((m: Member) => authClient.removeMember(m.id), { success: (_, m) => `Removed ${m.user.name}`, invalidate: [queryKeys.household] });
@@ -104,6 +107,9 @@ export function MemberList({ selfId }: { selfId: string }) {
                 <div className="min-w-0">
                   <p className="flex items-center gap-2 truncate font-medium">
                     {m.user.name}
+                    <Button variant="ghost" size="icon-sm" className="text-muted-foreground size-6" onClick={() => setRenaming(m)} aria-label={`Rename ${m.user.name}`} title="Rename">
+                      <Pencil className="size-3.5" />
+                    </Button>
                     {self && <Badge variant="secondary">You</Badge>}
                     {m.isKids && <Badge variant="success">Kids</Badge>}
                   </p>
@@ -157,6 +163,21 @@ export function MemberList({ selfId }: { selfId: string }) {
         })}
       </ul>
       <SignInCodeDialog member={showingCode} onOpenChange={(o) => !o && setShowingCode(null)} />
+      <RenameMemberDialog
+        key={renaming?.id}
+        member={renaming}
+        onOpenChange={(o) => !o && setRenaming(null)}
+        onSave={(name) =>
+          renaming
+            ? update.mutateAsync({ m: renaming, patch: { name } }).then(async () => {
+                // Your own name shows in the top bar too.
+                if (renaming.userId === selfId) await authChanged();
+                setRenaming(null);
+              })
+            : undefined
+        }
+        pending={update.isPending}
+      />
       <ConfirmDialog
         open={!!removing}
         onOpenChange={(o) => !o && setRemoving(null)}
@@ -330,5 +351,54 @@ function InviteForm({ householdId, defaultRole, allowOwner, onDone }: { househol
         </DialogFooter>
       </FieldGroup>
     </form>
+  );
+}
+
+/** A member's name: the account's, so it changes on every device they use. */
+function RenameMemberDialog({
+  member,
+  onOpenChange,
+  onSave,
+  pending,
+}: {
+  member: Member | null;
+  onOpenChange: (open: boolean) => void;
+  onSave: (name: string) => unknown;
+  pending: boolean;
+}) {
+  const [name, setName] = useState(member?.user.name ?? "");
+  const trimmed = name.trim();
+  return (
+    <Dialog open={!!member} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Rename {member?.user.name}</DialogTitle>
+          <DialogDescription>The name the apps show for them, on every device they use.</DialogDescription>
+        </DialogHeader>
+        <form
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (trimmed && trimmed !== member?.user.name) onSave(trimmed);
+            else onOpenChange(false);
+          }}
+        >
+          <FieldGroup>
+            <FormField label="Name" error={name && !trimmed ? "Give them a name." : null}>
+              {(p) => <Input {...p} value={name} maxLength={64} onChange={(e) => setName(e.target.value)} onFocus={(e) => e.currentTarget.select()} autoFocus />}
+            </FormField>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={pending || !trimmed}>
+                {pending && <LoaderCircle className="animate-spin" />}
+                Save
+              </Button>
+            </DialogFooter>
+          </FieldGroup>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

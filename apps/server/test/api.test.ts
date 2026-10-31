@@ -92,6 +92,17 @@ describe("setup and auth", () => {
     expect((await signIn("bob", "bobs-password")).status).toBe(200);
   });
 
+  test("the household's admins rename a member; members can't", async () => {
+    const full = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const bob = full.members.find((m: any) => m.user.email === "bob@example.com");
+    const renamed = await json(await server.request(`/api/household/members/${bob.id}`, { method: "PATCH", token, json: { name: "Bobby" } }));
+    expect(renamed.name).toBe("Bobby");
+    const bobs = (await signIn("bob", "bobs-password")).token!;
+    expect((await json(await server.request("/api/me", { token: bobs }))).user.name).toBe("Bobby");
+    expect((await server.request(`/api/household/members/${bob.id}`, { method: "PATCH", token: bobs, json: { name: "Hacker" } })).status).toBe(403);
+    await server.request(`/api/household/members/${bob.id}`, { method: "PATCH", token, json: { name: "bob" } });
+  });
+
   test("households don't see each other's library", async () => {
     const mine = await server.services.households.get((await json(await server.request("/api/me", { token }))).household.id);
     await mine.library.upsert({ provider: "local", ref: "/m/Only.Mine.2020.mkv", name: "Only.Mine.2020.mkv", size: 1, parsed: { title: "Only Mine", kind: "movie" } as never });

@@ -84,9 +84,9 @@ const q = (params: Record<string, string | number | undefined>) => {
 export const api = {
   info: () => request<ServerInfo>("GET", "/info", undefined, { auth: false }),
 
-  /** A member's kids flag and content limit in the active household (its admins). */
-  updateMember: (memberId: string, patch: { contentLimit?: ContentLimit; isKids?: boolean }) =>
-    request<{ id: string; contentLimit: ContentLimit; isKids: boolean }>("PATCH", `/household/members/${encodeURIComponent(memberId)}`, patch),
+  /** A member's name, kids flag and content limit in the active household (its admins). */
+  updateMember: (memberId: string, patch: { name?: string; contentLimit?: ContentLimit; isKids?: boolean }) =>
+    request<{ id: string; name?: string; contentLimit: ContentLimit; isKids: boolean }>("PATCH", `/household/members/${encodeURIComponent(memberId)}`, patch),
 
   /** A member's sign-in QR code (works once, for a minute; ask again every 30 seconds). */
   signInCode: (memberId: string) =>

@@ -214,7 +214,10 @@ export const authRoutes = new Hono<Env>()
 
   // A member's settings in this household (Better Auth keeps the member; these are Strata's).
   .patch("/household/members/:memberId", requireAuth, requireHousehold, requireHouseholdAdmin, async (c) => {
-    const input = await body(c, z.object({ contentLimit: z.enum(CONTENT_LIMITS).optional(), isKids: z.boolean().optional() }));
+    const input = await body(
+      c,
+      z.object({ name: z.string().trim().min(1).max(64).optional(), contentLimit: z.enum(CONTENT_LIMITS).optional(), isKids: z.boolean().optional() }),
+    );
     const patch: { contentLimit?: string; isKids?: boolean } = {};
     if (input.isKids !== undefined) {
       patch.isKids = input.isKids;
@@ -222,11 +225,16 @@ export const authRoutes = new Hono<Env>()
       if (input.isKids && input.contentLimit === undefined) patch.contentLimit = "kids";
     }
     if (input.contentLimit !== undefined) patch.contentLimit = input.contentLimit;
-    const [row] = await c.var.services.db
-      .update(member)
-      .set(patch)
-      .where(and(eq(member.id, c.req.param("memberId")), eq(member.organizationId, c.var.household.organizationId)))
-      .returning({ id: member.id, contentLimit: member.contentLimit, isKids: member.isKids });
+    const db = c.var.services.db;
+    const where = and(eq(member.id, c.req.param("memberId")), eq(member.organizationId, c.var.household.organizationId));
+    const columns = { id: member.id, userId: member.userId, contentLimit: member.contentLimit, isKids: member.isKids };
+    const [row] = Object.keys(patch).length ? await db.update(member).set(patch).where(where).returning(columns) : await db.select(columns).from(member).where(where);
     if (!row) throw new HTTPException(404, { message: "No such member" });
-    return c.json(row);
+    // The name is the person's account's: it changes everywhere they're signed in.
+    let name: string | undefined;
+    if (input.name !== undefined) {
+      const ctx = await c.var.services.auth.$context;
+      name = (await ctx.internalAdapter.updateUser(row.userId, { name: input.name }))?.name ?? input.name;
+    }
+    return c.json({ id: row.id, contentLimit: row.contentLimit, isKids: row.isKids, ...(name !== undefined ? { name } : {}) });
   });
