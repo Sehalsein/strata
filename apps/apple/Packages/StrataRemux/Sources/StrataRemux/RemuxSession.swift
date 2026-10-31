@@ -1,5 +1,6 @@
 import Foundation
 import FFmpeg
+import Security
 
 /// Plays a file AVPlayer can't open by itself (MKV, DTS, TrueHD…) by repackaging it on the
 /// device: the file is read straight from its link (or from disk, for downloads), cut
@@ -59,6 +60,9 @@ public final class RemuxSession: @unchecked Sendable {
     private var byteSource: ByteSource?
     private var segmenter: Segmenter?
     private var server: LoopbackServer?
+    /// For AirPlay: the same stream on the Wi-Fi address, under a secret path.
+    private var networkServer: LoopbackServer?
+    private var networkURL: URL?
     private var cache: [Int: Data] = [:]
     private var cacheOrder: [Int] = []
     private let lock = NSLock()
@@ -109,9 +113,33 @@ public final class RemuxSession: @unchecked Sendable {
         return url
     }
 
+    /// The stream at this device's Wi-Fi address, for an Apple TV on AirPlay (it can't
+    /// reach 127.0.0.1 here). Every path sits under a random 128-bit token, so nothing
+    /// else on the network can guess its way in. Started on first use; stops with `stop()`.
+    public func networkPlaylistURL() async throws -> URL {
+        if let networkURL { return networkURL }
+        guard let address = WiFiAddress.current() else { throw URLError(.notConnectedToInternet) }
+        var bytes = [UInt8](repeating: 0, count: 16)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { throw URLError(.cannotCreateFile) }
+        let token = bytes.map { String(format: "%02x", $0) }.joined()
+        let prefix = "/\(token)/"
+        let server = try LoopbackServer(loopbackOnly: false) { [weak self] path in
+            guard path.hasPrefix(prefix) else { return nil }
+            return await self?.respond(to: "/" + path.dropFirst(prefix.count))
+        }
+        let port = try await server.start()
+        networkServer = server
+        let url = URL(string: "http://\(address):\(port)\(prefix)index.m3u8")!
+        networkURL = url
+        return url
+    }
+
     public func stop() {
         server?.stop()
         server = nil
+        networkServer?.stop()
+        networkServer = nil
+        networkURL = nil
         byteSource?.close()
     }
 

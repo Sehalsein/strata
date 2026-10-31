@@ -156,6 +156,7 @@ public final class PlayerEngine {
     private var statusObservation: NSKeyValueObservation?
     private var timeControlObservation: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
+    private var externalObservation: NSKeyValueObservation?
 
     /// Progress is reported this often while playing.
     public var progressInterval: TimeInterval = 10
@@ -279,6 +280,10 @@ public final class PlayerEngine {
             let local = makeRemux(res)
             do {
                 url = try await local.start()
+                #if os(iOS)
+                // An Apple TV on AirPlay fetches the stream itself: it gets the Wi-Fi address.
+                if player.isExternalPlaybackActive { url = try await local.networkPlaylistURL() }
+                #endif
             } catch {
                 local.stop()
                 guard gen == generation else { throw CancellationError() }
@@ -703,6 +708,14 @@ public final class PlayerEngine {
         res.audioTracks = current.audioTracks.map { var t = $0; t.selected = t.index == track.index; return t }
         res.seekToMs = timeline.ms(at)
         activeAudioIndex = track.index
+        await restartDevice(res, at: at, wasPlaying: wasPlaying, gen: gen)
+    }
+
+    /// Repackages the file again from `at` (another audio track, or a new address for
+    /// AirPlay). Nothing goes to the server.
+    private func restartDevice(_ res: PlayResponse, at: TimeInterval, wasPlaying: Bool, gen: Int) async {
+        var res = res
+        res.seekToMs = timeline.ms(at)
         player.pause()
         isBuffering = true
         let task = Task { [weak self] in
@@ -717,6 +730,24 @@ public final class PlayerEngine {
         restartTask = task
         await task.value
     }
+
+    #if os(iOS)
+    /// AirPlay started or stopped. The Apple TV can't reach this device's 127.0.0.1, so in
+    /// device mode the stream moves to the Wi-Fi address while it plays there, and back
+    /// to loopback after.
+    private func externalPlaybackChanged(_ active: Bool) {
+        guard let current = session, current.mode == .device, restartTarget == nil,
+              let url = (player.currentItem?.asset as? AVURLAsset)?.url else { return }
+        let onLoopback = url.host == "127.0.0.1"
+        guard active == onLoopback else { return }
+        Log.player.info("AirPlay \(active ? "started" : "stopped", privacy: .public); moving the stream")
+        restartTask?.cancel()
+        let gen = generation
+        let at = position
+        let wasPlaying = status == .playing || status == .ready
+        restartTask = Task { [weak self] in await self?.restartDevice(current, at: at, wasPlaying: wasPlaying, gen: gen) }
+    }
+    #endif
 
     // MARK: - Unload
 
@@ -854,6 +885,12 @@ public final class PlayerEngine {
                 }
             }
         }
+        #if os(iOS)
+        externalObservation = player.observe(\.isExternalPlaybackActive, options: [.new]) { [weak self] p, _ in
+            let active = p.isExternalPlaybackActive
+            Task { @MainActor [weak self] in self?.externalPlaybackChanged(active) }
+        }
+        #endif
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.restartTarget == nil else { return }
@@ -871,6 +908,7 @@ public final class PlayerEngine {
         }
         statusObservation = nil
         timeControlObservation = nil
+        externalObservation = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
     }

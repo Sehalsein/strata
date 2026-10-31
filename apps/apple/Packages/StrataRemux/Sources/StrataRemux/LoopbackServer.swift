@@ -1,8 +1,9 @@
 import Foundation
 import Network
 
-/// A tiny HTTP/1.1 server on 127.0.0.1 for AVPlayer: GET requests, answered by `handler`
-/// with a body and content type, or nil for 404. Connections are kept alive.
+/// A tiny HTTP/1.1 server for AVPlayer, on 127.0.0.1 (or, for AirPlay, every interface):
+/// GET requests, answered by `handler` with a body and content type, or nil for 404.
+/// Connections are kept alive.
 final class LoopbackServer: @unchecked Sendable {
     typealias Handler = @Sendable (String) async -> (Data, String)?
 
@@ -11,10 +12,12 @@ final class LoopbackServer: @unchecked Sendable {
     private let handler: Handler
     private(set) var port: UInt16 = 0
 
-    init(handler: @escaping Handler) throws {
+    /// `loopbackOnly: false` listens on every interface, so another device (an Apple TV
+    /// on AirPlay) can reach it.
+    init(loopbackOnly: Bool = true, handler: @escaping Handler) throws {
         self.handler = handler
         let params = NWParameters.tcp
-        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
+        if loopbackOnly { params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any) }
         params.allowLocalEndpointReuse = true
         listener = try NWListener(using: params)
     }

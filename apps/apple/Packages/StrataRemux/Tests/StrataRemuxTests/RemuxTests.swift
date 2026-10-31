@@ -134,6 +134,34 @@ final class RemuxTests: XCTestCase {
         XCTAssertEqual(second.time, 8.5, accuracy: 0.3, "shown when the line starts in the file")
     }
 
+    /// For AirPlay the stream is also served at the Wi-Fi address, only under its secret path.
+    func testNetworkAddressServesTheStreamOnlyUnderItsToken() async throws {
+        guard WiFiAddress.current() != nil else { throw XCTSkip("no Wi-Fi address") }
+        let session = RemuxSession(source: .file(fixture("hevc_eac3_srt.mkv")), plan: RemuxPlan())
+        _ = try await session.start()
+        defer { session.stop() }
+        let network = try await session.networkPlaylistURL()
+        XCTAssertNotEqual(network.host, "127.0.0.1")
+        XCTAssertEqual(network.pathComponents.count, 3, network.path)
+        XCTAssertEqual(network.pathComponents[1].count, 32, "a 128-bit token")
+        // Fetched over loopback: the Mac's firewall may hold back LAN connections to a test binary.
+        var local = URLComponents(url: network, resolvingAgainstBaseURL: false)!
+        local.host = "127.0.0.1"
+        let url = local.url!
+        let (playlist, response) = try await URLSession.shared.data(from: url)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertTrue(String(decoding: playlist, as: UTF8.self).contains("seg00000.m4s"))
+        let segment = url.deletingLastPathComponent().appendingPathComponent("seg00000.m4s")
+        let (_, segmentResponse) = try await URLSession.shared.data(from: segment)
+        XCTAssertEqual((segmentResponse as? HTTPURLResponse)?.statusCode, 200)
+        var guess = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        guess.path = "/index.m3u8"
+        let (_, guessed) = try await URLSession.shared.data(from: guess.url!)
+        XCTAssertEqual((guessed as? HTTPURLResponse)?.statusCode, 404)
+        let again = try await session.networkPlaylistURL()
+        XCTAssertEqual(again.path, url.path, "one network server per session")
+    }
+
     /// Over HTTP with byte ranges, as from TorBox, including a link that has expired: the
     /// session asks for a new one and carries on.
     func testRemoteFileWithAnExpiredLink() async throws {
