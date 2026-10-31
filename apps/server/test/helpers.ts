@@ -125,9 +125,22 @@ export async function startTestServer(
   return { services, household, request, dataDir };
 }
 
-/** Generates small real media files with ffmpeg (cached between runs). */
+/**
+ * ffmpeg and ffprobe on PATH. Tests that make, probe or stream real media need both, and are
+ * skipped (with a warning) where they aren't installed; CI installs them, so it runs them all.
+ */
+export const hasFfmpeg = !!Bun.which("ffmpeg") && !!Bun.which("ffprobe");
+/** For `test.skipIf(noFfmpeg)`. */
+export const noFfmpeg = !hasFfmpeg;
+if (noFfmpeg) console.warn("ffmpeg/ffprobe not on PATH: skipping the tests that need real media. Install ffmpeg to run them.");
+
+/**
+ * Generates small real media files with ffmpeg (cached between runs). Without ffmpeg, the
+ * same names hold placeholder bytes (in their own folder, so they never stand in for real
+ * fixtures): enough for scanning and naming, not for anything that probes or plays them.
+ */
 export async function makeFixtures(): Promise<string> {
-  const root = join(tmpdir(), "strata-fixtures-v2");
+  const root = join(tmpdir(), hasFfmpeg ? "strata-fixtures-v2" : "strata-fixtures-v2-placeholders");
   mkdirSync(root, { recursive: true });
   const srt = join(root, "subs.srt");
   if (!existsSync(srt)) await Bun.write(srt, "1\n00:00:01,000 --> 00:00:04,000\nHello from Strata\n\n2\n00:00:20,000 --> 00:00:22,500\nSecond line\n");
@@ -143,6 +156,10 @@ export async function makeFixtures(): Promise<string> {
     const out = join(root, rel);
     if (existsSync(out)) continue;
     mkdirSync(join(out, ".."), { recursive: true });
+    if (noFfmpeg) {
+      await Bun.write(out, "placeholder: no ffmpeg to make real media\n");
+      continue;
+    }
     const proc = Bun.spawn(
       ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24:duration=30", "-f", "lavfi", "-i", "sine=frequency=440:duration=30", ...codec, out],
       { stderr: "pipe" },

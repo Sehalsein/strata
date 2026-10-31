@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { probe } from "../src/media/probe";
 import { DEFAULT_CAPS, decide } from "../src/playback/decide";
 import { buildHlsArgs } from "../src/playback/ffmpegArgs";
+import { noFfmpeg } from "./helpers";
 
 const run = async (cmd: string[]) => {
   const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
@@ -15,7 +16,7 @@ const run = async (cmd: string[]) => {
 describe("HLS output", () => {
   // A WEBRip whose audio starts 15s in made Apple's player reject the stream: the init
   // segment's audio track was empty because ffmpeg had no audio to describe yet.
-  test("audio that starts late still gets a described track and a first segment", async () => {
+  test.skipIf(noFfmpeg)("audio that starts late still gets a described track and a first segment", async () => {
     const dir = mkdtempSync(join(tmpdir(), "strata-hls-"));
     const src = join(dir, "late-audio.mkv");
     const made = await run([

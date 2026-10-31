@@ -26,3 +26,16 @@ test("sign-ins past their expiry are deleted, with the device details they hold"
   await server.services.jobs.run("pruneAuth");
   expect(await db.select({ id: session.id }).from(session).where(eq(session.id, row!.id))).toHaveLength(0);
 });
+
+test("usage limits count per key and refuse once over, saying when to try again", async () => {
+  const { RateLimitError } = await import("../src/throttle");
+  const rule = { limit: 2, windowMs: 60_000, lockMs: 60_000 };
+  const throttle = server.services.throttle;
+  await throttle.spend("searches:test-household", rule, "Too many searches.");
+  await throttle.spend("searches:test-household", rule, "Too many searches.");
+  const refused = await throttle.spend("searches:test-household", rule, "Too many searches.").catch((e) => e);
+  expect(refused).toBeInstanceOf(RateLimitError);
+  expect(refused.message).toContain("Try again in 1 minute.");
+  // Another household has its own count.
+  await throttle.spend("searches:other-household", rule, "Too many searches.");
+});

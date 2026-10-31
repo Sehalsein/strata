@@ -98,7 +98,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     isCloud ? null : { transcodeDir: paths.transcode, getFfmpeg: ffmpeg, keepAwake: new KeepAwake(), maxTranscodes: () => settings.get().maxTranscodes, hwAllowed: () => settings.get().hardwareAcceleration },
   );
   const subtitles = new SubtitleService(join(paths.root, "cache", "subtitles"), ffmpeg);
-  const households = new Households({ db, box, serverSettings: settings, cache, anime, progress, sessions, ffmpeg, fetch: fetchImpl });
+  const households = new Households({ db, box, serverSettings: settings, cache, throttle, anime, progress, sessions, ffmpeg, fetch: fetchImpl });
 
   /** Runs `fn` for every household, one after another; a failing one doesn't stop the rest. */
   const eachHousehold = async (what: string, fn: (h: Household) => Promise<unknown>) => {

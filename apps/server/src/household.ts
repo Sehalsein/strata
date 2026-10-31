@@ -9,6 +9,7 @@ import type { Kitsu } from "./catalog/anime/kitsu";
 import { Omdb } from "./catalog/omdb";
 import { Tmdb } from "./catalog/tmdb";
 import type { ApiCache } from "./catalog/apiCache";
+import { ADDS_PER_HOUSEHOLD, type Throttle } from "./throttle";
 import type { Db } from "./db";
 import { Library } from "./library";
 import type { FfmpegInfo } from "./platform/ffmpeg";
@@ -28,6 +29,8 @@ export interface Shared {
   serverSettings: ServerSettingsStore;
   /** TMDB and OMDb answers, cached for every household (they don't depend on whose key asked). */
   cache: ApiCache;
+  /** Usage limits per household (release searches, TorBox additions). */
+  throttle: Throttle;
   anime: { ids: AnimeIds; anilist: Anilist; kitsu: Kitsu };
   progress: ProgressStore;
   sessions: SessionManager;
@@ -75,7 +78,8 @@ export class Household {
     this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, id) => this.content.allowed(userId, "show", id));
     this.housekeeping = new TorboxHousekeeping(db, organizationId, this.library);
     const torbox = () => this.torbox();
-    this.discovery = new Discovery(tmdb, this.library, settings, torbox, shared.fetch, (id, hash, name) => this.housekeeping.recordAdded(id, hash, name), shared.anime.ids);
+    this.discovery = new Discovery(tmdb, this.library, settings, torbox, shared.fetch, (id, hash, name) => this.housekeeping.recordAdded(id, hash, name), shared.anime.ids,
+      () => shared.throttle.spend(`adds:${organizationId}`, ADDS_PER_HOUSEHOLD, "This household has added a lot of releases to TorBox today."));
     this.playback = new PlaybackService(this.library, shared.sessions, shared.progress, settings, shared.ffmpeg, torbox, this.discovery, (id, s, e) => this.catalog.nextEpisode(id, s, e), (id) => this.housekeeping.recordPlayed(id));
   }
 

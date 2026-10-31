@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { makeFixtures, startTestServer, type TestServer } from "./helpers";
+import { makeFixtures, noFfmpeg, startTestServer, type TestServer } from "./helpers";
 
 let server: TestServer;
 let token: string;
@@ -307,7 +307,7 @@ describe("library", () => {
 });
 
 describe("playback", () => {
-  test("mp4 + aac direct plays with byte ranges", async () => {
+  test.skipIf(noFfmpeg)("mp4 + aac direct plays with byte ranges", async () => {
     const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 1 } }));
     expect(play.mode).toBe("direct");
     expect(play.nextEpisode).toMatchObject({ season: 1, episode: 2, name: "Second", available: true });
@@ -336,7 +336,7 @@ describe("playback", () => {
     expect((await server.request("/api/continue/album/1", { method: "DELETE", token })).status).toBe(400);
   });
 
-  test("mkv remuxes to HLS from the resume point", async () => {
+  test.skipIf(noFfmpeg)("mkv remuxes to HLS from the resume point", async () => {
     await server.request("/api/progress", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, positionMs: 90_000, durationMs: 3_600_000 } });
     const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378 } }));
     expect(play.mode).toBe("remux");
@@ -352,7 +352,7 @@ describe("playback", () => {
     expect((await server.request(`/api/play/${play.sessionId}`, { method: "DELETE", token })).status).toBe(200);
   }, 30_000);
 
-  test("embedded and sidecar subtitles are served as WebVTT", async () => {
+  test.skipIf(noFfmpeg)("embedded and sidecar subtitles are served as WebVTT", async () => {
     const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, startMs: 0 } }));
     const tracks = play.subtitleTracks;
     expect(tracks.map((t: any) => [t.external, t.language, t.forced])).toEqual([
@@ -369,7 +369,7 @@ describe("playback", () => {
     server.services.sessions.stop(play.sessionId);
   }, 30_000);
 
-  test("DTS audio is transcoded", async () => {
+  test.skipIf(noFfmpeg)("DTS audio is transcoded", async () => {
     const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 2 } }));
     expect(play.mode).toBe("remux");
     expect(play.reasons.join(" ")).toContain("audio dts");
@@ -379,6 +379,7 @@ describe("playback", () => {
   }, 30_000);
 
   test("progress feeds continue watching and next up", async () => {
+    await server.request("/api/progress", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, positionMs: 90_000, durationMs: 3_600_000 } });
     await server.request("/api/progress", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 1, positionMs: 29_000, durationMs: 30_000 } });
     const { shelves } = await json(await server.request("/api/home", { token }));
     const cont = shelves.find((s: any) => s.id === "continue");

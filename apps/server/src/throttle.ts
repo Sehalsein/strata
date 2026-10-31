@@ -27,6 +27,23 @@ export const PIN_PER_SESSION: ThrottleRule = { limit: 5, windowMs: 15 * MINUTE, 
 export const STARTS_PER_ADDRESS: ThrottleRule = { limit: 10, windowMs: 10 * MINUTE, lockMs: 10 * MINUTE };
 /** Wrong setup codes from one address. */
 export const SETUP_PER_ADDRESS: ThrottleRule = { limit: 10, windowMs: 15 * MINUTE, lockMs: 60 * MINUTE };
+/**
+ * Release searches by one household (the server's stream addon is shared by all): plenty
+ * for browsing, not for scraping.
+ */
+export const SEARCHES_PER_HOUSEHOLD: ThrottleRule = { limit: 300, windowMs: 60 * MINUTE, lockMs: 30 * MINUTE };
+/** Releases one household's discovery adds to its TorBox in a day. */
+export const ADDS_PER_HOUSEHOLD: ThrottleRule = { limit: 60, windowMs: 24 * 60 * MINUTE, lockMs: 60 * MINUTE };
+
+/** Over a usage limit: answered as 429 with when to try again. */
+export class RateLimitError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfterMs: number,
+  ) {
+    super(message);
+  }
+}
 
 /**
  * Counts failed attempts per key in the database, so every server sharing it sees the
@@ -57,6 +74,16 @@ export class Throttle {
     return lockedUntil && lockedUntil > now ? lockedUntil - now : 0;
   }
 
+  /**
+   * Counts one use of something limited (not a failure): throws RateLimitError when `key`
+   * is over its limit, saying what was limited.
+   */
+  async spend(key: string, rule: ThrottleRule, what: string): Promise<void> {
+    const wait = await this.retryAfter(key);
+    if (wait) throw new RateLimitError(`${what} Try again in ${minutesText(wait)}.`, wait);
+    await this.fail(key, rule);
+  }
+
   /** Forgets `key`'s failures (a successful attempt). */
   async reset(key: string) {
     await this.db.delete(authAttempts).where(eq(authAttempts.key, key));
@@ -69,8 +96,13 @@ export class Throttle {
   }
 }
 
+/** "12 minutes", "1 minute". */
+function minutesText(ms: number): string {
+  const minutes = Math.max(1, Math.ceil(ms / MINUTE));
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
 /** "Try again in 12 minutes." */
 export function retryMessage(ms: number): string {
-  const minutes = Math.max(1, Math.ceil(ms / MINUTE));
-  return `Too many attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+  return `Too many attempts. Try again in ${minutesText(ms)}.`;
 }

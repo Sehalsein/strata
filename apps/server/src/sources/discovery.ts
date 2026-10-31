@@ -66,6 +66,8 @@ export class Discovery {
     private readonly onAdded: (torrentId: number, hash: string, name?: string) => void = () => {},
     /** Anime id list, for asking Torrentio by Kitsu id (much better anime coverage). */
     private readonly animeIds?: AnimeIds,
+    /** Asked before anything is added to TorBox; throws to refuse (the household's daily limit). */
+    private readonly allowAdd: () => Promise<void> = async () => {},
   ) {}
 
   get available(): boolean {
@@ -155,6 +157,7 @@ export class Discovery {
       if (owned) {
         torrentId = owned.id;
       } else {
+        await this.allowAdd();
         ({ torrentId } = await client.createTorrent(`magnet:?${magnet.toString().replace("urn%3Abtih%3A", "urn:btih:")}`));
         log.info(`Added ${release?.title ?? hash} to TorBox (#${torrentId})`);
         this.onAdded(torrentId, hash, release?.title);

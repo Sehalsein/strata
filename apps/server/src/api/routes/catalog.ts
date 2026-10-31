@@ -1,4 +1,5 @@
 import { serveRange } from "./stream";
+import { SEARCHES_PER_HOUSEHOLD } from "../../throttle";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -103,7 +104,10 @@ export const catalogRoutes = new Hono<Env>()
     if (mediaType === "episode" && (season === undefined || episode === undefined)) throw new HTTPException(400, { message: "season and episode are required for episodes" });
     await c.var.household.content.assertAllowed(userOf(c), mediaType === "movie" ? "movie" : "show", tmdbId);
     const items = await c.var.household.catalog.sources(mediaType, tmdbId, season, episode);
-    if (c.req.query("discover") === "1") items.push(...(await c.var.household.discovery.candidates({ mediaType, tmdbId, season, episode })));
+    if (c.req.query("discover") === "1") {
+      await c.var.services.throttle.spend(`searches:${c.var.household.organizationId}`, SEARCHES_PER_HOUSEHOLD, "This household has searched for releases a lot in the last hour.");
+      items.push(...(await c.var.household.discovery.candidates({ mediaType, tmdbId, season, episode })));
+    }
     return c.json({ items });
   })
 

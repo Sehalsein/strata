@@ -15,6 +15,7 @@ import { streamRoutes } from "./routes/stream";
 import { systemRoutes } from "./routes/system";
 import { webHandler } from "../web/static";
 import { gzipJson } from "./gzip";
+import { RateLimitError } from "../throttle";
 import { clientAddress } from "./localNetwork";
 import { CLIENT_ADDRESS_HEADER } from "../auth/betterAuth";
 
@@ -59,6 +60,7 @@ export function createApp(services: Services) {
     // `title` and `message` are what the apps show while they wait.
     if (err instanceof NotReadyError) return c.json({ ...err.info, title: "Getting it ready", message: err.message, error: err.message }, 202);
     if (err instanceof ZodError) return c.json({ error: "Invalid request", issues: err.issues }, 400);
+    if (err instanceof RateLimitError) return c.json({ error: err.message }, 429, { "Retry-After": String(Math.ceil(err.retryAfterMs / 1000)) });
     if (err instanceof TmdbError || err instanceof PlaybackError || err instanceof TorboxError) {
       return c.json({ error: err.message }, err.status as 400);
     }
