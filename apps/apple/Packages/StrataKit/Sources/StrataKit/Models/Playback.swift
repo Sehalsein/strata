@@ -317,9 +317,30 @@ public struct PreparingStatus: Codable, Sendable, Hashable {
     }
 }
 
+/// What `POST /api/play` answers (HTTP 428) when the server has no media info for the
+/// file it chose: the server can't read files itself, so the app reads the file's header
+/// from `url`, sends what it found (`StrataClient.reportProbe`) and asks to play again.
+public struct NeedsProbe: Codable, Sendable, Hashable {
+    public var fileId: Int
+    /// The file's TorBox link.
+    public var url: URL
+
+    public init(fileId: Int, url: URL) {
+        self.fileId = fileId
+        self.url = url
+    }
+}
+
+/// The 428 body: `{ "needsProbe": { "fileId", "url" } }`.
+struct NeedsProbeResponse: Codable, Sendable {
+    var needsProbe: NeedsProbe
+}
+
 public enum PlayOutcome: Sendable, Hashable {
     case started(PlayResponse)
     case preparing(PreparingStatus)
+    /// The server needs the file's media info first (see `NeedsProbe`).
+    case needsProbe(fileId: Int, url: URL)
 }
 
 /// `POST /api/progress` response.

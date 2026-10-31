@@ -85,6 +85,37 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(status.etaText, "14m left")
     }
 
+    func testPlay428AsksForTheFilesMediaInfo() async throws {
+        StubProtocol.reset { _ in .fixture("needs_probe", status: 428) }
+        let outcome = try await client().play(.movie(10378))
+        XCTAssertEqual(outcome, .needsProbe(fileId: 42, url: URL(string: "https://store-031.weur.tb-cdn.st/dld/4a1b6c?token=abc&file=Big.Buck.Bunny.2008.2160p.mkv")!))
+    }
+
+    func testPlayOtherErrorsStillThrow() async throws {
+        StubProtocol.reset { _ in .fixture("error_404", status: 404) }
+        do {
+            _ = try await client().play(.movie(1))
+            XCTFail("expected error")
+        } catch let e as StrataError {
+            XCTAssertEqual(e.status, 404)
+            XCTAssertEqual(e.message, "That title isn't in the catalog.")
+        }
+    }
+
+    func testReportProbePostsTheMediaInfo() async throws {
+        struct Info: Encodable, Sendable { var container = "mkv"; var durationMs = 1000 }
+        StubProtocol.reset { _ in StubProtocol.Reply(status: 200, body: Data(#"{"ok":true}"#.utf8)) }
+        try await client().reportProbe(fileId: 42, info: Info())
+        let req = try XCTUnwrap(StubProtocol.recorded.first)
+        XCTAssertEqual(req.httpMethod, "POST")
+        XCTAssertEqual(req.url?.path, "/api/files/42/probe")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        let body = try XCTUnwrap(req.jsonBody)
+        XCTAssertEqual(body["container"] as? String, "mkv")
+        XCTAssertEqual(body["durationMs"] as? Int, 1000)
+    }
+
     func testErrorShapeSurfacesServerMessage() async throws {
         StubProtocol.reset { _ in .fixture("error_404", status: 404) }
         do {

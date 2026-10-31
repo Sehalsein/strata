@@ -4,6 +4,12 @@ import XCTest
 /// Decodes JSON captured from the real server (`apps/server`, fake TMDB + ffmpeg fixtures)
 /// plus a few hand-written payloads for paths that need TMDB.
 final class ModelDecodingTests: XCTestCase {
+    func testNeedsProbe() throws {
+        let probe = try Fixture.decode(NeedsProbeResponse.self, "needs_probe").needsProbe
+        XCTAssertEqual(probe.fileId, 42)
+        XCTAssertEqual(probe.url.absoluteString, "https://store-031.weur.tb-cdn.st/dld/4a1b6c?token=abc&file=Big.Buck.Bunny.2008.2160p.mkv")
+    }
+
     func testServerInfo() throws {
         let info = try Fixture.decode(ServerInfo.self, "info")
         XCTAssertEqual(info.name, "strata")

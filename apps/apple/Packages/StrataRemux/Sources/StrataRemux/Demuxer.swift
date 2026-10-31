@@ -14,19 +14,7 @@ final class Demuxer {
 
     init(source: ByteSource, videoIndex requested: Int32?) throws {
         io = try IOBridge(source: source)
-        format = avformat_alloc_context()
-        format.pointee.pb = io.context
-        format.pointee.flags |= AVFMT_FLAG_CUSTOM_IO
-        // Enough to read the stream headers without pulling much of a 4K file.
-        format.pointee.probesize = 4 << 20
-        format.pointee.max_analyze_duration = 3 * Int64(AV_TIME_BASE)
-        var ctx: UnsafeMutablePointer<AVFormatContext>? = format
-        let opened = avformat_open_input(&ctx, nil, nil, nil)
-        if opened < 0 {
-            format = nil
-            throw io.takeError() ?? RemuxError.unsupported("This file can't be opened here (\(ffError(opened))).")
-        }
-        if avformat_find_stream_info(format, nil) < 0, let error = io.takeError() { throw error }
+        format = try Self.open(io)
 
         let best = av_find_best_stream(format, AVMEDIA_TYPE_VIDEO, requested ?? -1, -1, nil, 0)
         guard best >= 0 else { throw RemuxError.unsupported("This file has no video.") }
@@ -38,6 +26,28 @@ final class Demuxer {
 
     deinit {
         if format != nil { avformat_close_input(&format) }
+    }
+
+    /// Opens the file and reads its stream headers (shared with `MediaProbe`). The caller
+    /// closes the context with `avformat_close_input`.
+    static func open(_ io: IOBridge) throws -> UnsafeMutablePointer<AVFormatContext> {
+        var ctx: UnsafeMutablePointer<AVFormatContext>? = avformat_alloc_context()
+        guard let format = ctx else { throw RemuxError.ffmpeg("Out of memory") }
+        format.pointee.pb = io.context
+        format.pointee.flags |= AVFMT_FLAG_CUSTOM_IO
+        // Enough to read the stream headers without pulling much of a 4K file.
+        format.pointee.probesize = 4 << 20
+        format.pointee.max_analyze_duration = 3 * Int64(AV_TIME_BASE)
+        let opened = avformat_open_input(&ctx, nil, nil, nil)
+        if opened < 0 {
+            // avformat_open_input frees the context when it fails.
+            throw io.takeError() ?? RemuxError.unsupported("This file can't be opened here (\(ffError(opened))).")
+        }
+        if avformat_find_stream_info(ctx, nil) < 0, let error = io.takeError() {
+            avformat_close_input(&ctx)
+            throw error
+        }
+        return ctx!
     }
 
     func stream(_ index: Int32) -> UnsafeMutablePointer<AVStream> {

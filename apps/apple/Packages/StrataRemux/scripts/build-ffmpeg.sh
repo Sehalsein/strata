@@ -9,6 +9,14 @@
 # (FLAC/ALAC/PCM) or AAC encoders. Network I/O is the app's own (URLSession), so
 # FFmpeg is built without networking or TLS.
 #
+# The HEVC decoder is there only for reading a file's media info (MediaProbe, and the
+# HLS VIDEO-RANGE): FFmpeg's HEVC parser doesn't read the colour description in the SPS,
+# so an MKV that signals HDR10 only in the bitstream read as SDR. With the decoder,
+# avformat_find_stream_info opens it, which reads the SPS (VUI included) from the
+# extradata and fills color_trc; no HEVC frames are decoded there. The AV1 parser reads
+# colour itself, and MediaProbe reads H.264's SPS on its own (H264VUI.swift), so the
+# H.264 decoder (which would decode several frames per file in that step) stays out.
+#
 # Usage: scripts/build-ffmpeg.sh            (FFMPEG_VERSION=9.0.2 by default)
 set -euo pipefail
 
@@ -39,6 +47,7 @@ COMPONENTS=(
   --enable-parser=h264 --enable-parser=hevc --enable-parser=av1 --enable-parser=aac
   --enable-parser=ac3 --enable-parser=dca --enable-parser=mlp --enable-parser=flac
   --enable-parser=opus --enable-parser=vorbis
+  --enable-decoder=hevc
   --enable-decoder=dca --enable-decoder=truehd --enable-decoder=mlp --enable-decoder=flac
   --enable-decoder=opus --enable-decoder=vorbis --enable-decoder=mp3 --enable-decoder=pcm_s16le
   --enable-decoder=pcm_s24le --enable-decoder=pcm_s32le
@@ -109,6 +118,8 @@ MAP
 #include "libavcodec/bsf.h"
 #include "libavutil/avutil.h"
 #include "libavutil/opt.h"
+#include "libavutil/pixdesc.h"
+#include "libavutil/dovi_meta.h"
 #include "libavutil/channel_layout.h"
 #include "libavutil/audio_fifo.h"
 #include "libswresample/swresample.h"

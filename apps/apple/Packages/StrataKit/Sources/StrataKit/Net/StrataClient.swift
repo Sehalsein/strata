@@ -196,6 +196,8 @@ public final class StrataClient: Sendable {
 
     /// Starts a playback session. `startMs` nil resumes from saved progress. Returns
     /// `.preparing` (HTTP 202) while the server gets the source ready; repeat to follow it.
+    /// Returns `.needsProbe` (HTTP 428) when the server needs the file's media info first:
+    /// read it, send it with `reportProbe`, then repeat the call.
     public func play(_ target: PlaybackTarget,
                      candidateId: String? = nil,
                      startMs: Int? = nil,
@@ -203,7 +205,13 @@ public final class StrataClient: Sendable {
                      caps: ClientCaps = .current) async throws -> PlayOutcome {
         let body = PlayBody(mediaType: target.mediaType, tmdbId: target.tmdbId, season: target.season, episode: target.episode,
                             candidateId: candidateId, startMs: startMs, audioStreamIndex: audioStreamIndex, caps: caps)
-        let (data, status) = try await perform(request("POST", "/api/play", body: body))
+        let (data, response) = try await rawData(request("POST", "/api/play", body: body))
+        let status = response.statusCode
+        if status == 428 {
+            let probe = try decode(NeedsProbeResponse.self, from: data).needsProbe
+            return .needsProbe(fileId: probe.fileId, url: probe.url)
+        }
+        guard (200..<300).contains(status) else { throw httpError(status, data) }
         // 202: the server is getting the source ready; repeat the call to follow it.
         if status == 202 {
             return .preparing(try decode(PreparingStatus.self, from: data))
@@ -214,6 +222,12 @@ public final class StrataClient: Sendable {
             res.subtitleTracks[i].url = res.subtitleTracks[i].url.map(resolve)
         }
         return .started(res)
+    }
+
+    /// Sends the media info the app read from a file (answering `.needsProbe`). `info` is
+    /// in the server's `MediaInfo` shape, as StrataRemux's `MediaInfo` encodes.
+    public func reportProbe<Info: Encodable & Sendable>(fileId: Int, info: Info) async throws {
+        let _: OKResponse = try await send("POST", "/api/files/\(fileId)/probe", body: info)
     }
 
     /// A fresh link to a device-mode file whose link stopped working mid-play.

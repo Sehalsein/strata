@@ -138,6 +138,8 @@ public final class PlayerEngine {
     private var generation = 0
     /// Media time being restarted to; the timeline isn't trusted until the new item plays.
     private var restartTarget: TimeInterval?
+    /// Files whose media info this load already read for the server (see `probe`).
+    private var probedFiles = Set<Int>()
     @ObservationIgnored private var lastReportAt = Date.distantPast
     @ObservationIgnored private var lastReportedMs: Int?
     /// Set once the first item became ready; before that there's no real position to report
@@ -181,6 +183,7 @@ public final class PlayerEngine {
         generation += 1
         let gen = generation
         skipNativeSubtitles = false
+        probedFiles = []
         self.target = target
         self.meta = meta
         status = .loading
@@ -216,6 +219,7 @@ public final class PlayerEngine {
     /// Calls `/api/play`, asking again while the server gets the source ready (`.preparing`).
     /// `candidateId` keeps a restart (seek, audio switch) on the same file.
     private func requestPlay(client: StrataClient, target: PlaybackTarget, candidateId: String?, startMs: Int?, audioIndex: Int?, gen: Int) async throws -> PlayResponse {
+        var candidateId = candidateId
         while true {
             try Task.checkCancellation()
             switch try await client.play(target, candidateId: candidateId, startMs: startMs, audioStreamIndex: audioIndex) {
@@ -226,8 +230,35 @@ public final class PlayerEngine {
                 guard gen == generation else { throw CancellationError() }
                 status = .preparing(progress)
                 try await Task.sleep(nanoseconds: UInt64(preparePollInterval * 1_000_000_000))
+            case .needsProbe(let fileId, let url):
+                guard gen == generation else { throw CancellationError() }
+                try await probe(fileId: fileId, url: url, client: client, gen: gen)
+                // Ask again for the same file: the one the server chose, if we didn't name one.
+                candidateId = candidateId ?? "file:\(fileId)"
             }
         }
+    }
+
+    /// The server can't read files itself, so it asks the app for a file's media info the
+    /// first time it plays it: read the header from the link and send it. Once per file per
+    /// load, so a server that keeps asking can't loop forever.
+    private func probe(fileId: Int, url: URL, client: StrataClient, gen: Int) async throws {
+        guard probedFiles.insert(fileId).inserted else {
+            throw DeviceFailure(message: "The server couldn't use what this file holds. Pick another source.")
+        }
+        status = .loading
+        let info: MediaInfo
+        do {
+            // MediaProbe reads on its own queue; the main actor only waits.
+            info = try await MediaProbe.probe(url: url)
+        } catch {
+            guard gen == generation, !(error is CancellationError) else { throw CancellationError() }
+            Log.player.warning("probe failed: \(error.localizedDescription, privacy: .public)")
+            throw DeviceFailure(message: "This file couldn't be read (\(error.localizedDescription)). Pick another source.")
+        }
+        guard gen == generation else { throw CancellationError() }
+        try await client.reportProbe(fileId: fileId, info: info)
+        guard gen == generation else { throw CancellationError() }
     }
 
     /// Installs a play response as the current item. `newTitle` resets tracks/subtitles;
@@ -444,7 +475,7 @@ public final class PlayerEngine {
                 let e = StrataError.wrap(error)
                 if e.kind != .cancelled {
                     self.restartTarget = nil
-                    self.status = .failed(e.message)
+                    self.status = .failed((error as? DeviceFailure)?.message ?? e.message)
                 }
             }
         }
