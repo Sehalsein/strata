@@ -1,11 +1,11 @@
-import { sql } from "drizzle-orm";
+import { lt, sql } from "drizzle-orm";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createAuth, type Auth } from "./auth/betterAuth";
 import { dataPaths, type DataPaths, type RuntimeConfig } from "./config";
-import { closeDatabase, openDatabase, rowsOf, type Db } from "./db";
-import { organization, user } from "./db/schema";
+import { backupDatabase, closeDatabase, openDatabase, rowsOf, type Db } from "./db";
+import { organization, session as authSession, user, verification } from "./db/schema";
 import { ApiCache } from "./catalog/apiCache";
 import { Throttle } from "./throttle";
 import { announceSetupCode } from "./setupCode";
@@ -151,11 +151,21 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   );
   // Catalog answers (TMDB, Kitsu, AniList) a month unused are only taking space.
   jobs.register("pruneCatalogCache", async () => ({ removed: await cache.prune() }));
-  // Plays long over and old failed-attempt counts (Better Auth expires its own sessions).
+  // Plays long over, old failed-attempt counts, and sign-ins and one-time links past their
+  // expiry: a device's details (address, location) go with its sign-in, as /privacy says.
   jobs.register("pruneAuth", async () => {
     await sessions.prune();
     await throttle.prune();
-    return {};
+    const now = new Date();
+    const expired = await db.delete(authSession).where(lt(authSession.expiresAt, now)).returning({ id: authSession.id });
+    await db.delete(verification).where(lt(verification.expiresAt, now));
+    return { expiredSignIns: expired.length };
+  });
+  // A home server's bundled database, copied once a day into <data-dir>/backups (the last
+  // week kept). Elsewhere the database's own host backs it up (Neon keeps a history).
+  jobs.register("backupDatabase", async () => {
+    const file = await backupDatabase(db, paths.backups, "daily");
+    return file ? { file } : { skipped: "the database isn't the bundled one" };
   });
   jobs.register("detectFfmpeg", async () => {
     ffmpegInfo = await detectFfmpeg(paths.root);
@@ -200,6 +210,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     // The cloud image is updated by deploying a new one.
     if (!isCloud) jobs.schedule("checkUpdates", 6 * 60 * MINUTE, 60_000);
     jobs.schedule("pruneAuth", 24 * 60 * MINUTE, 5 * MINUTE);
+    if (!isCloud) jobs.schedule("backupDatabase", 24 * 60 * MINUTE, 20 * MINUTE);
     jobs.schedule("cleanTorbox", 24 * 60 * MINUTE, 10 * MINUTE);
     jobs.schedule("pruneCatalogCache", 24 * 60 * MINUTE, 15 * MINUTE);
     jobs.schedule("refreshAnimeIds", 24 * 60 * MINUTE, 30_000);

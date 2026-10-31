@@ -8,7 +8,8 @@ import { logger } from "../log";
 import { runtime } from "#runtime";
 
 const log = logger("db");
-const BACKUPS_KEPT = 5;
+/** Backups kept: a week of daily ones, and the ones taken before updates. */
+const BACKUPS_KEPT = 10;
 
 /**
  * Postgres, whichever way it's reached: bundled in-process (PGlite) on a home server, or a
