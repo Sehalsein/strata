@@ -10,11 +10,12 @@ let package = Package(
     dependencies: [
         .package(path: "../StrataKit"),
         .package(path: "../StrataDesign"),
+        .package(path: "../StrataRemux"),
     ],
     targets: [
         .target(
             name: "StrataPlayerUI",
-            dependencies: ["StrataKit", "StrataDesign"]
+            dependencies: ["StrataKit", "StrataDesign", "StrataRemux"]
         ),
         .testTarget(name: "StrataPlayerUITests", dependencies: ["StrataPlayerUI"]),
     ]

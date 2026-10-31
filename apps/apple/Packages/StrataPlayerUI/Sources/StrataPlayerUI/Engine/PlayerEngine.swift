@@ -3,6 +3,7 @@ import AVFoundation
 import Combine
 import Observation
 import StrataKit
+import StrataRemux
 
 /// What the player shows for the current title (Now Playing, chrome, Live Activity).
 public struct PlaybackMeta: Sendable, Hashable {
@@ -19,6 +20,10 @@ public struct PlaybackMeta: Sendable, Hashable {
 }
 
 /// Drives AVPlayer against a Strata server session.
+///
+/// In device mode the server only hands over the file's link: StrataRemux repackages it
+/// on the device and AVPlayer plays that from a loopback address. Anything the device
+/// can't open falls back to the server's own HLS stream for that play.
 ///
 /// Every time exposed here (`position`, `duration`, `seek(to:)`, chapters, subtitle cues) is
 /// **media time** — seconds into the title — regardless of where the current HLS stream starts.
@@ -49,6 +54,10 @@ public final class PlayerEngine {
     public private(set) var meta: PlaybackMeta?
     /// The current server session: mode, candidate (source file), reasons, URLs.
     public private(set) var session: PlayResponse?
+    /// Why this play went through the server instead of the device, for Stream Details.
+    public private(set) var fallbackReason: String?
+    /// Device mode: what the repackaging is doing, for Stream Details.
+    public var remuxStats: RemuxSession.Stats? { remux?.stats }
 
     public private(set) var audioTracks: [AudioTrack] = []
     public private(set) var subtitleTracks: [SubtitleTrack] = []
@@ -107,6 +116,14 @@ public final class PlayerEngine {
     public private(set) var client: StrataClient?
     private var nowPlaying: NowPlayingBridge?
 
+    // Device mode
+    /// Repackages the current file on the device (device mode only).
+    private var remux: RemuxSession?
+    /// Lines read so far from each embedded text track, by stream index, in media time.
+    private var embeddedCues: [Int: [VTTCue]] = [:]
+    /// Set once the device couldn't play this title: later restarts ask the server for HLS.
+    private var serverStreamOnly = false
+
     // Session plumbing
     private var timeline = MediaTimeline(startOffset: 0, duration: 0, isHLS: false)
     private var loadTask: Task<Void, Never>?
@@ -158,6 +175,8 @@ public final class PlayerEngine {
         await teardown(reportFinal: true)
         generation += 1
         let gen = generation
+        serverStreamOnly = false
+        fallbackReason = nil
         self.target = target
         self.meta = meta
         status = .loading
@@ -168,7 +187,16 @@ public final class PlayerEngine {
             guard let self else { return }
             do {
                 let res = try await self.requestPlay(client: client, target: target, candidateId: candidateId, startMs: startMs, audioIndex: nil, gen: gen)
-                try await self.start(res, gen: gen, newTitle: true, autoplay: true)
+                do {
+                    try await self.start(res, gen: gen, newTitle: true, autoplay: true)
+                } catch let failure as DeviceFailure {
+                    // The device couldn't open or play it: the server streams this one instead.
+                    Log.player.warning("device play failed, using the server: \(failure.message, privacy: .public)")
+                    self.serverStreamOnly = true
+                    self.fallbackReason = failure.message
+                    let again = try await self.requestPlay(client: client, target: target, candidateId: res.candidate.id, startMs: startMs, audioIndex: nil, gen: gen)
+                    try await self.start(again, gen: gen, newTitle: true, autoplay: true)
+                }
             } catch {
                 guard gen == self.generation, !(error is CancellationError) else { return }
                 let e = StrataError.wrap(error)
@@ -191,7 +219,8 @@ public final class PlayerEngine {
     private func requestPlay(client: StrataClient, target: PlaybackTarget, candidateId: String?, startMs: Int?, audioIndex: Int?, gen: Int) async throws -> PlayResponse {
         while true {
             try Task.checkCancellation()
-            switch try await client.play(target, candidateId: candidateId, startMs: startMs, audioStreamIndex: audioIndex) {
+            let caps: ClientCaps = serverStreamOnly ? ClientCaps.current.withoutDeviceRemux : .current
+            switch try await client.play(target, candidateId: candidateId, startMs: startMs, audioStreamIndex: audioIndex, caps: caps) {
             case .started(let res):
                 guard gen == generation else { throw CancellationError() }
                 return res
@@ -208,6 +237,22 @@ public final class PlayerEngine {
     private func start(_ res: PlayResponse, gen: Int, newTitle: Bool, autoplay: Bool) async throws {
         guard gen == generation else { throw CancellationError() }
         let previous = session
+        let previousRemux = remux
+        // Device mode: open the file and repackage it here before anything changes on screen.
+        var url = res.url
+        var newRemux: RemuxSession?
+        if res.mode == .device {
+            let local = makeRemux(res)
+            do {
+                url = try await local.start()
+            } catch {
+                local.stop()
+                guard gen == generation else { throw CancellationError() }
+                throw DeviceFailure(message: "The device couldn't open this file (\(error.localizedDescription)).")
+            }
+            guard gen == generation else { local.stop(); throw CancellationError() }
+            newRemux = local
+        }
         removeObservers()
 
         session = res
@@ -226,15 +271,29 @@ public final class PlayerEngine {
         }
 
         if res.mode.isHLS { try await waitForPlaylist(res.url, gen: gen) }
-        let item = AVPlayerItem(url: res.url)
+        let item = AVPlayerItem(url: url)
         // Start buffering a little ahead; long forward buffers waste server work on a remux.
-        item.preferredForwardBufferDuration = res.mode.isHLS ? 30 : 0
+        // On the device a minute ahead rides out a slow patch in the network.
+        switch res.mode {
+        case .remux, .transcode: item.preferredForwardBufferDuration = 30
+        case .device: item.preferredForwardBufferDuration = 60
+        case .direct: item.preferredForwardBufferDuration = 0
+        }
         player.replaceCurrentItem(with: item)
         attachObservers(item)
         isBuffering = true
+        remux = newRemux
+        if newTitle || res.mode != .device { embeddedCues = [:] }
+        if previousRemux !== newRemux { previousRemux?.stop() }
         if let previous, previous.sessionId != res.sessionId { stopSession(previous.sessionId) }
 
-        try await waitUntilReady(item)
+        do {
+            try await waitUntilReady(item)
+        } catch let error as StrataError where res.mode == .device {
+            // AVPlayer refused what the device made (a codec it can't decode, say).
+            guard gen == generation else { throw CancellationError() }
+            throw DeviceFailure(message: "The player couldn't play the repackaged stream (\(error.message)).")
+        }
         guard gen == generation else { throw CancellationError() }
         if let seek = MediaTimeline.initialSeek(res) {
             await player.seek(to: CMTime(seconds: seek, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
@@ -321,7 +380,7 @@ public final class PlayerEngine {
         case .inPlace(let stream):
             restartTask?.cancel()
             position = target
-            let tolerance = timeline.isHLS ? CMTime(seconds: 0.5, preferredTimescale: 600) : .zero
+            let tolerance = session?.mode == .direct ? .zero : CMTime(seconds: 0.5, preferredTimescale: 600)
             await player.seek(to: CMTime(seconds: stream, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance)
             if status == .ended { status = .paused }
             reportProgress(force: true)
@@ -425,7 +484,11 @@ public final class PlayerEngine {
 
     /// Switches audio by restarting the stream at the current position with that track.
     public func selectAudio(_ track: AudioTrack) async {
-        guard session != nil, track.index != activeAudioIndex else { return }
+        guard let current = session, track.index != activeAudioIndex else { return }
+        if current.mode == .device {
+            await switchDeviceAudio(to: track, in: current)
+            return
+        }
         activeAudioIndex = track.index
         let at = restartTarget ?? position
         restartTarget = at
@@ -441,6 +504,13 @@ public final class PlayerEngine {
         guard let track else {
             activeSubtitleId = nil
             subtitleCues = []
+            isLoadingSubtitles = false
+            return
+        }
+        if track.isEmbedded, let index = track.streamIndex {
+            // Read from the file as it plays: lines show from what's been read so far on.
+            activeSubtitleId = track.id
+            subtitleCues = embeddedCues[index] ?? []
             isLoadingSubtitles = false
             return
         }
@@ -480,6 +550,88 @@ public final class PlayerEngine {
         Task { await selectSubtitle(forced) }
     }
 
+    // MARK: - Device mode
+
+    /// The device couldn't open or play the file; the server streams it instead.
+    private struct DeviceFailure: Error {
+        let message: String
+    }
+
+    /// Audio the player takes as it is; anything else (DTS, TrueHD…) is decoded and kept lossless.
+    private static let copyableAudio = Set(ClientCaps.current.audioCodecs)
+
+    private func makeRemux(_ res: PlayResponse) -> RemuxSession {
+        let plan = res.remux
+        let source: RemuxSession.Source
+        if res.url.isFileURL {
+            source = .file(res.url)
+        } else {
+            let client = client
+            let sessionId = res.sessionId
+            let refresh: (@Sendable () async throws -> URL)? = client.map { client in { try await client.refreshLink(sessionId: sessionId) } }
+            source = .remote(res.url, refresh: refresh)
+        }
+        let local = RemuxSession(source: source, plan: StrataRemux.RemuxPlan(
+            videoStreamIndex: plan?.videoStreamIndex.map(Int32.init),
+            audioStreamIndex: plan?.audioStreamIndex.map(Int32.init),
+            audio: plan?.audio == "copy" || plan == nil ? .copy : .lossless,
+            stripDolbyVision: plan?.stripDolbyVision ?? false
+        ))
+        local.onCues = { [weak self, weak local] cues in
+            Task { @MainActor [weak self] in
+                guard let local else { return }
+                self?.receive(cues, from: local)
+            }
+        }
+        return local
+    }
+
+    /// Keeps lines read from the file, and shows them when their track is on.
+    private func receive(_ cues: [SubtitleCue], from source: RemuxSession) {
+        guard source === remux else { return }
+        var touched = Set<Int>()
+        for cue in cues {
+            let index = Int(cue.streamIndex)
+            let line = VTTCue(start: cue.start, end: cue.end, text: cue.text)
+            // A new session after an audio switch reads some of the same lines again.
+            guard embeddedCues[index]?.contains(line) != true else { continue }
+            embeddedCues[index, default: []].append(line)
+            touched.insert(index)
+        }
+        for index in touched { embeddedCues[index]?.sort { $0.start < $1.start } }
+        if let active = activeSubtitle, active.isEmbedded, let index = active.streamIndex, touched.contains(index) {
+            subtitleCues = embeddedCues[index] ?? []
+        }
+    }
+
+    /// Switches audio by repackaging the same file with the other track, at the same spot.
+    /// Nothing goes to the server.
+    private func switchDeviceAudio(to track: AudioTrack, in current: PlayResponse) async {
+        restartTask?.cancel()
+        let gen = generation
+        let at = position
+        let wasPlaying = status == .playing || status == .ended || status == .ready
+        var res = current
+        res.remux?.audioStreamIndex = track.index
+        res.remux?.audio = Self.copyableAudio.contains(track.codec.lowercased()) ? "copy" : "lossless"
+        res.audioTracks = current.audioTracks.map { var t = $0; t.selected = t.index == track.index; return t }
+        res.seekToMs = timeline.ms(at)
+        activeAudioIndex = track.index
+        player.pause()
+        isBuffering = true
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.start(res, gen: gen, newTitle: false, autoplay: wasPlaying)
+            } catch {
+                guard gen == self.generation, !(error is CancellationError), !Task.isCancelled else { return }
+                self.status = .failed((error as? DeviceFailure)?.message ?? StrataError.wrap(error).message)
+            }
+        }
+        restartTask = task
+        await task.value
+    }
+
     // MARK: - Unload
 
     /// Stops playback: reports the final position, ends the server session, clears state.
@@ -506,6 +658,9 @@ public final class PlayerEngine {
         removeObservers()
         player.pause()
         player.replaceCurrentItem(with: nil)
+        remux?.stop()
+        remux = nil
+        embeddedCues = [:]
         session = nil
         timeline = MediaTimeline(startOffset: 0, duration: 0, isHLS: false)
         restartTarget = nil

@@ -80,8 +80,23 @@ public struct UpNextCard: View {
 /// What's playing and how: shown from the player's info button.
 public struct StreamDetailsPanel: View {
     let session: PlayResponse?
+    /// Why the server streams this play instead of the device.
+    let fallbackReason: String?
+    /// Device mode: data read from the file so far.
+    let bytesRead: Int64?
 
-    public init(session: PlayResponse?) { self.session = session }
+    public init(session: PlayResponse?, fallbackReason: String? = nil, bytesRead: Int64? = nil) {
+        self.session = session
+        self.fallbackReason = fallbackReason
+        self.bytesRead = bytesRead
+    }
+
+    /// The audio line, saying when DTS or TrueHD is being decoded on the device.
+    private func audio(_ session: PlayResponse) -> String {
+        let title = session.selectedAudio?.displayTitle ?? "—"
+        guard session.mode == .device, let plan = session.remux, plan.audio != "copy" else { return title }
+        return title + " → Lossless (ALAC)"
+    }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space4) {
@@ -93,8 +108,16 @@ public struct StreamDetailsPanel: View {
                     row("File", c.displayName)
                     row("Playback", session.mode.label)
                     row("Video", [c.resolutionLabel, c.codecLabel, c.hdrLabel].compactMap { $0 }.joined(separator: " · "))
-                    row("Audio", session.selectedAudio?.displayTitle ?? "—")
+                    row("Audio", audio(session))
                     if let size = c.sizeLabel { row("Size", size) }
+                    if session.mode == .device, let bytesRead, bytesRead > 0, let read = Formatting.size(bytes: Int(bytesRead)) {
+                        row("Read", read)
+                    }
+                }
+                if let fallbackReason {
+                    Text(fallbackReason + " Your server streams it instead.")
+                        .font(.stFootnote)
+                        .foregroundStyle(.secondary)
                 }
                 if !session.reasons.isEmpty {
                     Text(session.reasons.joined(separator: "; "))

@@ -216,6 +216,12 @@ public final class StrataClient: Sendable {
         return .started(res)
     }
 
+    /// A fresh link to a device-mode file whose link stopped working mid-play.
+    public func refreshLink(sessionId: String) async throws -> URL {
+        let res: LinkResponse = try await send("POST", "/api/play/\(sessionId)/link", body: Empty())
+        return resolve(res.url)
+    }
+
     /// Ends a session (stops its ffmpeg job). Best-effort callers can ignore errors.
     public func stopPlayback(sessionId: String) async throws {
         let _: OKResponse = try await send("DELETE", "/api/play/\(sessionId)")
@@ -393,6 +399,10 @@ private struct PinBody: Encodable { var pin: String? }
 private struct DeviceNameBody: Encodable { var deviceName: String }
 private struct PollBody: Encodable { var pollToken: String }
 private struct WatchlistBody: Encodable { var type: TitleType; var tmdbId: Int; var on: Bool }
+
+private struct LinkResponse: Decodable {
+    var url: URL
+}
 
 private struct PlayBody: Encodable {
     var mediaType: MediaKind

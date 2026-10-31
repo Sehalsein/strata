@@ -21,7 +21,8 @@ extension ClientCaps {
             maxHeight: hwHEVC ? 2160 : 1080,
             hdr: hdrCapable ? ["hdr10", "hlg", "dv"] : [],
             // Profile 5 has no HDR10 fallback; without DV support the server transcodes it.
-            dvProfiles: hdrCapable ? [5, 8] : [8]
+            dvProfiles: hdrCapable ? [5, 8] : [8],
+            deviceRemux: true
         )
     }()
 }

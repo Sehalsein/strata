@@ -153,14 +153,26 @@ public struct ClientCaps: Codable, Sendable, Hashable {
     public var maxHeight: Int
     public var hdr: [String]
     public var dvProfiles: [Int]
+    /// The app can repackage files itself (StrataRemux), so the server hands over the
+    /// file's link instead of streaming it.
+    public var deviceRemux: Bool
 
-    public init(containers: [String], videoCodecs: [String], audioCodecs: [String], maxHeight: Int, hdr: [String], dvProfiles: [Int]) {
+    public init(containers: [String], videoCodecs: [String], audioCodecs: [String], maxHeight: Int, hdr: [String], dvProfiles: [Int], deviceRemux: Bool = false) {
         self.containers = containers
         self.videoCodecs = videoCodecs
         self.audioCodecs = audioCodecs
         self.maxHeight = maxHeight
         self.hdr = hdr
         self.dvProfiles = dvProfiles
+        self.deviceRemux = deviceRemux
+    }
+
+    /// The same device, asking the server to do the repackaging (the fallback when the
+    /// app can't open a file itself).
+    public var withoutDeviceRemux: ClientCaps {
+        var caps = self
+        caps.deviceRemux = false
+        return caps
     }
 }
 
@@ -209,10 +221,16 @@ public struct SubtitleTrack: Codable, Sendable, Hashable, Identifiable {
     public var isDefault: Bool
     public var external: Bool
     /// WebVTT URL (relative as sent by the server; `StrataClient` resolves it to absolute).
-    /// Nil for bitmap formats (PGS/VobSub) the server can't convert.
+    /// Nil for bitmap formats (PGS/VobSub) the server can't convert, and for tracks the
+    /// app reads from the stream itself (`embedded`).
     public var url: URL?
+    /// Device mode: a text track inside the file, read as the file plays.
+    public var embedded: Bool?
+    /// The track's stream index in the file (device mode).
+    public var streamIndex: Int?
 
-    public var isTextBased: Bool { url != nil }
+    public var isEmbedded: Bool { embedded == true && streamIndex != nil }
+    public var isTextBased: Bool { url != nil || isEmbedded }
     public var displayTitle: String {
         let lang = language.flatMap(LanguageName.display)
         var head = title?.isEmpty == false ? title! : (lang ?? "Track \(id)")
@@ -235,22 +253,36 @@ public struct NextEpisode: Codable, Sendable, Hashable {
 /// `POST /api/play` (200).
 public struct PlayResponse: Codable, Sendable, Hashable {
     public enum Mode: String, Codable, Sendable, Hashable {
-        case direct, remux, transcode
+        case direct, device, remux, transcode
 
-        public var isHLS: Bool { self != .direct }
+        /// The server streams HLS from the resume point (the timeline is offset).
+        public var isHLS: Bool { self == .remux || self == .transcode }
         public var label: String {
             switch self {
             case .direct: "Direct Play"
+            case .device: "Direct Stream"
             case .remux: "Remux (HLS)"
             case .transcode: "Transcode (HLS)"
             }
         }
     }
 
+    /// Device mode: how the app repackages the file.
+    public struct RemuxPlan: Codable, Sendable, Hashable {
+        /// "copy", or "lossless" (DTS/TrueHD decoded to ALAC). Older servers may say
+        /// "aac"/"eac3"; the app treats anything but "copy" as lossless.
+        public var audio: String
+        public var audioStreamIndex: Int?
+        public var videoStreamIndex: Int?
+        public var stripDolbyVision: Bool
+    }
+
     public var sessionId: String
     public var mode: Mode
     /// Stream URL; relative as sent by the server, absolute after `StrataClient.play`.
     public var url: URL
+    /// Device mode only.
+    public var remux: RemuxPlan?
     /// Media time at which the stream's t=0 sits (HLS starts at the resume point).
     public var startOffsetMs: Int
     /// Direct play: where to seek after loading (stream time). 0 for HLS.

@@ -189,6 +189,32 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(p.reasons, ["container mkv → HLS"])
     }
 
+    func testPlayDevice() throws {
+        let p = try Fixture.decode(PlayResponse.self, "play_device")
+        XCTAssertEqual(p.mode, .device)
+        XCTAssertFalse(p.mode.isHLS, "the device plays the whole file: no offset, seeks in place")
+        XCTAssertEqual(p.url.host(), "store-031.weur.tb-cdn.st")
+        XCTAssertEqual(p.remux?.audio, "lossless")
+        XCTAssertEqual(p.remux?.audioStreamIndex, 1)
+        XCTAssertEqual(p.seekToMs, 12_000)
+        let text = p.subtitleTracks[0]
+        XCTAssertNil(text.url)
+        XCTAssertTrue(text.isEmbedded)
+        XCTAssertTrue(text.isTextBased)
+        XCTAssertEqual(text.streamIndex, 2)
+        let pgs = p.subtitleTracks[2]
+        XCTAssertFalse(pgs.isEmbedded)
+        XCTAssertFalse(pgs.isTextBased)
+        // Older answers have no plan.
+        XCTAssertNil(try Fixture.decode(PlayResponse.self, "play_remux").remux)
+    }
+
+    func testCapsAskForDeviceRemux() throws {
+        let caps = try JSONSerialization.jsonObject(with: JSONEncoder().encode(ClientCaps.current)) as? [String: Any]
+        XCTAssertEqual(caps?["deviceRemux"] as? Bool, true)
+        XCTAssertFalse(ClientCaps.current.withoutDeviceRemux.deviceRemux)
+    }
+
     func testPlayTranscodeTracksAndChapters() throws {
         let p = try Fixture.decode(PlayResponse.self, "play_transcode")
         XCTAssertEqual(p.mode, .transcode)
