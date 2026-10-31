@@ -85,7 +85,6 @@ struct SettingsView: View {
                         if !active.viewerOnly {
                             Button("Change Password") { showChangePassword = true }
                         }
-                        Button("Link a TV") { showLinkTV = true }
                         #endif
                         Button("Sign Out \(active.name)", role: .destructive) { confirmSignOut = true }
                             .confirmationDialog("Sign \(active.name) out?", isPresented: $confirmSignOut, titleVisibility: .visible) {
@@ -109,6 +108,20 @@ struct SettingsView: View {
                         }
                     }
                 }
+
+                #if os(iOS)
+                if store.active != nil {
+                    Section {
+                        Button {
+                            showLinkTV = true
+                        } label: {
+                            Label("Link a TV", systemImage: "appletv")
+                        }
+                    } footer: {
+                        Text("Sign in an Apple TV as \(store.active?.name ?? "you") by approving the code it shows.")
+                    }
+                }
+                #endif
 
                 // Cellular quality and downloads (iPhone and iPad).
                 PlaybackSettingsSection()
