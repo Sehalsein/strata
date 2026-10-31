@@ -9,9 +9,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 
 /** "K7QM-W2XP-9HTR": easy to read out and type (no 0/O, 1/I), about 60 bits of chance. */
 function temporaryPassword(): string {
+  // 32 characters: the low 5 bits of a random byte pick one, evenly (32 divides 256).
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const bytes = crypto.getRandomValues(new Uint8Array(12));
-  const chars = [...bytes].map((b) => alphabet[b % alphabet.length]!);
+  const chars = [...bytes].map((b) => alphabet[b & 0b11111]!);
   return [0, 4, 8].map((i) => chars.slice(i, i + 4).join("")).join("-");
 }
 

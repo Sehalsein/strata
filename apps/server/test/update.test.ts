@@ -103,7 +103,7 @@ describe("signatures", () => {
   });
 
   test("refuses non-Ed25519 keys", () => {
-    const rsa = generateKeyPairSync("rsa", { modulusLength: 1024 });
+    const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
     expect(() => loadPrivateKey(rsa.privateKey.export({ format: "pem", type: "pkcs8" }).toString())).toThrow(/Ed25519/);
   });
 
