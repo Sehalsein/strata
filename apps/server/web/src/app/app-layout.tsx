@@ -1,5 +1,5 @@
 import { Suspense, useState } from "react";
-import { Building2, Check, ChevronsUpDown, KeyRound, Lock, LogOut, SearchX, UserPlus, UserRound } from "lucide-react";
+import { ChevronsUpDown, KeyRound, Lock, LogOut, SearchX, UserPlus, UserRound } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { errorMessage } from "@/lib/api";
@@ -30,6 +30,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { ChangePasswordDialog } from "@/features/auth/change-password-dialog";
+import { HouseholdSwitcher } from "@/features/households/household-switcher";
 import { matchRoute, NAV_GROUPS, routes } from "./routes";
 import { useSession } from "./session";
 
@@ -65,29 +66,13 @@ export default function AppLayout() {
 }
 
 function AppSidebar({ path }: { path: string }) {
-  const { info, me, can } = useSession();
+  const { info, can } = useSession();
   const { isMobile, setOpenMobile } = useSidebar();
   const active = matchRoute(path);
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild tooltip="Strata">
-              <Link href="/" onClick={() => isMobile && setOpenMobile(false)}>
-                <div className="flex aspect-square size-8 items-center justify-center">
-                  <BrandMark size={24} />
-                </div>
-                <div className="grid flex-1 text-left leading-tight">
-                  <span className="truncate font-semibold">Strata</span>
-                  <span className="text-muted-foreground truncate text-xs" title={me.household?.name ?? info.serverName}>
-                    {me.household?.name ?? (info.serverName !== "Strata" ? info.serverName : "Media server")}
-                  </span>
-                </div>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <HouseholdSwitcher />
       </SidebarHeader>
       <SidebarContent>
         {NAV_GROUPS.map((group) => {
@@ -115,7 +100,12 @@ function AppSidebar({ path }: { path: string }) {
         })}
       </SidebarContent>
       <SidebarFooter>
-        <p className="text-muted-foreground truncate px-2 font-mono text-xs group-data-[collapsible=icon]:hidden">v{info.version}</p>
+        <Link href="/" className="text-muted-foreground flex items-center gap-2 px-2 text-xs" onClick={() => isMobile && setOpenMobile(false)} title={`Strata v${info.version}`}>
+          <BrandMark size={16} />
+          <span className="truncate group-data-[collapsible=icon]:hidden">
+            Strata <span className="font-mono">v{info.version}</span>
+          </span>
+        </Link>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
@@ -134,53 +124,9 @@ function TopBar({ title }: { title: string }) {
           {info.serverName} · v{info.version}
         </span>
       </div>
-      <HouseholdSwitcher />
       <ModeToggle />
       <AccountMenu />
     </header>
-  );
-}
-
-/** Shown when the account is in more than one household; switching reloads everything for it. */
-function HouseholdSwitcher() {
-  const { me, authChanged } = useSession();
-  const households = useQuery({ queryKey: queryKeys.households, queryFn: authClient.listHouseholds, staleTime: 60_000 });
-  const [switching, setSwitching] = useState(false);
-  const list = households.data ?? [];
-  if (list.length < 2) return null;
-
-  const choose = async (id: string, name: string) => {
-    if (id === me.household?.id) return;
-    setSwitching(true);
-    try {
-      await authClient.setActiveHousehold(id);
-      await authChanged();
-      toast.success(`Switched to ${name}`);
-    } catch (err) {
-      toast.error(errorMessage(err));
-      setSwitching(false);
-    }
-  };
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="max-w-48 gap-1.5" disabled={switching} aria-label="Switch household">
-          <Building2 />
-          <span className="hidden truncate sm:inline">{me.household?.name ?? "Choose a household"}</span>
-          <ChevronsUpDown className="text-muted-foreground size-3.5" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">Households</DropdownMenuLabel>
-        {list.map((h) => (
-          <DropdownMenuItem key={h.id} onSelect={() => void choose(h.id, h.name)}>
-            <span className="flex-1 truncate">{h.name}</span>
-            {h.id === me.household?.id && <Check className="size-4" />}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 

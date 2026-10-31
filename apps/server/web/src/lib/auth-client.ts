@@ -186,6 +186,11 @@ export const authClient = {
     return call(ba.organization.create({ name, slug, keepCurrentActiveOrganization: true }) as Promise<BaResult<HouseholdSummary>>);
   },
 
+  /** Renames a household (its owner and admins). */
+  async renameHousehold(householdId: string, name: string): Promise<HouseholdSummary> {
+    return call(ba.organization.update({ organizationId: householdId, data: { name } }) as Promise<BaResult<HouseholdSummary>>);
+  },
+
   async invite(input: { email: string; role: HouseholdRole; householdId?: string }): Promise<Invitation> {
     return call(
       ba.organization.inviteMember({ email: input.email, role: input.role, ...(input.householdId ? { organizationId: input.householdId } : {}) }) as Promise<BaResult<Invitation>>,

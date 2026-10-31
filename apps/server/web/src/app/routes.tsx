@@ -1,5 +1,5 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
-import { Building2, LayoutDashboard, Library, MonitorSmartphone, ScrollText, Settings, Tv, Users, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Library, MonitorSmartphone, ScrollText, Settings, Tv, Users, type LucideIcon } from "lucide-react";
 import type { Access } from "./session";
 
 /**
@@ -30,7 +30,6 @@ export const routes: AppRoute[] = [
   { path: "/members", title: "Members", icon: Users, group: "People", access: "householdAdmin", component: lazy(() => import("@/features/members/members-page")) },
   { path: "/devices", title: "Devices", icon: MonitorSmartphone, group: "People", access: "any", component: lazy(() => import("@/features/devices/devices-page")) },
   { path: "/link", title: "Link a TV", icon: Tv, group: "People", access: "any", hidden: true, component: lazy(() => import("@/features/link/link-page")) },
-  { path: "/households", title: "Households", icon: Building2, group: "System", access: "serverAdmin", component: lazy(() => import("@/features/households/households-page")) },
   { path: "/settings", title: "Settings", icon: Settings, group: "System", access: "householdAdmin", component: lazy(() => import("@/features/settings/settings-page")) },
   { path: "/logs", title: "Logs", icon: ScrollText, group: "System", access: "serverAdmin", component: lazy(() => import("@/features/logs/logs-page")) },
 ];

@@ -31,8 +31,6 @@ export const queryKeys = {
   household: ["auth", "household"] as const,
   /** Households the account belongs to. */
   households: ["auth", "households"] as const,
-  /** Every household on the server (server admin). */
-  allHouseholds: ["admin", "households"] as const,
   /** This account's sign-ins (devices). */
   sessions: ["auth", "sessions"] as const,
   /** Accounts signed in on this browser. */

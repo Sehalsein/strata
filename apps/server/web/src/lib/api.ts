@@ -12,7 +12,6 @@ import type {
   TorboxAccount,
   UpdateStatus,
   ContentLimit,
-  HouseholdSummary,
   HouseholdDevice,
 } from "./types";
 
@@ -112,8 +111,6 @@ export const api = {
   devices: () => request<{ items: HouseholdDevice[] }>("GET", "/admin/devices"),
   signOutDevice: (id: string) => request<{ ok: true }>("DELETE", `/admin/devices/${encodeURIComponent(id)}`),
   stopSession: (id: string) => request<{ ok: true }>("DELETE", `/admin/sessions/${encodeURIComponent(id)}`),
-  /** Every household on the server (server admin). */
-  households: () => request<{ items: HouseholdSummary[] }>("GET", "/admin/households"),
   logs: (limit = 500) => request<{ items: LogEntry[] }>("GET", `/admin/logs${q({ limit })}`),
 };
 
