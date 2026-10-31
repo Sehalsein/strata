@@ -232,4 +232,7 @@ export const migrations: string[] = [
   /* 3: what each signed-in device is and where it was last seen */ `
   ALTER TABLE session ADD COLUMN location TEXT, ADD COLUMN device_name TEXT, ADD COLUMN device_model TEXT;
   `,
+  /* 4: a temporary password from an admin, to be replaced at the next sign-in */ `
+  ALTER TABLE "user" ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+  `,
 ];

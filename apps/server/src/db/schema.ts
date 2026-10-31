@@ -34,6 +34,8 @@ export const user = pgTable("user", {
   banned: boolean("banned"),
   banReason: text("ban_reason"),
   banExpires: at("ban_expires"),
+  /** Signed in with a temporary password from an admin: a new one is needed first. */
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
 });
 
 export const session = pgTable(

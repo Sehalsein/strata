@@ -160,6 +160,31 @@ describe("setup and auth", () => {
     await server.request("/api/auth/change-password", { method: "POST", token: bobsToken, json: { currentPassword: "bobs-new-password", newPassword: "bobs-password" } });
   });
 
+  test("an admin resets a member to a temporary password; they choose a new one before anything else", async () => {
+    const full = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const bob = full.members.find((m: any) => m.user.email === "bob@example.com");
+    const owner = full.members.find((m: any) => m.user.email !== "bob@example.com" && m.role.includes("owner"));
+    const bobsPhone = (await signIn("bob", "bobs-password")).token!;
+    // A member can't reset the owner's (or anyone's).
+    const refused = await server.request("/api/auth/admin/set-user-password", { method: "POST", token: bobsPhone, json: { userId: owner.userId, newPassword: "hijacked-password" } });
+    expect(refused.status).toBe(403);
+    // The owner sets a temporary one: every device of Bob's is signed out.
+    const reset = await server.request("/api/auth/admin/set-user-password", { method: "POST", token, json: { userId: bob.userId, newPassword: "TEMP-2345-WXYZ" } });
+    expect(reset.status).toBe(200);
+    expect((await server.request("/api/me", { token: bobsPhone })).status).toBe(401);
+    // Signed in with it, only /me answers until he picks a new password.
+    const temp = (await signIn("bob", "TEMP-2345-WXYZ")).token!;
+    expect((await json(await server.request("/api/me", { token: temp }))).mustChangePassword).toBe(true);
+    const blocked = await server.request("/api/home", { token: temp });
+    expect(blocked.status).toBe(403);
+    expect((await json(blocked)).code).toBe("PASSWORD_CHANGE_REQUIRED");
+    const changed = await server.request("/api/auth/change-password", { method: "POST", token: temp, json: { currentPassword: "TEMP-2345-WXYZ", newPassword: "bobs-password" } });
+    expect(changed.status).toBe(200);
+    const fresh = (await signIn("bob", "bobs-password")).token!;
+    expect((await json(await server.request("/api/me", { token: fresh }))).mustChangePassword).toBe(false);
+    expect((await server.request("/api/home", { token: fresh })).status).toBe(200);
+  });
+
   test("people can download everything kept about them, and delete their account", async () => {
     const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "dora@example.com", role: "member" } }));
     await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "dora@example.com", password: "doras-password", name: "dora", username: "dora", invitationId: invite.id } });

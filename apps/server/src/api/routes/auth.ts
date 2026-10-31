@@ -230,7 +230,7 @@ export const authRoutes = new Hono<Env>()
           .innerJoin(organization, eq(organization.id, member.organizationId))
           .where(and(eq(member.organizationId, organizationId), eq(member.userId, me.id)))
       : [];
-    return c.json({ user: me, viewerOnly, household: household ?? null });
+    return c.json({ user: me, viewerOnly, mustChangePassword: c.var.session.mustChangePassword, household: household ?? null });
   })
 
   // A member's sign-in QR code: a device that scans it signs in as them, in this household,

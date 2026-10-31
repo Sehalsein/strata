@@ -1,7 +1,9 @@
 import { createHash, createHmac } from "node:crypto";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
-import { and, eq, gt, like, sql } from "drizzle-orm";
+import { createAccessControl } from "better-auth/plugins/access";
+import { adminAc, defaultStatements } from "better-auth/plugins/admin/access";
+import { and, eq, gt, like, or, sql } from "drizzle-orm";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, bearer, deviceAuthorization, magicLink, multiSession, organization, username } from "better-auth/plugins";
 import { passkey } from "@better-auth/passkey";
@@ -61,6 +63,45 @@ export function signInMethods() {
   return { google, passkeys };
 }
 
+/** The admin plugin's permissions (see `admin()` below for who gets which). */
+const accessControl = createAccessControl(defaultStatements);
+
+/** Owner 2, admin 1, member 0 (a member's role can list several). */
+const rank = (role: string | null | undefined) => ((role ?? "").split(",").includes("owner") ? 2 : (role ?? "").split(",").includes("admin") ? 1 : 0);
+
+/**
+ * May the signed-in caller reset `userId`'s password? The server's admin may reset anyone
+ * else's; a household's owner or admin, someone below them in their active household,
+ * but never the server's admin. Never your own (that's Change password), and never from a
+ * device that joined without a password.
+ */
+async function assertMayResetPassword(db: Db, getSession: (headers: Headers) => Promise<{ user: { id: string }; session: unknown } | null>, headers: Headers | undefined, userId: string) {
+  // Asked through Better Auth's own getSession: a hook runs before the bearer plugin has
+  // turned the apps' token into a session.
+  const caller = headers ? await getSession(headers) : null;
+  const session = caller?.session as { activeOrganizationId?: string | null; viewerOnly?: boolean | null } | undefined;
+  const refuse = (message: string) => {
+    throw new APIError("FORBIDDEN", { message });
+  };
+  if (!caller || session?.viewerOnly) refuse("Sign in with your password to do that.");
+  if (caller!.user.id === userId) refuse("Change your own password from your account menu.");
+  const [target] = await db.select({ role: schema.user.role, name: schema.user.name }).from(schema.user).where(eq(schema.user.id, userId));
+  if (!target) refuse("No such account.");
+  if ((caller!.user as { role?: string | null }).role === "admin") return;
+  if (target!.role === "admin") refuse("Only the server's admin can reset that account's password.");
+  const household = session?.activeOrganizationId;
+  if (!household) refuse("Choose a household first.");
+  const roles = await db
+    .select({ userId: schema.member.userId, role: schema.member.role })
+    .from(schema.member)
+    .where(and(eq(schema.member.organizationId, household!), or(eq(schema.member.userId, caller!.user.id), eq(schema.member.userId, userId))));
+  const mine = roles.find((r) => r.userId === caller!.user.id);
+  const theirs = roles.find((r) => r.userId === userId);
+  if (!mine || rank(mine.role) < 1) refuse("Only the household's owner or admins can reset passwords.");
+  if (!theirs) refuse(`${target!.name} isn't in this household.`);
+  if (rank(theirs!.role) >= rank(mine!.role)) refuse(`Only someone above ${target!.name} in the household can reset their password.`);
+}
+
 export interface AuthOptions {
   db: Db;
   /** The server's secret key (base64); Better Auth's signing secret is derived from it. */
@@ -93,7 +134,8 @@ export interface AuthOptions {
 export function createAuth(options: AuthOptions) {
   const db = options.db;
   const methods = signInMethods();
-  return betterAuth({
+  // Hooks below ask Better Auth's own API (getSession) of the instance they belong to.
+  const auth = betterAuth({
     appName: "Strata",
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
@@ -109,6 +151,12 @@ export function createAuth(options: AuthOptions) {
         // Password reset is by email: without email set up there's nothing to send.
         if ((ctx.path === "/request-password-reset" || ctx.path === "/forget-password") && !emailConfigured()) {
           throw new APIError("NOT_FOUND", { message: "This server can't send email. Ask your household's admin to help." });
+        }
+        // Resetting someone's password (the admin plugin's set-user-password): the server's
+        // admin, or a household's owner or admin for someone below them in it.
+        if (ctx.path === "/admin/set-user-password") {
+          await assertMayResetPassword(db, (headers) => auth.api.getSession({ headers }), ctx.headers, String((ctx.body as { userId?: unknown } | undefined)?.userId ?? ""));
+          return;
         }
         if (ctx.path !== "/sign-up/email") return;
         // The invitation's id is the proof (it's in the link; no mail is sent): an email
@@ -138,6 +186,24 @@ export function createAuth(options: AuthOptions) {
           const [code] = userCode ? await db.select({ deviceCode: schema.deviceCode.deviceCode }).from(schema.deviceCode).where(eq(schema.deviceCode.userCode, userCode)) : [];
           if (code && household) {
             await adapter.createVerificationValue({ identifier: `tv-household:${code.deviceCode}`, value: household, expiresAt: new Date(Date.now() + 15 * 60_000) });
+          }
+          return;
+        }
+        // A password set by someone else is temporary: every device of theirs is signed out,
+        // and their next sign-in asks for a new one before anything else (api/context.ts).
+        if (ctx.path === "/admin/set-user-password") {
+          const userId = String((ctx.body as { userId?: unknown } | undefined)?.userId ?? "");
+          if (userId && ctx.context.returned && !(ctx.context.returned instanceof Error)) {
+            await adapter.deleteUserSessions(userId);
+            await db.update(schema.user).set({ mustChangePassword: true }).where(eq(schema.user.id, userId));
+          }
+          return;
+        }
+        // Choosing a new password replaces a temporary one from an admin.
+        if (ctx.path === "/change-password") {
+          const userId = ctx.context.session?.user.id;
+          if (userId && ctx.context.returned && !(ctx.context.returned instanceof Error)) {
+            await db.update(schema.user).set({ mustChangePassword: false }).where(eq(schema.user.id, userId));
           }
           return;
         }
@@ -221,6 +287,10 @@ export function createAuth(options: AuthOptions) {
       revokeSessionsOnPasswordReset: true,
       // "Forgot password?" (only with email set up, see ../email.ts): a link for an hour.
       resetPasswordTokenExpiresIn: 60 * 60,
+      // A password chosen by its owner replaces any temporary one.
+      onPasswordReset: async ({ user }) => {
+        await db.update(schema.user).set({ mustChangePassword: false }).where(eq(schema.user.id, user.id));
+      },
       sendResetPassword: async ({ user, url }) => {
         await sendEmail({
           to: user.email,
@@ -246,6 +316,11 @@ export function createAuth(options: AuthOptions) {
       },
     },
     user: {
+      additionalFields: {
+        // Set when an admin resets the password to a temporary one (api/routes/auth.ts);
+        // cleared by choosing a new one.
+        mustChangePassword: { type: "boolean", required: false, defaultValue: false, input: false },
+      },
       changeEmail: { enabled: false },
       // People delete their own account from the dashboard (with their password). Their
       // progress, lists, sign-ins and devices go with it; a household left with nobody is
@@ -302,7 +377,14 @@ export function createAuth(options: AuthOptions) {
     },
     plugins: [
       username({ minUsernameLength: 2, maxUsernameLength: 64 }),
-      admin({ defaultRole: "user", adminRoles: ["admin"] }),
+      admin({
+        defaultRole: "user",
+        adminRoles: ["admin"],
+        // Everyone may ask to set another account's password; the `before` hook allows it
+        // only for a household's owner or admin over someone below them (or the server admin).
+        ac: accessControl,
+        roles: { admin: accessControl.newRole(adminAc.statements), user: accessControl.newRole({ user: ["set-password"], session: [] }) },
+      }),
       organization({
         // Invitations last a week; the dashboard shows their link (no mail is sent), and
         // its id is what proves the invitee (see the sign-up hook), not a verified email.
@@ -353,6 +435,7 @@ export function createAuth(options: AuthOptions) {
       }),
     ],
   });
+  return auth;
 }
 
 export type Auth = ReturnType<typeof createAuth>;

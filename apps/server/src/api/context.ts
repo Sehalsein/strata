@@ -18,7 +18,12 @@ export interface RequestSession {
   role: string | null;
   /** Joined without a password or a TV: can watch, never administer. */
   viewerOnly: boolean;
+  /** Signed in with a temporary password: only /me works until a new one is chosen. */
+  mustChangePassword: boolean;
 }
+
+/** The answer to anything but /api/me while a temporary password is in use. */
+export const PASSWORD_CHANGE_REQUIRED = "PASSWORD_CHANGE_REQUIRED";
 
 export type Env = {
   /** The Bun server, passed as the second argument to fetch (absent in tests unless given). */
@@ -36,7 +41,7 @@ export type Env = {
 export const requireAuth: MiddlewareHandler<Env> = createMiddleware<Env>(async (c, next) => {
   const result = await c.var.services.auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null);
   if (!result) throw new HTTPException(401, { message: "Not signed in" });
-  const u = result.user as typeof result.user & { username?: string | null; role?: string | null; banned?: boolean | null };
+  const u = result.user as typeof result.user & { username?: string | null; role?: string | null; banned?: boolean | null; mustChangePassword?: boolean | null };
   const s = result.session as typeof result.session & { activeOrganizationId?: string | null; viewerOnly?: boolean | null };
   const viewerOnly = !!s.viewerOnly;
   // Keeps the Devices page current: where the device is now, and what it is. Written only
@@ -55,7 +60,14 @@ export const requireAuth: MiddlewareHandler<Env> = createMiddleware<Env>(async (
     organizationId: s.activeOrganizationId ?? null,
     role: null,
     viewerOnly,
+    // Devices that joined without a password (home, a TV) never used the temporary one.
+    mustChangePassword: !!u.mustChangePassword && !viewerOnly,
   });
+  if (!!u.mustChangePassword && !viewerOnly && new URL(c.req.url).pathname !== "/api/me") {
+    throw new HTTPException(403, {
+      res: Response.json({ error: "Choose a new password first: you signed in with a temporary one.", code: PASSWORD_CHANGE_REQUIRED }, { status: 403 }),
+    });
+  }
   await next();
 });
 

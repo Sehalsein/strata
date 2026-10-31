@@ -55,7 +55,8 @@ export function createApp(services: Services) {
   app.get("*", webHandler(services.config.webDir));
 
   app.onError((err, c) => {
-    if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
+    // A prepared answer (e.g. with a `code` the apps act on) goes out as it is.
+    if (err instanceof HTTPException) return err.res ? err.getResponse() : c.json({ error: err.message }, err.status);
     // Not an error for the client: the release is downloading; poll by repeating the request.
     // `title` and `message` are what the apps show while they wait.
     if (err instanceof NotReadyError) return c.json({ ...err.info, title: "Getting it ready", message: err.message, error: err.message }, 202);
