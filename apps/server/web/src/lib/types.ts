@@ -30,7 +30,7 @@ export type HouseholdRole = "owner" | "admin" | "member";
 
 /** GET /api/me: the signed-in account and its active household on this browser. */
 export interface Me {
-  user: { id: string; username: string | null; name: string; email: string; isServerAdmin: boolean };
+  user: { id: string; username: string | null; name: string; email: string; image: string | null; isServerAdmin: boolean };
   /** Joined without a password, or a TV: can watch, never administer. */
   viewerOnly: boolean;
   /** Signed in with a temporary password from an admin: a new one is needed first. */

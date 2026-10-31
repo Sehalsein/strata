@@ -37,6 +37,8 @@ public struct SavedSignIn: Codable, Sendable, Hashable, Identifiable {
     public var username: String?
     /// The account's display name.
     public var name: String
+    /// The profile picture's path on the server; nil for none.
+    public var image: String?
     /// The active household; nil until one is chosen.
     public var household: Household?
     /// Signed in without a password (a home-network join, a TV): can watch, not administer.
@@ -142,6 +144,22 @@ public final class ServerStore {
 
     public func server(id: String) -> SavedServer? { servers.first { $0.id == id } }
     public func server(for signIn: SavedSignIn) -> SavedServer? { server(id: signIn.serverID) }
+
+    /// `signIn`'s profile picture as a full URL, at its server's current address.
+    public func imageURL(for signIn: SavedSignIn) -> URL? {
+        guard let path = signIn.image, let server = server(for: signIn) else { return nil }
+        return URL(string: path, relativeTo: server.url)?.absoluteURL
+    }
+
+    /// Changes the active account's name and picture (a `url` from `StrataClient.avatars()`, or nil).
+    public func updateProfile(name: String, image: String?) async throws {
+        guard let id = activeID, let client else { return }
+        try await client.updateProfile(name: name, image: image)
+        update(id) {
+            $0.name = name
+            $0.image = image
+        }
+    }
 
     private let defaults: UserDefaults
     private let tokens: TokenStorage
@@ -623,6 +641,7 @@ extension SavedSignIn {
     mutating func apply(_ me: Me) {
         username = me.user.username
         name = me.user.name
+        image = me.user.image
         household = me.household
         viewerOnly = me.viewerOnly
         isServerAdmin = me.user.isServerAdmin

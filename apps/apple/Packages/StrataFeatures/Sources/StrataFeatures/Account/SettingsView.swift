@@ -10,6 +10,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showLibraries = false
     @State private var showAddProfile = false
+    @State private var showEditProfile = false
     @State private var showLinkTV = false
     @State private var showChangePassword = false
     @State private var confirmSignOut = false
@@ -32,16 +33,21 @@ struct SettingsView: View {
                 // One card: who's watching, the other profiles to switch to, and what this one can do.
                 Section {
                     if let active = store.active {
-                        HStack(spacing: Metrics.space4) {
-                            ProfileAvatar(name: active.name, seed: active.id, size: 56)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(active.name).font(.stTitle2)
-                                Text(profileLine(active)).font(.stFootnote).foregroundStyle(Theme.ink3)
+                        Button {
+                            showEditProfile = true
+                        } label: {
+                            HStack(spacing: Metrics.space4) {
+                                ProfileAvatar(name: active.name, seed: active.id, size: 56, imageURL: store.imageURL(for: active))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(active.name).font(.stTitle2).foregroundStyle(Theme.ink)
+                                    Text(profileLine(active)).font(.stFootnote).foregroundStyle(Theme.ink3)
+                                }
+                                Spacer(minLength: 0)
+                                if active.isKids { Text("Kids").eyebrowStyle(Theme.accentText) }
+                                Text("Edit").font(.stFootnote).foregroundStyle(Theme.accentText)
                             }
-                            Spacer(minLength: 0)
-                            if active.isKids { Text("Kids").eyebrowStyle(Theme.accentText) }
+                            .padding(.vertical, Metrics.space1)
                         }
-                        .padding(.vertical, Metrics.space1)
                         .profileActions(active, rename: startRename, remove: { removing = $0 }, store: store)
                     }
                     ForEach(store.signIns.filter { $0.id != store.activeID }) { signIn in
@@ -50,7 +56,7 @@ struct SettingsView: View {
                             services.refreshClient()
                         } label: {
                             HStack(spacing: Metrics.space3) {
-                                ProfileAvatar(name: signIn.name, seed: signIn.id, size: 32)
+                                ProfileAvatar(name: signIn.name, seed: signIn.id, size: 32, imageURL: store.imageURL(for: signIn))
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(signIn.name).foregroundStyle(Theme.ink)
                                     if showsServers, let server = store.server(for: signIn)?.name {
@@ -198,6 +204,7 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showLibraries) { NavigationStack { HouseholdPickerView(isSheet: true) } }
             .sheet(isPresented: $showAddProfile) { ConnectView(isAdding: true) }
+            .sheet(isPresented: $showEditProfile) { EditProfileView() }
             #if os(iOS)
             .sheet(isPresented: $showLinkTV) { ApproveDeviceView() }
             .sheet(isPresented: $showChangePassword) { ChangePasswordView() }

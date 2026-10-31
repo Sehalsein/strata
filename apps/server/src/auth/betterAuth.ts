@@ -10,6 +10,7 @@ import { passkey } from "@better-auth/passkey";
 import type { Db } from "../db";
 import { emailConfigured, sendEmail, simpleEmail } from "../email";
 import * as schema from "../db/schema";
+import { isAvatarImage } from "../avatars";
 import { runtime } from "#runtime";
 
 const DAY_S = 24 * 60 * 60;
@@ -157,6 +158,13 @@ export function createAuth(options: AuthOptions) {
         // admin for someone below them in it.
         if (ctx.path === "/admin/set-user-password" || ctx.path === "/admin/remove-user") {
           await assertMayManage(db, (headers) => auth.api.getSession({ headers }), ctx.headers, String((ctx.body as { userId?: unknown } | undefined)?.userId ?? ""));
+          return;
+        }
+        // A profile picture is one of Strata's own (src/avatars) or none: nobody can point
+        // their profile at an image from elsewhere.
+        if ((ctx.path === "/update-user" || ctx.path === "/admin/update-user") && ctx.body && typeof ctx.body === "object") {
+          const image = (ctx.body as { image?: unknown; data?: { image?: unknown } }).image ?? (ctx.body as { data?: { image?: unknown } }).data?.image;
+          if (image != null && !isAvatarImage(image)) throw new APIError("BAD_REQUEST", { message: "Pick one of the server's profile pictures." });
           return;
         }
         if (ctx.path !== "/sign-up/email") return;

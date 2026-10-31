@@ -196,7 +196,7 @@ export const authRoutes = new Hono<Env>()
     const [home] = await db.select({ id: organization.id, name: organization.name }).from(organization).orderBy(asc(organization.createdAt)).limit(1);
     if (!home) throw new HTTPException(409, { message: "This server has no household yet." });
     const people = await db
-      .select({ id: user.id, name: user.name, isKids: member.isKids })
+      .select({ id: user.id, name: user.name, image: user.image, isKids: member.isKids })
       .from(member)
       .innerJoin(user, eq(user.id, member.userId))
       .where(eq(member.organizationId, home.id))

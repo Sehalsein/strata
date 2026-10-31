@@ -10,6 +10,7 @@ import { logger } from "../log";
 import type { Env } from "./context";
 import { adminRoutes, serverAdminRoutes } from "./routes/admin";
 import { authRoutes } from "./routes/auth";
+import { avatarRoutes } from "./routes/avatars";
 import { catalogRoutes } from "./routes/catalog";
 import { streamRoutes } from "./routes/stream";
 import { systemRoutes } from "./routes/system";
@@ -45,6 +46,7 @@ export function createApp(services: Services) {
   // Order matters: catalogRoutes applies requireAuth to everything it sees under /api,
   // so the public and stream routes must be registered first.
   app.route("/api", authRoutes);
+  app.route("/api", avatarRoutes);
   app.route("/api", streamRoutes);
   app.route("/api/admin", systemRoutes);
   app.route("/api/admin", serverAdminRoutes);

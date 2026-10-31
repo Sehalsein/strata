@@ -88,6 +88,23 @@ public final class StrataClient: Sendable {
         try await get("/api/me", cached: false)
     }
 
+    // MARK: Profile pictures
+
+    /// The server's profile pictures, grouped.
+    public func avatars() async throws -> [AvatarGroup] {
+        let res: AvatarsResponse = try await get("/api/avatars", cached: true)
+        return res.groups
+    }
+
+    /// Changes this account's name, and its picture to one of `avatars()` (its `url`) or
+    /// none (nil).
+    public func updateProfile(name: String, image: String?) async throws {
+        let _: OKResponse = try await send("POST", "/api/auth/update-user", body: UpdateProfileBody(name: name, image: image))
+    }
+
+    /// A server path (like a profile's `image`) as a full URL on this server.
+    public func absoluteURL(_ path: String) -> URL? { URL(string: path, relativeTo: baseURL)?.absoluteURL }
+
     // MARK: Households
 
     /// The households this account belongs to.
@@ -540,6 +557,18 @@ private struct SetupBody: Encodable { var username: String; var password: String
 private struct SetActiveBody: Encodable { var organizationId: String }
 private struct ChangePasswordBody: Encodable { var currentPassword: String; var newPassword: String; var revokeOtherSessions: Bool }
 private struct JoinBody: Encodable { var userId: String? }
+private struct AvatarsResponse: Decodable { var groups: [AvatarGroup] }
+/// `image: null` is sent, not left out: that's how a picture is cleared.
+private struct UpdateProfileBody: Encodable {
+    var name: String
+    var image: String?
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encode(image, forKey: .image)
+    }
+    enum CodingKeys: String, CodingKey { case name, image }
+}
 private struct DeviceCodeBody: Encodable { var client_id: String }
 private struct DeviceTokenBody: Encodable { var grant_type: String; var device_code: String; var client_id: String }
 private struct DeviceAccessToken: Decodable { var access_token: String }

@@ -85,11 +85,14 @@ public struct Me: Codable, Sendable, Hashable {
         /// Display name.
         public var name: String
         public var email: String?
+        /// The profile picture's path on the server (`/api/avatars/<id>.png`); nil for none.
+        public var image: String?
         /// Runs the server (the account made at setup), signed in with a password.
         public var isServerAdmin: Bool
 
-        public init(id: String, username: String?, name: String, email: String? = nil, isServerAdmin: Bool = false) {
+        public init(id: String, username: String?, name: String, email: String? = nil, image: String? = nil, isServerAdmin: Bool = false) {
             self.id = id
+            self.image = image
             self.username = username
             self.name = name
             self.email = email
@@ -129,10 +132,13 @@ public struct HomeJoinChoices: Codable, Sendable, Hashable {
     public struct Member: Codable, Sendable, Hashable, Identifiable {
         public var id: String
         public var name: String
+        /// The profile picture's path on the server; nil for none.
+        public var image: String?
         public var isKids: Bool
 
-        public init(id: String, name: String, isKids: Bool = false) {
+        public init(id: String, name: String, image: String? = nil, isKids: Bool = false) {
             self.id = id
+            self.image = image
             self.name = name
             self.isKids = isKids
         }
@@ -250,4 +256,33 @@ struct ShelvesResponse: Codable, Sendable {
 
 struct OKResponse: Codable, Sendable {
     var ok: Bool?
+}
+
+/// One of the server's profile pictures (original characters drawn for Strata).
+public struct Avatar: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var name: String
+    /// `#rrggbb`, the picture's background: a placeholder colour while it loads.
+    public var background: String
+    /// Path on the server (`/api/avatars/<id>.png`): what a profile's `image` holds.
+    public var url: String
+
+    public init(id: String, name: String, background: String, url: String) {
+        self.id = id
+        self.name = name
+        self.background = background
+        self.url = url
+    }
+}
+
+/// `GET /api/avatars`: the pictures in the groups pickers show them in.
+public struct AvatarGroup: Codable, Sendable, Hashable, Identifiable {
+    public var title: String
+    public var avatars: [Avatar]
+    public var id: String { title }
+
+    public init(title: String, avatars: [Avatar]) {
+        self.title = title
+        self.avatars = avatars
+    }
 }

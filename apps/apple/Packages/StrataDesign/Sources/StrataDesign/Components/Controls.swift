@@ -195,16 +195,19 @@ public struct AvailabilityLabel: View {
     }
 }
 
-/// Profile disc with the name's initial, fill chosen stably per profile.
+/// Profile disc: the profile's picture from its server, or the name's initial on a fill
+/// chosen stably per profile (also while the picture loads).
 public struct ProfileAvatar: View {
     let name: String
     let seed: String
     let size: CGFloat
+    let imageURL: URL?
 
-    public init(name: String, seed: String, size: CGFloat = 96) {
+    public init(name: String, seed: String, size: CGFloat = 96, imageURL: URL? = nil) {
         self.name = name
         self.seed = seed
         self.size = size
+        self.imageURL = imageURL
     }
 
     public var body: some View {
@@ -215,6 +218,17 @@ public struct ProfileAvatar: View {
                 Text(name.prefix(1).uppercased())
                     .font(.system(size: size * 0.38, weight: .bold))
                     .foregroundStyle(Theme.onAccent)
+            }
+            .overlay {
+                if let imageURL {
+                    AsyncImage(url: imageURL) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        Color.clear
+                    }
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
+                }
             }
             .accessibilityLabel(name)
     }

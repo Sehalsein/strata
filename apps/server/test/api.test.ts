@@ -111,6 +111,23 @@ describe("setup and auth", () => {
     await server.request(`/api/household/members/${bob.id}`, { method: "PATCH", token, json: { name: "bob" } });
   });
 
+  test("profile pictures come from the server's own set, in groups", async () => {
+    const { groups } = await json(await server.request("/api/avatars"));
+    expect(groups.map((g: any) => g.title)).toEqual(["Animals", "Creatures", "Adventurers", "Snacks & Plants"]);
+    const fox = groups[0].avatars.find((a: any) => a.id === "fox");
+    expect(fox.url).toBe("/api/avatars/fox.png");
+    const png = await server.request(fox.url);
+    expect(png.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await png.arrayBuffer()).slice(1, 4)).toEqual(new Uint8Array([0x50, 0x4e, 0x47]));
+    expect((await server.request("/api/avatars/nope.png")).status).toBe(404);
+
+    const bobs = (await signIn("bob", "bobs-password")).token!;
+    expect((await server.request("/api/auth/update-user", { method: "POST", token: bobs, json: { image: fox.url } })).status).toBe(200);
+    expect((await json(await server.request("/api/me", { token: bobs }))).user.image).toBe(fox.url);
+    expect((await server.request("/api/auth/update-user", { method: "POST", token: bobs, json: { image: "https://example.com/x.png" } })).status).toBe(400);
+    expect((await server.request("/api/auth/update-user", { method: "POST", token: bobs, json: { image: null } })).status).toBe(200);
+  });
+
   test("a household's provider keys are its own: never another's, nor the server's", async () => {
     const h = await server.household();
     process.env.TMDB_API_KEY = "from-the-server";

@@ -12,7 +12,7 @@ import type { Services } from "../services";
 export interface RequestSession {
   /** Better Auth's session token (the bearer token). */
   token: string;
-  user: { id: string; username: string | null; name: string; email: string; isServerAdmin: boolean };
+  user: { id: string; username: string | null; name: string; email: string; image: string | null; isServerAdmin: boolean };
   organizationId: string | null;
   /** "owner" | "admin" | "member" in the active household, once `requireHousehold` ran. */
   role: string | null;
@@ -56,7 +56,7 @@ export const requireAuth: MiddlewareHandler<Env> = createMiddleware<Env>(async (
   }
   c.set("session", {
     token: s.token,
-    user: { id: u.id, username: u.username ?? null, name: u.name, email: u.email, isServerAdmin: u.role === "admin" && !viewerOnly },
+    user: { id: u.id, username: u.username ?? null, name: u.name, email: u.email, image: u.image ?? null, isServerAdmin: u.role === "admin" && !viewerOnly },
     organizationId: s.activeOrganizationId ?? null,
     role: null,
     viewerOnly,

@@ -56,7 +56,7 @@ export default function PrivacyPage() {
             <Section title="What's kept">
               <ul>
                 <li>
-                  <b>Your account:</b> your name, username, email address (if you gave one) and your password, stored only as a one-way hash.
+                  <b>Your account:</b> your name, which of the server's profile pictures you picked, your username, email address (if you gave one) and your password, stored only as a one-way hash.
                 </li>
                 <li>
                   <b>Your household:</b> which household you're in, your role, and, for kids profiles, the age limit.

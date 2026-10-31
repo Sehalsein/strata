@@ -244,7 +244,8 @@ struct ProfileToolbarButton: View {
         Button {
             showSettings = true
         } label: {
-            ProfileAvatar(name: services.store.active?.name ?? "?", seed: services.store.activeID ?? "", size: 30)
+            ProfileAvatar(name: services.store.active?.name ?? "?", seed: services.store.activeID ?? "", size: 30,
+                          imageURL: services.store.active.flatMap(services.store.imageURL(for:)))
         }
         .accessibilityLabel("Settings")
         .sheet(isPresented: $showSettings) { SettingsView() }

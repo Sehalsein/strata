@@ -50,7 +50,9 @@ function avatarFill(id: string): string {
   return AVATAR_FILLS[hash % AVATAR_FILLS.length]!;
 }
 
-export function Avatar({ id, name }: { id: string; name: string }) {
+/** A person's picture (one of the server's, /api/avatars) or their initial. */
+export function Avatar({ id, name, image }: { id: string; name: string; image?: string | null }) {
+  if (image) return <img src={image} alt="" aria-hidden="true" className="size-10 shrink-0 rounded-full" />;
   return (
     <span className="flex size-10 shrink-0 items-center justify-center rounded-full text-base font-semibold text-black/80" aria-hidden="true" style={{ background: avatarFill(id) }}>
       {name.slice(0, 1).toUpperCase()}
@@ -139,7 +141,7 @@ export function MemberList({ selfId }: { selfId: string }) {
           return (
             <li key={m.id} className="hover:bg-muted/30 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 px-4 py-3 transition-colors lg:grid-cols-[minmax(0,1fr)_8rem_11rem_4.5rem_4.5rem]">
               <div className="flex min-w-0 items-center gap-3">
-                <Avatar id={m.userId} name={m.user.name} />
+                <Avatar id={m.userId} name={m.user.name} image={m.user.image} />
                 <div className="min-w-0">
                   <p className="flex min-w-0 items-center gap-2 font-medium">
                     <span className="truncate">{m.user.name}</span>

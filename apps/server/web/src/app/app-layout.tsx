@@ -171,7 +171,7 @@ function AccountMenu() {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="sm" className="gap-1.5" aria-label="Account">
-            <UserRound />
+            {me.user.image ? <img src={me.user.image} alt="" className="size-5 rounded-full" /> : <UserRound />}
             <span className="hidden max-w-32 truncate sm:inline">{name}</span>
             <ChevronsUpDown className="text-muted-foreground size-3.5" />
           </Button>

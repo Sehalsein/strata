@@ -30,7 +30,7 @@ struct WhoIsWatchingView: View {
                     Button {
                         pick(signIn)
                     } label: {
-                        AvatarTile(name: signIn.name, seed: signIn.id,
+                        AvatarTile(name: signIn.name, seed: signIn.id, imageURL: store.imageURL(for: signIn),
                                    detail: showsServers ? store.server(for: signIn)?.name : nil,
                                    isKids: signIn.isKids, isCurrent: isSheet && signIn.id == store.activeID)
                     }
@@ -215,6 +215,7 @@ struct JoinMemberPickerView: View {
                             Task { await join(member) }
                         } label: {
                             AvatarTile(name: member.name, seed: SavedSignIn.id(server: target.info.id, user: member.id),
+                                       imageURL: member.image.flatMap { URL(string: $0, relativeTo: target.url)?.absoluteURL },
                                        isKids: member.isKids, isBusy: joining == member.id)
                         }
                         .buttonStyle(StrataCardStyle())
@@ -294,6 +295,7 @@ private struct AvatarRow<Content: View>: View {
 private struct AvatarTile: View {
     let name: String
     let seed: String
+    var imageURL: URL?
     var detail: String?
     var isKids = false
     var isCurrent = false
@@ -313,7 +315,7 @@ private struct AvatarTile: View {
                     Circle().fill(Theme.surface2).frame(width: size, height: size)
                         .overlay { Image(systemName: systemImage).font(.system(size: size * 0.32, weight: .medium)).foregroundStyle(Theme.ink2) }
                 } else {
-                    ProfileAvatar(name: name, seed: seed, size: size)
+                    ProfileAvatar(name: name, seed: seed, size: size, imageURL: imageURL)
                 }
                 if isBusy { ProgressView() }
             }
