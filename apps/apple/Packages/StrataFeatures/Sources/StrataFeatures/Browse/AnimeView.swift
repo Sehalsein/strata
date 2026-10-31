@@ -34,13 +34,15 @@ struct AnimeView: View {
             #endif
             .padding(.bottom, Metrics.space12)
         }
+        #if !os(tvOS)
+        // The spotlight runs to the top edge, under the bar, like Home's hero.
+        .heroUnderBar(hero != nil)
+        #endif
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
         #if os(tvOS)
         .ignoresSafeArea(edges: .top)
         #else
-        // The spotlight runs to the top edge, under the bar, like Home's hero.
-        .ignoresSafeArea(edges: hero == nil ? [] : .top)
         .navigationTitle("Anime")
         .navigationSubtitle(category?.name ?? "")
         #if os(iOS)

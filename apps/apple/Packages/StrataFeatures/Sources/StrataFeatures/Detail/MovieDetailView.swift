@@ -17,7 +17,7 @@ struct MovieDetailView: View {
         ScrollView {
             switch detail {
             case .loading:
-                ProgressView().frame(maxWidth: .infinity, minHeight: 500)
+                DetailSkeleton()
             case .failed(let message):
                 MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load this movie", message: message, actionTitle: "Try Again") {
                     Task { await load() }
@@ -27,9 +27,9 @@ struct MovieDetailView: View {
                 content(movie)
             }
         }
+        .heroUnderBar()
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
-        .ignoresSafeArea(edges: .top)
         #if os(tvOS)
         .toolbar(.hidden, for: .tabBar)
         // Content loads after the page appears, so focus Play once it's there
@@ -140,7 +140,12 @@ struct MovieDetailView: View {
     private func load() async {
         let result = await services.load { try await $0.movie(tmdbId) }
         if case .loading = result { return }
-        detail = result
+        // Fades in over the skeleton the first time; later reloads swap in place.
+        if case .loading = detail {
+            withAnimation(.easeOut(duration: 0.25)) { detail = result }
+        } else {
+            detail = result
+        }
         if let movie = result.value { inWatchlist = movie.inWatchlist }
     }
 
@@ -181,11 +186,27 @@ struct CastRail: View {
         .frame(width: avatar + 16)
     }
 
+    private var avatar: CGFloat { Self.avatar }
+
     #if os(tvOS)
-    private let avatar: CGFloat = 140
+    static let avatar: CGFloat = 140
     #else
-    private var avatar: CGFloat { Metrics.isPad ? 96 : 72 }
+    @MainActor static var avatar: CGFloat { Metrics.isPad ? 96 : 72 }
     #endif
+}
+
+/// A detail page while it loads, laid out like one (hero, then Cast, then a poster
+/// rail) so the page doesn't jump when it arrives.
+struct DetailSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: Metrics.railGap) {
+            SkeletonHero()
+            SkeletonRail(width: CastRail.avatar, circle: true)
+            SkeletonRail(width: Metrics.posterWidth)
+        }
+        .padding(.bottom, Metrics.space12)
+        .allowsHitTesting(false)
+    }
 }
 
 /// Opens the trailer on YouTube. Labeled where there's room, icon-only on iPhone.
