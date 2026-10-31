@@ -8,6 +8,7 @@ import type { Settings } from "../settings";
 import { detailLabel, type Candidate } from "./resolver";
 import type { TorboxClient, TorboxItem } from "./torbox/client";
 import { ingestItem } from "./torbox/sync";
+import { globalFetch } from "../net";
 
 const log = logger("discovery");
 const RELEASE_TTL_MS = 20 * 60_000;
@@ -61,7 +62,7 @@ export class Discovery {
     private readonly library: Library,
     private readonly settings: () => Settings,
     private readonly torbox: () => TorboxClient | null,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = globalFetch,
     /** Told about every torrent discovery adds, so housekeeping can remove it later. */
     private readonly onAdded: (torrentId: number, hash: string, name?: string) => void = () => {},
     /** Anime id list, for asking Torrentio by Kitsu id (much better anime coverage). */

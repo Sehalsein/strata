@@ -1,5 +1,6 @@
 import { logger } from "../log";
 import { CachedMissing, type ApiCache } from "./apiCache";
+import { globalFetch } from "../net";
 
 const FETCH_TIMEOUT_MS = 8_000;
 const REFRESH_BACKOFF_MS = 60_000;
@@ -141,7 +142,7 @@ export class Tmdb {
     private readonly cache: ApiCache,
     private readonly getKey: () => string | undefined,
     private readonly getLanguage: () => string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = globalFetch,
   ) {}
 
   get configured(): boolean {

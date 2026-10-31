@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { logger } from "../log";
+import { globalFetch } from "../net";
 
 const log = logger("ffmpeg");
 
@@ -31,7 +32,7 @@ export const platformKey = (platform = process.platform, arch = process.arch) =>
  */
 export async function installFfmpeg(
   dataDir: string,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = globalFetch,
   key = platformKey(),
   builds: Record<string, { file: string; sha256: string }> = BUNDLED_FFMPEG.builds,
 ): Promise<boolean> {

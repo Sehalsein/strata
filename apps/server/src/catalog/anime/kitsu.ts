@@ -1,6 +1,7 @@
 import { logger } from "../../log";
 import type { ApiCache } from "../apiCache";
 import type { AnilistMedia } from "./anilist";
+import { globalFetch } from "../../net";
 
 const log = logger("kitsu");
 const BASE = "https://kitsu.app/api/edge";
@@ -43,7 +44,7 @@ export class Kitsu {
 
   constructor(
     private readonly cache: ApiCache,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = globalFetch,
   ) {}
 
   /** Kitsu ids, in rank order, for one rail of series or films. */

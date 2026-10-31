@@ -2,6 +2,7 @@ import { logger } from "../../log";
 import { runtime } from "#runtime";
 import type { ApiCache } from "../apiCache";
 import { shareInFlight } from "../../inFlight";
+import { globalFetch } from "../../net";
 
 const log = logger("anilist");
 const ENDPOINT = "https://graphql.anilist.co";
@@ -103,7 +104,7 @@ export class Anilist {
 
   constructor(
     private readonly cache: ApiCache,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = globalFetch,
   ) {}
 
   async search(query: string): Promise<AnilistMedia[]> {

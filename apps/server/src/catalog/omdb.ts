@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { logger } from "../log";
 import type { ApiCache } from "./apiCache";
+import { globalFetch } from "../net";
 
 const log = logger("omdb");
 const BASE = "https://www.omdbapi.com/";
@@ -52,7 +53,7 @@ export class Omdb {
   constructor(
     private readonly cache: ApiCache,
     private readonly getKey: () => string | undefined,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = globalFetch,
   ) {}
 
   get configured(): boolean {

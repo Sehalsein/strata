@@ -30,6 +30,7 @@ import { createUpdater, type Updater } from "./update";
 import { API_VERSION, VERSION } from "./version";
 import { Households, type Household } from "./household";
 import { runtime } from "#runtime";
+import { globalFetch } from "./net";
 
 const log = logger("server");
 const MINUTE = 60_000;
@@ -76,7 +77,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   const box = SecretBox.load(isCloud ? null : paths.secretKey);
   const settings = new SettingsStore(db, box, serverSettingsSchema, SERVER_SECRET_KEYS);
   await settings.load();
-  const fetchImpl = overrides.fetch ?? fetch;
+  const fetchImpl = overrides.fetch ?? globalFetch;
   const cache = new ApiCache(db);
   const throttle = new Throttle(db);
   const auth = createAuth({ db, secretKey: box.signingKey(), baseURL: process.env.STRATA_PUBLIC_URL || undefined });

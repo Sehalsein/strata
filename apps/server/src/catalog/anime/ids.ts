@@ -3,6 +3,7 @@ import type { ApiCache } from "../apiCache";
 import { join } from "node:path";
 import { logger } from "../../log";
 import { shareInFlight } from "../../inFlight";
+import { globalFetch } from "../../net";
 
 const log = logger("anime");
 
@@ -54,7 +55,7 @@ export class AnimeIds {
    */
   constructor(
     private readonly store: AnimeIdStore,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = globalFetch,
   ) {}
 
   get size() {
