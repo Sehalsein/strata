@@ -18,6 +18,9 @@ interface Env {
   STRATA_PUBLIC_URL?: string;
   TMDB_API_KEY?: string;
   OMDB_API_KEY?: string;
+  /** "Sign in with Google" shows only with both. */
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
 }
 
 interface ExecutionContext {
@@ -38,6 +41,7 @@ function boot(env: Env) {
       ...(env.STRATA_PUBLIC_URL ? { STRATA_PUBLIC_URL: env.STRATA_PUBLIC_URL } : {}),
       ...(env.TMDB_API_KEY ? { TMDB_API_KEY: env.TMDB_API_KEY } : {}),
       ...(env.OMDB_API_KEY ? { OMDB_API_KEY: env.OMDB_API_KEY } : {}),
+      ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET ? { GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET } : {}),
     });
     const { createServices } = await import("./services");
     const { parseArgs } = await import("./config");

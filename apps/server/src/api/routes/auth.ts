@@ -13,7 +13,7 @@ import { retryMessage, SETUP_PER_ADDRESS, STARTS_PER_ADDRESS } from "../../throt
 import { isCloud } from "../../mode";
 import { launchSecret } from "../../platform/launcher";
 import { dashboardUrls } from "../../platform/network";
-import { SIGN_IN_CODE_HEADER, SIGN_IN_CODE_SECONDS, signInCodeSecret, takeIssuedCode } from "../../auth/betterAuth";
+import { SIGN_IN_CODE_HEADER, SIGN_IN_CODE_SECONDS, signInCodeSecret, signInMethods, takeIssuedCode } from "../../auth/betterAuth";
 
 /**
  * Strata's own account routes, around Better Auth (mounted at /api/auth/*, which does
@@ -81,6 +81,8 @@ export const authRoutes = new Hono<Env>()
       setupCodeRequired: !isLoopbackRequest(c),
       /** True when this client may join without a password (see /join). */
       localJoin: await canJoinLocally(c),
+      /** Ways in besides a password that this server is set up for (the sign-in page's buttons). */
+      signIn: (({ google, passkeys }) => ({ google: !!google, passkey: !!passkeys }))(signInMethods()),
     });
   })
 

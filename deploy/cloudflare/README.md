@@ -26,9 +26,16 @@ npx wrangler deploy
 Optional: `TMDB_API_KEY` / `OMDB_API_KEY` as secrets instead of setting them in the
 dashboard, and `STRATA_PUBLIC_URL` (in `wrangler.jsonc` vars) once it has a domain.
 
+Sign in with Google and passkeys are off unless set up, and the sign-in page only shows
+what's on:
+- **Google:** `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (secrets) (a Google Cloud OAuth client,
+  redirect URI `<STRATA_PUBLIC_URL>/api/auth/callback/google`). People connect Google to
+  their account first, from the dashboard's account menu; it never creates accounts.
+- **Passkeys:** `STRATA_PUBLIC_URL` on HTTPS (browsers only allow passkeys there).
+
 On the first request the server creates its tables and logs a **setup code**
 (`npx wrangler tail`): the dashboard asks for it to create the server admin. Then add
-households (Households page) and invite their owners.
+households (the household switcher at the top of the sidebar) and invite their owners.
 
 `STRATA_SECRET_KEY` encrypts the API keys stored in the database. Keep it the same
 across deploys; a different key can't read them (they'd need entering again).

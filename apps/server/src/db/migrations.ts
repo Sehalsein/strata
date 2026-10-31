@@ -212,4 +212,21 @@ export const migrations: string[] = [
   );
   CREATE INDEX play_sessions_organization ON play_sessions(organization_id);
   `,
+  /* 2: passkeys */ `
+  CREATE TABLE passkey (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    public_key TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+    credential_id TEXT NOT NULL,
+    counter INTEGER NOT NULL,
+    device_type TEXT NOT NULL,
+    backed_up BOOLEAN NOT NULL,
+    transports TEXT,
+    created_at TIMESTAMPTZ,
+    aaguid TEXT
+  );
+  CREATE INDEX passkey_user_id ON passkey(user_id);
+  CREATE INDEX passkey_credential_id ON passkey(credential_id);
+  `,
 ];

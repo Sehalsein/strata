@@ -20,6 +20,12 @@ describe("setup and auth", () => {
     return { status: res.status, token: res.headers.get("set-auth-token") };
   };
 
+  test("a server without Google keys or an HTTPS address offers only passwords", async () => {
+    expect((await json(await server.request("/api/info"))).signIn).toEqual({ google: false, passkey: false });
+    expect((await server.request("/api/auth/sign-in/social", { method: "POST", json: { provider: "google" } })).status).not.toBe(200);
+    expect((await server.request("/api/auth/passkey/generate-authenticate-options")).status).toBe(404);
+  });
+
   test("info reports setup required", async () => {
     const info = await json(await server.request("/api/info"));
     expect(info).toMatchObject({ name: "strata", setupRequired: true, apiVersion: 1, mode: "home" });

@@ -1,5 +1,5 @@
-import { Suspense, useState } from "react";
-import { ChevronsUpDown, KeyRound, Lock, LogOut, SearchX, UserPlus, UserRound } from "lucide-react";
+import { Suspense, useEffect, useState } from "react";
+import { ChevronsUpDown, Fingerprint, KeyRound, Lock, LogOut, SearchX, UserPlus, UserRound } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { errorMessage } from "@/lib/api";
@@ -30,6 +30,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { ChangePasswordDialog } from "@/features/auth/change-password-dialog";
+import { SignInMethodsDialog } from "@/features/auth/sign-in-methods-dialog";
 import { HouseholdSwitcher } from "@/features/households/household-switcher";
 import { matchRoute, NAV_GROUPS, routes } from "./routes";
 import { useSession } from "./session";
@@ -137,8 +138,16 @@ function roleLabel(role: string | undefined): string {
 
 /** The signed-in account, the other accounts saved in this browser, and signing out. */
 function AccountMenu() {
-  const { me, isServerAdmin, authChanged, addAccount } = useSession();
+  const { info, me, isServerAdmin, authChanged, addAccount } = useSession();
   const [changing, setChanging] = useState(false);
+  const [methods, setMethods] = useState(false);
+  const hasOtherMethods = !!(info.signIn?.google || info.signIn?.passkey);
+  // Back from connecting Google.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("google") !== "connected") return;
+    history.replaceState(null, "", window.location.pathname);
+    toast.success("Google connected: you can sign in with it now.");
+  }, []);
   const accounts = useQuery({ queryKey: queryKeys.accounts, queryFn: authClient.listAccounts, staleTime: 30_000 });
   const others = (accounts.data ?? []).filter((a) => a.user.id !== me.user.id);
   const current = (accounts.data ?? []).find((a) => a.user.id === me.user.id);
@@ -190,6 +199,11 @@ function AccountMenu() {
           <DropdownMenuItem onSelect={() => setChanging(true)}>
             <KeyRound /> Change password
           </DropdownMenuItem>
+          {hasOtherMethods && (
+            <DropdownMenuItem onSelect={() => setMethods(true)}>
+              <Fingerprint /> Sign-in methods
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onSelect={() => void run(() => (current ? authClient.signOutAccount(current.session.token) : authClient.signOutAll()), others.length ? `Signed ${name} out` : undefined)}
@@ -204,6 +218,7 @@ function AccountMenu() {
         </DropdownMenuContent>
       </DropdownMenu>
       <ChangePasswordDialog open={changing} onOpenChange={setChanging} />
+      {hasOtherMethods && <SignInMethodsDialog open={methods} onOpenChange={setMethods} />}
     </>
   );
 }

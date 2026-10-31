@@ -4,6 +4,7 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { and, eq, gt } from "drizzle-orm";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, bearer, deviceAuthorization, magicLink, multiSession, organization, username } from "better-auth/plugins";
+import { passkey } from "@better-auth/passkey";
 import type { Db } from "../db";
 import * as schema from "../db/schema";
 import { runtime } from "#runtime";
@@ -40,6 +41,25 @@ export function takeIssuedCode(captureId: string): string | undefined {
   return token;
 }
 
+/**
+ * The ways in besides a password, each on only when the server is set up for it, so a
+ * home server shows neither:
+ * - Google: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (redirect URI
+ *   `<address>/api/auth/callback/google`).
+ * - Passkeys: a public HTTPS address (STRATA_PUBLIC_URL); browsers only allow them on HTTPS.
+ */
+export function signInMethods() {
+  const google = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET } : null;
+  let passkeys: { rpID: string; origin: string } | null = null;
+  try {
+    const url = process.env.STRATA_PUBLIC_URL ? new URL(process.env.STRATA_PUBLIC_URL) : null;
+    if (url?.protocol === "https:") passkeys = { rpID: url.hostname, origin: url.origin };
+  } catch {
+    // Not a URL: no passkeys.
+  }
+  return { google, passkeys };
+}
+
 export interface AuthOptions {
   db: Db;
   /** The server's secret key (base64); Better Auth's signing secret is derived from it. */
@@ -71,6 +91,7 @@ export interface AuthOptions {
  */
 export function createAuth(options: AuthOptions) {
   const db = options.db;
+  const methods = signInMethods();
   return betterAuth({
     appName: "Strata",
     hooks: {
@@ -169,9 +190,17 @@ export function createAuth(options: AuthOptions) {
         member: schema.member,
         invitation: schema.invitation,
         deviceCode: schema.deviceCode,
+        passkey: schema.passkey,
         rateLimit: schema.rateLimit,
       },
     }),
+    // Google signs in only an account that connected it while signed in (Settings ›
+    // Account): it never makes an account, nor joins one by matching email (many Strata
+    // accounts have none), and the Google address needn't be the account's.
+    socialProviders: methods.google ? { google: { ...methods.google, disableSignUp: true, disableImplicitSignUp: true } } : {},
+    account: {
+      accountLinking: { enabled: true, disableImplicitLinking: true, allowDifferentEmails: true },
+    },
     emailAndPassword: {
       enabled: true,
       // Open only to someone with a pending invitation (see `hooks`); the first account
@@ -259,6 +288,7 @@ export function createAuth(options: AuthOptions) {
         },
       }),
       multiSession({ maximumSessions: 8 }),
+      ...(methods.passkeys ? [passkey({ rpID: methods.passkeys.rpID, rpName: "Strata", origin: methods.passkeys.origin })] : []),
       bearer(),
       deviceAuthorization({
         verificationUri: "/link",

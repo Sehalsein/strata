@@ -30,6 +30,13 @@ create the admin account.
 Optional: `TMDB_API_KEY`, `TORBOX_API_KEY`, `OMDB_API_KEY` set keys from the
 environment instead of the dashboard.
 
+Sign in with Google and passkeys are off unless set up, and the sign-in page only shows
+what's on:
+- **Google:** `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (a Google Cloud OAuth client,
+  redirect URI `<STRATA_PUBLIC_URL>/api/auth/callback/google`). People connect Google to
+  their account first, from the dashboard's account menu; it never creates accounts.
+- **Passkeys:** `STRATA_PUBLIC_URL` on HTTPS (browsers only allow passkeys there).
+
 Put HTTPS in front (the host's proxy usually does). Several containers can share one
 database: migrations take a lock, and sign-ins, settings, TV codes, throttling and the
 catalog cache all live in Postgres. Background jobs (TorBox sync) run in each container,

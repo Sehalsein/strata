@@ -1,7 +1,8 @@
 import { createAuthClient } from "better-auth/react";
 import { adminClient, deviceAuthorizationClient, multiSessionClient, organizationClient, usernameClient } from "better-auth/client/plugins";
+import { passkeyClient } from "@better-auth/passkey/client";
 import { ApiError, configureApiAuth, request } from "./api";
-import type { AuthSession, DeviceAccount, DeviceCodeInfo, FullHousehold, HouseholdRole, HouseholdSummary, Invitation, Me } from "./types";
+import type { AuthSession, SavedPasskey, DeviceAccount, DeviceCodeInfo, FullHousehold, HouseholdRole, HouseholdSummary, Invitation, Me } from "./types";
 
 /*
  * Every auth/session concern lives here. Accounts, sign-in, households (Better Auth
@@ -13,7 +14,7 @@ import type { AuthSession, DeviceAccount, DeviceCodeInfo, FullHousehold, Househo
 
 const ba = createAuthClient({
   baseURL: `${window.location.origin}/api/auth`,
-  plugins: [usernameClient(), organizationClient(), adminClient(), multiSessionClient(), deviceAuthorizationClient()],
+  plugins: [usernameClient(), organizationClient(), adminClient(), multiSessionClient(), deviceAuthorizationClient(), passkeyClient()],
 });
 
 /** A Better Auth error: `{message, code}`, or the device flow's `{error, error_description}`. */
@@ -109,6 +110,53 @@ export const authClient = {
   async signIn({ username, password }: { username: string; password: string }) {
     if (username.includes("@")) await call(ba.signIn.email({ email: username, password }));
     else await call(ba.signIn.username({ username, password }));
+  },
+
+  /**
+   * Signs in with Google (only an account that connected it): leaves for Google and comes
+   * back to the dashboard, with `?auth_error=` when it didn't work.
+   */
+  async signInWithGoogle() {
+    const back = `${window.location.origin}/`;
+    await call(ba.signIn.social({ provider: "google", callbackURL: back, errorCallbackURL: `${back}?auth_error=google` }) as Promise<BaResult<unknown>>);
+  },
+
+  /** Signs in with a passkey saved on this device or a phone nearby. */
+  async signInWithPasskey() {
+    await call(ba.signIn.passkey() as Promise<BaResult<unknown>>);
+  },
+
+  // Sign-in methods of the signed-in account
+
+  /** Whether the account has Google connected. */
+  async googleConnected(): Promise<boolean> {
+    const accounts = await call(ba.listAccounts() as Promise<BaResult<{ providerId: string }[]>>);
+    return accounts.some((a) => a.providerId === "google");
+  },
+
+  /** Connects Google to the signed-in account (leaves for Google and comes back). */
+  async connectGoogle() {
+    await call(ba.linkSocial({ provider: "google", callbackURL: `${window.location.origin}/?google=connected` }) as Promise<BaResult<unknown>>);
+  },
+
+  async disconnectGoogle() {
+    // Better Auth unlinks by its own id for the connection (not Google's account id).
+    const accounts = await call(ba.listAccounts() as Promise<BaResult<{ id: string; providerId: string }[]>>);
+    const google = accounts.find((a) => a.providerId === "google");
+    if (google) await call(ba.unlinkAccount({ accountId: google.id }) as Promise<BaResult<unknown>>);
+  },
+
+  async listPasskeys(): Promise<SavedPasskey[]> {
+    return call(ba.passkey.listUserPasskeys() as Promise<BaResult<SavedPasskey[]>>);
+  },
+
+  /** Saves a passkey for the signed-in account (the browser asks to create one). */
+  async addPasskey(name: string) {
+    await call(ba.passkey.addPasskey({ name }) as Promise<BaResult<unknown>>);
+  },
+
+  async deletePasskey(id: string) {
+    await call(ba.passkey.deletePasskey({ id }) as Promise<BaResult<unknown>>);
   },
 
   /** Joins by invitation: a new account, the invitation accepted, its household opened. */

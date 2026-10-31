@@ -12,6 +12,7 @@
     "package:mac": "bun scripts/package-mac.ts"
   },
   "dependencies": {
+    "@better-auth/passkey": "1.7.9",
     "@electric-sql/pglite": "0.5.14",
     "@neondatabase/serverless": "1.2.0",
     "better-auth": "1.7.9",

@@ -14,6 +14,16 @@ export interface ServerInfo {
   localJoin?: boolean;
   /** "cloud": hosted, without local folders, home-network join, Bonjour or self-update. */
   mode: "home" | "cloud";
+  /** Ways in besides a password that this server is set up for. */
+  signIn?: { google: boolean; passkey: boolean };
+}
+
+/** A passkey saved for the signed-in account. */
+export interface SavedPasskey {
+  id: string;
+  name?: string | null;
+  createdAt: string;
+  deviceType: string;
 }
 
 export type HouseholdRole = "owner" | "admin" | "member";

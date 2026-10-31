@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react";
-import { LoaderCircle } from "lucide-react";
-import { ApiError, errorMessage } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { KeyRound, LoaderCircle } from "lucide-react";
+import { api, ApiError, errorMessage } from "@/lib/api";
+import { queryKeys } from "@/lib/query";
 import { authClient } from "@/lib/auth-client";
 import { BrandMark } from "@/components/brand-mark";
 import { ModeToggle } from "@/components/mode-toggle";
@@ -58,8 +60,33 @@ export function AuthScreen({ children }: { children: ReactNode }) {
 export function SignInForm({ onSignedIn, onCancel, submitLabel = "Sign in" }: { onSignedIn: () => void | Promise<void>; onCancel?: () => void; submitLabel?: string }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<{ message: string; rateLimited: boolean } | null>(null);
+  const [error, setError] = useState<{ message: string; rateLimited: boolean } | null>(() => {
+    // Back from Google without a sign-in (an account that hasn't connected it, say).
+    if (!new URLSearchParams(window.location.search).has("auth_error")) return null;
+    history.replaceState(null, "", window.location.pathname);
+    return { message: "That Google account isn't connected to a Strata account. Sign in with your password, then connect Google from the account menu.", rateLimited: false };
+  });
   const [pending, setPending] = useState(false);
+  const [other, setOther] = useState<"google" | "passkey" | null>(null);
+  // Google and passkeys show only where the server is set up for them.
+  const info = useQuery({ queryKey: queryKeys.info, queryFn: api.info, staleTime: 60_000 });
+  const methods = info.data?.signIn;
+
+  const signInWith = async (method: "google" | "passkey") => {
+    setOther(method);
+    setError(null);
+    try {
+      if (method === "google") {
+        await authClient.signInWithGoogle(); // leaves the page
+        return;
+      }
+      await authClient.signInWithPasskey();
+      await onSignedIn();
+    } catch (err) {
+      setError({ message: errorMessage(err), rateLimited: err instanceof ApiError && err.status === 429 });
+    }
+    setOther(null);
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,6 +120,23 @@ export function SignInForm({ onSignedIn, onCancel, submitLabel = "Sign in" }: { 
           {pending && <LoaderCircle className="animate-spin" />}
           {pending ? "Signing in…" : submitLabel}
         </Button>
+        {(methods?.google || methods?.passkey) && (
+          <>
+            <div className="text-muted-foreground flex items-center gap-3 text-xs">
+              <span className="bg-border h-px flex-1" /> or <span className="bg-border h-px flex-1" />
+            </div>
+            {methods.passkey && (
+              <Button type="button" variant="outline" className="w-full" onClick={() => void signInWith("passkey")} disabled={!!other || pending}>
+                {other === "passkey" ? <LoaderCircle className="animate-spin" /> : <KeyRound />} Sign in with a passkey
+              </Button>
+            )}
+            {methods.google && (
+              <Button type="button" variant="outline" className="w-full" onClick={() => void signInWith("google")} disabled={!!other || pending}>
+                {other === "google" ? <LoaderCircle className="animate-spin" /> : <GoogleMark />} Continue with Google
+              </Button>
+            )}
+          </>
+        )}
         {onCancel && (
           <Button type="button" variant="ghost" className="w-full" onClick={onCancel}>
             Cancel
@@ -100,5 +144,17 @@ export function SignInForm({ onSignedIn, onCancel, submitLabel = "Sign in" }: { 
         )}
       </FieldGroup>
     </form>
+  );
+}
+
+/** Google's "G", for its sign-in button. */
+function GoogleMark() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="size-4">
+      <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.7Z" />
+      <path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.3v3.1A12 12 0 0 0 12 24Z" />
+      <path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6h-4a12 12 0 0 0 0 10.8l4-3.1Z" />
+      <path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c.9-2.9 3.6-4.9 6.7-4.9Z" />
+    </svg>
   );
 }
