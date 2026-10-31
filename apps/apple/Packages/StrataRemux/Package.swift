@@ -15,7 +15,8 @@ let package = Package(
     ],
     targets: [
         .binaryTarget(name: "FFmpeg", path: "Frameworks/FFmpeg.xcframework"),
-        .target(name: "StrataRemux", dependencies: ["FFmpeg"]),
+        // The privacy manifest covers FFmpeg too (its file protocol references fstat/lstat).
+        .target(name: "StrataRemux", dependencies: ["FFmpeg"], resources: [.copy("Resources/PrivacyInfo.xcprivacy")]),
         .testTarget(name: "StrataRemuxTests", dependencies: ["StrataRemux"], resources: [.copy("Fixtures")]),
     ]
 )

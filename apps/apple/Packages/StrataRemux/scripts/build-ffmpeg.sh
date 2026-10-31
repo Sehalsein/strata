@@ -143,6 +143,23 @@ HDR
   <key>MinimumOSVersion</key><string>$min</string>
 </dict></plist>
 PLIST
+  # Apple's required-reason APIs: libavformat's file protocol references fstat/lstat
+  # (file sizes; only files in the app's own container are ever opened). No data collected.
+  cat >"$fw/PrivacyInfo.xcprivacy" <<'PRIVACY'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>NSPrivacyTracking</key><false/>
+  <key>NSPrivacyTrackingDomains</key><array/>
+  <key>NSPrivacyCollectedDataTypes</key><array/>
+  <key>NSPrivacyAccessedAPITypes</key><array>
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key><string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key><array><string>C617.1</string></array>
+    </dict>
+  </array>
+</dict></plist>
+PRIVACY
   FRAMEWORK_ARGS+=(-framework "$fw")
 done
 

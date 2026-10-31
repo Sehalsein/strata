@@ -15,7 +15,8 @@ let package = Package(
     targets: [
         .target(
             name: "StrataPlayerUI",
-            dependencies: ["StrataKit", "StrataDesign", "StrataRemux"]
+            dependencies: ["StrataKit", "StrataDesign", "StrataRemux"],
+            resources: [.copy("Resources/PrivacyInfo.xcprivacy")]
         ),
         .testTarget(name: "StrataPlayerUITests", dependencies: ["StrataPlayerUI"]),
     ]

@@ -154,6 +154,10 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+                    if let server = store.activeServer {
+                        PrivacyPolicyRow(server: server.url)
+                    }
+                    AcknowledgementsRow()
                 } header: {
                     Text("App")
                 }
