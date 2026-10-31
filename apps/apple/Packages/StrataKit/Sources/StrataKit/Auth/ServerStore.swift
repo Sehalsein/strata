@@ -257,6 +257,27 @@ public final class ServerStore {
         }
     }
 
+    /// Signs in with a member's QR code (from the server's dashboard): saves the sign-in
+    /// and makes it active. The device can watch, not administer.
+    @discardableResult
+    public func signIn(code: String, url: URL) async -> Bool {
+        isAuthenticating = true
+        lastError = nil
+        defer { isAuthenticating = false }
+        do {
+            let client = StrataClient(baseURL: url, session: session, cacheTTL: 0)
+            let info = try await client.info()
+            let token = try await client.signIn(code: code)
+            try await adopt(token: token, url: url, info: info)
+            Log.auth.info("signIn by QR code ok server=\(info.id, privacy: .public)")
+            return true
+        } catch {
+            lastError = StrataError.wrap(error).message
+            Log.auth.error("signIn by QR code failed: \(StrataError.wrap(error).message, privacy: .public)")
+            return false
+        }
+    }
+
     /// Finishes a sign-in that produced `token` some other way (a TV approved by code from
     /// a phone): saves it and makes it active.
     @discardableResult

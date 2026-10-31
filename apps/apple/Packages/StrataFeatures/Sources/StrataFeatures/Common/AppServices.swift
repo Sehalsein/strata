@@ -173,6 +173,14 @@ public extension Array where Element == Provider {
     var kinds: [ProviderKind] { isEmpty ? [] : [.library] }
 }
 
+/// A member's sign-in QR code (shown in the server's dashboard), opened as
+/// `strata://sign-in?server=<address>&code=<code>`.
+public struct SignInCodeRequest: Identifiable, Hashable {
+    public let server: URL
+    public let code: String
+    public var id: String { code }
+}
+
 /// A TV's sign-in code to approve, from a scanned QR code or typed in Settings.
 public struct LinkRequest: Identifiable, Hashable {
     public let code: String
@@ -191,7 +199,8 @@ public struct LinkRequest: Identifiable, Hashable {
 /// Handles `strata://` deep links:
 /// `strata://movie/<id>`, `strata://show/<id>`,
 /// `strata://watch/movie/<id>`, `strata://watch/episode/<show>/<season>/<episode>`,
-/// `strata://link?user_code=<code>&server=<id or address>` (approve a TV's sign-in), and
+/// `strata://link?user_code=<code>&server=<id or address>` (approve a TV's sign-in),
+/// `strata://sign-in?server=<address>&code=<code>` (a member's QR code: sign in as them), and
 /// the TV's own `https://<server>/link?user_code=<code>` when it opens the app.
 @MainActor
 @Observable
@@ -199,6 +208,7 @@ public final class AppCoordinator {
     public var pendingRoute: Route?
     public var pendingWatch: PlaybackTarget?
     public var pendingLink: LinkRequest?
+    public var pendingSignIn: SignInCodeRequest?
 
     public init() {}
 
@@ -223,6 +233,11 @@ public final class AppCoordinator {
             if kind == "episode", parts.count == 3 { pendingWatch = .episode(show: parts[0], season: parts[1], episode: parts[2]) }
         case "link":
             if let code = value("user_code") ?? value("code") { link(code, server: value("server")) }
+        case "sign-in":
+            if let code = value("code"), !code.isEmpty, let server = value("server").flatMap(URL.init(string:)),
+               server.scheme == "http" || server.scheme == "https", server.host != nil {
+                pendingSignIn = SignInCodeRequest(server: server, code: code)
+            }
         default: break
         }
     }

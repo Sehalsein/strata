@@ -67,6 +67,31 @@ describe("setup and auth", () => {
     expect((await server.request("/api/admin/settings", { token: bob })).status).toBe(403);
   });
 
+  test("a member's QR sign-in code signs a device in as them, once, to watch", async () => {
+    const full = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const bob = full.members.find((m: any) => m.user.email === "bob@example.com");
+    const bobsPhone = (await signIn("bob", "bobs-password")).token!;
+    const issued = await json(await server.request(`/api/household/members/${bob.id}/sign-in-code`, { method: "POST", token }));
+    expect(issued.link).toStartWith("strata://sign-in?");
+    const code = new URL(issued.link).searchParams.get("code")!;
+    const verify = () => server.request(`/api/auth/magic-link/verify?token=${encodeURIComponent(code)}`);
+    const signedIn = await json(await verify());
+    const me = await json(await server.request("/api/me", { token: signedIn.token }));
+    expect(me).toMatchObject({ viewerOnly: true, user: { username: "bob" }, household: { id: full.id } });
+    // Once only.
+    const again = await verify();
+    expect(again.status).not.toBe(200);
+    expect(again.headers.get("set-auth-token")).toBeNull();
+    // Nobody asks for a code from outside; members can't show someone else's.
+    expect((await server.request("/api/auth/sign-in/magic-link", { method: "POST", json: { email: "bob@example.com" } })).status).toBe(404);
+    const admin = full.members.find((m: any) => m.user.id !== bob.user.id);
+    expect((await server.request(`/api/household/members/${admin.id}/sign-in-code`, { method: "POST", token: signedIn.token })).status).toBe(403);
+    // Bob's password and other sign-ins still work (Better Auth wipes both for an
+    // account whose email isn't marked confirmed).
+    expect((await server.request("/api/me", { token: bobsPhone })).status).toBe(200);
+    expect((await signIn("bob", "bobs-password")).status).toBe(200);
+  });
+
   test("households don't see each other's library", async () => {
     const mine = await server.services.households.get((await json(await server.request("/api/me", { token }))).household.id);
     await mine.library.upsert({ provider: "local", ref: "/m/Only.Mine.2020.mkv", name: "Only.Mine.2020.mkv", size: 1, parsed: { title: "Only Mine", kind: "movie" } as never });

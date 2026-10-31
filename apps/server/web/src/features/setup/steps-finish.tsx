@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, CircleCheck, CircleDashed, Copy, LayoutDashboard, Library, LoaderCircle, RefreshCw, Tv, UserPlus } from "lucide-react";
-import { renderSVG } from "uqr";
+import { QrCode } from "@/components/qr-code";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
@@ -49,12 +49,6 @@ function useServerAddress() {
   // Opened via localhost: other devices can't use that, so prefer the LAN address.
   const isLoopback = /^https?:\/\/(localhost|127\.|\[::1\])/.test(here);
   return { address: isLoopback ? (lan ?? here) : here, lan, loading: status.isPending && isLoopback };
-}
-
-function QrCode({ value }: { value: string }) {
-  const svg = useMemo(() => renderSVG(value, { border: 2, pixelSize: 6, blackColor: "#000", whiteColor: "#fff" }), [value]);
-  // uqr builds the SVG from the QR matrix itself; nothing user-supplied is interpolated as markup.
-  return <div className="size-44 overflow-hidden rounded-lg bg-white p-1 [&>svg]:h-full [&>svg]:w-full" role="img" aria-label={`QR code for ${value}`} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
 export function DevicesStep({ info, onNext, onBack }: StepProps) {

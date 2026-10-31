@@ -13,6 +13,7 @@ import type {
   UpdateStatus,
   ContentLimit,
   HouseholdDevice,
+  SignInCode,
 } from "./types";
 
 export class ApiError extends Error {
@@ -86,6 +87,10 @@ export const api = {
   /** A member's kids flag and content limit in the active household (its admins). */
   updateMember: (memberId: string, patch: { contentLimit?: ContentLimit; isKids?: boolean }) =>
     request<{ id: string; contentLimit: ContentLimit; isKids: boolean }>("PATCH", `/household/members/${encodeURIComponent(memberId)}`, patch),
+
+  /** A member's sign-in QR code (works once, for a minute; ask again every 30 seconds). */
+  signInCode: (memberId: string) =>
+    request<SignInCode>("POST", `/household/members/${encodeURIComponent(memberId)}/sign-in-code`),
 
   status: () => request<AdminStatus>("GET", "/admin/status"),
   settings: () => request<SettingsResponse>("GET", "/admin/settings"),

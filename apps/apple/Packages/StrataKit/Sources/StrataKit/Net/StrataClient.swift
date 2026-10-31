@@ -123,6 +123,16 @@ public final class StrataClient: Sendable {
         return res.token
     }
 
+    /// Signs in with a member's QR code from the dashboard (Better Auth's magic link):
+    /// returns the new session's token. Each code works once, for about a minute.
+    public func signIn(code: String) async throws -> String {
+        let (data, response) = try await rawData(request("GET", "/api/auth/magic-link/verify", query: [URLQueryItem(name: "token", value: code)]))
+        // A used or expired code answers with a redirect to the dashboard, not JSON.
+        if (200..<300).contains(response.statusCode), let res = try? JSONDecoder().decode(TokenResponse.self, from: data) { return res.token }
+        if response.statusCode >= 400 { throw httpError(response.statusCode, data) }
+        throw StrataError(kind: .http, status: 410, message: "That code has expired or was already used. Show a new one and scan it again.")
+    }
+
     // MARK: Sign-in by code (RFC 8628: a TV shows a code; a signed-in phone approves it)
 
     /// The client id the server accepts for the Apple TV app.

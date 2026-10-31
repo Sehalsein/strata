@@ -1,9 +1,9 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { and, eq, gt } from "drizzle-orm";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { admin, bearer, deviceAuthorization, multiSession, organization, username } from "better-auth/plugins";
+import { admin, bearer, deviceAuthorization, magicLink, multiSession, organization, username } from "better-auth/plugins";
 import type { Db } from "../db";
 import * as schema from "../db/schema";
 import { runtime } from "#runtime";
@@ -15,6 +15,30 @@ export const CLIENT_ADDRESS_HEADER = "x-strata-client-address";
 
 /** The client id the Apple TV app sends when it asks for a sign-in code. */
 export const TV_CLIENT_ID = "strata-apple-tv";
+
+/** How long a sign-in QR code works; the dashboard shows a new one every 30 seconds. */
+export const SIGN_IN_CODE_SECONDS = 60;
+
+/** Where a sign-in code's household is noted until the code is used. */
+const signInCodeNote = (token: string) => `sign-in-code:${createHash("sha256").update(token).digest("base64url")}`;
+
+/**
+ * Sign-in codes made in this process, by the id the caller passed: the magic-link plugin
+ * hands its token to `sendMagicLink`, which keeps it here for the caller instead of
+ * mailing it (nothing here sends mail).
+ */
+const issuedCodes = new Map<string, string>();
+
+/** Takes the code `issueSignInCode`'s call to the plugin produced. */
+/** Marks the server's own call for a code (a random secret, made per process). */
+export const SIGN_IN_CODE_HEADER = "x-strata-sign-in-code";
+export const signInCodeSecret = crypto.randomUUID();
+
+export function takeIssuedCode(captureId: string): string | undefined {
+  const token = issuedCodes.get(captureId);
+  issuedCodes.delete(captureId);
+  return token;
+}
 
 export interface AuthOptions {
   db: Db;
@@ -55,6 +79,11 @@ export function createAuth(options: AuthOptions) {
         if (process.env.STRATA_DEMO === "1" && /^\/(change-password|update-user|change-email|delete-user|set-password|admin\/|organization\/(create|update|delete|invite-member|remove-member|update-member-role|leave|cancel-invitation)$)/.test(ctx.path)) {
           throw new APIError("FORBIDDEN", { message: "The demo can't be changed." });
         }
+        // Sign-in codes are only made by the server (api/routes/auth.ts, for a household's
+        // admins or the member themself), never asked for from outside.
+        if (ctx.path === "/sign-in/magic-link" && ctx.headers?.get(SIGN_IN_CODE_HEADER) !== signInCodeSecret) {
+          throw new APIError("NOT_FOUND", { message: "Not found" });
+        }
         if (ctx.path !== "/sign-up/email") return;
         // The invitation's id is the proof (it's in the link; no mail is sent): an email
         // alone, which anyone might know, doesn't open sign-up.
@@ -84,6 +113,24 @@ export function createAuth(options: AuthOptions) {
           if (code && household) {
             await adapter.createVerificationValue({ identifier: `tv-household:${code.deviceCode}`, value: household, expiresAt: new Date(Date.now() + 15 * 60_000) });
           }
+          return;
+        }
+        // A sign-in code (a member's QR code) opens the household it was made in, to watch:
+        // the device can't administer. A code for someone no longer in it signs nobody in.
+        if (ctx.path === "/magic-link/verify") {
+          const created = ctx.context.newSession;
+          const token = String((ctx.query as { token?: unknown } | undefined)?.token ?? "");
+          if (!created || !token) return;
+          const noted = await adapter.findVerificationValue(signInCodeNote(token));
+          if (noted) await adapter.deleteVerificationByIdentifier(noted.identifier).catch(() => {});
+          const [stillMember] = noted
+            ? await db.select({ id: schema.member.id }).from(schema.member).where(and(eq(schema.member.organizationId, noted.value), eq(schema.member.userId, created.user.id)))
+            : [];
+          if (!noted || !stillMember) {
+            await adapter.deleteSession(created.session.token);
+            throw new APIError("FORBIDDEN", { message: "That code is no longer valid. Ask for a new one." });
+          }
+          await adapter.updateSession(created.session.token, { activeOrganizationId: noted.value, viewerOnly: true });
           return;
         }
         // …and applied when the TV picks up its sign-in, which can watch, never administer.
@@ -189,6 +236,26 @@ export function createAuth(options: AuthOptions) {
               isKids: { type: "boolean", required: false, defaultValue: false, input: false },
             },
           },
+        },
+      }),
+      // Sign-in QR codes: a household's admin (or the member) shows a member's code in the
+      // dashboard and a device scans it to sign in as them. Each code works once, for a
+      // minute; the token goes back to the dashboard instead of by mail. Only existing
+      // accounts can use one.
+      magicLink({
+        expiresIn: SIGN_IN_CODE_SECONDS,
+        disableSignUp: true,
+        storeToken: "hashed",
+        rateLimit: { window: 60, max: 30 },
+        sendMagicLink: async ({ token, metadata }, ctx) => {
+          const { captureId, organizationId } = (metadata ?? {}) as { captureId?: string; organizationId?: string };
+          if (!captureId || !organizationId || !ctx) return;
+          await ctx.context.internalAdapter.createVerificationValue({
+            identifier: signInCodeNote(token),
+            value: organizationId,
+            expiresAt: new Date(Date.now() + SIGN_IN_CODE_SECONDS * 1000),
+          });
+          issuedCodes.set(captureId, token);
         },
       }),
       multiSession({ maximumSessions: 8 }),

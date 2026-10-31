@@ -12,6 +12,8 @@ import { checkSetupCode, clearSetupCode } from "../../setupCode";
 import { retryMessage, SETUP_PER_ADDRESS, STARTS_PER_ADDRESS } from "../../throttle";
 import { isCloud } from "../../mode";
 import { launchSecret } from "../../platform/launcher";
+import { dashboardUrls } from "../../platform/network";
+import { SIGN_IN_CODE_HEADER, SIGN_IN_CODE_SECONDS, signInCodeSecret, takeIssuedCode } from "../../auth/betterAuth";
 
 /**
  * Strata's own account routes, around Better Auth (mounted at /api/auth/*, which does
@@ -48,6 +50,19 @@ async function sessionFor(c: Context<Env>, userId: string, organizationId: strin
     ipAddress: clientAddress(c),
   });
   return created.token;
+}
+
+/**
+ * The address a device should use for this server: the public one when set, else the one
+ * this page was opened at, unless that's this machine itself (then its home-network address).
+ */
+function addressForDevices(c: Context<Env>): string {
+  if (process.env.STRATA_PUBLIC_URL) return process.env.STRATA_PUBLIC_URL.replace(/\/+$/, "");
+  const url = new URL(c.req.url);
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  if (host !== "localhost" && host !== "::1" && !host.startsWith("127.")) return url.origin;
+  const { host: bind, port } = c.var.services.config;
+  return dashboardUrls(bind, port).find((u) => !/\/\/(localhost|127\.|\[::1\])/.test(u)) ?? url.origin;
 }
 
 export const authRoutes = new Hono<Env>()
@@ -151,6 +166,50 @@ export const authRoutes = new Hono<Env>()
           .where(and(eq(member.organizationId, organizationId), eq(member.userId, me.id)))
       : [];
     return c.json({ user: me, viewerOnly, household: household ?? null });
+  })
+
+  // A member's sign-in QR code: a device that scans it signs in as them, in this household,
+  // able to watch. Works once, for a minute; the dashboard asks for a new one every 30
+  // seconds. For the household's admins, and for the member themself.
+  .post("/household/members/:memberId/sign-in-code", requireAuth, requireHousehold, async (c) => {
+    const s = c.var.services;
+    const householdId = c.var.household.organizationId;
+    const [row] = await s.db
+      .select({ userId: member.userId, name: user.name, email: user.email, emailVerified: user.emailVerified })
+      .from(member)
+      .innerJoin(user, eq(user.id, member.userId))
+      .where(and(eq(member.id, c.req.param("memberId")), eq(member.organizationId, householdId)));
+    if (!row) throw new HTTPException(404, { message: "No such member" });
+    const me = c.var.session;
+    const roles = (me.role ?? "").split(",");
+    if (row.userId !== me.user.id && (me.viewerOnly || !(roles.includes("owner") || roles.includes("admin")))) {
+      throw new HTTPException(403, { message: "Only the household's owner and admins can show someone else's code." });
+    }
+    // Better Auth wipes the password of an account whose email isn't marked confirmed when
+    // a magic link signs it in. Strata never sends mail (people join by invitation link),
+    // so its accounts count as confirmed.
+    if (!row.emailVerified) await s.db.update(user).set({ emailVerified: true }).where(eq(user.id, row.userId));
+    const captureId = crypto.randomUUID();
+    // As a request to this server (Better Auth takes its address from it), marked as ours.
+    const origin = new URL(c.req.url).origin;
+    await s.auth.handler(
+      new Request(`${origin}/api/auth/sign-in/magic-link`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin, [SIGN_IN_CODE_HEADER]: signInCodeSecret },
+        body: JSON.stringify({ email: row.email, metadata: { captureId, organizationId: householdId } }),
+      }),
+    );
+    const token = takeIssuedCode(captureId);
+    if (!token) throw new HTTPException(500, { message: "Couldn't make a sign-in code" });
+    const server = addressForDevices(c);
+    return c.json({
+      name: row.name,
+      server,
+      expiresAt: new Date(Date.now() + SIGN_IN_CODE_SECONDS * 1000).toISOString(),
+      refreshInSeconds: 30,
+      /** What the QR code holds: the Strata apps (and the iPhone's camera) open it. */
+      link: `strata://sign-in?${new URLSearchParams({ server, code: token })}`,
+    });
   })
 
   // A member's settings in this household (Better Auth keeps the member; these are Strata's).

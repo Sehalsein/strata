@@ -75,6 +75,16 @@ export interface AuthSession {
   viewerOnly?: boolean | null;
 }
 
+/** POST /api/household/members/:id/sign-in-code: what a member's QR code holds. */
+export interface SignInCode {
+  name: string;
+  server: string;
+  expiresAt: string;
+  refreshInSeconds: number;
+  /** strata://sign-in?server=…&code=… */
+  link: string;
+}
+
 /** GET /api/admin/devices: a device signed in to the household, and whose it is. */
 export interface HouseholdDevice {
   id: string;

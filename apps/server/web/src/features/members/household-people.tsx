@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, LoaderCircle, Mail, Trash, UserPlus, Users, X } from "lucide-react";
+import { Check, Copy, LoaderCircle, Mail, QrCode as QrCodeIcon, Trash, UserPlus, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { authClient, invitationLink } from "@/lib/auth-client";
@@ -8,6 +8,7 @@ import { relativeTime } from "@/lib/format";
 import { queryKeys, useApiMutation } from "@/lib/query";
 import type { ContentLimit, HouseholdRole, Invitation, Member } from "@/lib/types";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { SignInCodeDialog } from "./sign-in-code-dialog";
 import { EmptyState, ErrorAlert, InlineError } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,6 +66,7 @@ export function useHousehold() {
 export function MemberList({ selfId }: { selfId: string }) {
   const household = useHousehold();
   const [removing, setRemoving] = useState<Member | null>(null);
+  const [showingCode, setShowingCode] = useState<{ id: string; name: string } | null>(null);
   const setRole = useApiMutation(({ m, role }: { m: Member; role: HouseholdRole }) => authClient.setMemberRole(m.id, role), {
     success: (_, { m, role }) => `${m.user.name}'s role is now ${ROLE_LABELS[role].label}`,
     invalidate: [queryKeys.household],
@@ -141,6 +143,9 @@ export function MemberList({ selfId }: { selfId: string }) {
                     Kids
                   </Label>
                 </div>
+                <Button variant="ghost" size="sm" onClick={() => setShowingCode({ id: m.id, name: m.user.name })} title={`A QR code that signs a phone or iPad in as ${m.user.name}`}>
+                  <QrCodeIcon /> Sign-in code
+                </Button>
                 {!self && (
                   <Button variant="ghost" size="icon-sm" className="text-destructive" onClick={() => setRemoving(m)} aria-label={`Remove ${m.user.name}`}>
                     <Trash />
@@ -151,6 +156,7 @@ export function MemberList({ selfId }: { selfId: string }) {
           );
         })}
       </ul>
+      <SignInCodeDialog member={showingCode} onOpenChange={(o) => !o && setShowingCode(null)} />
       <ConfirmDialog
         open={!!removing}
         onOpenChange={(o) => !o && setRemoving(null)}

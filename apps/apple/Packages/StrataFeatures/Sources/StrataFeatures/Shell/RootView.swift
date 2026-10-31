@@ -61,6 +61,10 @@ public struct RootView: View {
         .fullScreenCover(item: Binding(get: { services.watching }, set: { services.watching = $0 })) { request in
             WatchView(request: request)
         }
+        // A member's sign-in QR code was scanned: confirm, then sign in as them.
+        .sheet(item: Binding(get: { services.coordinator.pendingSignIn }, set: { services.coordinator.pendingSignIn = $0 })) { request in
+            SignInCodeView(request: request)
+        }
         #if os(iOS)
         // A TV's sign-in link was opened: confirm and approve it.
         .sheet(item: Binding(get: { services.store.signIns.isEmpty ? nil : services.coordinator.pendingLink },
