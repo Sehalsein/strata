@@ -1,0 +1,26 @@
+// The cloud Strata server on Cloudflare Workers (see README.md here).
+//   cd deploy/cloudflare
+//   npx wrangler secret put DATABASE_URL        # Neon's connection string
+//   npx wrangler secret put STRATA_SECRET_KEY   # openssl rand -base64 32 (keep it safe)
+//   npx wrangler deploy
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "strata",
+  "main": "../../apps/server/src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  // node:crypto, node:async_hooks and process.env, which the server uses.
+  "compatibility_flags": ["nodejs_compat"],
+  // The dashboard, built by `bun run build` in apps/server/web; only /api/* runs the Worker.
+  "assets": {
+    "directory": "../../apps/server/web/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  // TorBox sync every 15 minutes; cleanup and pruning once a day (src/worker.ts).
+  "triggers": { "crons": ["*/15 * * * *", "17 4 * * *"] },
+  "limits": { "cpu_ms": 30000 },
+  "observability": { "enabled": true },
+  "vars": {
+    // "STRATA_PUBLIC_URL": "https://strata.example.com"
+  }
+}

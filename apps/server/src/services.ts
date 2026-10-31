@@ -31,6 +31,7 @@ import { Bonjour } from "./platform/bonjour";
 import { createUpdater, type Updater } from "./update";
 import { API_VERSION, VERSION } from "./version";
 import { Households, type Household } from "./household";
+import { runtime } from "#runtime";
 
 const log = logger("server");
 const MINUTE = 60_000;
@@ -74,7 +75,7 @@ export interface ServiceOverrides {
 
 export async function createServices(config: RuntimeConfig, overrides: ServiceOverrides = {}): Promise<Services> {
   const paths = dataPaths(config.dataDir);
-  setLogDir(paths.logs);
+  if (runtime.name === "bun") setLogDir(paths.logs);
   const db = await openDatabase(config.databaseUrl ?? paths.db);
   const box = SecretBox.load(isCloud ? null : paths.secretKey);
   const settings = new SettingsStore(db, box, serverSettingsSchema, SERVER_SECRET_KEYS);
@@ -195,7 +196,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
 
   const serverId = await loadServerId(db, paths.root);
   // Only local streams run through this server; TorBox plays don't mind an update.
-  const updater = createUpdater({ dataDir: paths.root, dbPath: paths.db, backupsDir: paths.backups, db, settings, activeSessions: () => sessions.activeTranscodes(), fetch: fetchImpl });
+  const updater = runtime.name === "workers" ? workersUpdater() : createUpdater({ dataDir: paths.root, dbPath: paths.db, backupsDir: paths.backups, db, settings, activeSessions: () => sessions.activeTranscodes(), fetch: fetchImpl });
   jobs.register("checkUpdates", () => updater.checkAndMaybeApply());
   // Started by main.ts once the HTTP server is listening; refreshed when the name/toggle changes.
   const bonjour = new Bonjour(() => {
@@ -243,4 +244,16 @@ async function loadServerId(db: Db, dataDir: string): Promise<string> {
   const id = !isCloud && existsSync(file) ? readFileSync(file, "utf8").trim() : randomUUID();
   await db.execute(sql`INSERT INTO strata_meta (key, value) VALUES ('server_id', ${id}) ON CONFLICT (key) DO NOTHING`);
   return id;
+}
+
+/** On Workers the server is updated by deploying it: there's nothing to check or apply. */
+function workersUpdater(): Updater {
+  const status = { state: "idle", updateAvailable: false, latest: null, lastError: null, disabledReason: "Deployed on Cloudflare: update by deploying a new version" };
+  return {
+    status: () => status,
+    check: async () => status,
+    checkAndMaybeApply: async () => {},
+    apply: async () => {},
+    onRestart: () => {},
+  } as unknown as Updater;
 }

@@ -24,3 +24,4 @@ drizzle/
 
 # App Store screenshots: regenerated from the demo server, uploaded to App Store Connect
 apps/apple/AppStore/screenshots/
+deploy/cloudflare/.dev.vars

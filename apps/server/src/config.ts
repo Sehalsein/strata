@@ -1,5 +1,6 @@
 import { homedir, platform, tmpdir } from "node:os";
 import { isCloud } from "./mode";
+import { runtime } from "#runtime";
 import { join, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
 
@@ -75,8 +76,9 @@ export function dataPaths(dataDir: string): DataPaths {
     transcode: join(dataDir, "cache", "transcode"),
     logs: join(dataDir, "logs"),
   };
-  for (const dir of [paths.root, paths.backups, paths.transcode, paths.logs]) {
-    mkdirSync(dir, { recursive: true });
+  // Workers have no disk: paths are only names there (nothing uses them).
+  if (runtime.name === "bun") {
+    for (const dir of [paths.root, paths.backups, paths.transcode, paths.logs]) mkdirSync(dir, { recursive: true });
   }
   return paths;
 }
