@@ -180,6 +180,11 @@ struct SettingsView: View {
         let who = signIn.username.map { "@\($0)" } ?? "Signed in"
         return "\(who) on \(store.server(for: signIn)?.name ?? "this server")"
     }
+
+    private func startRename(_ server: SavedServer) {
+        newName = server.name
+        renaming = server
+    }
 }
 
 #if os(iOS)
@@ -253,8 +258,5 @@ struct ChangePasswordView: View {
         }
     }
 
-    private func startRename(_ server: SavedServer) {
-        newName = server.name
-        renaming = server
-    }
 }
+#endif

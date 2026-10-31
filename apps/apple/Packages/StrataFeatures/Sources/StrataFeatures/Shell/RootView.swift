@@ -133,7 +133,7 @@ struct MainShell: View {
                 Tab(value: AppTab.profile) {
                     SettingsView(embedded: true)
                 } label: {
-                    Label(services.store.active?.profileName ?? "Profile", systemImage: "person.crop.circle")
+                    Label(services.store.active?.name ?? "Account", systemImage: "person.crop.circle")
                 }
                 .tabPlacement(.sidebarOnly)
             }
