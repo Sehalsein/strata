@@ -9,12 +9,16 @@ public struct RemuxPlan: Sendable, Equatable {
     public var audio: Audio
     /// Dolby Vision profile 7: keep the HDR10 base layer only.
     public var stripDolbyVision: Bool
+    /// "PQ" (HDR10, Dolby Vision), "HLG" or "SDR", when known from elsewhere: the file's own
+    /// flag can sit in the video bitstream, which isn't decoded here.
+    public var videoRange: String?
 
-    public init(videoStreamIndex: Int32? = nil, audioStreamIndex: Int32? = nil, audio: Audio = .copy, stripDolbyVision: Bool = false) {
+    public init(videoStreamIndex: Int32? = nil, audioStreamIndex: Int32? = nil, audio: Audio = .copy, stripDolbyVision: Bool = false, videoRange: String? = nil) {
         self.videoStreamIndex = videoStreamIndex
         self.audioStreamIndex = audioStreamIndex
         self.audio = audio
         self.stripDolbyVision = stripDolbyVision
+        self.videoRange = videoRange
     }
 }
 

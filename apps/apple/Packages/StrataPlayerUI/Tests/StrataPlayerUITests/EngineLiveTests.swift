@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 import StrataKit
 @testable import StrataPlayerUI
@@ -59,9 +60,8 @@ final class EngineLiveTests: XCTestCase {
         // Lupin: 4K HEVC, DD+ copied, starts in seconds, seeks far in place.
         var started = Date()
         await engine.load(target: .episode(show: 96677, season: 1, episode: 1), meta: PlaybackMeta(title: "Lupin"), startMs: 0)
-        print("DEVICE lupin start \(Date().timeIntervalSince(started))s status=\(engine.status) fallback=\(engine.fallbackReason ?? "none")")
+        print("DEVICE lupin start \(Date().timeIntervalSince(started))s status=\(engine.status)")
         XCTAssertEqual(engine.session?.mode, .device)
-        XCTAssertNil(engine.fallbackReason)
         XCTAssertTrue(engine.session?.url.host()?.contains("tb-cdn") == true, "straight from TorBox")
         try await waitPlaying(engine, past: 3)
         let session = engine.session?.sessionId
@@ -72,9 +72,31 @@ final class EngineLiveTests: XCTestCase {
         XCTAssertEqual(engine.session?.sessionId, session, "a seek stays in the same session")
         let english = try XCTUnwrap(engine.subtitleTracks.first { $0.isEmbedded && LanguageName.normalized($0.language) == "en" && !$0.forced })
         await engine.selectSubtitle(english)
-        try await Task.sleep(for: .seconds(15))
-        print("DEVICE lupin subtitles: \(engine.subtitleCues.count) lines, now: \(engine.activeCueText ?? "-")")
-        XCTAssertFalse(engine.subtitleCues.isEmpty, "lines read from the file")
+        let item = try XCTUnwrap(engine.player.currentItem)
+        let group = try? await item.asset.loadMediaSelectionGroup(for: .legible)
+        if let group, !group.options.isEmpty {
+            // The player draws it from the stream itself (so it shows in PiP and on AirPlay).
+            let selected = item.currentMediaSelection.selectedMediaOption(in: group)
+            print("DEVICE lupin subtitle tracks in the stream: \(group.options.count), selected: \(selected?.displayName ?? "none")")
+            XCTAssertEqual(selected?.displayName, english.displayTitle)
+            XCTAssertTrue(engine.subtitleCues.isEmpty, "not drawn twice")
+            let output = AVPlayerItemLegibleOutput()
+            let collector = LegibleLines()
+            output.setDelegate(collector, queue: .main)
+            output.suppressesPlayerRendering = true
+            item.add(output)
+            try await Task.sleep(for: .seconds(15))
+            print("DEVICE lupin lines from the stream: \(collector.lines.prefix(3))")
+            XCTAssertFalse(collector.lines.isEmpty, "the player shows lines from the stream")
+            await engine.selectSubtitle(nil)
+            XCTAssertNil(item.currentMediaSelection.selectedMediaOption(in: group), "off is off")
+        } else {
+            // HDR the device can't show: no tracks in the stream, the overlay draws the lines.
+            print("DEVICE lupin: no subtitle tracks in the stream (HDR eligible: \(AVPlayer.eligibleForHDRPlayback)), overlay")
+            try await Task.sleep(for: .seconds(15))
+            print("DEVICE lupin overlay: \(engine.subtitleCues.count) lines, now: \(engine.activeCueText ?? "-")")
+            XCTAssertFalse(engine.subtitleCues.isEmpty, "lines read from the file")
+        }
         XCTAssertEqual(engine.status, .playing)
 
         // One Piece: Opus → lossless ALAC, switch to another track mid-play.
@@ -91,6 +113,26 @@ final class EngineLiveTests: XCTestCase {
         XCTAssertEqual(engine.activeAudioIndex, other.index)
         XCTAssertEqual(engine.position, before + 2, accuracy: 6, "picks up where it was")
         XCTAssertTrue(engine.player.currentItem?.tracks.contains { $0.assetTrack?.mediaType == .audio } == true)
+
+        // SDR: the stream carries its subtitle tracks, and the player draws the chosen one.
+        let subs = engine.subtitleTracks.filter(\.isEmbedded)
+        let opItem = try XCTUnwrap(engine.player.currentItem)
+        let opGroup = try await XCTUnwrapAsync(await opItem.asset.loadMediaSelectionGroup(for: .legible))
+        XCTAssertEqual(opGroup.options.count, subs.count)
+        let pick = try XCTUnwrap(subs.first { LanguageName.normalized($0.language) == "en" } ?? subs.first)
+        let lines = LegibleLines()
+        let output = AVPlayerItemLegibleOutput()
+        output.setDelegate(lines, queue: .main)
+        output.suppressesPlayerRendering = true
+        opItem.add(output)
+        await engine.selectSubtitle(pick)
+        XCTAssertNotNil(opItem.currentMediaSelection.selectedMediaOption(in: opGroup))
+        XCTAssertTrue(engine.subtitleCues.isEmpty, "not drawn twice")
+        // A line starts at 6:47.9 ("Hello...").
+        await engine.seek(to: 404)
+        try await Task.sleep(for: .seconds(8))
+        print("DEVICE onepiece \(pick.displayTitle) from the stream: \(lines.lines.prefix(3))")
+        XCTAssertFalse(lines.lines.isEmpty, "the player shows lines from the stream")
         await engine.unload()
     }
 
@@ -103,4 +145,17 @@ final class EngineLiveTests: XCTestCase {
         }
         XCTFail("not playing past \(position): status=\(engine.status) pos=\(engine.position)")
     }
+}
+
+final class LegibleLines: NSObject, AVPlayerItemLegibleOutputPushDelegate, @unchecked Sendable {
+    var lines: [String] = []
+
+    func legibleOutput(_ output: AVPlayerItemLegibleOutput, didOutputAttributedStrings strings: [NSAttributedString],
+                       nativeSampleBuffers: [Any], forItemTime itemTime: CMTime) {
+        lines += strings.map(\.string).filter { !$0.isEmpty }
+    }
+}
+
+func XCTUnwrapAsync<T>(_ value: T?, file: StaticString = #filePath, line: UInt = #line) async throws -> T {
+    try XCTUnwrap(value, file: file, line: line)
 }

@@ -22,8 +22,9 @@ public struct PlaybackMeta: Sendable, Hashable {
 /// Drives AVPlayer against a Strata server session.
 ///
 /// In device mode the server only hands over the file's link: StrataRemux repackages it
-/// on the device and AVPlayer plays that from a loopback address. Anything the device
-/// can't open falls back to the server's own HLS stream for that play.
+/// on the device and AVPlayer plays that from a loopback address. Video never streams
+/// through the server (only files on its own disk do): a file the device can't play fails
+/// with a message to pick another source.
 ///
 /// Every time exposed here (`position`, `duration`, `seek(to:)`, chapters, subtitle cues) is
 /// **media time** — seconds into the title — regardless of where the current HLS stream starts.
@@ -54,8 +55,6 @@ public final class PlayerEngine {
     public private(set) var meta: PlaybackMeta?
     /// The current server session: mode, candidate (source file), reasons, URLs.
     public private(set) var session: PlayResponse?
-    /// Why this play went through the server instead of the device, for Stream Details.
-    public private(set) var fallbackReason: String?
     /// Device mode: what the repackaging is doing, for Stream Details.
     public var remuxStats: RemuxSession.Stats? { remux?.stats }
 
@@ -121,8 +120,14 @@ public final class PlayerEngine {
     private var remux: RemuxSession?
     /// Lines read so far from each embedded text track, by stream index, in media time.
     private var embeddedCues: [Int: [VTTCue]] = [:]
-    /// Set once the device couldn't play this title: later restarts ask the server for HLS.
-    private var serverStreamOnly = false
+    /// The stream's own subtitle tracks (embedded text tracks, as WebVTT), which the player
+    /// draws itself: in Picture in Picture and on AirPlay too.
+    private var nativeSubtitles: AVMediaSelectionGroup?
+    /// The name each embedded track has in the stream, by `SubtitleTrack.id`.
+    private var nativeSubtitleNames: [String: String] = [:]
+    /// Set when the player refused this title's stream with subtitle tracks in it: it's
+    /// repackaged without them, and the overlay shows the lines.
+    private var skipNativeSubtitles = false
 
     // Session plumbing
     private var timeline = MediaTimeline(startOffset: 0, duration: 0, isHLS: false)
@@ -175,8 +180,7 @@ public final class PlayerEngine {
         await teardown(reportFinal: true)
         generation += 1
         let gen = generation
-        serverStreamOnly = false
-        fallbackReason = nil
+        skipNativeSubtitles = false
         self.target = target
         self.meta = meta
         status = .loading
@@ -187,16 +191,11 @@ public final class PlayerEngine {
             guard let self else { return }
             do {
                 let res = try await self.requestPlay(client: client, target: target, candidateId: candidateId, startMs: startMs, audioIndex: nil, gen: gen)
-                do {
-                    try await self.start(res, gen: gen, newTitle: true, autoplay: true)
-                } catch let failure as DeviceFailure {
-                    // The device couldn't open or play it: the server streams this one instead.
-                    Log.player.warning("device play failed, using the server: \(failure.message, privacy: .public)")
-                    self.serverStreamOnly = true
-                    self.fallbackReason = failure.message
-                    let again = try await self.requestPlay(client: client, target: target, candidateId: res.candidate.id, startMs: startMs, audioIndex: nil, gen: gen)
-                    try await self.start(again, gen: gen, newTitle: true, autoplay: true)
-                }
+                try await self.start(res, gen: gen, newTitle: true, autoplay: true)
+            } catch let failure as DeviceFailure {
+                guard gen == self.generation else { return }
+                Log.player.warning("device play failed: \(failure.message, privacy: .public)")
+                self.status = .failed(failure.message)
             } catch {
                 guard gen == self.generation, !(error is CancellationError) else { return }
                 let e = StrataError.wrap(error)
@@ -219,8 +218,7 @@ public final class PlayerEngine {
     private func requestPlay(client: StrataClient, target: PlaybackTarget, candidateId: String?, startMs: Int?, audioIndex: Int?, gen: Int) async throws -> PlayResponse {
         while true {
             try Task.checkCancellation()
-            let caps: ClientCaps = serverStreamOnly ? ClientCaps.current.withoutDeviceRemux : .current
-            switch try await client.play(target, candidateId: candidateId, startMs: startMs, audioStreamIndex: audioIndex, caps: caps) {
+            switch try await client.play(target, candidateId: candidateId, startMs: startMs, audioStreamIndex: audioIndex) {
             case .started(let res):
                 guard gen == generation else { throw CancellationError() }
                 return res
@@ -248,7 +246,7 @@ public final class PlayerEngine {
             } catch {
                 local.stop()
                 guard gen == generation else { throw CancellationError() }
-                throw DeviceFailure(message: "The device couldn't open this file (\(error.localizedDescription)).")
+                throw DeviceFailure(message: "This file couldn't be opened (\(error.localizedDescription)). Pick another source.")
             }
             guard gen == generation else { local.stop(); throw CancellationError() }
             newRemux = local
@@ -290,10 +288,18 @@ public final class PlayerEngine {
         do {
             try await waitUntilReady(item)
         } catch let error as StrataError where res.mode == .device {
-            // AVPlayer refused what the device made (a codec it can't decode, say).
             guard gen == generation else { throw CancellationError() }
-            throw DeviceFailure(message: "The player couldn't play the repackaged stream (\(error.message)).")
+            if !skipNativeSubtitles, newRemux?.subtitleRenditions.isEmpty == false {
+                // Try once more without the subtitle tracks before giving up on the device.
+                Log.player.warning("stream with subtitle tracks refused (\(error.message, privacy: .public)); trying without")
+                skipNativeSubtitles = true
+                return try await start(res, gen: gen, newTitle: newTitle, autoplay: autoplay)
+            }
+            // AVPlayer refused what the device made (a codec it can't decode, say).
+            throw DeviceFailure(message: "This file can't play on this device (\(error.message)). Pick another source.")
         }
+        guard gen == generation else { throw CancellationError() }
+        nativeSubtitles = res.mode == .device ? try? await item.asset.loadMediaSelectionGroup(for: .legible) : nil
         guard gen == generation else { throw CancellationError() }
         if let seek = MediaTimeline.initialSeek(res) {
             await player.seek(to: CMTime(seconds: seek, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
@@ -319,6 +325,8 @@ public final class PlayerEngine {
             activeSubtitleId = nil
             subtitleCues = []
         }
+        // The player only draws the stream's subtitles we turned on (not ones it picks by itself).
+        applyNativeSubtitle()
         nowPlaying?.update(meta: meta, position: position, duration: duration, rate: player.rate)
         reportProgress(force: true)
     }
@@ -501,6 +509,7 @@ public final class PlayerEngine {
     public func selectSubtitle(_ track: SubtitleTrack?) async {
         subtitleTask?.cancel()
         subtitleError = nil
+        defer { applyNativeSubtitle() }
         guard let track else {
             activeSubtitleId = nil
             subtitleCues = []
@@ -508,10 +517,11 @@ public final class PlayerEngine {
             return
         }
         if track.isEmbedded, let index = track.streamIndex {
-            // Read from the file as it plays: lines show from what's been read so far on.
             activeSubtitleId = track.id
-            subtitleCues = embeddedCues[index] ?? []
             isLoadingSubtitles = false
+            // The player draws it from the stream; otherwise the overlay shows the lines read
+            // from the file so far.
+            subtitleCues = nativeOption(for: track) == nil ? embeddedCues[index] ?? [] : []
             return
         }
         guard let url = track.url else {
@@ -552,13 +562,25 @@ public final class PlayerEngine {
 
     // MARK: - Device mode
 
-    /// The device couldn't open or play the file; the server streams it instead.
+    /// The device couldn't open or play the file.
     private struct DeviceFailure: Error {
         let message: String
     }
 
     /// Audio the player takes as it is; anything else (DTS, TrueHD…) is decoded and kept lossless.
     private static let copyableAudio = Set(ClientCaps.current.audioCodecs)
+
+    /// The stream's own track for an embedded subtitle, if the player found it.
+    private func nativeOption(for track: SubtitleTrack) -> AVMediaSelectionOption? {
+        guard let group = nativeSubtitles, let name = nativeSubtitleNames[track.id] else { return nil }
+        return group.options.first { $0.displayName == name }
+    }
+
+    /// Has the player draw the active embedded track itself, or nothing.
+    private func applyNativeSubtitle() {
+        guard let group = nativeSubtitles, let item = player.currentItem else { return }
+        item.select(activeSubtitle.flatMap(nativeOption(for:)), in: group)
+    }
 
     private func makeRemux(_ res: PlayResponse) -> RemuxSession {
         let plan = res.remux
@@ -571,12 +593,30 @@ public final class PlayerEngine {
             let refresh: (@Sendable () async throws -> URL)? = client.map { client in { try await client.refreshLink(sessionId: sessionId) } }
             source = .remote(res.url, refresh: refresh)
         }
+        let hdr = res.candidate.hdr?.lowercased()
         let local = RemuxSession(source: source, plan: StrataRemux.RemuxPlan(
             videoStreamIndex: plan?.videoStreamIndex.map(Int32.init),
             audioStreamIndex: plan?.audioStreamIndex.map(Int32.init),
             audio: plan?.audio == "copy" || plan == nil ? .copy : .lossless,
-            stripDolbyVision: plan?.stripDolbyVision ?? false
+            stripDolbyVision: plan?.stripDolbyVision ?? false,
+            videoRange: hdr == "hlg" ? "HLG" : hdr == nil || hdr == "" ? "SDR" : "PQ"
         ))
+        // Each embedded text track becomes a WebVTT track, named uniquely so it can be found.
+        var names: [String: String] = [:]
+        var renditions: [RemuxSession.SubtitleRendition] = []
+        // A playlist that declares HDR is refused outright where HDR can't be shown (without
+        // the declaration the player tone-maps it), so there the overlay draws the lines.
+        let withTracks = !skipNativeSubtitles && (hdr == nil || hdr == "" || AVPlayer.eligibleForHDRPlayback)
+        for track in res.subtitleTracks where track.isEmbedded && withTracks {
+            var name = track.displayTitle
+            var n = 2
+            while names.values.contains(name) { name = "\(track.displayTitle) \(n)"; n += 1 }
+            names[track.id] = name
+            renditions.append(.init(streamIndex: Int32(track.streamIndex!), name: name, language: LanguageName.normalized(track.language),
+                                    isDefault: false, forced: track.forced))
+        }
+        nativeSubtitleNames = names
+        local.subtitleRenditions = renditions
         local.onCues = { [weak self, weak local] cues in
             Task { @MainActor [weak self] in
                 guard let local else { return }
@@ -599,7 +639,8 @@ public final class PlayerEngine {
             touched.insert(index)
         }
         for index in touched { embeddedCues[index]?.sort { $0.start < $1.start } }
-        if let active = activeSubtitle, active.isEmbedded, let index = active.streamIndex, touched.contains(index) {
+        if let active = activeSubtitle, active.isEmbedded, let index = active.streamIndex, touched.contains(index),
+           nativeOption(for: active) == nil {
             subtitleCues = embeddedCues[index] ?? []
         }
     }
@@ -661,6 +702,8 @@ public final class PlayerEngine {
         remux?.stop()
         remux = nil
         embeddedCues = [:]
+        nativeSubtitles = nil
+        nativeSubtitleNames = [:]
         session = nil
         timeline = MediaTimeline(startOffset: 0, duration: 0, isHLS: false)
         restartTarget = nil

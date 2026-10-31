@@ -255,20 +255,25 @@ struct BrowseListView: View {
     }
 }
 
-struct SearchView: View {
-    @Environment(AppServices.self) private var services
+/// The Search tab. The field always shows under the title, like the TV app's: on iPhone
+/// the automatic placement showed no field at all, and on iPad, in the toolbar, it was a
+/// second search button beside the tab bar's Search tab.
+struct SearchTab: View {
     @State private var query = ""
-    @State private var results: Loadable<[TitleCard]>?
 
-    /// On iPad the field sits in the page, under the title, like the TV app's: in the
-    /// toolbar it was a second search button beside the tab bar's Search tab.
-    private static var fieldPlacement: SearchFieldPlacement {
+    var body: some View {
         #if os(iOS)
-        Metrics.isPad ? .navigationBarDrawer(displayMode: .always) : .automatic
+        StackHost { SearchView(query: $query).searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Movies and shows") }
         #else
-        .automatic
+        StackHost { SearchView(query: $query).searchable(text: $query, prompt: "Movies and shows") }
         #endif
     }
+}
+
+struct SearchView: View {
+    @Environment(AppServices.self) private var services
+    @Binding var query: String
+    @State private var results: Loadable<[TitleCard]>?
 
     var body: some View {
         ScrollView {
@@ -297,7 +302,6 @@ struct SearchView: View {
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
         .navigationTitle("Search")
-        .searchable(text: $query, placement: Self.fieldPlacement, prompt: "Movies and shows")
         .task(id: query) {
             let q = query.trimmingCharacters(in: .whitespaces)
             guard q.count >= 2 else { results = nil; return }

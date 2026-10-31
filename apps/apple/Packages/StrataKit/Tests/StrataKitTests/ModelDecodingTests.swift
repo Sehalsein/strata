@@ -212,7 +212,6 @@ final class ModelDecodingTests: XCTestCase {
     func testCapsAskForDeviceRemux() throws {
         let caps = try JSONSerialization.jsonObject(with: JSONEncoder().encode(ClientCaps.current)) as? [String: Any]
         XCTAssertEqual(caps?["deviceRemux"] as? Bool, true)
-        XCTAssertFalse(ClientCaps.current.withoutDeviceRemux.deviceRemux)
     }
 
     func testPlayTranscodeTracksAndChapters() throws {

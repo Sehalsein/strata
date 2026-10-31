@@ -112,7 +112,7 @@ struct MainShell: View {
             }
             #endif
             Tab(value: AppTab.search, role: .search) {
-                StackHost { SearchView() }
+                SearchTab()
             }
             #if os(iOS)
             if Self.sidebar {

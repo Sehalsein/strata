@@ -103,6 +103,37 @@ final class RemuxTests: XCTestCase {
         }
     }
 
+    /// Subtitles go to the player as a WebVTT track it draws itself (so they show in Picture
+    /// in Picture and on AirPlay), at the right moment.
+    func testSubtitlesAreAWebVTTTrackThePlayerShows() async throws {
+        let session = RemuxSession(source: .file(fixture("hevc_eac3_srt.mkv")), plan: RemuxPlan())
+        session.subtitleRenditions = [.init(streamIndex: 2, name: "English", language: "en")]
+        let url = try await session.start()
+        defer { session.stop() }
+        let master = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(master.contains("TYPE=SUBTITLES"), master)
+
+        let asset = AVURLAsset(url: url)
+        let group = try await XCTUnwrapAsync(await asset.loadMediaSelectionGroup(for: .legible))
+        let english = try XCTUnwrap(group.options.first { $0.extendedLanguageTag == "en" }, "\(group.options)")
+        let item = AVPlayerItem(asset: asset)
+        let collector = LegibleCollector()
+        let output = AVPlayerItemLegibleOutput()
+        output.setDelegate(collector, queue: .main)
+        output.suppressesPlayerRendering = true
+        item.add(output)
+        item.select(english, in: group)
+        let player = AVPlayer(playerItem: item)
+        player.isMuted = true
+        while item.status != .readyToPlay { try await Task.sleep(for: .milliseconds(50)) }
+        await player.seek(to: CMTime(seconds: 7.5, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        player.play()
+        try await Task.sleep(for: .seconds(3))
+        player.pause()
+        let second = try XCTUnwrap(collector.lines.first { $0.text.contains("Second line") }, "\(collector.lines)")
+        XCTAssertEqual(second.time, 8.5, accuracy: 0.3, "shown when the line starts in the file")
+    }
+
     /// Over HTTP with byte ranges, as from TorBox, including a link that has expired: the
     /// session asks for a new one and carries on.
     func testRemoteFileWithAnExpiredLink() async throws {
@@ -155,4 +186,18 @@ final class RemuxTests: XCTestCase {
         }
         return (video, gaps, Double(audioEnd) * audioTB.seconds, videoStart, audioStart)
     }
+}
+
+/// Lines the player would draw, with when.
+final class LegibleCollector: NSObject, AVPlayerItemLegibleOutputPushDelegate, @unchecked Sendable {
+    var lines: [(text: String, time: Double)] = []
+
+    func legibleOutput(_ output: AVPlayerItemLegibleOutput, didOutputAttributedStrings strings: [NSAttributedString],
+                       nativeSampleBuffers: [Any], forItemTime itemTime: CMTime) {
+        for s in strings where !s.string.isEmpty { lines.append((s.string, itemTime.seconds)) }
+    }
+}
+
+func XCTUnwrapAsync<T>(_ value: T?, file: StaticString = #filePath, line: UInt = #line) async throws -> T {
+    try XCTUnwrap(value, file: file, line: line)
 }

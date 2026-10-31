@@ -80,14 +80,11 @@ public struct UpNextCard: View {
 /// What's playing and how: shown from the player's info button.
 public struct StreamDetailsPanel: View {
     let session: PlayResponse?
-    /// Why the server streams this play instead of the device.
-    let fallbackReason: String?
     /// Device mode: data read from the file so far.
     let bytesRead: Int64?
 
-    public init(session: PlayResponse?, fallbackReason: String? = nil, bytesRead: Int64? = nil) {
+    public init(session: PlayResponse?, bytesRead: Int64? = nil) {
         self.session = session
-        self.fallbackReason = fallbackReason
         self.bytesRead = bytesRead
     }
 
@@ -113,11 +110,6 @@ public struct StreamDetailsPanel: View {
                     if session.mode == .device, let bytesRead, bytesRead > 0, let read = Formatting.size(bytes: Int(bytesRead)) {
                         row("Read", read)
                     }
-                }
-                if let fallbackReason {
-                    Text(fallbackReason + " Your server streams it instead.")
-                        .font(.stFootnote)
-                        .foregroundStyle(.secondary)
                 }
                 if !session.reasons.isEmpty {
                     Text(session.reasons.joined(separator: "; "))

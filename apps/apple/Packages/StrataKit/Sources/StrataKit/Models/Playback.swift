@@ -167,13 +167,6 @@ public struct ClientCaps: Codable, Sendable, Hashable {
         self.deviceRemux = deviceRemux
     }
 
-    /// The same device, asking the server to do the repackaging (the fallback when the
-    /// app can't open a file itself).
-    public var withoutDeviceRemux: ClientCaps {
-        var caps = self
-        caps.deviceRemux = false
-        return caps
-    }
 }
 
 public struct Chapter: Codable, Sendable, Hashable {

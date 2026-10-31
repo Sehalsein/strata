@@ -101,7 +101,7 @@ struct WatchView: View {
         .onMoveCommand { _ in if !chromeVisible { showChrome() } }
         #endif
         .sheet(isPresented: $showDetails) {
-            StreamDetailsPanel(session: engine.session, fallbackReason: engine.fallbackReason, bytesRead: engine.remuxStats?.bytesFetched).presentationDetents([.medium])
+            StreamDetailsPanel(session: engine.session, bytesRead: engine.remuxStats?.bytesFetched).presentationDetents([.medium])
         }
         #if os(iOS)
         .onAppear { PlayerOrientation.enterPlayer() }
