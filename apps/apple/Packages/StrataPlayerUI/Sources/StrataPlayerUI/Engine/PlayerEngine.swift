@@ -55,6 +55,11 @@ public final class PlayerEngine {
     public private(set) var meta: PlaybackMeta?
     /// The current server session: mode, candidate (source file), reasons, URLs.
     public private(set) var session: PlayResponse?
+    #if os(tvOS)
+    /// The frame rate and dynamic range the TV should switch to for this title (the player
+    /// view hands it to its window's display manager); nil when nothing's playing.
+    public private(set) var displayCriteria: AVDisplayCriteria?
+    #endif
     /// Device mode: what the repackaging is doing, for Stream Details.
     public var remuxStats: RemuxSession.Stats? { remux?.stats }
 
@@ -330,6 +335,15 @@ public final class PlayerEngine {
             throw DeviceFailure(message: "This file can't play on this device (\(error.message)). Pick another source.")
         }
         guard gen == generation else { throw CancellationError() }
+        #if os(tvOS)
+        if newTitle || displayCriteria == nil {
+            if let format = newRemux?.videoFormat {
+                displayCriteria = DisplayMatch.criteria(for: format)
+            } else if res.mode == .direct {
+                displayCriteria = await DisplayMatch.criteria(for: item.asset)
+            }
+        }
+        #endif
         nativeSubtitles = res.mode == .device ? try? await item.asset.loadMediaSelectionGroup(for: .legible) : nil
         guard gen == generation else { throw CancellationError() }
         if let seek = MediaTimeline.initialSeek(res) {
@@ -714,6 +728,9 @@ public final class PlayerEngine {
         generation += 1
         target = nil
         meta = nil
+        #if os(tvOS)
+        displayCriteria = nil
+        #endif
         status = .idle
         nowPlaying?.update(meta: nil, position: 0, duration: 0, rate: 0)
     }

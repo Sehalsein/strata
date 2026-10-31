@@ -32,6 +32,19 @@ public final class RemuxSession: @unchecked Sendable {
         }
     }
 
+    /// The video as the file has it: what an Apple TV switches its display mode to.
+    public struct VideoFormat: Sendable, Equatable {
+        public enum Codec: Sendable { case h264, hevc, av1, other }
+        public var width: Int
+        public var height: Int
+        public var frameRate: Double?
+        public var codec: Codec
+        /// "PQ" (HDR10, Dolby Vision), "HLG" or "SDR".
+        public var range: String
+        /// Dolby Vision kept (not stripped to its HDR10 base layer).
+        public var dolbyVision: Bool
+    }
+
     /// What Stream Details shows.
     public struct Stats: Sendable {
         public var segments: Int
@@ -57,6 +70,8 @@ public final class RemuxSession: @unchecked Sendable {
     /// Text subtitle streams to offer as WebVTT tracks. Set before `start()`.
     public var subtitleRenditions: [SubtitleRendition] = []
     public private(set) var playlistURL: URL?
+    /// The video's format, known once `start()` returns.
+    public private(set) var videoFormat: VideoFormat?
     /// Called on an arbitrary thread with new subtitle lines as segments are read.
     public var onCues: (@Sendable ([SubtitleCue]) -> Void)?
 
@@ -85,6 +100,7 @@ public final class RemuxSession: @unchecked Sendable {
             return segmenter
         }
         self.segmenter = segmenter
+        videoFormat = Self.videoFormat(segmenter, plan: plan)
         let server = try LoopbackServer { [weak self] path in await self?.respond(to: path) }
         let port = try await server.start()
         self.server = server
@@ -127,21 +143,39 @@ public final class RemuxSession: @unchecked Sendable {
     /// RESOLUTION, FRAME-RATE and VIDEO-RANGE for the master playlist. HDR must be declared
     /// there: without VIDEO-RANGE=PQ the player took an HDR10 file for SDR and refused it.
     private func videoAttributes(_ segmenter: Segmenter) -> String {
+        let format = Self.videoFormat(segmenter, plan: plan)
+        var out = ""
+        if format.width > 0, format.height > 0 { out += "RESOLUTION=\(format.width)x\(format.height)," }
+        if let rate = format.frameRate { out += String(format: "FRAME-RATE=%.3f,", rate) }
+        return out + "VIDEO-RANGE=\(format.range),"
+    }
+
+    /// What the video is, read from the file's header.
+    static func videoFormat(_ segmenter: Segmenter, plan: RemuxPlan) -> VideoFormat {
         let video = segmenter.demuxer.stream(segmenter.demuxer.videoIndex).pointee
         let par = video.codecpar.pointee
-        var out = ""
-        if par.width > 0, par.height > 0 { out += "RESOLUTION=\(par.width)x\(par.height)," }
         let rate = video.avg_frame_rate.num > 0 && video.avg_frame_rate.den > 0 ? video.avg_frame_rate : video.r_frame_rate
-        if rate.num > 0, rate.den > 0 { out += String(format: "FRAME-RATE=%.3f,", Double(rate.num) / Double(rate.den)) }
-        if let range = plan.videoRange { return out + "VIDEO-RANGE=\(range)," }
-        switch par.color_trc {
-        case AVCOL_TRC_SMPTE2084: out += "VIDEO-RANGE=PQ,"
-        case AVCOL_TRC_ARIB_STD_B67: out += "VIDEO-RANGE=HLG,"
-        default:
+        let dolbyVision = !plan.stripDolbyVision && hasDolbyVision(video)
+        let range: String
+        if let known = plan.videoRange {
+            range = known
+        } else {
+            switch par.color_trc {
+            case AVCOL_TRC_SMPTE2084: range = "PQ"
+            case AVCOL_TRC_ARIB_STD_B67: range = "HLG"
             // Dolby Vision profile 5 carries no HDR10 transfer flag but is PQ all the same.
-            out += Self.hasDolbyVision(video) ? "VIDEO-RANGE=PQ," : "VIDEO-RANGE=SDR,"
+            default: range = hasDolbyVision(video) ? "PQ" : "SDR"
+            }
         }
-        return out
+        let codec: VideoFormat.Codec = switch par.codec_id {
+        case AV_CODEC_ID_HEVC: .hevc
+        case AV_CODEC_ID_H264: .h264
+        case AV_CODEC_ID_AV1: .av1
+        default: .other
+        }
+        return VideoFormat(width: Int(par.width), height: Int(par.height),
+                           frameRate: rate.num > 0 && rate.den > 0 ? Double(rate.num) / Double(rate.den) : nil,
+                           codec: codec, range: range, dolbyVision: dolbyVision)
     }
 
     private static func hasDolbyVision(_ stream: AVStream) -> Bool {

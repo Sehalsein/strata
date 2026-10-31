@@ -25,7 +25,7 @@ struct WatchView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            PlayerSurface(player: engine.player, gravity: engine.videoGravity, pip: pip)
+            PlayerSurface(engine: engine, pip: pip)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
@@ -218,16 +218,18 @@ struct WatchView: View {
 }
 
 /// The video layer, with Picture in Picture attached once it's on screen.
+/// On Apple TV it also asks the TV to match the video's frame rate and dynamic range.
 private struct PlayerSurface: View {
-    let player: AVPlayer
-    let gravity: AVLayerVideoGravity
+    let engine: PlayerEngine
     let pip: PiPController
 
     var body: some View {
         #if os(iOS)
-        AVPlayerContainer(player: player, gravity: gravity) { layer in pip.attach(playerLayer: layer) }
+        AVPlayerContainer(player: engine.player, gravity: engine.videoGravity) { layer in pip.attach(playerLayer: layer) }
+        #elseif os(tvOS)
+        AVPlayerContainer(player: engine.player, gravity: engine.videoGravity).matchingDisplay(engine.displayCriteria)
         #else
-        AVPlayerContainer(player: player, gravity: gravity)
+        AVPlayerContainer(player: engine.player, gravity: engine.videoGravity)
         #endif
     }
 }

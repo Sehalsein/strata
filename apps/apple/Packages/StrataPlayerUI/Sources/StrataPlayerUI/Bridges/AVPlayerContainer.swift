@@ -15,6 +15,10 @@ public struct AVPlayerContainer: View {
     public let player: AVPlayer
     public let gravity: AVLayerVideoGravity
     let onLayer: ((AVPlayerLayer) -> Void)?
+    #if os(tvOS)
+    /// The display mode to ask the TV for while this view is on screen.
+    var displayCriteria: AVDisplayCriteria?
+    #endif
 
     public init(player: AVPlayer, gravity: AVLayerVideoGravity = .resizeAspect, onLayer: ((AVPlayerLayer) -> Void)? = nil) {
         self.player = player
@@ -22,10 +26,23 @@ public struct AVPlayerContainer: View {
         self.onLayer = onLayer
     }
 
+    #if os(tvOS)
+    /// Asks the TV to match the video's frame rate and dynamic range while this shows.
+    public func matchingDisplay(_ criteria: AVDisplayCriteria?) -> AVPlayerContainer {
+        var copy = self
+        copy.displayCriteria = criteria
+        return copy
+    }
+    #endif
+
     public var body: some View {
         Group {
             #if canImport(UIKit)
+            #if os(tvOS)
+            PlayerLayerRepresentable(player: player, gravity: gravity, onLayer: onLayer, displayCriteria: displayCriteria)
+            #else
             PlayerLayerRepresentable(player: player, gravity: gravity, onLayer: onLayer)
+            #endif
             #elseif canImport(AppKit)
             SystemPlayerRepresentableMac(player: player, gravity: gravity)
             #endif
@@ -39,6 +56,9 @@ struct PlayerLayerRepresentable: UIViewRepresentable {
     let player: AVPlayer
     let gravity: AVLayerVideoGravity
     let onLayer: ((AVPlayerLayer) -> Void)?
+    #if os(tvOS)
+    var displayCriteria: AVDisplayCriteria? = nil
+    #endif
 
     func makeUIView(context: Context) -> PlayerLayerHostView {
         let view = PlayerLayerHostView()
@@ -52,6 +72,9 @@ struct PlayerLayerRepresentable: UIViewRepresentable {
     func updateUIView(_ view: PlayerLayerHostView, context: Context) {
         if view.playerLayer.player !== player { view.playerLayer.player = player }
         if view.playerLayer.videoGravity != gravity { view.playerLayer.videoGravity = gravity }
+        #if os(tvOS)
+        view.displayCriteria = displayCriteria
+        #endif
     }
 }
 #endif
@@ -81,6 +104,27 @@ struct SystemPlayerRepresentableMac: NSViewRepresentable {
 public final class PlayerLayerHostView: UIView {
     public override class var layerClass: AnyClass { AVPlayerLayer.self }
     public var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+
+    #if os(tvOS)
+    /// Set on the window's display manager while the view is in a window, and cleared
+    /// when it leaves (the TV goes back to its usual mode).
+    var displayCriteria: AVDisplayCriteria? {
+        didSet {
+            guard displayCriteria != oldValue else { return }
+            window?.avDisplayManager.preferredDisplayCriteria = displayCriteria
+        }
+    }
+
+    public override func willMove(toWindow newWindow: UIWindow?) {
+        super.willMove(toWindow: newWindow)
+        if newWindow == nil { window?.avDisplayManager.preferredDisplayCriteria = nil }
+    }
+
+    public override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if let window, displayCriteria != nil { window.avDisplayManager.preferredDisplayCriteria = displayCriteria }
+    }
+    #endif
 }
 #endif
 
