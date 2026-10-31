@@ -201,6 +201,17 @@ public final class StrataClient: Sendable {
         return res.shelves
     }
 
+    /// My List: the titles on this account's list, newest first. A server from before
+    /// `GET /api/watchlist` has it only as a shelf on Home.
+    public func watchlist() async throws -> [TitleCard] {
+        do {
+            let res: ItemsResponse<TitleCard> = try await get("/api/watchlist")
+            return res.items
+        } catch let error as StrataError where error.isNotFound {
+            return try await home().first { $0.id == "watchlist" }?.items ?? []
+        }
+    }
+
     public func browse(_ type: TitleType, list: BrowseList) async throws -> [TitleCard] {
         let res: ItemsResponse<TitleCard> = try await get("/api/browse/\(type.rawValue)/\(list.rawValue)")
         return res.items

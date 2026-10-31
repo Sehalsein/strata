@@ -42,7 +42,6 @@ test("usage limits count per key and refuse once over, saying when to try again"
 
 test("errors go to Sentry when SENTRY_DSN is set, with secrets stripped, once a minute each", async () => {
   const { logger } = await import("../src/log");
-  const { pendingReports } = await import("../src/errorReporting");
   const realFetch = globalThis.fetch;
   const sent: { url: string; body: string }[] = [];
   globalThis.fetch = (async (input: any, init?: any) => {
@@ -54,7 +53,7 @@ test("errors go to Sentry when SENTRY_DSN is set, with secrets stripped, once a 
     const log = logger("test");
     log.error("TorBox link failed https://x.example/dl?token=secret123", new Error("boom"));
     log.error("TorBox link failed https://x.example/dl?token=secret123", new Error("boom"));
-    await pendingReports();
+    await Bun.sleep(10); // the reports are sent in the background
     expect(sent).toHaveLength(1);
     expect(sent[0]!.url).toBe("https://o1.ingest.sentry.io/api/42/envelope/");
     expect(sent[0]!.body).not.toContain("secret123");

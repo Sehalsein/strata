@@ -724,7 +724,8 @@ export class CatalogService {
     return first ? at(first.season_number, 1) : null;
   }
 
-  private async watchlist(userId: string): Promise<TitleCard[]> {
+  /** The titles on this person's list (My List), newest first. */
+  async watchlist(userId: string): Promise<TitleCard[]> {
     const rows = await this.progress.watchlist(userId);
     const cards = await Promise.all(
       rows.map(async (r) => {

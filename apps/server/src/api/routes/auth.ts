@@ -6,12 +6,12 @@ import { z } from "zod";
 import { account, continueHidden, member, organization, passkey, progress, session, user, watchlist } from "../../db/schema";
 import { emailConfigured } from "../../email";
 import { API_VERSION, VERSION } from "../../version";
-import { body, requireAuth, requireHousehold, requireHouseholdAdmin, type Env } from "../context";
+import { body, permissions, requireAuth, requireHousehold, requireHouseholdAdmin, type Env } from "../context";
 import { CONTENT_LIMITS } from "../../catalog/contentRating";
 import { clientAddress, isLocalRequest, isLoopbackRequest } from "../localNetwork";
 import { checkSetupCode, clearSetupCode } from "../../setupCode";
 import { retryMessage, SETUP_PER_ADDRESS, STARTS_PER_ADDRESS } from "../../throttle";
-import { isCloud } from "../../mode";
+import { publicCapabilities } from "../../profile";
 import { launchSecret } from "../../platform/launcher";
 import { dashboardUrls } from "../../platform/network";
 import { describeDevice } from "../deviceInfo";
@@ -28,7 +28,7 @@ const usernameSchema = z.string().trim().min(2).max(64).regex(/^[a-zA-Z0-9_.-]+$
 
 async function canJoinLocally(c: Context<Env>): Promise<boolean> {
   const s = c.var.services;
-  return !isCloud && s.settings.get().localJoin && isLocalRequest(c) && (await s.hasAccounts());
+  return s.profile.homeNetworkJoin && s.settings.get().localJoin && isLocalRequest(c) && (await s.hasAccounts());
 }
 
 /** Counts a password-less start (a home join) from this address; 429 past the limit. */
@@ -125,17 +125,19 @@ export const authRoutes = new Hono<Env>()
       version: VERSION,
       apiVersion: API_VERSION,
       /** "home" or "cloud" (stateless; no local folders or home-network join). */
-      mode: isCloud ? "cloud" : "home",
+      mode: s.profile.mode,
+      /** What this server does (local folders, home-network join, self-update…): ask this, not `mode`. */
+      capabilities: publicCapabilities(s.profile),
       /** The public site in front of this server, when there is one (it has the privacy page). */
       siteUrl: process.env.STRATA_SITE_URL || null,
       /** Home servers make their admin first; the cloud has no setup (anyone signs up). */
-      setupRequired: !isCloud && !(await s.hasAccounts()),
+      setupRequired: s.profile.firstRunSetup && !(await s.hasAccounts()),
       /** Setup asks for the code from the server's log (not from the server's own machine). */
       setupCodeRequired: !isLoopbackRequest(c),
       /** True when this client may join without a password (see /join). */
       localJoin: await canJoinLocally(c),
       /** Ways in besides a password that this server is set up for (the sign-in page's buttons). */
-      signIn: (({ google, passkeys }) => ({ google: !!google, passkey: !!passkeys, passwordReset: emailConfigured(), signUp: isCloud, confirmEmail: isCloud && emailConfigured() }))(signInMethods()),
+      signIn: (({ google, passkeys }) => ({ google: !!google, passkey: !!passkeys, passwordReset: emailConfigured(), signUp: s.profile.openSignUp, confirmEmail: s.profile.openSignUp && emailConfigured() }))(signInMethods()),
     });
   })
 
@@ -153,7 +155,7 @@ export const authRoutes = new Hono<Env>()
   // First run: the server admin's account and their household. Needs the code the
   // server prints in its log, unless asked from the server's own machine.
   .post("/setup/admin", async (c) => {
-    if (isCloud) throw new HTTPException(404, { message: "Not found" });
+    if (!c.var.services.profile.firstRunSetup) throw new HTTPException(404, { message: "Not found" });
     const s = c.var.services;
     const input = await body(
       c,
@@ -223,7 +225,7 @@ export const authRoutes = new Hono<Env>()
       .where(and(eq(member.id, c.req.param("memberId")), eq(member.organizationId, c.var.household.organizationId)));
     if (!row) throw new HTTPException(404, { message: "No such member" });
     const auth = c.var.services.auth;
-    await assertMayManage(c.var.services.db, (headers) => auth.api.getSession({ headers }), c.req.raw.headers, row.userId).catch((err: unknown) => {
+    await assertMayManage(c.var.services.db, c.var.services.profile, (headers) => auth.api.getSession({ headers }), c.req.raw.headers, row.userId).catch((err: unknown) => {
       throw new HTTPException(403, { message: err instanceof Error ? err.message : "Not allowed" });
     });
     return exportFor(c, row.userId);
@@ -237,7 +239,7 @@ export const authRoutes = new Hono<Env>()
       serverName: s.settings.get().serverName,
       contact: process.env.STRATA_PRIVACY_CONTACT || null,
       operator: process.env.STRATA_OPERATOR || null,
-      mode: isCloud ? "cloud" : "home",
+      mode: s.profile.mode,
       email: emailConfigured(),
       google: !!google,
       passkeys: !!passkeys,
@@ -254,7 +256,9 @@ export const authRoutes = new Hono<Env>()
           .innerJoin(organization, eq(organization.id, member.organizationId))
           .where(and(eq(member.organizationId, organizationId), eq(member.userId, me.id)))
       : [];
-    return c.json({ user: me, viewerOnly, mustChangePassword: c.var.session.mustChangePassword, household: household ?? null });
+    // Role of the household this device is in, for what it may do (`permissions`).
+    if (household) c.var.session.role = household.role;
+    return c.json({ user: me, viewerOnly, mustChangePassword: c.var.session.mustChangePassword, household: household ?? null, permissions: permissions(c) });
   })
 
   // A member's sign-in QR code: a device that scans it signs in as them, in this household,
@@ -269,10 +273,12 @@ export const authRoutes = new Hono<Env>()
       .innerJoin(user, eq(user.id, member.userId))
       .where(and(eq(member.id, c.req.param("memberId")), eq(member.organizationId, householdId)));
     if (!row) throw new HTTPException(404, { message: "No such member" });
-    const me = c.var.session;
-    const roles = (me.role ?? "").split(",");
-    if (row.userId !== me.user.id && (me.viewerOnly || !(roles.includes("owner") || roles.includes("admin")))) {
-      throw new HTTPException(403, { message: "Only the household's owner and admins can show someone else's code." });
+    // Someone else's code signs a device in as them: the same rule as resetting their
+    // password (someone above them in the household, or the server's admin).
+    if (row.userId !== c.var.session.user.id) {
+      await assertMayManage(s.db, s.profile, (headers) => s.auth.api.getSession({ headers }), c.req.raw.headers, row.userId).catch((err: unknown) => {
+        throw new HTTPException(403, { message: err instanceof Error ? err.message : "Only the household's owner and admins can show someone else's code." });
+      });
     }
     // Better Auth wipes the password of an account whose email isn't marked confirmed when
     // a magic link signs it in. Strata never sends mail (people join by invitation link),

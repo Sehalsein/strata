@@ -26,4 +26,3 @@ export type Mode = "home" | "cloud";
 const built = typeof STRATA_BUILD_MODE === "string" ? STRATA_BUILD_MODE : undefined;
 
 export const MODE: Mode = (built ?? process.env.STRATA_MODE) === "cloud" ? "cloud" : "home";
-export const isCloud = MODE === "cloud";

@@ -48,7 +48,8 @@ try {
   const bossToken = boss.headers.get("set-auth-token")!;
   expect((await server.request("/api/admin/logs", { token: bossToken })).status).toBe(200);
   expect((await server.request("/api/admin/logs", { token: annToken })).status).toBe(403);
-  // Jobs run wherever a cron lands: each run is recorded, and the next comes from the crons.
+  // Jobs run on any instance: each run is recorded in the database. (When the next one is
+  // depends on the runtime: see profile.test.ts.)
   expect((await server.request("/api/admin/jobs/pruneAuth/run", { method: "POST", token: bossToken })).status).toBe(202);
   let pruneAuth: any;
   for (let i = 0; i < 50 && !pruneAuth?.lastRunAt; i++) {
@@ -56,7 +57,6 @@ try {
     pruneAuth = (await json(await server.request("/api/admin/status", { token: bossToken }))).jobs.find((j: any) => j.name === "pruneAuth");
   }
   expect(pruneAuth.lastRunAt).toBeGreaterThan(0);
-  expect(pruneAuth.nextRunAt).toBeGreaterThan(Date.now());
   const saved = await server.services.db.execute(sql`SELECT value FROM strata_meta WHERE key = 'job:pruneAuth'`);
   expect(JSON.stringify(saved)).toContain("lastRunAt");
   // Home-only jobs aren't there at all.

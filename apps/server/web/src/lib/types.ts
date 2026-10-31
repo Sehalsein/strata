@@ -14,10 +14,37 @@ export interface ServerInfo {
   localJoin?: boolean;
   /** "cloud": hosted, without local folders, home-network join, Bonjour or self-update. */
   mode: "home" | "cloud";
+  /** What this server does: ask these rather than `mode`. */
+  capabilities: Capabilities;
   /** The public site in front of this server (the cloud's landing page), which has the privacy page. */
   siteUrl?: string | null;
   /** Ways in besides a password that this server is set up for. */
   signIn?: { google: boolean; passkey: boolean; passwordReset?: boolean; /** Cloud: anyone may make an account (and gets a household of their own). */ signUp?: boolean; /** New accounts confirm their email before signing in. */ confirmEmail?: boolean };
+}
+
+/** What a server does (src/profile.ts on the server). */
+export interface Capabilities {
+  /** Media folders on the server's disk, played through ffmpeg. */
+  localMedia: boolean;
+  /** Announces itself on the home network. */
+  bonjour: boolean;
+  /** Devices on the home network may join without a password. */
+  homeNetworkJoin: boolean;
+  /** Updates itself (otherwise it's updated by deploying it). */
+  selfUpdate: boolean;
+  /** Anyone may make an account. */
+  openSignUp: boolean;
+  /** First-run setup makes the server's admin. */
+  firstRunSetup: boolean;
+  /** The public demo: nothing may be changed. */
+  readOnly: boolean;
+}
+
+/** What the signed-in device may do (src/auth/permissions.ts on the server). */
+export interface Permissions {
+  administerHousehold: boolean;
+  administerServer: boolean;
+  change: boolean;
 }
 
 /** A passkey saved for the signed-in account. */
@@ -38,6 +65,8 @@ export interface Me {
   /** Signed in with a temporary password from an admin: a new one is needed first. */
   mustChangePassword?: boolean;
   household: { id: string; name: string; role: string; contentLimit: ContentLimit; isKids: boolean } | null;
+  /** Worked out by the server: the dashboard doesn't read roles itself. */
+  permissions: Permissions;
 }
 
 /** A household (Better Auth organization) as listed. */

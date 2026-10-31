@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import type { Env } from "./context";
+import type { DeploymentProfile } from "../profile";
 import { clientAddress, isLocalAddress } from "./localNetwork";
-import { isCloud } from "../mode";
 
 /** What a request says about the device making it, for the Devices page. */
 export interface DeviceInfo {
@@ -48,7 +48,7 @@ function locationOf(c: Context<Env>, ip: string | null): string | null {
   if (ip && isLocalAddress(ip)) return "Home network";
   let cf: CfLocation | undefined = (c.req.raw as Request & { cf?: CfLocation }).cf;
   // Headers only count behind a proxy this server trusts (as for the client's address).
-  if (!cf && (isCloud || process.env.STRATA_TRUST_PROXY === "1")) {
+  if (!cf && (c.var.services.profile.behindProxy || process.env.STRATA_TRUST_PROXY === "1")) {
     cf = { city: c.req.header("cf-ipcity"), region: c.req.header("cf-region"), country: c.req.header("cf-ipcountry") };
   }
   if (!cf) return null;
@@ -76,9 +76,9 @@ export function describeDevice(c: Context<Env>): DeviceInfo {
  * machine's ARP table. MACs never travel over HTTP, so this is all there is, and only on a
  * home server: a cloud server (or a container on its own network) sees none.
  */
-export async function homeNetworkMacs(): Promise<Map<string, string>> {
+export async function homeNetworkMacs(profile: DeploymentProfile): Promise<Map<string, string>> {
   const macs = new Map<string, string>();
-  if (isCloud) return macs;
+  if (profile.behindProxy) return macs;
   try {
     const { platform } = await import("node:os");
     if (platform() === "linux") {

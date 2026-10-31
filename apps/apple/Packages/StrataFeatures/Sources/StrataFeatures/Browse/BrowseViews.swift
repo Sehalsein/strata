@@ -352,7 +352,7 @@ struct MyListView: View {
         #endif
         .task {
             await services.client?.clearCache()
-            items = await services.load { try await $0.home().first { $0.id == "watchlist" }?.items ?? [] }
+            items = await services.load { try await $0.watchlist() }
         }
     }
 }

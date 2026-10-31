@@ -6,7 +6,7 @@ import { logger } from "../log";
 import type { Settings } from "../settings";
 import type { TitleType } from "./service";
 import type { Tmdb, TmdbMovie, TmdbShow } from "./tmdb";
-import { shareInFlight } from "../inFlight";
+import { SharedWork } from "../inFlight";
 
 const log = logger("ratings");
 
@@ -79,7 +79,8 @@ function showCertification(s: TmdbShow, region: string): string | null {
 
 /** Applies a profile's content limit to catalog lists, detail pages and playback. */
 export class ContentFilter {
-  private ages = new Map<string, Promise<{ age: number | null; genres: number[] }>>();
+  /** Ratings looked up, by title and region (failures aren't kept). */
+  private ages = new SharedWork<string, { age: number | null; genres: number[] }>({ remember: true, max: 5_000 });
 
   constructor(
     private readonly db: Db,
@@ -143,27 +144,15 @@ export class ContentFilter {
   private rating(type: TitleType, tmdbId: number) {
     const region = this.settings().region;
     const key = `${type}:${tmdbId}:${region}`;
-    let pending = this.ages.get(key);
-    if (!pending) {
-      pending = (async () => {
-        if (type === "movie") {
-          const m = await this.tmdb.movie(tmdbId);
-          const cert = movieCertification(m, region);
-          return { age: cert ? certificationAge(cert, region) : null, genres: m.genres.map((g) => g.id) };
-        }
-        const s = await this.tmdb.show(tmdbId);
-        const cert = showCertification(s, region);
-        return { age: cert ? certificationAge(cert, region) : null, genres: s.genres.map((g) => g.id) };
-      })();
-      if (this.ages.size > 5_000) this.ages.clear();
-      if (shareInFlight) {
-        this.ages.set(key, pending);
-        pending.catch(() => this.ages.delete(key));
-      } else {
-        // Only a finished lookup is shared (see inFlight.ts).
-        pending.then((v) => this.ages.set(key, Promise.resolve(v))).catch(() => {});
+    return this.ages.get(key, async () => {
+      if (type === "movie") {
+        const m = await this.tmdb.movie(tmdbId);
+        const cert = movieCertification(m, region);
+        return { age: cert ? certificationAge(cert, region) : null, genres: m.genres.map((g) => g.id) };
       }
-    }
-    return pending;
+      const s = await this.tmdb.show(tmdbId);
+      const cert = showCertification(s, region);
+      return { age: cert ? certificationAge(cert, region) : null, genres: s.genres.map((g) => g.id) };
+    });
   }
 }

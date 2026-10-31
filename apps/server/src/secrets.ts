@@ -1,5 +1,14 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+
+/**
+ * Whether a secret someone sent matches the real one, in constant time. Both are hashed
+ * first, so neither the content nor the length shows in how long it takes.
+ */
+export function sameSecret(given: string, expected: string): boolean {
+  const digest = (v: string) => createHash("sha256").update(v).digest();
+  return timingSafeEqual(digest(given), digest(expected));
+}
 
 /**
  * Encrypts API keys before they go into the database: AES-256-GCM with a key that is

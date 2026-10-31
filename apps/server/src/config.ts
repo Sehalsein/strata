@@ -1,5 +1,5 @@
 import { homedir, platform, tmpdir } from "node:os";
-import { isCloud } from "./mode";
+import { defaultProfile } from "./profile";
 import { runtime } from "#runtime";
 import { join, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
@@ -20,7 +20,8 @@ export interface RuntimeConfig {
 export function defaultDataDir(): string {
   if (process.env.STRATA_DATA_DIR) return process.env.STRATA_DATA_DIR;
   // The cloud server keeps nothing lasting on disk: only caches it can lose.
-  if (isCloud) return join(tmpdir(), "strata");
+  // A server that keeps no state here (cloud) only needs a scratch folder for caches.
+  if (!defaultProfile().localState) return join(tmpdir(), "strata");
   if (platform() === "darwin") return join(homedir(), "Library", "Application Support", "Strata");
   const xdg = process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share");
   return join(xdg, "strata");
@@ -51,7 +52,7 @@ export function parseArgs(argv: string[]): { command: string; config: RuntimeCon
     else throw new Error(`Unknown option ${arg}`);
   }
   config.dataDir = resolve(config.dataDir);
-  if (isCloud && !config.databaseUrl) throw new Error("The cloud server needs DATABASE_URL (a Postgres server, e.g. Neon).");
+  if (!defaultProfile().localState && !config.databaseUrl) throw new Error("The cloud server needs DATABASE_URL (a Postgres server, e.g. Neon).");
   if (config.webDir) config.webDir = resolve(config.webDir);
   return { command, config };
 }

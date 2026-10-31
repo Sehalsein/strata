@@ -236,6 +236,7 @@ describe("setup and auth", () => {
     const file = (await exported.json()) as any;
     expect(file.account).toMatchObject({ username: "dora", email: "dora@example.com" });
     expect(file.myList).toEqual([expect.objectContaining({ tmdbId: 10378 })]);
+    expect((await json(await server.request("/api/watchlist", { token: dora }))).items).toEqual([expect.objectContaining({ type: "movie", tmdbId: 10378 })]);
     expect(file.devices.length).toBeGreaterThan(0);
     expect(JSON.stringify(file)).not.toContain(dora);
 
@@ -265,6 +266,30 @@ describe("setup and auth", () => {
     await server.request("/api/auth/organization/set-active", { method: "POST", token, json: { organizationId: mine.organizationId } });
     expect(await files(token)).toContain("Only.Mine.2020.mkv");
     await mine.library.markMissing("local", []);
+  });
+
+  test("a household's admin manages only people below them, and only in this household", async () => {
+    const full = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const bobMember = full.members.find((m: any) => m.user.name === "bob");
+    const owner = full.members.find((m: any) => m.role.includes("owner"));
+    // Carol owns the neighbours' household and joins this one too.
+    const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "carol@example.com", role: "member" } }));
+    const carol = (await signIn("carol", "carols-password")).token!;
+    expect((await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: carol, json: { invitationId: invite.id } })).status).toBe(200);
+    const carolId = (await json(await server.request("/api/me", { token: carol }))).user.id;
+    expect((await server.request("/api/auth/organization/update-member-role", { method: "POST", token, json: { memberId: bobMember.id, role: "admin" } })).status).toBe(200);
+    const bob = (await signIn("bob", "bobs-password")).token!;
+    // No sign-in code for the owner above him…
+    expect((await server.request(`/api/household/members/${owner.id}/sign-in-code`, { method: "POST", token: bob })).status).toBe(403);
+    // …and Carol's account isn't this household's alone to reset.
+    const reset = await server.request("/api/auth/admin/set-user-password", { method: "POST", token: bob, json: { userId: carolId, newPassword: "hijacked-password" } });
+    expect(reset.status).toBe(403);
+    expect((await signIn("carol", "carols-password")).status).toBe(200);
+    // The server's admin still can.
+    const carolMember = (await json(await server.request("/api/auth/organization/get-full-organization", { token }))).members.find((m: any) => m.userId === carolId);
+    expect((await server.request(`/api/household/members/${carolMember.id}/sign-in-code`, { method: "POST", token })).status).toBe(200);
+    await server.request("/api/auth/organization/update-member-role", { method: "POST", token, json: { memberId: bobMember.id, role: "member" } });
+    await server.request("/api/auth/organization/remove-member", { method: "POST", token, json: { memberIdOrEmail: carolMember.id } });
   });
 
   test("a TV signs in by code once a signed-in phone approves it, and can only watch", async () => {
@@ -298,6 +323,15 @@ describe("setup and auth", () => {
     expect((await server.request("/api/titles/movie/10378", { token: bob })).status).toBe(200);
     // Other accounts are unaffected.
     expect(await titles(token)).toEqual([666, 10378]);
+    // Nor the files of those titles, by id.
+    const h = await server.household();
+    const file = await h.library.upsert({ provider: "local", ref: "/m/Night.mkv", name: "Night.mkv", size: 1, parsed: { title: "Night", kind: "movie" } as never });
+    await h.library.setManualMatch(file.id, "movie", 666);
+    expect((await server.request(`/api/files/${file.id}/link`, { method: "POST", token: bob })).status).toBe(403);
+    expect((await server.request(`/api/files/${file.id}/content`, { token: bob })).status).toBe(404);
+    expect((await server.request(`/api/files/${file.id}/probe`, { method: "POST", token: bob, json: { durationMs: 1, video: [], audio: [], subtitles: [] } })).status).not.toBe(200);
+    expect((await server.request(`/api/files/${file.id}/link`, { method: "POST", token })).status).toBe(200);
+    await h.library.markMissing("local", []);
   });
 
   test("launcher proof: only with the launch secret, only from loopback", async () => {
@@ -332,6 +366,26 @@ describe("setup and auth", () => {
     expect((await server.request("/api/home", { token: joined.token })).status).toBe(200);
     // Someone outside the household can't be picked.
     expect((await server.request("/api/join", { method: "POST", ip: "192.168.2.40", json: { userId: "not-a-member" } })).status).toBe(404);
+  });
+
+  test("a device that joined without a password can't administer through Better Auth either", async () => {
+    const choices = await json(await server.request("/api/join", { method: "POST", ip: "192.168.2.42", json: {} }));
+    const adminId = choices.members.find((m: any) => m.name === "sehal").id;
+    const joined = (await json(await server.request("/api/join", { method: "POST", ip: "192.168.2.42", json: { userId: adminId } }))).token;
+    const call = (path: string, init: { method?: string; json?: unknown } = {}) => server.request(`/api/auth${path}`, { ...init, token: joined });
+    // Watching and its own sign-in still work.
+    expect((await server.request("/api/me", { token: joined })).status).toBe(200);
+    expect((await call("/organization/list")).status).toBe(200);
+    // The server admin's account, from a joined device: no admin plugin, no household changes,
+    // no new way in.
+    expect((await call("/admin/create-user", { method: "POST", json: { email: "x@example.com", password: "x-password-1", name: "x", role: "admin" } })).status).toBe(403);
+    expect((await call("/admin/list-users")).status).toBe(403);
+    expect((await call("/admin/set-role", { method: "POST", json: { userId: adminId, role: "admin" } })).status).toBe(403);
+    expect((await call("/admin/impersonate-user", { method: "POST", json: { userId: adminId } })).status).toBe(403);
+    expect((await call("/organization/invite-member", { method: "POST", json: { email: "x@example.com", role: "owner" } })).status).toBe(403);
+    expect((await call("/link-social", { method: "POST", json: { provider: "google" } })).status).toBe(403);
+    // The same account signed in with its password still can.
+    expect((await server.request("/api/auth/admin/list-users", { token })).status).toBe(200);
   });
 
   test("the household's admins see every device, whose it is, and can sign it out", async () => {

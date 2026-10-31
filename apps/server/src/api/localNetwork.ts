@@ -1,6 +1,5 @@
 import type { Context } from "hono";
 import type { Env } from "./context";
-import { isCloud } from "../mode";
 
 /** Headers a reverse proxy or tunnel adds: behind one, every client looks local, so we don't trust it. */
 const PROXY_HEADERS = ["forwarded", "x-forwarded-for", "x-real-ip", "cf-connecting-ip", "true-client-ip"];
@@ -12,7 +11,7 @@ const PROXY_HEADERS = ["forwarded", "x-forwarded-for", "x-real-ip", "cf-connecti
  */
 export function isLocalRequest(c: Context<Env>): boolean {
   // A cloud server has no home network: its "local" peers are its host's proxies.
-  if (isCloud) return false;
+  if (c.var.services.profile.behindProxy) return false;
   if (PROXY_HEADERS.some((h) => c.req.header(h) !== undefined)) return false;
   // Browsers send Origin on cross-site and POST requests; the apps never do. Refusing it
   // stops a web page on the LAN (or a DNS-rebound one) from joining on someone's behalf.
@@ -36,7 +35,7 @@ export function isLocalHost(raw: string | undefined): boolean {
 
 /** Straight from this machine: a loopback peer address and no proxy headers. */
 export function isLoopbackRequest(c: Context<Env>): boolean {
-  if (isCloud) return false;
+  if (c.var.services.profile.behindProxy) return false;
   if (PROXY_HEADERS.some((h) => c.req.header(h) !== undefined)) return false;
   const address = c.env?.requestIP?.(c.req.raw)?.address?.toLowerCase();
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
@@ -55,13 +54,19 @@ export function isLocalAddress(raw: string): boolean {
 }
 
 /**
- * The client's address, for throttling. The cloud server sits behind its host's proxy,
- * so the address is the first one in X-Forwarded-For (`STRATA_TRUST_PROXY=1` does the
- * same for a home server behind a reverse proxy); otherwise the connection's own.
+ * The client's address, for throttling. On Workers it's Cloudflare's CF-Connecting-IP,
+ * which a client can't set. Behind another proxy (the cloud server in a container, or
+ * `STRATA_TRUST_PROXY=1` on a home server) it's the last X-Forwarded-For entry: the one
+ * the proxy in front added. Earlier entries are whatever the client sent. Otherwise it's
+ * the connection's own address.
  */
 export function clientAddress(c: Context<Env>): string {
-  if (isCloud || process.env.STRATA_TRUST_PROXY === "1") {
-    const forwarded = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("cf-connecting-ip") || c.req.header("x-real-ip");
+  const { profile } = c.var.services;
+  if (profile.runtime === "workers") {
+    const address = c.req.header("cf-connecting-ip");
+    if (address) return address.toLowerCase();
+  } else if (profile.behindProxy || process.env.STRATA_TRUST_PROXY === "1") {
+    const forwarded = c.req.header("x-forwarded-for")?.split(",").at(-1)?.trim() || c.req.header("x-real-ip");
     if (forwarded) return forwarded.toLowerCase();
   }
   return c.env?.requestIP?.(c.req.raw)?.address?.toLowerCase() ?? "unknown";

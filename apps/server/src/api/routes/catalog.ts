@@ -7,7 +7,6 @@ import { body, intParam, optionalInt, requireAuth, requireHousehold, userOf, typ
 import { capsSchema } from "../../playback/decide";
 import { NeedsProbeError } from "../../playback/service";
 import { mediaInfoSchema } from "../../media/probe";
-import type { Shelf } from "../../catalog/service";
 
 const target = z.object({
   mediaType: z.enum(["movie", "episode"]),
@@ -21,78 +20,71 @@ const episodeRule = [
   { message: "season and episode are required for episodes" },
 ] as const;
 
-/** Drops titles above the profile's content limit, and shelves left empty. */
-async function allowedShelves(c: Context<Env>, shelves: Shelf[]): Promise<Shelf[]> {
-  const userId = userOf(c);
-  const filtered = await Promise.all(shelves.map(async (shelf) => ({ ...shelf, items: await c.var.household.content.filter(userId, shelf.items) })));
-  return filtered.filter((shelf) => shelf.items.length > 0);
+/** What play and download both take, besides the title. */
+const prepareFields = {
+  candidateId: z.string().optional(),
+  audioStreamIndex: z.number().int().optional(),
+  preferMaxHeight: z.number().int().min(240).optional(),
+  caps: capsSchema.default({}),
+};
+
+/** A file the server can't read yet: the app reads its details itself, sends them, and asks again. */
+async function needsProbe(c: Context<Env>, prepare: () => Promise<object>) {
+  try {
+    return c.json(await prepare());
+  } catch (err) {
+    if (err instanceof NeedsProbeError) return c.json({ needsProbe: { fileId: err.fileId, url: err.url } }, 428);
+    throw err;
+  }
 }
+
+/** The signed-in person's view of the household's catalog, with their content limit applied. */
+const viewer = (c: Context<Env>) => c.var.household.viewer(userOf(c));
 
 export const catalogRoutes = new Hono<Env>()
   .use(requireAuth, requireHousehold)
 
-  .get("/home", async (c) => c.json({ shelves: await allowedShelves(c, await c.var.household.catalog.home(userOf(c))) }))
+  .get("/home", async (c) => c.json({ shelves: await viewer(c).home() }))
 
   .get("/genres/:type", async (c) => {
     const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
-    return c.json({ items: await c.var.household.catalog.genres(type) });
+    return c.json({ items: await viewer(c).genres(type) });
   })
 
   .get("/browse/:type/genre/:id", async (c) => {
     const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
-    return c.json({ shelves: await allowedShelves(c, await c.var.household.catalog.genreShelves(type, intParam(c, "id"))) });
+    return c.json({ shelves: await viewer(c).genreShelves(type, intParam(c, "id")) });
   })
 
   // Episodes of the shows on this profile's list: the last week and the next month.
-  .get("/calendar", async (c) => c.json({ items: await c.var.household.calendar.episodes(userOf(c)) }))
+  .get("/calendar", async (c) => c.json({ items: await viewer(c).calendar() }))
 
-  .get("/shows", async (c) => c.json({ shelves: await allowedShelves(c, await c.var.household.catalog.showsPage()) }))
-  .get("/anime/categories", (c) => c.json({ items: c.var.household.catalog.animeCategories() }))
+  .get("/shows", async (c) => c.json({ shelves: await viewer(c).showsPage() }))
+  .get("/anime/categories", (c) => c.json({ items: viewer(c).animeCategories() }))
 
   .get("/anime", async (c) => {
     const category = c.req.query("category") || undefined;
-    if (category && !c.var.household.catalog.animeCategories().some((x) => x.id === category)) throw new HTTPException(400, { message: "Unknown anime category" });
-    return c.json({ shelves: await allowedShelves(c, await c.var.household.catalog.animePage(category)) });
+    if (category && !viewer(c).animeCategories().some((x) => x.id === category)) throw new HTTPException(400, { message: "Unknown anime category" });
+    return c.json({ shelves: await viewer(c).animePage(category) });
   })
 
-  .get("/person/:id", async (c) => {
-    const person = await c.var.household.catalog.person(intParam(c, "id"));
-    const content = c.var.household.content;
-    const userId = userOf(c);
-    return c.json({ ...person, movies: await content.filter(userId, person.movies), shows: await content.filter(userId, person.shows) });
-  })
+  .get("/person/:id", async (c) => c.json(await viewer(c).person(intParam(c, "id"))))
 
   .get("/browse/:type/:list", async (c) => {
     const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
     const list = z.enum(["trending", "popular", "topRated", "library"]).parse(c.req.param("list"));
-    return c.json({ items: await c.var.household.content.filter(userOf(c), await c.var.household.catalog.browse(type, list)) });
+    return c.json({ items: await viewer(c).browse(type, list) });
   })
 
   .get("/search", async (c) => {
     const q = c.req.query("q")?.trim();
     if (!q) return c.json({ items: [] });
-    return c.json({ items: await c.var.household.content.filter(userOf(c), await c.var.household.catalog.search(q)) });
+    return c.json({ items: await viewer(c).search(q) });
   })
 
-  .get("/titles/movie/:id", async (c) => {
-    const { catalog, content } = c.var.household;
-    const [userId, id] = [userOf(c), intParam(c, "id")];
-    await content.assertAllowed(userId, "movie", id);
-    const movie = await catalog.movie(userId, id);
-    return c.json({ ...movie, recommendations: await content.filter(userId, movie.recommendations) });
-  })
-  .get("/titles/show/:id", async (c) => {
-    const { catalog, content } = c.var.household;
-    const [userId, id] = [userOf(c), intParam(c, "id")];
-    await content.assertAllowed(userId, "show", id);
-    const show = await catalog.show(userId, id);
-    return c.json({ ...show, recommendations: await content.filter(userId, show.recommendations) });
-  })
-  .get("/titles/show/:id/seasons/:season", async (c) => {
-    const [userId, id] = [userOf(c), intParam(c, "id")];
-    await c.var.household.content.assertAllowed(userId, "show", id);
-    return c.json(await c.var.household.catalog.season(userId, id, intParam(c, "season")));
-  })
+  .get("/titles/movie/:id", async (c) => c.json(await viewer(c).movie(intParam(c, "id"))))
+  .get("/titles/show/:id", async (c) => c.json(await viewer(c).show(intParam(c, "id"))))
+  .get("/titles/show/:id/seasons/:season", async (c) => c.json(await viewer(c).season(intParam(c, "id"), intParam(c, "season"))))
 
   // Library sources are instant; `discover=1` adds releases from scrapers (a few seconds).
   .get("/sources", async (c) => {
@@ -102,71 +94,36 @@ export const catalogRoutes = new Hono<Env>()
     const season = optionalInt(c.req.query("season"));
     const episode = optionalInt(c.req.query("episode"));
     if (mediaType === "episode" && (season === undefined || episode === undefined)) throw new HTTPException(400, { message: "season and episode are required for episodes" });
-    await c.var.household.content.assertAllowed(userOf(c), mediaType === "movie" ? "movie" : "show", tmdbId);
-    const items = await c.var.household.catalog.sources(mediaType, tmdbId, season, episode);
+    const target = { mediaType, tmdbId, season, episode };
+    const items = await viewer(c).sources(target);
     if (c.req.query("discover") === "1") {
       await c.var.services.throttle.spend(`searches:${c.var.household.organizationId}`, SEARCHES_PER_HOUSEHOLD, "This household has searched for releases a lot in the last hour.");
-      items.push(...(await c.var.household.discovery.candidates({ mediaType, tmdbId, season, episode })));
+      items.push(...(await viewer(c).discover(target)));
     }
     return c.json({ items });
   })
 
   .post("/play", async (c) => {
-    const req = await body(
-      c,
-      target
-        .extend({
-          candidateId: z.string().optional(),
-          startMs: z.number().min(0).optional(),
-          audioStreamIndex: z.number().int().optional(),
-          preferMaxHeight: z.number().int().min(240).optional(),
-          caps: capsSchema.default({}),
-        })
-        .refine(...episodeRule),
-    );
-    const userId = userOf(c);
-    await c.var.household.content.assertAllowed(userId, req.mediaType === "movie" ? "movie" : "show", req.tmdbId);
-    try {
-      return c.json(await c.var.household.playback.play({ userId }, req));
-    } catch (err) {
-      // The app reads the file's details itself, sends them, and asks again.
-      if (err instanceof NeedsProbeError) return c.json({ needsProbe: { fileId: err.fileId, url: err.url } }, 428);
-      throw err;
-    }
+    const req = await body(c, target.extend({ ...prepareFields, startMs: z.number().min(0).optional() }).refine(...episodeRule));
+    return needsProbe(c, () => viewer(c).play(req));
   })
 
   // A file to download and watch offline (iPhone and iPad): its link and how to play it.
   .post("/downloads", async (c) => {
-    const req = await body(
-      c,
-      target
-        .extend({
-          candidateId: z.string().optional(),
-          audioStreamIndex: z.number().int().optional(),
-          preferMaxHeight: z.number().int().min(240).optional(),
-          caps: capsSchema.default({}),
-        })
-        .refine(...episodeRule),
-    );
-    await c.var.household.content.assertAllowed(userOf(c), req.mediaType === "movie" ? "movie" : "show", req.tmdbId);
-    try {
-      return c.json(await c.var.household.playback.prepareDownload(req));
-    } catch (err) {
-      if (err instanceof NeedsProbeError) return c.json({ needsProbe: { fileId: err.fileId, url: err.url } }, 428);
-      throw err;
-    }
+    const req = await body(c, target.extend(prepareFields).refine(...episodeRule));
+    return needsProbe(c, () => viewer(c).prepareDownload(req));
   })
 
   // A fresh link for a download whose link expired.
   .post("/files/:id/link", async (c) => {
     const id = intParam(c, "id");
-    const url = await c.var.household.playback.fileLink(id);
+    const url = await viewer(c).fileLink(id);
     return c.json({ url: url ?? `/api/files/${id}/content` });
   })
 
   // A file on this server's disk, for downloading (TorBox files download from TorBox).
   .get("/files/:id/content", async (c) => {
-    const path = await c.var.household.playback.localPath(intParam(c, "id"));
+    const path = await viewer(c).localPath(intParam(c, "id"));
     if (!path) throw new HTTPException(404, { message: "No such file" });
     return serveRange(path, c.req.header("range"));
   })
@@ -174,7 +131,7 @@ export const catalogRoutes = new Hono<Env>()
   // Media info the app read from a file (see NeedsProbeError): codecs, tracks, length.
   .post("/files/:id/probe", async (c) => {
     const info = await body(c, mediaInfoSchema);
-    if (!(await c.var.household.playback.acceptProbe(intParam(c, "id"), info))) throw new HTTPException(404, { message: "No such file" });
+    if (!(await viewer(c).acceptProbe(intParam(c, "id"), info))) throw new HTTPException(404, { message: "No such file" });
     return c.json({ ok: true });
   })
 
@@ -216,10 +173,13 @@ export const catalogRoutes = new Hono<Env>()
     return c.json({ ok: true });
   })
 
+  // My List on its own (it's also a shelf on /home).
+  .get("/watchlist", async (c) => c.json({ items: await viewer(c).watchlist() }))
+
   .put("/watchlist", async (c) => {
     const input = await body(c, z.object({ type: z.enum(["movie", "show"]), tmdbId: z.number().int(), on: z.boolean() }));
     // Nothing above the profile's content limit goes on its list (taking it off is fine).
-    if (input.on) await c.var.household.content.assertAllowed(userOf(c), input.type, input.tmdbId);
+    await viewer(c).assertMayList(input.type, input.tmdbId, input.on);
     await c.var.services.progress.setWatchlist(userOf(c), input.type, input.tmdbId, input.on);
     return c.json({ ok: true });
   });

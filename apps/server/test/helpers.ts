@@ -95,7 +95,13 @@ export interface TestServer {
 
 export async function startTestServer(
   fetchImpl: typeof fetch = fakeTmdb,
-  overrides: { ffmpeg?: null; /** Keys every household gets (each household has its own). */ keys?: Partial<Record<SecretKey, string>> } = {},
+  overrides: {
+    ffmpeg?: null;
+    /** Keys every household gets (each household has its own). */
+    keys?: Partial<Record<SecretKey, string>>;
+    /** Another kind of server than this process's (deploymentProfile("cloud", "workers")…). */
+    profile?: import("../src/profile").DeploymentProfile;
+  } = {},
 ): Promise<TestServer> {
   const dataDir = mkdtempSync(join(tmpdir(), "strata-test-"));
   process.env.STRATA_NO_FFMPEG_DOWNLOAD = "1"; // tests use the machine's ffmpeg, never a download

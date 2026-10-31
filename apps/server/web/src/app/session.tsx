@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { Me, ServerInfo } from "@/lib/types";
+import type { Capabilities, Me, ServerInfo } from "@/lib/types";
 
 /** "systemAdmin": the backoffice, for whoever runs the server (set by the environment on the cloud). */
 export type Access = "any" | "householdAdmin" | "serverAdmin" | "systemAdmin";
@@ -11,8 +11,10 @@ export interface Session {
   isServerAdmin: boolean;
   /** The active household's owner or an admin: its library, settings, members. */
   isHouseholdAdmin: boolean;
-  /** The hosted server: no folders, home-network join, Bonjour or self-update. */
+  /** The hosted server (for wording; what it can do is in `capabilities`). */
   cloud: boolean;
+  /** What this server does: local folders, home-network join, self-update… */
+  capabilities: Capabilities;
   can: (access: Access) => boolean;
   /**
    * After a sign-in, sign-out, account or household switch: re-reads who's signed in and drops

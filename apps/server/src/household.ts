@@ -1,6 +1,7 @@
 import { CatalogService } from "./catalog/service";
 import { CalendarService } from "./catalog/calendar";
 import { ContentFilter } from "./catalog/contentRating";
+import { Viewer } from "./catalog/viewer";
 import { Matcher } from "./catalog/matcher";
 import { AnimeMatcher } from "./catalog/anime/match";
 import type { Anilist } from "./catalog/anime/anilist";
@@ -81,6 +82,11 @@ export class Household {
     this.discovery = new Discovery(tmdb, this.library, settings, torbox, shared.fetch, (id, hash, name) => this.housekeeping.recordAdded(id, hash, name), shared.anime.ids,
       () => shared.throttle.spend(`adds:${organizationId}`, ADDS_PER_HOUSEHOLD, "This household has added a lot of releases to TorBox today."));
     this.playback = new PlaybackService(this.library, shared.sessions, shared.progress, settings, shared.ffmpeg, torbox, this.discovery, (id, s, e) => this.catalog.nextEpisode(id, s, e), (id) => this.housekeeping.recordPlayed(id));
+  }
+
+  /** One person's view of the catalog, with their content limit applied (see Viewer). */
+  viewer(userId: string): Viewer {
+    return new Viewer(this, userId);
   }
 
   /** The server's settings with the household's on top. */

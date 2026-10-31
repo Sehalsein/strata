@@ -103,7 +103,7 @@ export function DevicesStep({ info, onNext, onBack }: StepProps) {
             {lan && lan !== address && <p className="text-muted-foreground text-xs">On your home network: {lan}</p>}
           </div>
           <ol className="text-muted-foreground list-decimal space-y-1.5 pl-5 text-sm">
-            {info.mode !== "cloud" && <li>On your home network, “{info.serverName}” shows up in the app by itself (Bonjour).</li>}
+            {info.capabilities.bonjour && <li>On your home network, “{info.serverName}” shows up in the app by itself (Bonjour).</li>}
             <li>{info.mode === "cloud" ? "Enter" : "Otherwise, enter"} the address above, or scan the code with your iPhone's camera.</li>
             <li>Sign in with your account. Everyone you invite signs in with their own.</li>
           </ol>

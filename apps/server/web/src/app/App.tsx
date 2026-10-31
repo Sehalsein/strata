@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { useQuery } from "@tanstack/react-query";
 import { LoaderCircle, RefreshCw, ServerOff } from "lucide-react";
 import { api, errorMessage, privacyUrl } from "@/lib/api";
-import { authClient, isHouseholdAdmin } from "@/lib/auth-client";
+import { authClient } from "@/lib/auth-client";
 import { queryClient, queryKeys } from "@/lib/query";
 import { navigate, usePath } from "@/lib/router";
 import { Button } from "@/components/ui/button";
@@ -74,11 +74,11 @@ export function App() {
   const session = useMemo<Session | null>(() => {
     if (!info.data || !me.data) return null;
     const m = me.data;
-    const isServerAdmin = m.user.isServerAdmin;
-    const householdAdmin = !m.viewerOnly && isHouseholdAdmin(m.household?.role);
+    const isServerAdmin = m.permissions.administerServer;
+    const householdAdmin = m.permissions.administerHousehold;
     const can = (access: Access) =>
       access === "any" ? true : access === "systemAdmin" ? isServerAdmin : access === "serverAdmin" ? isServerAdmin && householdAdmin : householdAdmin;
-    return { info: info.data, me: m, isServerAdmin, isHouseholdAdmin: householdAdmin, cloud: info.data.mode === "cloud", can, authChanged, addAccount: () => setAddingAccount(true) };
+    return { info: info.data, me: m, isServerAdmin, isHouseholdAdmin: householdAdmin, cloud: info.data.mode === "cloud", capabilities: info.data.capabilities, can, authChanged, addAccount: () => setAddingAccount(true) };
   }, [info.data, me.data, authChanged]);
 
   if (info.isPending) return <FullscreenSpinner />;

@@ -100,6 +100,12 @@ export function refuseServerStream(plan: PlaybackPlan, inputKind: "path" | "url"
   throw new PlaybackError(`This source can't play on this device (${plan.reasons.join("; ")}). Pick another source.`, 422);
 }
 
+/** A download plays on the device as it is or repackaged there, never through the server. */
+export function playsOnDevice(plan: PlaybackPlan): "direct" | "device" {
+  if (plan.mode === "direct" || plan.mode === "device") return plan.mode;
+  throw new PlaybackError(`This source can't play on this device (${plan.reasons.join("; ")}). Pick another source.`, 422);
+}
+
 /** The server has no media info for this TorBox file: the app reads it from `url` and sends it. */
 export class NeedsProbeError extends Error {
   constructor(
@@ -131,13 +137,7 @@ export class PlaybackService {
   async play(user: { userId: string }, req: PlayRequest): Promise<PlayResponse> {
     // Started now so the (possibly uncached) season lookup overlaps the probe and link.
     const nextLookup = req.mediaType === "episode" ? this.findNextEpisode(req.tmdbId, req.season!, req.episode!).catch(() => null) : Promise.resolve(null);
-    const file = await this.chooseFile(req);
-
-    const first = await this.resolveInput(file);
-    const info = await this.probeFile(file, first.input);
-    // The probe may have swapped a stalled TorBox link for a fresh one.
-    const { input, inputKind } = await this.resolveInput(file);
-    const plan = decide(info, req.caps, req.audioStreamIndex, this.settings().language);
+    const { file, info, input, inputKind, plan, remux, audioTracks, candidate } = await this.prepare(req);
     refuseServerStream(plan, inputKind, req.caps);
 
     let startMs = req.startMs;
@@ -182,15 +182,12 @@ export class PlaybackService {
       sessionId: session.id,
       mode: plan.mode,
       url: direct ? this.handOff(session) : `/api/stream/${session.id}/stream.m3u8`,
-      remux:
-        plan.mode === "device"
-          ? { audio: plan.audio, audioStreamIndex: plan.audioStreamIndex, videoStreamIndex: plan.videoStreamIndex, stripDolbyVision: plan.stripDolbyVision }
-          : null,
+      remux,
       startOffsetMs: session.startOffsetMs,
       seekToMs: direct ? startMs : 0,
       durationMs: info.durationMs,
-      candidate: toCandidate((await this.library.get(file.id))!),
-      audioTracks: info.audio.map((a) => ({ index: a.index, codec: a.codec, channels: a.channels, language: a.language, title: a.title, selected: a.index === plan.audioStreamIndex })),
+      candidate,
+      audioTracks,
       subtitleTracks: session.subtitles.map((t) => ({
         id: t.id,
         codec: t.codec,
@@ -214,29 +211,47 @@ export class PlaybackService {
    * play on the device as it is or repackaged there.
    */
   async prepareDownload(req: Omit<PlayRequest, "startMs">): Promise<DownloadResponse> {
-    const file = await this.chooseFile(req);
-    const first = await this.resolveInput(file);
-    const info = await this.probeFile(file, first.input);
-    const { input, inputKind } = await this.resolveInput(file);
-    const plan = decide(info, req.caps, req.audioStreamIndex, this.settings().language);
-    if (plan.mode !== "direct" && plan.mode !== "device") {
-      throw new PlaybackError(`This source can't play on this device (${plan.reasons.join("; ")}). Pick another source.`, 422);
-    }
+    const { file, info, input, inputKind, plan, remux, audioTracks, candidate } = await this.prepare(req);
     return {
       fileId: file.id,
       url: inputKind === "url" ? input : `/api/files/${file.id}/content`,
-      mode: plan.mode,
-      remux:
-        plan.mode === "device"
-          ? { audio: plan.audio, audioStreamIndex: plan.audioStreamIndex, videoStreamIndex: plan.videoStreamIndex, stripDolbyVision: plan.stripDolbyVision }
-          : null,
+      mode: playsOnDevice(plan),
+      remux,
       durationMs: info.durationMs,
-      candidate: toCandidate((await this.library.get(file.id))!),
-      audioTracks: info.audio.map((a) => ({ index: a.index, codec: a.codec, channels: a.channels, language: a.language, title: a.title, selected: a.index === plan.audioStreamIndex })),
+      candidate,
+      audioTracks,
       subtitleTracks: embeddedTracks(info)
         .filter((t) => t.text && typeof t.source === "number")
         .map((t) => ({ id: t.id, codec: t.codec, language: t.language, title: t.title, forced: t.forced, isDefault: t.isDefault, external: false, url: null, embedded: true, streamIndex: t.source as number })),
       chapters: info.chapters,
+    };
+  }
+
+  /**
+   * Gets a title ready to play on this device, for play and download alike: chooses the
+   * file, makes sure it's reachable (a fresh TorBox link) and its media known (or throws
+   * NeedsProbeError for the app to read it), and plans how it plays. The caller then
+   * refuses what it can't use: refuseServerStream to play, playsOnDevice to download.
+   */
+  private async prepare(req: Omit<PlayRequest, "startMs">) {
+    const file = await this.chooseFile(req);
+    const first = await this.resolveInput(file);
+    const info = await this.probeFile(file, first.input);
+    // The probe may have swapped a stalled TorBox link for a fresh one.
+    const { input, inputKind } = await this.resolveInput(file);
+    const plan = decide(info, req.caps, req.audioStreamIndex, this.settings().language);
+    return {
+      file,
+      info,
+      input,
+      inputKind,
+      plan,
+      remux:
+        plan.mode === "device"
+          ? { audio: plan.audio, audioStreamIndex: plan.audioStreamIndex, videoStreamIndex: plan.videoStreamIndex, stripDolbyVision: plan.stripDolbyVision }
+          : null,
+      audioTracks: info.audio.map((a) => ({ index: a.index, codec: a.codec, channels: a.channels, language: a.language, title: a.title, selected: a.index === plan.audioStreamIndex })),
+      candidate: toCandidate((await this.library.get(file.id))!),
     };
   }
 

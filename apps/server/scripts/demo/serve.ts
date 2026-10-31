@@ -9,12 +9,13 @@
 // --public (the hosted demo): sign in as "demo" / "strata-demo", a viewer-only account;
 // the admin's password is random and never shown, admin routes are refused for everyone,
 // and nothing reaches out (no TorBox, release search, updates or home-network join).
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../../src/api/app";
+import { sameSecret } from "../../src/secrets";
 import type { Shelf, TitleCard } from "../../src/catalog/service";
 import { imageUrl, type TmdbListItem } from "../../src/catalog/tmdb";
 import { createServices, type Services } from "../../src/services";
@@ -176,7 +177,7 @@ home.catalog.animePage = async (category?: string): Promise<Shelf[]> => {
 async function restoreSession(req: Request): Promise<Response> {
   const key = process.env.DEMO_RESTORE_KEY ?? "";
   const given = req.headers.get("X-Demo-Key") ?? "";
-  if (!key || given.length !== key.length || !timingSafeEqual(Buffer.from(given), Buffer.from(key))) return new Response("Not found", { status: 404 });
+  if (!key || !sameSecret(given, key)) return new Response("Not found", { status: 404 });
   const body = (await req.json().catch(() => null)) as { token?: unknown; username?: unknown; viewerOnly?: unknown } | null;
   const token = typeof body?.token === "string" && /^[A-Za-z0-9_-]{16,128}$/.test(body.token) ? body.token : null;
   if (!token) return Response.json({ error: "Bad request" }, { status: 400 });
@@ -192,8 +193,8 @@ async function restoreSession(req: Request): Promise<Response> {
 }
 
 // Only now, with the demo set up: admin routes and changes to the accounts and households
-// are refused from here on (api/context.ts, auth/betterAuth.ts). Seeding above needs them.
-if (publicDemo) process.env.STRATA_DEMO = "1";
+// are refused from here on (auth/permissions.ts, auth/betterAuth.ts). Seeding above needs them.
+if (publicDemo) services.profile.readOnly = true;
 
 const app = createApp(services);
 Bun.serve({

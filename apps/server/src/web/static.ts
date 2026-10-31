@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { join, normalize } from "node:path";
+import { join, normalize, resolve, sep } from "node:path";
 import type { Context } from "hono";
 import { embeddedFiles } from "./embedded";
 
@@ -23,8 +23,10 @@ const PLACEHOLDER = `<!doctype html><meta charset="utf-8"><title>Strata</title>
 export function webHandler(webDir?: string) {
   const lookup = (path: string): string | undefined => {
     if (webDir) {
-      const full = normalize(join(webDir, path));
-      if (!full.startsWith(webDir)) return undefined;
+      // Inside webDir itself: "/srv/web-other" starts with "/srv/web" but isn't in it.
+      const root = resolve(webDir);
+      const full = normalize(join(root, path));
+      if (!full.startsWith(root + sep)) return undefined;
       return existsSync(full) ? full : undefined;
     }
     return embeddedFiles[path];

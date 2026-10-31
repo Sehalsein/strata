@@ -6,6 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { member, session as sessionTable } from "../db/schema";
 import { describeDevice, deviceChanges } from "./deviceInfo";
 import { isSystemAdmin } from "../auth/betterAuth";
+import { permissionsOf, type Permissions } from "../auth/permissions";
 import type { Household } from "../household";
 import type { Services } from "../services";
 
@@ -57,7 +58,7 @@ export const requireAuth: MiddlewareHandler<Env> = createMiddleware<Env>(async (
   }
   c.set("session", {
     token: s.token,
-    user: { id: u.id, username: u.username ?? null, name: u.name, email: u.email, image: u.image ?? null, isServerAdmin: isSystemAdmin(u) && !viewerOnly },
+    user: { id: u.id, username: u.username ?? null, name: u.name, email: u.email, image: u.image ?? null, isServerAdmin: isSystemAdmin(c.var.services.profile, u) && !viewerOnly },
     organizationId: s.activeOrganizationId ?? null,
     role: null,
     viewerOnly,
@@ -89,19 +90,27 @@ export const requireHousehold: MiddlewareHandler<Env> = createMiddleware<Env>(as
   await next();
 });
 
+/** What the signed-in device may do in its household (see auth/permissions.ts). */
+export function permissions(c: Context<Env>): Permissions {
+  const { viewerOnly, role, user } = c.var.session;
+  return permissionsOf(c.var.services.profile, { viewerOnly, role, isServerAdmin: user.isServerAdmin });
+}
+
+const DEMO_REFUSAL = "The demo can't be changed.";
+
 /** The household's owner or an admin, signed in with a password (not a TV or home join). */
 export const requireHouseholdAdmin: MiddlewareHandler<Env> = createMiddleware<Env>(async (c, next) => {
-  if (process.env.STRATA_DEMO === "1") throw new HTTPException(403, { message: "The demo can't be changed." });
-  const { role, viewerOnly } = c.var.session;
-  const roles = (role ?? "").split(",");
-  if (viewerOnly || !(roles.includes("owner") || roles.includes("admin"))) throw new HTTPException(403, { message: "Only the household's owner or admins can do that" });
+  const may = permissions(c);
+  if (!may.change) throw new HTTPException(403, { message: DEMO_REFUSAL });
+  if (!may.administerHousehold) throw new HTTPException(403, { message: "Only the household's owner or admins can do that" });
   await next();
 });
 
 /** The server admin (the account made at setup), signed in with a password. */
 export const requireServerAdmin: MiddlewareHandler<Env> = createMiddleware<Env>(async (c, next) => {
-  if (process.env.STRATA_DEMO === "1") throw new HTTPException(403, { message: "The demo can't be changed." });
-  if (!c.var.session.user.isServerAdmin) throw new HTTPException(403, { message: "Only the server's admin can do that" });
+  const may = permissions(c);
+  if (!may.change) throw new HTTPException(403, { message: DEMO_REFUSAL });
+  if (!may.administerServer) throw new HTTPException(403, { message: "Only the server's admin can do that" });
   await next();
 });
 

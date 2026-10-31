@@ -330,4 +330,3 @@ export function invitationLink(invitationId: string): string {
   return `${window.location.origin}/invite/${invitationId}`;
 }
 
-export const isHouseholdAdmin = (role: string | null | undefined) => !!role && role.split(",").some((r) => r === "owner" || r === "admin");

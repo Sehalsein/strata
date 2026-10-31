@@ -2,7 +2,7 @@ import { eq, lt } from "drizzle-orm";
 import type { Db } from "../db";
 import { apiCache } from "../db/schema";
 import { logger } from "../log";
-import { shareInFlight } from "../inFlight";
+import { SharedWork } from "../inFlight";
 import { runtime } from "#runtime";
 
 const log = logger("cache");
@@ -46,7 +46,8 @@ const DAY = 24 * 60 * 60_000;
  */
 export class ApiCache {
   private memo = new Map<string, Entry>();
-  private inflight = new Map<string, Promise<unknown>>();
+  /** Fetches under way, joined by anyone asking for the same key meanwhile. */
+  private inflight = new SharedWork<string, unknown>();
   private failedAt = new Map<string, number>();
 
   constructor(private readonly db: Db) {}
@@ -60,15 +61,13 @@ export class ApiCache {
     } else if (entry && age < options.ttl) {
       return entry.value as T;
     } else if (entry && age < (options.maxStale ?? 30 * DAY)) {
-      if (!this.inflight.has(key) && !this.backingOff(key, options)) {
-        runtime.background(this.fetch(key, options, fetch)); // a failed refresh keeps the old copy
+      if (!this.inflight.running(key) && !this.backingOff(key, options)) {
+        runtime.background(this.inflight.get(key, () => this.fetch(key, options, fetch))); // a failed refresh keeps the old copy
       }
       return entry.value as T;
     }
-    const sharing = this.inflight.get(key) as Promise<T> | undefined;
-    if (sharing) return sharing;
-    if (this.backingOff(key, options)) throw new Error("The service didn't answer a moment ago; try again shortly.");
-    return this.fetch(key, options, fetch);
+    if (!this.inflight.running(key) && this.backingOff(key, options)) throw new Error("The service didn't answer a moment ago; try again shortly.");
+    return this.inflight.get(key, () => this.fetch(key, options, fetch)) as Promise<T>;
   }
 
   /** Reads a cached answer, if any (memory, then the database). */
@@ -103,8 +102,8 @@ export class ApiCache {
     return gone.length;
   }
 
-  private fetch<T>(key: string, options: CacheOptions, fetch: () => Promise<T>): Promise<T> {
-    const work = (async () => {
+  private async fetch<T>(key: string, options: CacheOptions, fetch: () => Promise<T>): Promise<T> {
+    {
       try {
         const value = await fetch();
         this.failedAt.delete(key);
@@ -120,9 +119,7 @@ export class ApiCache {
         }
         throw err;
       }
-    })().finally(() => this.inflight.delete(key));
-    if (shareInFlight) this.inflight.set(key, work);
-    return work;
+    }
   }
 
   private backingOff(key: string, options: CacheOptions): boolean {

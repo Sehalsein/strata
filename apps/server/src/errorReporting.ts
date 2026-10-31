@@ -1,6 +1,7 @@
 import { redactSecrets } from "./log";
 import { MODE } from "./mode";
 import { VERSION } from "./version";
+import { runtime } from "#runtime";
 
 /**
  * Errors to Sentry when SENTRY_DSN is set: one small request per error, sent straight to
@@ -8,7 +9,6 @@ import { VERSION } from "./version";
  * through redactSecrets; the same message is sent at most once a minute.
  */
 const recent = new Map<string, number>();
-let pending: Promise<unknown>[] = [];
 
 function dsn(): { url: string; key: string } | null {
   const raw = process.env.SENTRY_DSN;
@@ -50,13 +50,8 @@ export function reportError(scope: string, message: string, error?: unknown) {
     headers: { "Content-Type": "application/x-sentry-envelope", "X-Sentry-Auth": `Sentry sentry_version=7, sentry_client=strata/${VERSION}, sentry_key=${target.key}` },
     body,
   }).catch(() => {});
-  pending.push(sent);
-  void sent.finally(() => (pending = pending.filter((p) => p !== sent)));
-}
-
-/** Sends still in flight (a Worker waits for these before its request ends). */
-export function pendingReports(): Promise<unknown> {
-  return Promise.all(pending);
+  // On Workers the request stays open until it's sent (runtime.background).
+  runtime.background(sent);
 }
 
 function stackFrames(stack: string) {

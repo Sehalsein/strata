@@ -3,7 +3,7 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { createAccessControl } from "better-auth/plugins/access";
 import { adminAc, defaultStatements } from "better-auth/plugins/admin/access";
-import { and, eq, gt, like, or, sql } from "drizzle-orm";
+import { and, eq, gt, like, ne, or, sql } from "drizzle-orm";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, bearer, deviceAuthorization, magicLink, multiSession, organization, username } from "better-auth/plugins";
 import { passkey } from "@better-auth/passkey";
@@ -11,7 +11,9 @@ import type { Db } from "../db";
 import { emailConfigured, sendEmail, simpleEmail } from "../email";
 import * as schema from "../db/schema";
 import { isAvatarImage } from "../avatars";
-import { isCloud } from "../mode";
+import { sameSecret } from "../secrets";
+import type { DeploymentProfile } from "../profile";
+import { roleRank } from "./permissions";
 import { runtime } from "#runtime";
 
 const DAY_S = 24 * 60 * 60;
@@ -52,8 +54,8 @@ export function takeIssuedCode(captureId: string): string | undefined {
 }
 
 /** Cloud: the accounts with these emails run the server (STRATA_ADMIN_EMAILS, comma-separated). */
-export function isAdminEmail(email: string | null | undefined): boolean {
-  if (!isCloud || !email) return false;
+export function isAdminEmail(profile: DeploymentProfile, email: string | null | undefined): boolean {
+  if (!profile.adminsByEmail || !email) return false;
   const list = (process.env.STRATA_ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase());
   return list.includes(email.toLowerCase());
 }
@@ -67,8 +69,17 @@ const ownsHousehold = async (db: Db, userId: string) =>
  * environment decides, every request: an email in STRATA_ADMIN_EMAILS, so taking one off
  * the list takes the access away at once.
  */
-export function isSystemAdmin(user: { role?: string | null; email?: string | null }): boolean {
-  return isCloud ? isAdminEmail(user.email) : user.role === "admin";
+export function isSystemAdmin(profile: DeploymentProfile, user: { role?: string | null; email?: string | null; emailVerified?: boolean | null }): boolean {
+  return profile.adminsByEmail ? isAdminEmail(profile, user.email) && adminEmailProven(user) : user.role === "admin";
+}
+
+/**
+ * Cloud with email set up: an admin's address counts once it's confirmed by mail, so nobody
+ * becomes the server's admin by signing up (or being invited) with that address first.
+ * Without email nothing can be confirmed, and the list alone decides.
+ */
+function adminEmailProven(user: { emailVerified?: boolean | null }): boolean {
+  return !emailConfigured() || !!user.emailVerified;
 }
 /**
  * The ways in besides a password, each on only when the server is set up for it, so a
@@ -96,8 +107,13 @@ export function signInMethods() {
 /** The admin plugin's permissions (see `admin()` below for who gets which). */
 const accessControl = createAccessControl(defaultStatements);
 
-/** Owner 2, admin 1, member 0 (a member's role can list several). */
-const rank = (role: string | null | undefined) => ((role ?? "").split(",").includes("owner") ? 2 : (role ?? "").split(",").includes("admin") ? 1 : 0);
+/**
+ * Better Auth paths a watch-only session (viewerOnly) may not call: the admin plugin, the
+ * household changes beyond picking one, and anything that adds or removes a way in.
+ */
+const VIEWER_REFUSED =
+  /^\/(admin\/|organization\/(?!(list|set-active|get-full-organization|get-active-member|get-active-member-role)$)|passkey\/|link-social|unlink-account|delete-user|set-password|revoke-sessions|revoke-other-sessions|multi-session\/revoke)/;
+
 
 /**
  * May the signed-in caller manage `userId`'s account (reset its password, delete it)? The
@@ -105,7 +121,7 @@ const rank = (role: string | null | undefined) => ((role ?? "").split(",").inclu
  * them in their active household, but never the server's admin. Never your own, and never
  * from a device that joined without a password.
  */
-export async function assertMayManage(db: Db, getSession: (headers: Headers) => Promise<{ user: { id: string }; session: unknown } | null>, headers: Headers | undefined, userId: string) {
+export async function assertMayManage(db: Db, profile: DeploymentProfile, getSession: (headers: Headers) => Promise<{ user: { id: string }; session: unknown } | null>, headers: Headers | undefined, userId: string) {
   // Asked through Better Auth's own getSession: a hook runs before the bearer plugin has
   // turned the apps' token into a session.
   const caller = headers ? await getSession(headers) : null;
@@ -115,10 +131,10 @@ export async function assertMayManage(db: Db, getSession: (headers: Headers) => 
   };
   if (!caller || session?.viewerOnly) refuse("Sign in with your password to do that.");
   if (caller!.user.id === userId) refuse("That's your own account: use your account menu.");
-  const [target] = await db.select({ role: schema.user.role, email: schema.user.email, name: schema.user.name }).from(schema.user).where(eq(schema.user.id, userId));
+  const [target] = await db.select({ role: schema.user.role, email: schema.user.email, emailVerified: schema.user.emailVerified, name: schema.user.name }).from(schema.user).where(eq(schema.user.id, userId));
   if (!target) refuse("No such account.");
-  if (isSystemAdmin(caller!.user as { role?: string | null; email?: string | null })) return;
-  if (isSystemAdmin(target!)) refuse("Only the server's admin can manage that account.");
+  if (isSystemAdmin(profile, caller!.user as { role?: string | null; email?: string | null; emailVerified?: boolean | null })) return;
+  if (isSystemAdmin(profile, target!)) refuse("Only the server's admin can manage that account.");
   const household = session?.activeOrganizationId;
   if (!household) refuse("Choose a household first.");
   const roles = await db
@@ -127,13 +143,22 @@ export async function assertMayManage(db: Db, getSession: (headers: Headers) => 
     .where(and(eq(schema.member.organizationId, household!), or(eq(schema.member.userId, caller!.user.id), eq(schema.member.userId, userId))));
   const mine = roles.find((r) => r.userId === caller!.user.id);
   const theirs = roles.find((r) => r.userId === userId);
-  if (!mine || rank(mine.role) < 1) refuse("Only the household's owner or admins can do that.");
+  if (!mine || roleRank(mine.role) < 1) refuse("Only the household's owner or admins can do that.");
   if (!theirs) refuse(`${target!.name} isn't in this household.`);
-  if (rank(theirs!.role) >= rank(mine!.role)) refuse(`Only someone above ${target!.name} in the household can do that.`);
+  if (roleRank(theirs!.role) >= roleRank(mine!.role)) refuse(`Only someone above ${target!.name} in the household can do that.`);
+  // The account is theirs everywhere: someone also in another household is managed by the
+  // server's admin, not by one household's admins.
+  const [elsewhere] = await db
+    .select({ id: schema.member.id })
+    .from(schema.member)
+    .where(and(eq(schema.member.userId, userId), ne(schema.member.organizationId, household!)))
+    .limit(1);
+  if (elsewhere) refuse(`${target!.name} is in another household too, so only the server's admin can do that.`);
 }
 
 export interface AuthOptions {
   db: Db;
+  profile: DeploymentProfile;
   /** The server's secret key (base64); Better Auth's signing secret is derived from it. */
   secretKey: Buffer;
   /** The address people reach the server at, when known (cloud). */
@@ -162,21 +187,30 @@ export interface AuthOptions {
  * - Failed sign-ins are rate-limited in the database, shared by every server.
  */
 export function createAuth(options: AuthOptions) {
-  const db = options.db;
+  const { db, profile } = options;
   const methods = signInMethods();
-  const confirmEmail = isCloud && emailConfigured();
+  const confirmEmail = profile.openSignUp && emailConfigured();
   // Hooks below ask Better Auth's own API (getSession) of the instance they belong to.
   const auth = betterAuth({
     appName: "Strata",
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         // The hosted public demo shares one account: nobody may change it.
-        if (process.env.STRATA_DEMO === "1" && /^\/(change-password|update-user|change-email|delete-user|set-password|admin\/|organization\/(create|update|delete|invite-member|remove-member|update-member-role|leave|cancel-invitation)$)/.test(ctx.path)) {
+        if (profile.readOnly && /^\/(change-password|update-user|change-email|delete-user|set-password|admin\/|organization\/(create|update|delete|invite-member|remove-member|update-member-role|leave|cancel-invitation)$)/.test(ctx.path)) {
           throw new APIError("FORBIDDEN", { message: "The demo can't be changed." });
+        }
+        // A device that joined without a password (home network, QR code, TV) may watch and
+        // tend its own sign-in, never administer: its session can't reach the admin plugin,
+        // change households, or add a way in (passkey, Google) that outlives it.
+        if (VIEWER_REFUSED.test(ctx.path)) {
+          const caller = ctx.headers ? await auth.api.getSession({ headers: ctx.headers }) : null;
+          if ((caller?.session as { viewerOnly?: boolean | null } | undefined)?.viewerOnly) {
+            throw new APIError("FORBIDDEN", { message: "Sign in with your password to do that." });
+          }
         }
         // Sign-in codes are only made by the server (api/routes/auth.ts, for a household's
         // admins or the member themself), never asked for from outside.
-        if (ctx.path === "/sign-in/magic-link" && ctx.headers?.get(SIGN_IN_CODE_HEADER) !== signInCodeSecret()) {
+        if (ctx.path === "/sign-in/magic-link" && !sameSecret(ctx.headers?.get(SIGN_IN_CODE_HEADER) ?? "", signInCodeSecret())) {
           throw new APIError("NOT_FOUND", { message: "Not found" });
         }
         // Password reset is by email: without email set up there's nothing to send.
@@ -187,7 +221,7 @@ export function createAuth(options: AuthOptions) {
         // set-user-password and remove-user): the server's admin, or a household's owner or
         // admin for someone below them in it.
         if (ctx.path === "/admin/set-user-password" || ctx.path === "/admin/remove-user") {
-          await assertMayManage(db, (headers) => auth.api.getSession({ headers }), ctx.headers, String((ctx.body as { userId?: unknown } | undefined)?.userId ?? ""));
+          await assertMayManage(db, profile, (headers) => auth.api.getSession({ headers }), ctx.headers, String((ctx.body as { userId?: unknown } | undefined)?.userId ?? ""));
           return;
         }
         // A profile picture is one of Strata's own (src/avatars) or none: nobody can point
@@ -200,7 +234,7 @@ export function createAuth(options: AuthOptions) {
         if (ctx.path !== "/sign-up/email") return;
         // Cloud: anyone may sign up and gets a household of their own (see `after`). With an
         // invitation's id they join that household instead, checked as below.
-        if (isCloud && !(ctx.body as { invitationId?: unknown } | undefined)?.invitationId) return;
+        if (profile.openSignUp && !(ctx.body as { invitationId?: unknown } | undefined)?.invitationId) return;
         // The invitation's id is the proof (it's in the link; no mail is sent): an email
         // alone, which anyone might know, doesn't open sign-up.
         const body = (ctx.body ?? {}) as { email?: unknown; invitationId?: unknown };
@@ -230,7 +264,7 @@ export function createAuth(options: AuthOptions) {
           const created = ctx.context.newSession;
           const returned = ctx.context.returned as { user?: { id: string; name: string; createdAt: Date | string } } | undefined;
           const user = created?.user ?? (ctx.path === "/sign-up/email" && returned && !(returned instanceof Error) ? returned.user : undefined);
-          if (!isCloud || !user || (ctx.body as { invitationId?: unknown } | undefined)?.invitationId) return;
+          if (!profile.openSignUp || !user || (ctx.body as { invitationId?: unknown } | undefined)?.invitationId) return;
           if (ctx.path === "/callback/:id") {
             const isNew = Date.now() - new Date(user.createdAt).getTime() < 10 * 60_000;
             const [inOne] = await db.select({ id: schema.member.id }).from(schema.member).where(eq(schema.member.userId, user.id)).limit(1);
@@ -307,8 +341,10 @@ export function createAuth(options: AuthOptions) {
           // sent the link to that address (the sign-up hook checked the invitation).
           before: async (user, ctx) => {
             const image = user.image != null && !isAvatarImage(user.image) ? null : user.image;
-            const invited = ctx?.path === "/sign-up/email" && !!(ctx.body as { invitationId?: unknown } | undefined)?.invitationId;
-            return { data: { ...user, image, ...(invited ? { emailVerified: true } : {}), ...(isAdminEmail(user.email) ? { role: "admin" } : {}) } };
+            // An invitation's link is passed on by hand, so it doesn't prove an admin's address.
+            const invited = ctx?.path === "/sign-up/email" && !!(ctx.body as { invitationId?: unknown } | undefined)?.invitationId && !(confirmEmail && isAdminEmail(profile, user.email));
+            const emailVerified = invited || !!user.emailVerified;
+            return { data: { ...user, image, ...(invited ? { emailVerified: true } : {}), ...(isSystemAdmin(profile, { email: user.email, emailVerified }) ? { role: "admin" } : {}) } };
           },
         },
         delete: {
@@ -348,9 +384,9 @@ export function createAuth(options: AuthOptions) {
           before: async (session) => {
             // …and on each sign-in the role follows the list (Better Auth's admin plugin reads
             // it): added after signing up, or taken off.
-            if (isCloud) {
-              const [u] = await db.select({ email: schema.user.email, role: schema.user.role }).from(schema.user).where(eq(schema.user.id, session.userId));
-              const role = u && isAdminEmail(u.email) ? "admin" : "user";
+            if (profile.adminsByEmail) {
+              const [u] = await db.select({ email: schema.user.email, emailVerified: schema.user.emailVerified, role: schema.user.role }).from(schema.user).where(eq(schema.user.id, session.userId));
+              const role = u && isSystemAdmin(profile, u) ? "admin" : "user";
               if (u && (u.role ?? "user") !== role) await db.update(schema.user).set({ role }).where(eq(schema.user.id, session.userId));
             }
             if ((session as { activeOrganizationId?: string | null }).activeOrganizationId) return;
@@ -384,7 +420,7 @@ export function createAuth(options: AuthOptions) {
     // (Settings › Account): it never makes an account. Cloud: it also signs up, like the
     // Create account form. Neither joins an account by matching email (many Strata accounts
     // have none), and the Google address needn't be the account's.
-    socialProviders: methods.google ? { google: { ...methods.google, disableSignUp: !isCloud, disableImplicitSignUp: !isCloud } } : {},
+    socialProviders: methods.google ? { google: { ...methods.google, disableSignUp: !profile.openSignUp, disableImplicitSignUp: !profile.openSignUp } } : {},
     account: {
       accountLinking: { enabled: true, disableImplicitLinking: true, allowDifferentEmails: true },
     },
@@ -503,7 +539,7 @@ export function createAuth(options: AuthOptions) {
         sendInvitationEmail: async () => {},
         // Households are made by the server admin (or setup); in the cloud, also one by each
         // new account (its own, see the sign-up `after` hook).
-        allowUserToCreateOrganization: async (user) => isSystemAdmin(user as { role?: string | null; email?: string | null }) || (isCloud && !(await ownsHousehold(db, user.id))),
+        allowUserToCreateOrganization: async (user) => isSystemAdmin(profile, user as { role?: string | null; email?: string | null; emailVerified?: boolean | null }) || (profile.openSignUp && !(await ownsHousehold(db, user.id))),
         creatorRole: "owner",
         membershipLimit: 50,
         schema: {

@@ -45,7 +45,7 @@ function sectionFromHash(available: Section[]): SectionId {
  * checked with the provider first).
  */
 export default function SettingsPage({ scope = "household" }: { scope?: "household" | "server" }) {
-  const { isServerAdmin, cloud } = useSession();
+  const { isServerAdmin, capabilities } = useSession();
   const sections: Section[] = (
     [
       { id: "general", label: "General", icon: Globe, group: "household" },
@@ -55,7 +55,8 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
       ...(isServerAdmin
         ? ([
             { id: "server", label: "Server", icon: Server, group: "server" },
-            ...(!cloud ? [{ id: "network", label: "Network", icon: Network, group: "server" } as Section, { id: "updates", label: "Updates", icon: RefreshCw, group: "server" } as Section] : []),
+            ...(capabilities.homeNetworkJoin || capabilities.bonjour ? [{ id: "network", label: "Network", icon: Network, group: "server" } as Section] : []),
+            ...(capabilities.selfUpdate ? [{ id: "updates", label: "Updates", icon: RefreshCw, group: "server" } as Section] : []),
           ] as Section[])
         : []),
     ] as Section[]
@@ -81,7 +82,7 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isServerAdmin, cloud, scope]);
+  }, [isServerAdmin, capabilities, scope]);
 
   const dirty = useMemo(() => !!data && !!draft && JSON.stringify(data.settings) !== JSON.stringify(draft), [data, draft]);
 
@@ -166,7 +167,7 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
 
           {section === "library" && (
             <>
-              {!cloud && (
+              {capabilities.localMedia && (
                 <SettingsSection title="Media folders" description="Folders on this server that hold the household's movies and shows. Strata scans them and matches each file.">
                   <div className="p-5">
                     <MediaFolders value={draft.mediaFolders} onChange={(v) => set("mediaFolders", v)} canBrowse={isServerAdmin} />
@@ -202,9 +203,9 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
 
           {section === "connections" && <Connections secrets={data.secrets} />}
 
-          {section === "server" && isServerAdmin && <ServerSections draft={draft} set={set} cloud={cloud} />}
-          {section === "network" && isServerAdmin && !cloud && <NetworkSection draft={draft} set={set} />}
-          {section === "updates" && isServerAdmin && !cloud && <UpdatesCard draft={draft} set={set} />}
+          {section === "server" && isServerAdmin && <ServerSections draft={draft} set={set} localMedia={capabilities.localMedia} />}
+          {section === "network" && isServerAdmin && (capabilities.homeNetworkJoin || capabilities.bonjour) && <NetworkSection draft={draft} set={set} />}
+          {section === "updates" && isServerAdmin && capabilities.selfUpdate && <UpdatesCard draft={draft} set={set} />}
         </div>
       </div>
 
@@ -315,7 +316,7 @@ function SourcesSection({ draft, set }: { draft: Settings; set: SetFn }) {
   );
 }
 
-function ServerSections({ draft, set, cloud }: { draft: Settings; set: SetFn; cloud: boolean }) {
+function ServerSections({ draft, set, localMedia }: { draft: Settings; set: SetFn; localMedia: boolean }) {
   const urlInvalid = !!draft.torrentioUrl && !/^https?:\/\/\S+$/.test(draft.torrentioUrl);
   return (
     <>
@@ -325,7 +326,7 @@ function ServerSections({ draft, set, cloud }: { draft: Settings; set: SetFn; cl
         </SettingRow>
       </SettingsSection>
       <SettingsSection title="Library" description="For every household.">
-        {!cloud && (
+        {localMedia && (
           <SettingRow label="Scan folders every" htmlFor="scan-every" description="How often every household's media folders are checked for new files. 0 turns it off.">
             <NumberInput id="scan-every" min={0} suffix="min" value={draft.scanIntervalMinutes} onChange={(v) => set("scanIntervalMinutes", v)} />
           </SettingRow>
@@ -339,7 +340,7 @@ function ServerSections({ draft, set, cloud }: { draft: Settings; set: SetFn; cl
           <Input id="addon-url" className="font-mono sm:w-72" type="url" placeholder="https://torrentio.strem.fun" value={draft.torrentioUrl} onChange={(e) => set("torrentioUrl", e.target.value.trim())} spellCheck={false} autoCapitalize="off" />
         </SettingRow>
       </SettingsSection>
-      {!cloud && (
+      {localMedia && (
         <SettingsSection title="Transcoding" description="Only for files on this server's disk; TorBox video plays straight from TorBox.">
           <ToggleRow label="Hardware acceleration" description="VideoToolbox, VAAPI or QSV when a file has to be converted." checked={draft.hardwareAcceleration} onChange={(v) => set("hardwareAcceleration", v)} />
           <SettingRow label="At the same time" htmlFor="max-transcodes" description="How many conversions may run at once (1–16).">

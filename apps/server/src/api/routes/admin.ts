@@ -13,7 +13,6 @@ import { imageUrl, yearOf } from "../../catalog/tmdb";
 import { API_VERSION, VERSION } from "../../version";
 import { member, session as authSession, user } from "../../db/schema";
 import { and, desc, eq, gt } from "drizzle-orm";
-import { isCloud } from "../../mode";
 import { homeNetworkMacs, isPrivateMac } from "../deviceInfo";
 import { isLocalAddress } from "../localNetwork";
 import type { PlaybackSession } from "../../playback/sessions";
@@ -62,7 +61,7 @@ export const adminRoutes = new Hono<Env>()
       .orderBy(desc(authSession.updatedAt));
     const current = c.var.session.token;
     // MACs only reach this server for devices on its own home network (its ARP table).
-    const macs = rows.some((r) => r.ipAddress && /^\d+\.\d+\.\d+\.\d+$/.test(r.ipAddress) && isLocalAddress(r.ipAddress)) ? await homeNetworkMacs() : new Map<string, string>();
+    const macs = rows.some((r) => r.ipAddress && /^\d+\.\d+\.\d+\.\d+$/.test(r.ipAddress) && isLocalAddress(r.ipAddress)) ? await homeNetworkMacs(c.var.services.profile) : new Map<string, string>();
     return c.json({
       items: rows.map(({ token, ...row }) => {
         const macAddress = (row.ipAddress && macs.get(row.ipAddress)) || null;
@@ -91,9 +90,9 @@ export const adminRoutes = new Hono<Env>()
       version: VERSION,
       apiVersion: API_VERSION,
       platform: `${platform()}-${process.arch}`,
-      mode: isCloud ? "cloud" : "home",
+      mode: s.profile.mode,
       isServerAdmin: c.var.session.user.isServerAdmin,
-      dataDir: isCloud ? null : s.paths.root,
+      dataDir: s.profile.localState ? s.paths.root : null,
       uptimeMs: Date.now() - s.startedAt,
       ffmpeg: ff ? { version: ff.version, path: ff.ffmpeg, hwEncoder: ff.hwEncoder ?? null } : null,
       ffmpegSetup: s.ffmpegSetup(),
@@ -255,7 +254,7 @@ export const serverAdminRoutes = new Hono<Env>()
   .use("/fs", requireAuth, requireServerAdmin)
   // Folder picker for the setup wizard. Admin-only; lists directories, never files.
   .get("/fs", async (c) => {
-    if (isCloud) throw new HTTPException(404, { message: "The cloud server has no folders" });
+    if (!c.var.services.profile.localMedia) throw new HTTPException(404, { message: "The cloud server has no folders" });
     const path = resolve(c.req.query("path") || homedir());
     let entries;
     try {

@@ -9,7 +9,7 @@ import { organization, session as authSession, user, verification } from "./db/s
 import { ApiCache } from "./catalog/apiCache";
 import { Throttle } from "./throttle";
 import { announceSetupCode } from "./setupCode";
-import { isCloud, MODE } from "./mode";
+import { defaultProfile, type DeploymentProfile } from "./profile";
 import { Jobs } from "./jobs";
 import { logger, setLogDir } from "./log";
 import { SessionManager } from "./playback/sessions";
@@ -38,6 +38,8 @@ const MINUTE = 60_000;
 
 export interface Services {
   config: RuntimeConfig;
+  /** What this server does (home or cloud, Bun or Workers, the demo): see profile.ts. */
+  profile: DeploymentProfile;
   paths: DataPaths;
   db: Db;
   /** The server's own settings (its provider keys come from its environment). */
@@ -68,38 +70,41 @@ export interface Services {
 
 export interface ServiceOverrides {
   fetch?: typeof fetch;
+  /** Run as another kind of server (tests: cloud, or cloud on Bun, in the same process). */
+  profile?: DeploymentProfile;
   ffmpeg?: FfmpegInfo | null;
 }
 
 export async function createServices(config: RuntimeConfig, overrides: ServiceOverrides = {}): Promise<Services> {
+  const profile = overrides.profile ?? defaultProfile();
   const paths = dataPaths(config.dataDir);
-  if (runtime.name === "bun") setLogDir(paths.logs);
+  if (profile.runtime === "bun") setLogDir(paths.logs);
   const db = await openDatabase(config.databaseUrl ?? paths.db);
-  const box = SecretBox.load(isCloud ? null : paths.secretKey);
+  const box = SecretBox.load(profile.localState ? paths.secretKey : null);
   const settings = new SettingsStore(db, box, serverSettingsSchema, SERVER_SECRET_KEYS);
   await settings.load();
   const fetchImpl = overrides.fetch ?? globalFetch;
   const cache = new ApiCache(db);
   const throttle = new Throttle(db);
-  const auth = createAuth({ db, secretKey: box.signingKey(), baseURL: process.env.STRATA_PUBLIC_URL || undefined });
+  const auth = createAuth({ db, profile, secretKey: box.signingKey(), baseURL: process.env.STRATA_PUBLIC_URL || undefined });
   const hasAccounts = async () => (await db.select({ id: user.id }).from(user).limit(1)).length > 0;
   const householdIds = async () => (await db.select({ id: organization.id }).from(organization)).map((o) => o.id);
-  if (!isCloud && !(await hasAccounts())) await announceSetupCode(db);
+  if (profile.firstRunSetup && !(await hasAccounts())) await announceSetupCode(db);
 
   // A release binary carries its own ffmpeg: unpacked into the data folder on first start.
-  if (!isCloud && overrides.ffmpeg === undefined) await unpackEmbeddedFfmpeg(paths.root).catch((err) => log.warn("Couldn't set up the built-in ffmpeg", err));
-  let ffmpegInfo = overrides.ffmpeg !== undefined ? overrides.ffmpeg : isCloud ? null : await detectFfmpeg(paths.root);
+  if (profile.localMedia && overrides.ffmpeg === undefined) await unpackEmbeddedFfmpeg(paths.root).catch((err) => log.warn("Couldn't set up the built-in ffmpeg", err));
+  let ffmpegInfo = overrides.ffmpeg !== undefined ? overrides.ffmpeg : profile.localMedia ? await detectFfmpeg(paths.root) : null;
   const ffmpeg = () => ffmpegInfo;
 
   const anime = {
-    ids: new AnimeIds(isCloud ? cachedAnimeIdStore(cache) : fileAnimeIdStore(join(paths.root, "cache")), fetchImpl),
+    ids: new AnimeIds(profile.localState ? fileAnimeIdStore(join(paths.root, "cache")) : cachedAnimeIdStore(cache), fetchImpl),
     anilist: new Anilist(cache, fetchImpl),
     kitsu: new Kitsu(cache, fetchImpl),
   };
   const progress = new ProgressStore(db);
   const sessions = new SessionManager(
     db,
-    isCloud ? null : { transcodeDir: paths.transcode, getFfmpeg: ffmpeg, keepAwake: new KeepAwake(), maxTranscodes: () => settings.get().maxTranscodes, hwAllowed: () => settings.get().hardwareAcceleration },
+    !profile.localMedia ? null : { transcodeDir: paths.transcode, getFfmpeg: ffmpeg, keepAwake: new KeepAwake(), maxTranscodes: () => settings.get().maxTranscodes, hwAllowed: () => settings.get().hardwareAcceleration },
   );
   const subtitles = new SubtitleService(join(paths.root, "cache", "subtitles"), ffmpeg);
   const households = new Households({ db, box, serverSettings: settings, cache, throttle, anime, progress, sessions, ffmpeg, fetch: fetchImpl });
@@ -119,9 +124,9 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   };
 
   // The cloud's jobs run on whichever instance a cron or a request lands on: their last
-  // runs are kept in the database, and the crons say when they run next.
+  // runs are kept in the database. Only Cron Triggers say when they run next; timers know.
   const jobs = new Jobs(
-    isCloud
+    profile.sharedJobHistory
       ? {
           history: {
             load: async () =>
@@ -130,12 +135,12 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
               await db.execute(sql`INSERT INTO strata_meta (key, value) VALUES (${`job:${name}`}, ${JSON.stringify(run)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
             },
           },
-          nextRun: (name) => nextScheduledRun(name),
+          ...(profile.scheduler === "cron" ? { nextRun: (name: string) => nextScheduledRun(name) } : {}),
         }
       : {},
   );
   // Local folders, the bundled database, ffmpeg and self-updates are a home server's only.
-  if (!isCloud) jobs.register("scanLocal", () => eachHousehold("Scanning folders", (h) => scanLocal(h.library, h.settings().mediaFolders, () => {})));
+  if (profile.localMedia) jobs.register("scanLocal", () => eachHousehold("Scanning folders", (h) => scanLocal(h.library, h.settings().mediaFolders, () => {})));
   // Each household with a key, at most every `torboxSyncMinutes` (the job itself runs every 15).
   const lastSync = new Map<string, number>();
   jobs.register("syncTorbox", () =>
@@ -183,17 +188,17 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   });
   // A home server's bundled database, copied once a day into <data-dir>/backups (the last
   // week kept). Elsewhere the database's own host backs it up (Neon keeps a history).
-  if (!isCloud) jobs.register("backupDatabase", async () => {
+  if (profile.localState) jobs.register("backupDatabase", async () => {
     const file = await backupDatabase(db, paths.backups, "daily");
     return file ? { file } : { skipped: "the database isn't the bundled one" };
   });
-  if (!isCloud) jobs.register("detectFfmpeg", async () => {
+  if (profile.localMedia) jobs.register("detectFfmpeg", async () => {
     ffmpegInfo = await detectFfmpeg(paths.root);
     return { found: !!ffmpegInfo };
   });
   // No ffmpeg on the machine: the server fetches its own (pinned, checksummed) into <data-dir>/bin.
   let ffmpegSetup: FfmpegSetup = { state: "idle" };
-  if (!isCloud) jobs.register("installFfmpeg", async () => {
+  if (profile.localMedia) jobs.register("installFfmpeg", async () => {
     if (ffmpegInfo) return { skipped: "ffmpeg is already available" };
     ffmpegSetup = { state: "downloading" };
     try {
@@ -210,27 +215,27 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     }
   });
   // The cloud server plays nothing through ffmpeg (no local folders); only a home server fetches it.
-  if (!isCloud && !ffmpegInfo && overrides.ffmpeg === undefined && process.env.STRATA_NO_FFMPEG_DOWNLOAD !== "1") void jobs.run("installFfmpeg");
+  if (profile.localMedia && !ffmpegInfo && overrides.ffmpeg === undefined && process.env.STRATA_NO_FFMPEG_DOWNLOAD !== "1") void jobs.run("installFfmpeg");
 
-  const serverId = await loadServerId(db, paths.root);
+  const serverId = await loadServerId(db, profile.localState ? paths.root : null);
   // Only local streams run through this server; TorBox plays don't mind an update.
-  const updater = runtime.name === "workers" ? workersUpdater() : createUpdater({ dataDir: paths.root, dbPath: paths.db, backupsDir: paths.backups, db, settings, activeSessions: () => sessions.activeTranscodes(), fetch: fetchImpl });
-  if (!isCloud) jobs.register("checkUpdates", () => updater.checkAndMaybeApply());
+  const updater = !profile.selfUpdate ? deployedUpdater(profile) : createUpdater({ dataDir: paths.root, dbPath: paths.db, backupsDir: paths.backups, db, settings, activeSessions: () => sessions.activeTranscodes(), fetch: fetchImpl });
+  if (profile.selfUpdate) jobs.register("checkUpdates", () => updater.checkAndMaybeApply());
   // Started by main.ts once the HTTP server is listening; refreshed when the name/toggle changes.
   const bonjour = new Bonjour(() => {
     const s = settings.get();
-    return s.bonjourEnabled && !isCloud ? { name: s.serverName, port: config.port, txt: { version: VERSION, api: String(API_VERSION), id: serverId } } : null;
+    return s.bonjourEnabled && profile.bonjour ? { name: s.serverName, port: config.port, txt: { version: VERSION, api: String(API_VERSION), id: serverId } } : null;
   });
   settings.onChange(() => bonjour.refresh());
 
   // In-process timers on Bun; Cron Triggers run the same jobs on Workers (src/worker.ts).
-  if (process.env.STRATA_NO_JOBS !== "1") {
-    if (!isCloud) jobs.schedule("scanLocal", Math.max(1, settings.get().scanIntervalMinutes) * MINUTE, 5_000);
+  if (profile.scheduler === "timers" && process.env.STRATA_NO_JOBS !== "1") {
+    if (profile.localMedia) jobs.schedule("scanLocal", Math.max(1, settings.get().scanIntervalMinutes) * MINUTE, 5_000);
     jobs.schedule("syncTorbox", 15 * MINUTE, 8_000);
     // The cloud image is updated by deploying a new one.
-    if (!isCloud) jobs.schedule("checkUpdates", 6 * 60 * MINUTE, 60_000);
+    if (profile.selfUpdate) jobs.schedule("checkUpdates", 6 * 60 * MINUTE, 60_000);
     jobs.schedule("pruneAuth", 24 * 60 * MINUTE, 5 * MINUTE);
-    if (!isCloud) jobs.schedule("backupDatabase", 24 * 60 * MINUTE, 20 * MINUTE);
+    if (profile.localState) jobs.schedule("backupDatabase", 24 * 60 * MINUTE, 20 * MINUTE);
     jobs.schedule("cleanTorbox", 24 * 60 * MINUTE, 10 * MINUTE);
     jobs.schedule("pruneCatalogCache", 24 * 60 * MINUTE, 15 * MINUTE);
     jobs.schedule("refreshAnimeIds", 24 * 60 * MINUTE, 30_000);
@@ -243,10 +248,10 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     void closeDatabase(db);
     log.info("Stopped");
   };
-  log.info(`Running as a ${MODE} server`);
+  log.info(`Running as a ${profile.mode} server`);
 
   return {
-    config, paths, db, settings, auth, households, throttle, cache, progress, sessions, subtitles, jobs, serverId, bonjour, updater, ffmpeg,
+    config, profile, paths, db, settings, auth, households, throttle, cache, progress, sessions, subtitles, jobs, serverId, bonjour, updater, ffmpeg,
     ffmpegSetup: () => ffmpegSetup, hasAccounts, householdIds, startedAt: Date.now(), shutdown,
   };
 }
@@ -256,18 +261,19 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
  * database so every cloud instance shares it. A home server that had one in its data
  * folder keeps it.
  */
-async function loadServerId(db: Db, dataDir: string): Promise<string> {
+async function loadServerId(db: Db, dataDir: string | null): Promise<string> {
   const rows = rowsOf<{ value: string }>(await db.execute(sql`SELECT value FROM strata_meta WHERE key = 'server_id'`));
   if (rows[0]) return rows[0].value;
-  const file = join(dataDir, "server-id");
-  const id = !isCloud && existsSync(file) ? readFileSync(file, "utf8").trim() : randomUUID();
+  const file = dataDir && join(dataDir, "server-id");
+  const id = file && existsSync(file) ? readFileSync(file, "utf8").trim() : randomUUID();
   await db.execute(sql`INSERT INTO strata_meta (key, value) VALUES ('server_id', ${id}) ON CONFLICT (key) DO NOTHING`);
   return id;
 }
 
-/** On Workers the server is updated by deploying it: there's nothing to check or apply. */
-function workersUpdater(): Updater {
-  const status = { state: "idle", updateAvailable: false, latest: null, lastError: null, disabledReason: "Deployed on Cloudflare: update by deploying a new version" };
+/** A server that's updated by deploying it (cloud): there's nothing to check or apply. */
+function deployedUpdater(profile: DeploymentProfile): Updater {
+  const disabledReason = profile.runtime === "workers" ? "Deployed on Cloudflare: update by deploying a new version" : "A cloud server: update by deploying a new version";
+  const status = { state: "idle", updateAvailable: false, latest: null, lastError: null, disabledReason };
   return {
     status: () => status,
     check: async () => status,

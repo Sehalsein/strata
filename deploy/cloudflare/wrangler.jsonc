@@ -26,7 +26,13 @@
   // apps/server/src/cloudSchedule.ts, which must list the same expressions.
   "triggers": { "crons": ["*/15 * * * *", "17 4 * * *"] },
   "limits": { "cpu_ms": 30000 },
-  "observability": { "enabled": true },
+  // Logs and traces (traces show each request's database round trips).
+  "observability": { "enabled": true, "logs": { "enabled": true }, "traces": { "enabled": true, "head_sampling_rate": 0.1 } },
+  // Runs near Neon rather than near each visitor: every request makes several database
+  // round trips one after another. Smart Placement picks the spot from measured latency.
+  "placement": { "mode": "smart" },
+  // Checked by `wrangler dev`; the optional ones are listed at the top.
+  "secrets": { "required": ["DATABASE_URL", "STRATA_SECRET_KEY"] },
   // The Worker answers at this address (Cloudflare makes the DNS record and certificate;
   // sehalsein.com must be a zone in the same Cloudflare account). The landing site at
   // strata.sehalsein.com (deploy/landing) passes its /api/* here too.

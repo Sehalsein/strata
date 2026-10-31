@@ -1,6 +1,7 @@
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { reportError } from "./errorReporting";
+import { runtime } from "#runtime";
 
 type Level = "debug" | "info" | "warn" | "error";
 
@@ -35,7 +36,9 @@ function write(level: Level, scope: string, message: string, extra?: unknown) {
   if (ring.length > RING_SIZE) ring.shift();
   if (level === "debug" && !process.env.STRATA_DEBUG) return;
   const line = `${entry.time} ${level.toUpperCase().padEnd(5)} [${scope}] ${entry.message}`;
-  (level === "error" || level === "warn" ? console.error : console.log)(line);
+  // Workers Logs indexes JSON fields (level, scope), so the cloud server logs JSON.
+  const out = runtime.name === "workers" ? JSON.stringify(entry) : line;
+  (level === "error" || level === "warn" ? console.error : console.log)(out);
   if (logFile) {
     try {
       appendFileSync(logFile, line + "\n");

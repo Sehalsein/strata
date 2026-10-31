@@ -3,7 +3,6 @@ import { dataPaths, parseArgs } from "./config";
 import { createApp } from "./api/app";
 import { createServices, type Services } from "./services";
 import { logger, setLogDir } from "./log";
-import { isCloud } from "./mode";
 import { dashboardUrls } from "./platform/network";
 import { compiledBinaryPath, RESTART_EXIT_CODE, underServiceManager } from "./platform/runtime";
 import { serviceCli } from "./platform/service";
@@ -87,7 +86,7 @@ async function serve(argv: string[]) {
 
   log.info(`Strata ${VERSION} — data in ${services.paths.root}`);
   for (const url of dashboardUrls(config.host, server.port ?? config.port)) log.info(`Dashboard: ${url}`);
-  if (!isCloud && !(await services.hasAccounts())) log.info("First run — open the dashboard to finish setup");
+  if (services.profile.firstRunSetup && !(await services.hasAccounts())) log.info("First run — open the dashboard to finish setup");
   services.bonjour.start();
 
   if (boot === "trial") {
