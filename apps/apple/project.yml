@@ -66,6 +66,7 @@ targets:
           NSAllowsLocalNetworking: true
         NSBonjourServices: [_strata._tcp]
         NSLocalNetworkUsageDescription: Strata looks for your Strata servers on the local network.
+        NSCameraUsageDescription: Strata uses the camera to scan sign-in and server QR codes from your server's dashboard.
         NSUserActivityTypes:
           - com.strata.viewing
           - com.strata.watching

@@ -9,6 +9,8 @@ struct SignInCodeView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
     let request: SignInCodeRequest
+    /// After signing in (Add Profile closes itself).
+    var onSignedIn: () -> Void = {}
 
     @State private var serverName: String?
     @State private var signingIn = false
@@ -31,17 +33,9 @@ struct SignInCodeView: View {
                     Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
                         .multilineTextAlignment(.center)
                 }
-                Button {
+                PrimaryButton("Sign In", isLoading: signingIn) {
                     Task { await signIn() }
-                } label: {
-                    HStack {
-                        if signingIn { ProgressView() }
-                        Text("Sign In")
-                    }
-                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
                 .disabled(signingIn)
             }
             .padding(Metrics.gutter)
@@ -65,6 +59,7 @@ struct SignInCodeView: View {
         if await services.store.signIn(code: request.code, url: request.server) {
             services.refreshClient()
             dismiss()
+            onSignedIn()
         } else {
             error = services.store.lastError ?? "Couldn't sign in."
         }

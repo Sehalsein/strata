@@ -26,6 +26,9 @@ struct ConnectView: View {
     @State private var signInTarget: ServerTarget?
     @State private var joinTarget: ServerTarget?
     @State private var showAddressEntry = false
+    /// The camera (or a pasted link): a member's sign-in code or a server's address.
+    @State private var scanning = false
+    @State private var scannedSignIn: SignInCodeRequest?
     /// Servers appear a moment after the screen; on tvOS focus moves to the first one
     /// (otherwise it sits on "Enter Address", the only button at first).
     @FocusState private var focusedServer: String?
@@ -41,6 +44,9 @@ struct ConnectView: View {
             ScrollView {
                 VStack(alignment: Self.alignment, spacing: Metrics.space8) {
                     header
+                    #if os(iOS)
+                    scanButton
+                    #endif
                     serverList
                     #if os(tvOS)
                     Button("Enter Address") { showAddressEntry = true }
@@ -83,6 +89,14 @@ struct ConnectView: View {
             }
             #endif
         }
+        #if os(iOS)
+        .sheet(isPresented: $scanning) {
+            QRScannerSheet { text in handleScan(text) }
+        }
+        .sheet(item: $scannedSignIn) { request in
+            SignInCodeView(request: request, onSignedIn: signedIn)
+        }
+        #endif
         .onAppear { services.browser.start() }
         #if DEBUG
         // `-StrataServer 127.0.0.1:8460` connects at launch, for UI tests and screenshots
@@ -115,12 +129,20 @@ struct ConnectView: View {
     private static let frameAlignment = Alignment.leading
     #endif
 
+    private static func subtitle(isAdding: Bool) -> String {
+        #if os(iOS)
+        isAdding ? "Scan a code from your admin, or pick the server it's on." : "Scan a code from your admin, or pick a server on your network."
+        #else
+        isAdding ? "Pick the server it's on, or enter its address." : "Pick a server on your network, or enter its address."
+        #endif
+    }
+
     private var header: some View {
         VStack(alignment: Self.alignment, spacing: Metrics.space3) {
             StrataMark().frame(height: 44).padding(.bottom, Metrics.space2)
             Text(isAdding ? "Add a profile" : "Connect to Strata")
                 .font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-            Text(isAdding ? "Pick the server it's on, or enter its address." : "Pick a server on your network, or enter its address.")
+            Text(Self.subtitle(isAdding: isAdding))
                 .font(.stCallout).foregroundStyle(Theme.ink2)
                 .multilineTextAlignment(Self.alignment == .center ? .center : .leading)
         }
@@ -200,6 +222,54 @@ struct ConnectView: View {
         .padding(Metrics.space4)
         .contentShape(Rectangle())
     }
+
+    #if os(iOS)
+    /// The quickest way in: a sign-in code from the dashboard signs this profile in; the
+    /// server's address code just finds the server.
+    private var scanButton: some View {
+        Button {
+            error = nil
+            scanning = true
+        } label: {
+            HStack(spacing: Metrics.space4) {
+                Image(systemName: "qrcode.viewfinder")
+                    .font(.stHeadline)
+                    .foregroundStyle(Theme.onAccent)
+                    .frame(width: 44, height: 44)
+                    .background(Theme.apricot, in: RoundedRectangle(cornerRadius: Metrics.radiusSM, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Scan QR Code").font(.stHeadline).foregroundStyle(Theme.ink)
+                    Text("Sign-in code or server address")
+                        .font(.stFootnote).foregroundStyle(Theme.ink3)
+                }
+                Spacer(minLength: Metrics.space2)
+                Image(systemName: "chevron.right").font(.stFootnote.weight(.semibold)).foregroundStyle(Theme.ink3)
+            }
+            .padding(Metrics.space4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
+    }
+
+    private func handleScan(_ text: String) {
+        switch ScannedCode(text) {
+        case .signIn(let request):
+            // After the scanner's sheet has gone.
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(450))
+                scannedSignIn = request
+            }
+        case .server(let address):
+            self.address = address
+            Task { await probe(address) }
+        case .tvLink:
+            error = "That's a TV's code. To sign a TV in, open Settings › Link a TV."
+        case .unknown:
+            error = "That QR code isn't from Strata. Scan a sign-in code from Members, or the server's address."
+        }
+    }
+    #endif
 
     private var addressEntry: some View {
         VStack(alignment: .leading, spacing: Metrics.space3) {
