@@ -110,6 +110,9 @@ struct SettingsView: View {
                     }
                 }
 
+                // Cellular quality and downloads (iPhone and iPad).
+                PlaybackSettingsSection()
+
                 if let active = store.active {
                     Section {
                         Button("Sign Out \(active.name)", role: .destructive) { confirmSignOut = true }
