@@ -463,6 +463,8 @@ public final class StrataClient: Sendable {
         // demand a browser's Origin header (403 "Missing or null Origin").
         req.httpShouldHandleCookies = false
         req.setValue("application/json", forHTTPHeaderField: "Accept")
+        // What this device is, for the server's Devices page.
+        for (name, value) in DeviceInfo.headers { req.setValue(value, forHTTPHeaderField: name) }
         if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")

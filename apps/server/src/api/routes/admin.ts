@@ -14,6 +14,8 @@ import { API_VERSION, VERSION } from "../../version";
 import { member, organization, session as authSession, user } from "../../db/schema";
 import { and, desc, eq, gt } from "drizzle-orm";
 import { isCloud } from "../../mode";
+import { homeNetworkMacs, isPrivateMac } from "../deviceInfo";
+import { isLocalAddress } from "../localNetwork";
 import type { PlaybackSession } from "../../playback/sessions";
 import type { Household } from "../../household";
 import type { Services } from "../../services";
@@ -43,6 +45,10 @@ export const adminRoutes = new Hono<Env>()
         userName: user.name,
         username: user.username,
         userAgent: authSession.userAgent,
+        ipAddress: authSession.ipAddress,
+        location: authSession.location,
+        deviceName: authSession.deviceName,
+        deviceModel: authSession.deviceModel,
         viewerOnly: authSession.viewerOnly,
         createdAt: authSession.createdAt,
         updatedAt: authSession.updatedAt,
@@ -54,7 +60,14 @@ export const adminRoutes = new Hono<Env>()
       .where(and(eq(authSession.activeOrganizationId, h.organizationId), gt(authSession.expiresAt, new Date())))
       .orderBy(desc(authSession.updatedAt));
     const current = c.var.session.token;
-    return c.json({ items: rows.map(({ token, ...row }) => ({ ...row, viewerOnly: !!row.viewerOnly, isCurrent: token === current })) });
+    // MACs only reach this server for devices on its own home network (its ARP table).
+    const macs = rows.some((r) => r.ipAddress && /^\d+\.\d+\.\d+\.\d+$/.test(r.ipAddress) && isLocalAddress(r.ipAddress)) ? await homeNetworkMacs() : new Map<string, string>();
+    return c.json({
+      items: rows.map(({ token, ...row }) => {
+        const macAddress = (row.ipAddress && macs.get(row.ipAddress)) || null;
+        return { ...row, viewerOnly: !!row.viewerOnly, isCurrent: token === current, macAddress, macIsPrivate: macAddress ? isPrivateMac(macAddress) : false };
+      }),
+    });
   })
 
   // Signs a device out of this household (it goes back to the sign-in screen).

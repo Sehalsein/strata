@@ -229,4 +229,7 @@ export const migrations: string[] = [
   CREATE INDEX passkey_user_id ON passkey(user_id);
   CREATE INDEX passkey_credential_id ON passkey(credential_id);
   `,
+  /* 3: what each signed-in device is and where it was last seen */ `
+  ALTER TABLE session ADD COLUMN location TEXT, ADD COLUMN device_name TEXT, ADD COLUMN device_model TEXT;
+  `,
 ];

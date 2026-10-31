@@ -3,7 +3,8 @@ import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 import type { z } from "zod";
 import { and, eq } from "drizzle-orm";
-import { member } from "../db/schema";
+import { member, session as sessionTable } from "../db/schema";
+import { describeDevice, deviceChanges } from "./deviceInfo";
 import type { Household } from "../household";
 import type { Services } from "../services";
 
@@ -38,6 +39,16 @@ export const requireAuth: MiddlewareHandler<Env> = createMiddleware<Env>(async (
   const u = result.user as typeof result.user & { username?: string | null; role?: string | null; banned?: boolean | null };
   const s = result.session as typeof result.session & { activeOrganizationId?: string | null; viewerOnly?: boolean | null };
   const viewerOnly = !!s.viewerOnly;
+  // Keeps the Devices page current: where the device is now, and what it is. Written only
+  // when something changed, which is rare (a new network, an app update).
+  const changes = deviceChanges(s as Parameters<typeof deviceChanges>[0], describeDevice(c));
+  if (changes) {
+    await c.var.services.db
+      .update(sessionTable)
+      .set({ ...changes, updatedAt: new Date() })
+      .where(eq(sessionTable.token, s.token))
+      .catch(() => {});
+  }
   c.set("session", {
     token: s.token,
     user: { id: u.id, username: u.username ?? null, name: u.name, email: u.email, isServerAdmin: u.role === "admin" && !viewerOnly },

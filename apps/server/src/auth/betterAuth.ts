@@ -220,6 +220,10 @@ export function createAuth(options: AuthOptions) {
       updateAge: DAY_S,
       additionalFields: {
         viewerOnly: { type: "boolean", required: false, defaultValue: false, input: false },
+        // What the device is and where it was last seen (api/deviceInfo.ts; kept current by requireAuth).
+        location: { type: "string", required: false, input: false },
+        deviceName: { type: "string", required: false, input: false },
+        deviceModel: { type: "string", required: false, input: false },
       },
     },
     user: {

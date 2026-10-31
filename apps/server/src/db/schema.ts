@@ -54,6 +54,11 @@ export const session = pgTable(
     activeOrganizationId: text("active_organization_id"),
     /** Joined without a password (home network) or a TV: can watch, never administer. */
     viewerOnly: boolean("viewer_only").default(false),
+    /** Where the device was last seen ("Home network", or a city from Cloudflare). */
+    location: text("location"),
+    /** The device's own name and model, as the Strata apps send them. */
+    deviceName: text("device_name"),
+    deviceModel: text("device_model"),
   },
   (t) => [index("session_user_id").on(t.userId)],
 );

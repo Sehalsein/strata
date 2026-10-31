@@ -13,6 +13,7 @@ import { retryMessage, SETUP_PER_ADDRESS, STARTS_PER_ADDRESS } from "../../throt
 import { isCloud } from "../../mode";
 import { launchSecret } from "../../platform/launcher";
 import { dashboardUrls } from "../../platform/network";
+import { describeDevice } from "../deviceInfo";
 import { SIGN_IN_CODE_HEADER, SIGN_IN_CODE_SECONDS, signInCodeSecret, signInMethods, takeIssuedCode } from "../../auth/betterAuth";
 
 /**
@@ -43,12 +44,7 @@ async function sessionFor(c: Context<Env>, userId: string, organizationId: strin
   const ctx = await c.var.services.auth.$context;
   const created = await ctx.internalAdapter.createSession(userId, false);
   // Made here rather than by Better Auth, so the device (for the Devices page) is set here too.
-  await ctx.internalAdapter.updateSession(created.token, {
-    activeOrganizationId: organizationId,
-    viewerOnly,
-    userAgent: c.req.header("user-agent") ?? null,
-    ipAddress: clientAddress(c),
-  });
+  await ctx.internalAdapter.updateSession(created.token, { activeOrganizationId: organizationId, viewerOnly, ...describeDevice(c) });
   return created.token;
 }
 

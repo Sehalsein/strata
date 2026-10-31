@@ -83,6 +83,9 @@ export interface AuthSession {
   activeOrganizationId: string | null;
   /** A TV or a home-network join: can watch, never administer. */
   viewerOnly?: boolean | null;
+  location?: string | null;
+  deviceName?: string | null;
+  deviceModel?: string | null;
 }
 
 /** POST /api/household/members/:id/sign-in-code: what a member's QR code holds. */
@@ -102,6 +105,17 @@ export interface HouseholdDevice {
   userName: string;
   username: string | null;
   userAgent: string | null;
+  /** The address it last used. */
+  ipAddress: string | null;
+  /** "Home network", or a city from Cloudflare; null when unknown. */
+  location: string | null;
+  /** The device's own name and model ("Living Room", "AppleTV14,1"), from the Strata apps. */
+  deviceName: string | null;
+  deviceModel: string | null;
+  /** Only for devices on a home server's own network. */
+  macAddress: string | null;
+  /** A made-up address (iPhones and iPads use a different one per network). */
+  macIsPrivate: boolean;
   viewerOnly: boolean;
   createdAt: string;
   updatedAt: string;

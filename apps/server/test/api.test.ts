@@ -198,10 +198,30 @@ describe("setup and auth", () => {
   test("the household's admins see every device, whose it is, and can sign it out", async () => {
     const choices = await json(await server.request("/api/join", { method: "POST", ip: "192.168.2.41", json: {} }));
     const bobId = choices.members.find((m: any) => m.name === "bob").id;
-    const joined = await json(await server.request("/api/join", { method: "POST", ip: "192.168.2.41", json: { userId: bobId }, headers: { "User-Agent": "Strata/1.0 (AppleTV; tvOS 26)" } }));
-    const devices = (await json(await server.request("/api/admin/devices", { token }))).items;
-    const bobs = devices.find((d: any) => d.userId === bobId && d.userAgent?.includes("AppleTV"));
-    expect(bobs).toMatchObject({ userName: "bob", viewerOnly: true, isCurrent: false });
+    const joined = await json(
+      await server.request("/api/join", {
+        method: "POST",
+        ip: "192.168.2.41",
+        json: { userId: bobId },
+        headers: { "User-Agent": "Strata/1.0 (AppleTV; tvOS 26)", "X-Strata-Device-Name": "Living Room", "X-Strata-Device-Model": "AppleTV14,1" },
+      }),
+    );
+    let devices = (await json(await server.request("/api/admin/devices", { token }))).items;
+    let bobs = devices.find((d: any) => d.userId === bobId && d.userAgent?.includes("AppleTV"));
+    expect(bobs).toMatchObject({
+      userName: "bob",
+      viewerOnly: true,
+      isCurrent: false,
+      ipAddress: "192.168.2.41",
+      location: "Home network",
+      deviceName: "Living Room",
+      deviceModel: "AppleTV14,1",
+    });
+    // The device moves (a new address on the network): the list follows it.
+    expect((await server.request("/api/me", { token: joined.token, ip: "192.168.2.77" })).status).toBe(200);
+    devices = (await json(await server.request("/api/admin/devices", { token }))).items;
+    bobs = devices.find((d: any) => d.id === bobs.id);
+    expect(bobs).toMatchObject({ ipAddress: "192.168.2.77", location: "Home network", deviceName: "Living Room" });
     expect(devices.some((d: any) => d.isCurrent && d.userName === "sehal")).toBe(true);
     expect(devices.every((d: any) => d.token === undefined)).toBe(true);
     // Members don't see the household's devices.

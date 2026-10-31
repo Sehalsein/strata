@@ -29,6 +29,7 @@ public final class AppServices {
     public private(set) var isOnline = NetworkConditions.shared.isOnline
 
     public init(store: ServerStore? = nil) {
+        DeviceInfo.captureName()
         self.store = store ?? ServerStore()
         RemoteCommandBridge.shared.attach(engine)
         #if os(iOS)
