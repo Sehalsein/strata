@@ -22,7 +22,3 @@ export function compiledBinaryPath(): string | null {
 export function underServiceManager(): boolean {
   return process.env.STRATA_SERVICE === "1" || !!process.env.INVOCATION_ID;
 }
-
-export function inDocker(): boolean {
-  return process.env.STRATA_DOCKER === "1";
-}

@@ -30,7 +30,6 @@ const port = Number(arg("port", "8460"));
 const publicDemo = process.argv.includes("--public");
 if (!process.env.TMDB_API_KEY) throw new Error("Set TMDB_API_KEY: the demo shows real TMDB details for its public-domain titles.");
 process.env.STRATA_NO_JOBS = "1";
-process.env.STRATA_DOCKER = "1"; // no self-update
 
 let services: Services | undefined;
 let home: Household | undefined;

@@ -22,6 +22,54 @@ export const BUNDLED_FFMPEG = {
   } as Record<string, { file: string; sha256: string }>,
 };
 
+/** What the bundled build is, and where its source and licence are (it's GPL): shipped next to it. */
+export function ffmpegNotice(): string {
+  const tag = `v${BUNDLED_FFMPEG.version}`;
+  return [
+    `ffmpeg and ffprobe here are jellyfin-ffmpeg ${BUNDLED_FFMPEG.version}, unmodified portable "gpl" builds.`,
+    `They're licensed under the GNU General Public License, version 3 or later.`,
+    ``,
+    `Source:  ${BUNDLED_FFMPEG.source}/tree/${tag}`,
+    `Builds:  ${BUNDLED_FFMPEG.source}/releases/tag/${tag}`,
+    `Licence: ${BUNDLED_FFMPEG.source}/blob/${tag}/LICENSE.md and https://www.gnu.org/licenses/gpl-3.0.txt`,
+    ``,
+  ].join("\n");
+}
+
+/**
+ * Unpacks the ffmpeg built into this binary (scripts/build.ts) into `<dataDir>/bin`, where
+ * `detectFfmpeg` looks first: on first start, and after an update brings a different one.
+ * Returns false when this binary has none (from source), leaving the download to do.
+ */
+export async function unpackEmbeddedFfmpeg(dataDir: string): Promise<boolean> {
+  const { embeddedFfmpeg } = await import("./embeddedFfmpeg");
+  if (!embeddedFfmpeg) return false;
+  const bin = join(dataDir, "bin");
+  const stamp = join(bin, "ffmpeg.json");
+  const current = existsSync(stamp) ? (JSON.parse(await Bun.file(stamp).text()) as { version?: string }).version : undefined;
+  if (current === embeddedFfmpeg.version && existsSync(join(bin, "ffmpeg")) && existsSync(join(bin, "ffprobe"))) return true;
+  mkdirSync(bin, { recursive: true });
+  const work = mkdtempSync(join(bin, ".ffmpeg-"));
+  try {
+    for (const tool of ["ffmpeg", "ffprobe"] as const) {
+      const unpacked = join(work, tool);
+      writeFileSync(unpacked, Bun.gunzipSync(new Uint8Array(await Bun.file(embeddedFfmpeg[tool]).arrayBuffer())));
+      chmodSync(unpacked, 0o755);
+      if (process.platform === "darwin") {
+        const sign = Bun.spawn(["codesign", "--force", "--sign", "-", unpacked], { stdout: "ignore", stderr: "ignore" });
+        if ((await sign.exited) !== 0) throw new Error(`Couldn't sign ${tool}`);
+      }
+      renameSync(unpacked, join(bin, tool));
+    }
+    writeFileSync(join(bin, "FFMPEG-NOTICE.txt"), embeddedFfmpeg.notice);
+    writeFileSync(stamp, JSON.stringify({ version: embeddedFfmpeg.version, source: BUNDLED_FFMPEG.source, bundled: true }, null, 2) + "\n");
+    log.info(`ffmpeg ${embeddedFfmpeg.version} set up in ${bin} (built in)`);
+    return true;
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 export type FfmpegSetup = { state: "idle" } | { state: "downloading" } | { state: "failed"; error: string } | { state: "unsupported" };
 
 export const platformKey = (platform = process.platform, arch = process.arch) => `${platform}-${arch}`;

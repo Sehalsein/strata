@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { backupDatabase, type Db } from "../db";
 import type { ServerSettingsStore } from "../settings";
-import { compiledBinaryPath, inDocker } from "../platform/runtime";
+import { compiledBinaryPath } from "../platform/runtime";
 import { UPDATE_BASE_URL, VERSION } from "../version";
 import { currentPlatformKey } from "./manifest";
 import { UPDATE_PUBLIC_KEY } from "./publicKey";
@@ -19,7 +19,6 @@ export function createUpdater(opts: {
   fetch?: typeof fetch;
 }): Updater {
   const binary = compiledBinaryPath();
-  const docker = inDocker();
   // Replacing the binary inside Strata.app would break its signature.
   const inApp = !!binary && binary.includes(".app/Contents/MacOS/");
   return new Updater({
@@ -27,12 +26,10 @@ export function createUpdater(opts: {
     platform: currentPlatformKey(),
     dataDir: opts.dataDir,
     dbPath: opts.dbPath,
-    binaryPath: docker || inApp ? null : binary,
-    disabledReason: docker
-      ? "Running in Docker: update by pulling a newer image"
-      : inApp
-        ? "Installed as Strata.app: update by installing the new version"
-        : binary
+    binaryPath: inApp ? null : binary,
+    disabledReason: inApp
+      ? "Installed as Strata.app: update by installing the new version"
+      : binary
         ? null
         : "Running from source: self-update only works in the compiled binary",
     publicKey: UPDATE_PUBLIC_KEY,

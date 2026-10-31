@@ -14,7 +14,7 @@ import { Jobs } from "./jobs";
 import { logger, setLogDir } from "./log";
 import { SessionManager } from "./playback/sessions";
 import { detectFfmpeg, type FfmpegInfo } from "./platform/ffmpeg";
-import { installFfmpeg, type FfmpegSetup } from "./platform/ffmpegInstall";
+import { installFfmpeg, unpackEmbeddedFfmpeg, type FfmpegSetup } from "./platform/ffmpegInstall";
 import { KeepAwake } from "./platform/keepAwake";
 import { ProgressStore } from "./progress";
 import { Anilist } from "./catalog/anime/anilist";
@@ -86,6 +86,8 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   const householdIds = async () => (await db.select({ id: organization.id }).from(organization)).map((o) => o.id);
   if (!isCloud && !(await hasAccounts())) await announceSetupCode(db);
 
+  // A release binary carries its own ffmpeg: unpacked into the data folder on first start.
+  if (!isCloud && overrides.ffmpeg === undefined) await unpackEmbeddedFfmpeg(paths.root).catch((err) => log.warn("Couldn't set up the built-in ffmpeg", err));
   let ffmpegInfo = overrides.ffmpeg !== undefined ? overrides.ffmpeg : isCloud ? null : await detectFfmpeg(paths.root);
   const ffmpeg = () => ffmpegInfo;
 
