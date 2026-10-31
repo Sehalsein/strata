@@ -11,6 +11,8 @@ struct SettingsView: View {
     @State private var confirmSignOut = false
     @State private var showSignInTV = false
     @State private var renaming: SavedServer?
+    /// Asked first: removing a server signs this device out of it.
+    @State private var removing: SavedServer?
     @State private var newName = ""
     /// Shown as a tab (tvOS) rather than a sheet: no Done button.
     var embedded = false
@@ -59,12 +61,16 @@ struct SettingsView: View {
                         }
                         .contextMenu {
                             Button { startRename(server) } label: { Label("Rename", systemImage: "pencil") }
-                            Button(role: .destructive) { services.store.removeServer(server.id) } label: { Label("Remove", systemImage: "trash") }
+                            Button(role: .destructive) { removing = server } label: { Label("Remove", systemImage: "trash") }
                         }
                         #if !os(tvOS)
-                        .swipeActions {
-                            Button("Remove", role: .destructive) { services.store.removeServer(server.id) }
-                            Button("Rename") { startRename(server) }
+                        // No full swipe, and no destructive role: that animates the row away
+                        // before anyone has confirmed, and it springs back if they cancel.
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button { removing = server } label: { Label("Remove", systemImage: "trash") }
+                                .tint(.red)
+                            Button { startRename(server) } label: { Label("Rename", systemImage: "pencil") }
+                                .tint(Theme.ink3)
                         }
                         #endif
                     }
@@ -108,6 +114,16 @@ struct SettingsView: View {
             .sheet(isPresented: $showProfiles) { ProfilePickerView(isSheet: true) }
             .sheet(isPresented: $showAddServer) { ConnectView(isAddingServer: true) }
             .sheet(isPresented: $showSignInTV) { ApproveDeviceView() }
+            .confirmationDialog("Remove \(removing?.name ?? "this server")?",
+                                isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+                                titleVisibility: .visible, presenting: removing) { server in
+                Button("Remove", role: .destructive) { remove(server) }
+                Button("Cancel", role: .cancel) {}
+            } message: { server in
+                Text(server.id == services.store.activeID
+                     ? "This device will be signed out of it. You can add it again later."
+                     : "You can add it again later.")
+            }
             .alert("Rename Server", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
                 TextField("Name", text: $newName)
                 Button("Cancel", role: .cancel) {}
@@ -117,6 +133,20 @@ struct SettingsView: View {
             } message: {
                 Text("Only on this device.")
             }
+        }
+    }
+
+    private func remove(_ server: SavedServer) {
+        // The one in use: the app restarts on the next server (or the connect screen), so
+        // close Settings first rather than have it torn away mid-animation.
+        if server.id == services.store.activeID, !embedded {
+            dismiss()
+            Task {
+                try? await Task.sleep(for: .milliseconds(400))
+                services.store.removeServer(server.id)
+            }
+        } else {
+            withAnimation { services.store.removeServer(server.id) }
         }
     }
 
