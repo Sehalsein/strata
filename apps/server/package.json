@@ -15,9 +15,9 @@
     "@better-auth/passkey": "1.7.14",
     "@electric-sql/pglite": "0.5.14",
     "@neondatabase/serverless": "1.2.0",
+    "@noble/hashes": "2.4.0",
     "better-auth": "1.7.14",
     "drizzle-orm": "^0.45.4",
-    "hash-wasm": "4.12.0",
     "hono": "^4.13.14",
     "zod": "^4.6.7"
   },

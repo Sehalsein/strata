@@ -1,8 +1,8 @@
 // The server on Cloudflare Workers (the cloud server). See types.ts and src/worker.ts.
 import { AsyncLocalStorage } from "node:async_hooks";
-import { argon2id, argon2Verify } from "hash-wasm";
 import { Pool } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-serverless";
+import { hashArgon2id, verifyArgon2id } from "./argon2";
 import anitomyModule from "../vendor/anitomy/anitomy_ng_bg.wasm";
 import type { DbClient, Runtime } from "./types";
 
@@ -63,10 +63,8 @@ export const runtime: Runtime = {
     if (scope) (scope.background ??= []).push(settled);
   },
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  // OWASP's Argon2id minimum (19 MiB, 2 passes): within a Worker's memory and CPU.
-  hashPassword: (password) =>
-    argon2id({ password, salt: crypto.getRandomValues(new Uint8Array(16)), parallelism: 1, iterations: 2, memorySize: 19_456, hashLength: 32, outputType: "encoded" }),
-  verifyPassword: (password, hash) => argon2Verify({ password, hash }),
+  hashPassword: hashArgon2id,
+  verifyPassword: verifyArgon2id,
   anitomyWasm: () => anitomyModule as unknown as WebAssembly.Module,
   openClient: async () => ({ db, kind: "server", close: async () => {} }),
 };
