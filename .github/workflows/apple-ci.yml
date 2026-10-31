@@ -6,8 +6,14 @@ on:
       - "apps/apple/**"
       - ".github/workflows/apple-*.yml"
   push:
+    # main, and the branches work happens on (a push there checks it before any PR exists).
     branches:
       - main
+      - strata-server
+      - "fix/**"
+      - "feat/**"
+      - "codex/**"
+      - "test/**"
     paths:
       - "apps/apple/**"
       - ".github/workflows/apple-*.yml"
