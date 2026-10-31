@@ -3,3 +3,19 @@
 @source "./";
 @source "../../server/web/src/components";
 @source "../../server/web/src/features/account/privacy-page.tsx";
+
+/* The light running along "Your files → Your TV". */
+@keyframes flow {
+  from {
+    left: -35%;
+  }
+  to {
+    left: 100%;
+  }
+}
+@utility animate-flow {
+  animation: flow 1.8s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}

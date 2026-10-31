@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
-import { Apple, ArrowRight, Baby, Check, Download, Lock, Play, Server, Sparkles, Tv, UserPlus, Zap } from "lucide-react";
+import { ArrowRight, Download, Laptop, Play, Server, Sparkles } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Poster, PosterWall } from "@/components/poster-wall";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Faq, Reveal, Screens, Transform } from "./sections";
+import { Features, Steps } from "./showcase";
 
 const SOURCE_URL = "https://github.com/Sehalsein/strata";
 /** The Mac app (the server, in the menu bar), and how to install on Linux. */
@@ -83,7 +84,7 @@ function Hero() {
           <div className="animate-in fade-in slide-in-from-bottom-5 mt-9 flex w-full flex-col gap-3 duration-700 sm:w-auto sm:flex-row">
             <Button size="lg" asChild className="h-12 px-6 text-base shadow-[0_0_40px_-8px_var(--primary)]">
               <a href={MAC_DOWNLOAD}>
-                <Apple className="fill-current" /> Download for Mac
+                <Download /> Download for macOS
               </a>
             </Button>
             <Button size="lg" variant="outline" asChild className="h-12 border-white/20 bg-white/5 px-6 text-base text-white hover:bg-white/10 hover:text-white">
@@ -185,109 +186,6 @@ function Section({ id, eyebrow, title, lede, children, className }: { id?: strin
   );
 }
 
-function Steps() {
-  const steps = [
-    { title: "Install Strata", body: "Put the server on a Mac or Linux machine at home. On a Mac it lives in the menu bar and keeps itself up to date." },
-    { title: "Add your media", body: "Point it at the folders where your movies and shows live. Strata recognises each one and dresses it up with artwork and details." },
-    { title: "Press play", body: "Open Strata on iPhone, iPad, Mac or Apple TV, and pick up where you left off on any of them." },
-  ];
-  return (
-    <Section eyebrow="How it works" title="From your files to the sofa in minutes">
-      <ol className="relative grid gap-10 md:grid-cols-3 md:gap-6">
-        <div aria-hidden="true" className="absolute top-6 right-[16%] left-[16%] hidden h-px bg-gradient-to-r from-transparent via-[var(--primary)] to-transparent opacity-50 md:block" />
-        {steps.map((s, i) => (
-          <li key={s.title} className="relative flex flex-col items-start gap-4 md:items-center md:text-center">
-            <span className="bg-background text-brand-text border-primary/40 relative flex size-12 items-center justify-center rounded-full border text-lg font-semibold shadow-[0_0_30px_-6px_var(--primary)]">{i + 1}</span>
-            <h3 className="text-xl font-semibold">{s.title}</h3>
-            <p className="text-muted-foreground max-w-xs text-sm leading-relaxed">{s.body}</p>
-          </li>
-        ))}
-      </ol>
-    </Section>
-  );
-}
-
-/** One feature card: an icon, a title, a line, and something to look at. */
-function Bento({ icon: Icon, title, body, children, className }: { icon: typeof Zap; title: string; body: string; children?: ReactNode; className?: string }) {
-  return (
-    <div className={cn("bg-card group relative flex flex-col overflow-hidden rounded-3xl border p-6 transition-colors hover:border-[var(--primary)]/40 sm:p-7", className)}>
-      <div className="relative z-10 flex flex-col gap-2">
-        <Icon className="text-brand-text size-5" />
-        <h3 className="text-lg font-semibold">{title}</h3>
-        <p className="text-muted-foreground max-w-sm text-sm leading-relaxed">{body}</p>
-      </div>
-      {children && <div className="relative mt-6 flex flex-1 items-end">{children}</div>}
-    </div>
-  );
-}
-
-function Features() {
-  return (
-    <div className="bg-muted/30 border-y">
-      <Section eyebrow="Features" title="The experience your media deserves" lede="Everything you love about the big streaming apps, for the movies and shows that are already yours.">
-        <div className="grid gap-4 md:grid-cols-6">
-          <Bento icon={UserPlus} title="A profile for everyone" body="Everyone you invite gets their own picture, progress, Continue Watching and My List." className="md:col-span-4">
-            <div className="flex flex-wrap gap-4">
-              {AVATARS.map((a, i) => (
-                <div key={a} className="flex flex-col items-center gap-2">
-                  <img src={`/api/avatars/${a}.png`} alt="" className={cn("size-14 rounded-2xl transition-transform duration-300 group-hover:-translate-y-1 sm:size-16", i === 0 && "ring-2 ring-[var(--primary)]")} style={{ transitionDelay: `${i * 40}ms` }} />
-                  <span className="text-muted-foreground text-xs">{["Maya", "Sam", "Leo", "Ava", "Kai", "Nora"][i]}</span>
-                </div>
-              ))}
-            </div>
-          </Bento>
-          <Bento icon={Baby} title="Kids profiles" body="Set an age limit per profile. Anything above it doesn't show up." className="md:col-span-2">
-            <div className="flex flex-wrap gap-2">
-              {["All ages", "7+", "13+", "16+"].map((r, i) => (
-                <span key={r} className={cn("rounded-full border px-3 py-1 text-xs", i === 1 ? "border-[var(--primary)] bg-[var(--primary)]/12 text-brand-text font-medium" : "text-muted-foreground")}>
-                  {r}
-                </span>
-              ))}
-            </div>
-          </Bento>
-          <Bento icon={Tv} title="Made for the big screen" body="Apple TV matches each video's frame rate and dynamic range, and you sign in by scanning a code with your phone." className="md:col-span-2">
-            <div className="flex flex-wrap gap-2">
-              {["4K", "HDR", "Dolby Vision", "Dolby Atmos"].map((b) => (
-                <span key={b} className="rounded-md border px-2 py-1 font-mono text-[11px] font-semibold tracking-wide">
-                  {b}
-                </span>
-              ))}
-            </div>
-          </Bento>
-          <Bento icon={Zap} title="Plays everything, smoothly" body="Your files play straight to the device you're watching on, with Picture in Picture, AirPlay and subtitles." className="md:col-span-2">
-            <div className="flex w-full items-center gap-2 text-xs">
-              <span className="bg-muted rounded-md px-2 py-1">Your media</span>
-              <span className="h-px flex-1 bg-gradient-to-r from-[var(--primary)] to-[var(--sand)]" />
-              <span className="bg-primary text-primary-foreground rounded-md px-2 py-1 font-medium">Your TV</span>
-            </div>
-          </Bento>
-          <Bento icon={Download} title="Downloads" body="Save movies and episodes on iPhone and iPad for the plane." className="md:col-span-2">
-            <div className="flex items-center gap-3">
-              <svg viewBox="0 0 36 36" className="size-12 -rotate-90">
-                <circle cx="18" cy="18" r="15" fill="none" className="stroke-muted" strokeWidth="3.5" />
-                <circle cx="18" cy="18" r="15" fill="none" stroke="var(--primary)" strokeWidth="3.5" strokeLinecap="round" strokeDasharray="94.2" strokeDashoffset="28" />
-              </svg>
-              <div className="text-xs">
-                <p className="font-medium">Downloading</p>
-                <p className="text-muted-foreground">2 episodes left</p>
-              </div>
-            </div>
-          </Bento>
-          <Bento icon={Lock} title="Yours, at home" body="Your library and everything about it stay on your machine. No ads, no analytics, no tracking, and people join only by a link you send." className="md:col-span-6">
-            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-              {["Runs on your machine", "No ads", "No tracking", "Invite-only", "Open source"].map((t) => (
-                <span key={t} className="flex items-center gap-1.5">
-                  <Check className="text-brand-text size-4" /> {t}
-                </span>
-              ))}
-            </div>
-          </Bento>
-        </div>
-      </Section>
-    </div>
-  );
-}
-
 /** Getting the server: the Mac app, Homebrew, or a Linux binary. */
 function Install() {
   return (
@@ -297,7 +195,7 @@ function Install() {
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_70%_80%_at_100%_0%,color-mix(in_oklab,var(--primary)_14%,transparent),transparent)]" />
           <div className="relative flex items-center gap-3">
             <div className="bg-primary/12 text-brand-text flex size-11 items-center justify-center rounded-xl">
-              <Apple className="size-5 fill-current" />
+              <Laptop className="size-5" />
             </div>
             <div>
               <h3 className="text-lg font-semibold">Mac</h3>
@@ -360,7 +258,7 @@ function Closing() {
           <p className="max-w-lg text-white/65">Install Strata, add your media, invite the people you watch with, and press play.</p>
           <Button size="lg" asChild className="h-12 px-6 text-base shadow-[0_0_40px_-8px_var(--primary)]">
             <a href={MAC_DOWNLOAD}>
-              <Apple className="fill-current" /> Download for Mac
+              <Download /> Download for macOS
             </a>
           </Button>
         </div>
