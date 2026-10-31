@@ -4,7 +4,8 @@
 //   npx wrangler secret put STRATA_SECRET_KEY   # openssl rand -base64 32 (keep it safe)
 //   npx wrangler deploy
 // Optional secrets: RESEND_API_KEY (password-reset email), GOOGLE_CLIENT_ID and
-// GOOGLE_CLIENT_SECRET (Sign in with Google), SENTRY_DSN (error reports).
+// GOOGLE_CLIENT_SECRET (Sign in with Google), STRATA_ADMIN_EMAILS (system admins),
+// STRATA_OPERATOR and STRATA_PRIVACY_CONTACT (the privacy page), SENTRY_DSN (error reports).
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "strata",
@@ -32,9 +33,8 @@
   "vars": {
     // Password-reset email, through Resend (RESEND_API_KEY is a secret).
     "STRATA_EMAIL_FROM": "Strata <no-reply@sehalsein.com>",
-    // Also, when you're ready (see README.md):
-    //   "STRATA_OPERATOR": "Sehal Sein",
-    //   "STRATA_PRIVACY_CONTACT": "privacy@sehalsein.com",
+    // Who runs the server and how to reach them, for the privacy page: STRATA_OPERATOR and
+    // STRATA_PRIVACY_CONTACT are secrets, so the contact address stays out of this repo.
     // Passkeys, Google's callback, email links and the apps' QR codes all use this address.
     "STRATA_PUBLIC_URL": "https://strata.sehalsein.com"
   }
