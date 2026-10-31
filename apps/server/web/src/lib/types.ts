@@ -12,8 +12,80 @@ export interface ServerInfo {
   setupCodeRequired?: boolean;
   /** True when this client may join without a password. */
   localJoin?: boolean;
-  /** Hosted server without local folders. Not sent by the server yet; the dashboard treats absent as false. */
-  cloud?: boolean;
+  /** "cloud": hosted, without local folders, home-network join, Bonjour or self-update. */
+  mode: "home" | "cloud";
+}
+
+export type HouseholdRole = "owner" | "admin" | "member";
+
+/** GET /api/me: the signed-in account and its active household on this browser. */
+export interface Me {
+  user: { id: string; username: string | null; name: string; email: string; isServerAdmin: boolean };
+  /** Joined without a password, or a TV: can watch, never administer. */
+  viewerOnly: boolean;
+  household: { id: string; name: string; role: string; contentLimit: ContentLimit; isKids: boolean } | null;
+}
+
+/** A household (Better Auth organization) as listed. */
+export interface HouseholdSummary {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: string;
+}
+
+export interface Member {
+  id: string;
+  userId: string;
+  organizationId: string;
+  role: string;
+  createdAt: string;
+  contentLimit?: ContentLimit;
+  isKids?: boolean;
+  user: { id: string; name: string; email: string; image?: string | null };
+}
+
+export interface Invitation {
+  id: string;
+  organizationId: string;
+  email: string;
+  role: string;
+  status: "pending" | "accepted" | "rejected" | "canceled";
+  expiresAt: string;
+  createdAt?: string;
+  inviterId: string;
+}
+
+export interface FullHousehold extends HouseholdSummary {
+  members: Member[];
+  invitations: Invitation[];
+}
+
+/** A sign-in of the current account (Better Auth session). */
+export interface AuthSession {
+  id: string;
+  token: string;
+  userAgent: string | null;
+  ipAddress: string | null;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  activeOrganizationId: string | null;
+  /** A TV or a home-network join: can watch, never administer. */
+  viewerOnly?: boolean | null;
+}
+
+/** An account signed in on this browser (multi-session). */
+export interface DeviceAccount {
+  session: AuthSession;
+  user: { id: string; name: string; email: string; username?: string | null; role?: string | null };
+}
+
+/** GET /api/auth/device: a TV's code. */
+export interface DeviceCodeInfo {
+  user_code: string;
+  status: "pending" | "approved" | "denied";
+  client_id?: string;
 }
 
 export type MediaFolderKind = "auto" | "movies" | "shows";
@@ -82,15 +154,6 @@ export interface FsListing {
   shortcuts: { name: string; path: string }[];
 }
 
-export interface Profile {
-  id: number;
-  name: string;
-  avatar: string | null;
-  hasPin: boolean;
-  isKids: boolean;
-  contentLimit: ContentLimit;
-}
-
 export type ContentLimit = "none" | "teen" | "kids" | "little";
 
 export interface JobStatus {
@@ -106,8 +169,8 @@ export interface JobStatus {
 
 export interface PlaybackSessionDto {
   id: string;
-  profileId: number;
-  profileName: string | null;
+  userId: string;
+  userName: string | null;
   fileId: number;
   title: string | null;
   target: { mediaType: "movie" | "episode"; tmdbId: number; season?: number; episode?: number };
@@ -131,7 +194,10 @@ export interface AdminStatus {
   version: string;
   apiVersion: number | string;
   platform: string;
-  dataDir: string;
+  mode: "home" | "cloud";
+  isServerAdmin: boolean;
+  /** Null on the cloud server. */
+  dataDir: string | null;
   uptimeMs: number;
   ffmpeg: { version: string; path: string; hwEncoder: string | null } | null;
   ffmpegSetup?: { state: "idle" | "downloading" | "unsupported" } | { state: "failed"; error: string };
@@ -212,14 +278,3 @@ export interface LogEntry {
   message: string;
 }
 
-export interface Device {
-  /** Session token hash: identifies the device, can't be used to sign in. */
-  id: string;
-  deviceName: string | null;
-  profileName: string | null;
-  createdAt: number;
-  lastSeenAt: number;
-  /** Joined without a password (home network or a TV code): can watch, not administer. */
-  viewerOnly: boolean;
-  isCurrent: boolean;
-}

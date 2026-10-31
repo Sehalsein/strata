@@ -27,8 +27,18 @@ export const queryKeys = {
   me: ["auth", "me"] as const,
   status: ["admin", "status"] as const,
   settings: ["admin", "settings"] as const,
-  profiles: ["profiles"] as const,
-  devices: ["admin", "devices"] as const,
+  /** Better Auth: the active household with members and invitations. */
+  household: ["auth", "household"] as const,
+  /** Households the account belongs to. */
+  households: ["auth", "households"] as const,
+  /** Every household on the server (server admin). */
+  allHouseholds: ["admin", "households"] as const,
+  /** This account's sign-ins (devices). */
+  sessions: ["auth", "sessions"] as const,
+  /** Accounts signed in on this browser. */
+  accounts: ["auth", "accounts"] as const,
+  sessionToken: ["auth", "token"] as const,
+  deviceCode: (code: string) => ["auth", "device", code] as const,
   logs: (limit: number) => ["admin", "logs", limit] as const,
   files: (filters: LibraryFilters) => ["admin", "files", filters] as const,
   filesAll: ["admin", "files"] as const,

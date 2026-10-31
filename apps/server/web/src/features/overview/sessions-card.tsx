@@ -45,7 +45,7 @@ export function SessionsCard({ sessions }: { sessions: PlaybackSessionDto[] }) {
                     {s.paused && <Badge variant="outline">Paused</Badge>}
                   </div>
                   <p className="text-muted-foreground text-sm">
-                    {s.profileName ?? `Profile ${s.profileId}`} · file {s.fileId} · started {relativeTime(s.startedAt)} · last request {relativeTime(s.lastAccessAt)}
+                    {s.userName ?? "Someone"} · file {s.fileId} · started {relativeTime(s.startedAt)} · last request {relativeTime(s.lastAccessAt)}
                   </p>
                   {s.reasons.length > 0 && <p className="text-muted-foreground font-mono text-xs">{s.reasons.join(" · ")}</p>}
                   {s.error && <p className="text-destructive text-sm">{s.error}</p>}
@@ -63,7 +63,7 @@ export function SessionsCard({ sessions }: { sessions: PlaybackSessionDto[] }) {
         open={!!confirming}
         onOpenChange={(o) => !o && setConfirming(null)}
         title="Stop this stream?"
-        description={confirming ? `“${sessionTitle(confirming)}” stops playing on ${confirming.profileName ?? "the device"}.` : undefined}
+        description={confirming ? `“${sessionTitle(confirming)}” stops playing on ${confirming.userName ? `${confirming.userName}'s device` : "the device"}.` : undefined}
         confirmLabel="Stop stream"
         onConfirm={() => (confirming ? stop.mutateAsync(confirming.id) : undefined)}
       />

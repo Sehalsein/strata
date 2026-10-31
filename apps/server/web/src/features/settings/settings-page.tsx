@@ -17,6 +17,7 @@ import { NumberInput, SwitchField, type SetFn } from "./fields";
 import { MediaFolders } from "./media-folders";
 import { SecretKeyForm } from "./secret-key-form";
 import { UpdatesCard } from "./updates-card";
+import { useSession } from "@/app/session";
 
 const PROVIDER_LABEL: Record<Provider, string> = { local: "Local folders", torbox: "TorBox" };
 
@@ -36,6 +37,8 @@ function tabFromHash(): TabValue {
 }
 
 export default function SettingsPage() {
+  const { isServerAdmin, cloud, me } = useSession();
+  const tabs = TABS.filter((t) => t.value !== "updates" || (isServerAdmin && !cloud));
   const settings = useQuery({ queryKey: queryKeys.settings, queryFn: api.settings, staleTime: Infinity });
   const [draft, setDraft] = useState<Settings | null>(null);
   const [tab, setTab] = useState<TabValue>(tabFromHash);
@@ -69,7 +72,7 @@ export default function SettingsPage() {
 
   const save = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!draft.serverName.trim()) {
+    if (isServerAdmin && !draft.serverName.trim()) {
       setTab("general");
       setSaveError("Give the server a name.");
       return;
@@ -98,7 +101,14 @@ export default function SettingsPage() {
 
   return (
     <Page className="max-w-4xl pb-24">
-      <PageHeader title="Settings" description="Changes apply to every client of this server." />
+      <PageHeader
+        title="Settings"
+        description={
+          isServerAdmin
+            ? `Server settings and keys apply to every household; library, playback and TorBox settings only to ${me.household?.name ?? "this household"}.`
+            : `Settings for ${me.household?.name ?? "this household"}. Server-wide settings belong to the server's admin.`
+        }
+      />
 
       <Tabs
         value={tab}
@@ -110,7 +120,7 @@ export default function SettingsPage() {
       >
         <div className="-mx-1 overflow-x-auto px-1">
           <TabsList>
-            {TABS.map((t) => (
+            {tabs.map((t) => (
               <TabsTrigger key={t.value} value={t.value}>
                 {t.label}
               </TabsTrigger>
@@ -119,30 +129,34 @@ export default function SettingsPage() {
         </div>
 
         <TabsContent value="general" className="flex flex-col gap-6">
-          <ServerCard draft={draft} set={set} />
-          <NetworkCard draft={draft} set={set} />
+          <ServerCard draft={draft} set={set} isServerAdmin={isServerAdmin} />
+          {isServerAdmin && !cloud && <NetworkCard draft={draft} set={set} />}
         </TabsContent>
 
         <TabsContent value="library" className="flex flex-col gap-6">
-          <SectionCard title="Media folders" description="Folders on this server that hold movies or shows.">
-            <MediaFolders value={draft.mediaFolders} onChange={(v) => set("mediaFolders", v)} />
-          </SectionCard>
-          <ScanningCard draft={draft} set={set} />
+          {!cloud && (
+            <SectionCard title="Media folders" description="Folders on this server that hold this household's movies or shows.">
+              <MediaFolders value={draft.mediaFolders} onChange={(v) => set("mediaFolders", v)} canBrowse={isServerAdmin} />
+            </SectionCard>
+          )}
+          <ScanningCard draft={draft} set={set} isServerAdmin={isServerAdmin} cloud={cloud} />
           <SourcesCard draft={draft} set={set} />
         </TabsContent>
 
         <TabsContent value="playback" className="flex flex-col gap-6">
-          <DiscoveryCard draft={draft} set={set} />
-          <TranscodingCard draft={draft} set={set} />
+          <DiscoveryCard draft={draft} set={set} isServerAdmin={isServerAdmin} />
+          {isServerAdmin && <TranscodingCard draft={draft} set={set} />}
         </TabsContent>
 
         <TabsContent value="keys" className="flex flex-col gap-6">
-          <ProviderKeysCard secrets={data.secrets} />
+          <ProviderKeysCard secrets={data.secrets} isServerAdmin={isServerAdmin} />
         </TabsContent>
 
-        <TabsContent value="updates" className="flex flex-col gap-6">
-          <UpdatesCard draft={draft} set={set} />
-        </TabsContent>
+        {isServerAdmin && !cloud && (
+          <TabsContent value="updates" className="flex flex-col gap-6">
+            <UpdatesCard draft={draft} set={set} />
+          </TabsContent>
+        )}
       </Tabs>
 
       {(dirty || saveError) && (
@@ -186,13 +200,15 @@ function SectionCard({ title, description, children }: { title: string; descript
   );
 }
 
-function ServerCard({ draft, set }: { draft: Settings; set: SetFn }) {
+function ServerCard({ draft, set, isServerAdmin }: { draft: Settings; set: SetFn; isServerAdmin: boolean }) {
   return (
-    <SectionCard title="Server">
+    <SectionCard title={isServerAdmin ? "Server" : "Catalog"}>
       <FieldGroup>
+        {isServerAdmin && (
         <FormField label="Server name" description="Shown in the apps when they find this server." error={!draft.serverName.trim() ? "Give the server a name." : null}>
           {(p) => <Input {...p} value={draft.serverName} maxLength={64} onChange={(e) => set("serverName", e.target.value)} required />}
         </FormField>
+        )}
         <div className="grid gap-5 sm:grid-cols-2">
           <FormField label="Metadata language" description="TMDB language tag, e.g. en-US, fr-FR, ja-JP." error={draft.language && !/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(draft.language) ? "Use a tag like en-US." : null}>
             {(p) => <Input {...p} className="font-mono" value={draft.language} onChange={(e) => set("language", e.target.value)} spellCheck={false} autoCapitalize="off" />}
@@ -246,20 +262,22 @@ function NetworkCard({ draft, set }: { draft: Settings; set: SetFn }) {
           checked={draft.localJoin}
           onChange={(v) => set("localJoin", v)}
           label="No password at home"
-          description="Devices on your home network skip sign-in and go straight to picking a profile (PINs still apply). They can watch but can't change settings. Away from home, devices sign in with your account. Turn this off before exposing the server through a tunnel or port forward that hides visitors' addresses."
+          description="Devices on your home network skip the password and pick who they are from the first household's members. They can watch but can't change settings. Away from home, devices sign in with your account. Turn this off before exposing the server through a tunnel or port forward that hides visitors' addresses."
         />
       </FieldGroup>
     </SectionCard>
   );
 }
 
-function ScanningCard({ draft, set }: { draft: Settings; set: SetFn }) {
+function ScanningCard({ draft, set, isServerAdmin, cloud }: { draft: Settings; set: SetFn; isServerAdmin: boolean; cloud: boolean }) {
   return (
     <SectionCard title="Scanning & sync">
       <FieldGroup>
-        <FormField label="Scan local folders every" description="Minutes. 0 turns scheduled scans off.">
-          {(p) => <NumberInput {...p} min={0} suffix="min" value={draft.scanIntervalMinutes} onChange={(v) => set("scanIntervalMinutes", v)} />}
-        </FormField>
+        {isServerAdmin && !cloud && (
+          <FormField label="Scan local folders every" description="Minutes, for every household. 0 turns scheduled scans off.">
+            {(p) => <NumberInput {...p} min={0} suffix="min" value={draft.scanIntervalMinutes} onChange={(v) => set("scanIntervalMinutes", v)} />}
+          </FormField>
+        )}
         <FormField label="Sync TorBox every" description="Minutes. 0 turns scheduled syncs off.">
           {(p) => <NumberInput {...p} min={0} suffix="min" value={draft.torboxSyncMinutes} onChange={(v) => set("torboxSyncMinutes", v)} />}
         </FormField>
@@ -321,17 +339,19 @@ function SourcesCard({ draft, set }: { draft: Settings; set: SetFn }) {
   );
 }
 
-function DiscoveryCard({ draft, set }: { draft: Settings; set: SetFn }) {
+function DiscoveryCard({ draft, set, isServerAdmin }: { draft: Settings; set: SetFn; isServerAdmin: boolean }) {
   const urlInvalid = !!draft.torrentioUrl && !/^https?:\/\/\S+$/.test(draft.torrentioUrl);
   return (
     <SectionCard title="Discovery" description="Find playable releases of titles that aren't in your library.">
       <FieldGroup>
         <SwitchField checked={draft.discoveryEnabled} onChange={(v) => set("discoveryEnabled", v)} label="Find releases on TorBox" description="Look for playable TorBox releases of titles that aren't in your library." />
-        <FormField label="Stream addon URL" description="A Torrentio-compatible Stremio addon to search. Leave empty to turn it off." error={urlInvalid ? "Enter a full http(s) URL." : null}>
+        {isServerAdmin && (
+        <FormField label="Stream addon URL" description="A Torrentio-compatible Stremio addon to search, for every household. Leave empty to turn it off." error={urlInvalid ? "Enter a full http(s) URL." : null}>
           {(p) => (
             <Input {...p} className="font-mono" type="url" placeholder="https://torrentio.strem.fun" value={draft.torrentioUrl} onChange={(e) => set("torrentioUrl", e.target.value.trim())} spellCheck={false} autoCapitalize="off" />
           )}
         </FormField>
+        )}
         <SwitchField checked={draft.useTorboxSearch} onChange={(v) => set("useTorboxSearch", v)} label="Use TorBox search" description="Also ask TorBox's own search for releases." />
         <SwitchField checked={draft.showUncached} onChange={(v) => set("showUncached", v)} label="Show uncached releases" description="Offer releases TorBox hasn't cached yet; they download before they can play." />
         <FormField label="Largest automatic pick" description="In GB. Discovery won't auto-pick a bigger release. 0 means no limit.">
@@ -355,10 +375,12 @@ function TranscodingCard({ draft, set }: { draft: Settings; set: SetFn }) {
   );
 }
 
-function ProviderKeysCard({ secrets }: { secrets: SettingsResponse["secrets"] }) {
+function ProviderKeysCard({ secrets, isServerAdmin }: { secrets: SettingsResponse["secrets"]; isServerAdmin: boolean }) {
   return (
-    <SectionCard title="Provider keys" description="Each key is checked with its provider, then stored encrypted on this server.">
+    <SectionCard title="Provider keys" description="Each key is checked with its provider, then stored encrypted on this server. TMDB is the server's, shared by every household; TorBox is this household's own.">
       <div className="flex flex-col gap-6">
+        {isServerAdmin && (
+        <>
         <SecretKeyForm
           secretKey="tmdbApiKey"
           label="TMDB API key"
@@ -375,6 +397,8 @@ function ProviderKeysCard({ secrets }: { secrets: SettingsResponse["secrets"] })
           }
         />
         <Separator />
+        </>
+        )}
         <SecretKeyForm
           secretKey="torboxApiKey"
           label="TorBox API key"

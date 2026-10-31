@@ -2,36 +2,57 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { useQuery } from "@tanstack/react-query";
 import { LoaderCircle, RefreshCw, ServerOff } from "lucide-react";
 import { api, errorMessage } from "@/lib/api";
-import { authClient } from "@/lib/auth-client";
+import { authClient, isHouseholdAdmin } from "@/lib/auth-client";
 import { queryClient, queryKeys } from "@/lib/query";
-import { navigate } from "@/lib/router";
+import { navigate, usePath } from "@/lib/router";
 import { Button } from "@/components/ui/button";
 import { BrandMark } from "@/components/brand-mark";
 import { wizardInProgress } from "@/features/setup/wizard-state";
-import { SessionContext, type Session } from "./session";
+import { SessionContext, type Access, type Session } from "./session";
 
 const AppLayout = lazy(() => import("./app-layout"));
 const LoginPage = lazy(() => import("@/features/auth/login-page"));
 const SetupWizard = lazy(() => import("@/features/setup/setup-wizard"));
+const InvitePage = lazy(() => import("@/features/invite/invite-page"));
+
+/** Every cached response but the server's info and who's signed in: dropped whenever the account or household changes. */
+const accountData = (q: { queryKey: readonly unknown[] }) => q.queryKey[0] !== "info" && !(q.queryKey[0] === "auth" && q.queryKey[1] === "me");
 
 /**
  * Boot: ask the server who it is, then show setup (no admin yet, or the wizard is mid-way),
- * sign-in (no token) or the dashboard. A 401 from any call drops back to sign-in.
+ * an invitation (/invite/:id, signed in or not), sign-in (nobody signed in on this browser)
+ * or the dashboard. A 401 from any call drops back to sign-in.
  */
 export function App() {
+  const path = usePath();
   const info = useQuery({ queryKey: queryKeys.info, queryFn: api.info, staleTime: Infinity, retry: false, refetchOnWindowFocus: false });
-  const [authed, setAuthed] = useState(() => authClient.hasSession());
-  const [inWizard, setInWizard] = useState(() => wizardInProgress());
+  const me = useQuery({ queryKey: queryKeys.me, queryFn: authClient.getMe, staleTime: Infinity, retry: false, refetchOnWindowFocus: false, enabled: info.data?.setupRequired === false });
+  // Mid-wizard (signed in, steps left): set by the account step, or read back after a reload.
+  const [inWizardState, setInWizard] = useState(false);
+  const [wizardDismissed, setWizardDismissed] = useState(false);
+  const inWizard = inWizardState || (!wizardDismissed && !!me.data && wizardInProgress());
+  const [addingAccount, setAddingAccount] = useState(false);
+  // Bumped on every auth change so the signed-in app remounts with fresh queries.
+  const [epoch, setEpoch] = useState(0);
+
+  const authChanged = useCallback(async () => {
+    await queryClient.fetchQuery({ queryKey: queryKeys.me, queryFn: authClient.getMe, staleTime: 0 });
+    queryClient.removeQueries({ predicate: accountData });
+    setAddingAccount(false);
+    setEpoch((e) => e + 1);
+  }, []);
 
   useEffect(
     () =>
       authClient.onSessionExpired(() => {
-        setAuthed(false);
         setInWizard(false);
-        // Drop cached admin data so the next account doesn't see it.
-        queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== "info" });
+        setWizardDismissed(true);
+        // Drop cached admin data so the next account doesn't see it; re-ask who's signed in
+        // (another saved account may still be).
+        queryClient.removeQueries({ predicate: accountData });
+        void authChanged();
       }),
-    [],
+    [authChanged],
   );
 
   const serverName = info.data?.serverName;
@@ -39,63 +60,81 @@ export function App() {
     document.title = serverName && serverName !== "Strata" ? `${serverName} · Strata` : "Strata";
   }, [serverName]);
 
-  const signOut = useCallback(async () => {
-    await authClient.signOut();
-    setAuthed(false);
-    queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== "info" });
-  }, []);
-
-  const session = useMemo<Session | null>(() => (info.data ? { info: info.data, signOut } : null), [info.data, signOut]);
+  const session = useMemo<Session | null>(() => {
+    if (!info.data || !me.data) return null;
+    const m = me.data;
+    const isServerAdmin = m.user.isServerAdmin;
+    const householdAdmin = !m.viewerOnly && isHouseholdAdmin(m.household?.role);
+    const can = (access: Access) => (access === "any" ? true : access === "serverAdmin" ? isServerAdmin && householdAdmin : householdAdmin);
+    return { info: info.data, me: m, isServerAdmin, isHouseholdAdmin: householdAdmin, cloud: info.data.mode === "cloud", can, authChanged, addAccount: () => setAddingAccount(true) };
+  }, [info.data, me.data, authChanged]);
 
   if (info.isPending) return <FullscreenSpinner />;
   if (info.isError || !info.data) {
-    return (
-      <div className="flex min-h-svh items-center justify-center p-6">
-        <div className="flex max-w-sm flex-col items-center gap-3 text-center">
-          <div className="bg-muted text-muted-foreground flex size-12 items-center justify-center rounded-full">
-            <ServerOff className="size-6" />
-          </div>
-          <h1 className="text-xl font-semibold">Can't reach the server</h1>
-          <p className="text-muted-foreground text-sm">{errorMessage(info.error)}</p>
-          <Button onClick={() => void info.refetch()} disabled={info.isFetching}>
-            {info.isFetching ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
-            Try again
-          </Button>
-        </div>
-      </div>
-    );
+    return <Unreachable error={info.error} retrying={info.isFetching} onRetry={() => void info.refetch()} />;
   }
 
+  const inviteId = /^\/invite\/([^/]+)\/?$/.exec(path)?.[1];
   let screen;
-  if (info.data.setupRequired || inWizard) {
+  if (inviteId && !info.data.setupRequired) {
+    screen = (
+      <InvitePage
+        invitationId={decodeURIComponent(inviteId)}
+        serverName={info.data.serverName}
+        me={me.data ?? null}
+        onJoined={async () => {
+          await authChanged();
+          navigate("/", { replace: true });
+        }}
+      />
+    );
+  } else if (info.data.setupRequired || inWizard) {
     screen = (
       <SetupWizard
         info={info.data}
-        onDone={(to = "/") => {
+        onDone={async (to = "/") => {
+          await queryClient.invalidateQueries({ queryKey: queryKeys.info });
+          await authChanged();
           setInWizard(false);
-          setAuthed(true);
-          void queryClient.invalidateQueries({ queryKey: queryKeys.info });
+          setWizardDismissed(true);
           navigate(to, { replace: true });
         }}
         onAccountCreated={() => setInWizard(true)}
       />
     );
-  } else if (!authed) {
-    screen = (
-      <LoginPage
-        serverName={info.data.serverName}
-        onSignedIn={() => setAuthed(true)}
-      />
-    );
+  } else if (me.isPending) {
+    screen = <FullscreenSpinner />;
+  } else if (me.isError) {
+    screen = <Unreachable error={me.error} retrying={me.isFetching} onRetry={() => void me.refetch()} />;
+  } else if (!session || addingAccount) {
+    screen = <LoginPage serverName={info.data.serverName} adding={!!session} onSignedIn={() => void authChanged()} onCancel={session ? () => setAddingAccount(false) : undefined} />;
   } else {
     screen = (
       <SessionContext.Provider value={session}>
-        <AppLayout />
+        <AppLayout key={epoch} />
       </SessionContext.Provider>
     );
   }
 
   return <Suspense fallback={<FullscreenSpinner />}>{screen}</Suspense>;
+}
+
+function Unreachable({ error, retrying, onRetry }: { error: unknown; retrying: boolean; onRetry: () => void }) {
+  return (
+    <div className="flex min-h-svh items-center justify-center p-6">
+      <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+        <div className="bg-muted text-muted-foreground flex size-12 items-center justify-center rounded-full">
+          <ServerOff className="size-6" />
+        </div>
+        <h1 className="text-xl font-semibold">Can't reach the server</h1>
+        <p className="text-muted-foreground text-sm">{errorMessage(error)}</p>
+        <Button onClick={onRetry} disabled={retrying}>
+          {retrying ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
+          Try again
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function FullscreenSpinner() {

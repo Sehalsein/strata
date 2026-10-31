@@ -4,7 +4,6 @@ import type {
   LibraryFile,
   LibraryFilters,
   LogEntry,
-  Profile,
   SecretKey,
   ServerInfo,
   Settings,
@@ -12,8 +11,8 @@ import type {
   TmdbResult,
   TorboxAccount,
   UpdateStatus,
-  Device,
   ContentLimit,
+  HouseholdSummary,
 } from "./types";
 
 export class ApiError extends Error {
@@ -27,7 +26,8 @@ export class ApiError extends Error {
 
 /**
  * How requests authenticate. Owned by lib/auth-client.ts (the only module that knows about
- * tokens or sessions), so swapping the auth system never touches this file or the pages.
+ * sessions): the dashboard's sessions are same-origin cookies, so it adds no headers and only
+ * hears about 401s.
  */
 export interface ApiAuth {
   /** Headers for an authenticated request (e.g. a bearer token); {} for cookie sessions. */
@@ -83,10 +83,9 @@ const q = (params: Record<string, string | number | undefined>) => {
 export const api = {
   info: () => request<ServerInfo>("GET", "/info", undefined, { auth: false }),
 
-  profiles: () => request<Profile[]>("GET", "/profiles"),
-  createProfile: (name: string, pin?: string, isKids = false) => request<Profile>("POST", "/profiles", { name, isKids, ...(pin ? { pin } : {}) }),
-  updateProfile: (id: number, patch: { name?: string; pin?: string | null; isKids?: boolean; contentLimit?: ContentLimit }) => request<Profile>("PATCH", `/profiles/${id}`, patch),
-  deleteProfile: (id: number) => request<{ ok: true }>("DELETE", `/profiles/${id}`),
+  /** A member's kids flag and content limit in the active household (its admins). */
+  updateMember: (memberId: string, patch: { contentLimit?: ContentLimit; isKids?: boolean }) =>
+    request<{ id: string; contentLimit: ContentLimit; isKids: boolean }>("PATCH", `/household/members/${encodeURIComponent(memberId)}`, patch),
 
   status: () => request<AdminStatus>("GET", "/admin/status"),
   settings: () => request<SettingsResponse>("GET", "/admin/settings"),
@@ -109,8 +108,8 @@ export const api = {
   applyUpdate: () => request<UpdateStatus>("POST", "/admin/update/apply"),
 
   stopSession: (id: string) => request<{ ok: true }>("DELETE", `/admin/sessions/${encodeURIComponent(id)}`),
-  devices: () => request<{ items: Device[] }>("GET", "/admin/devices"),
-  signOutDevice: (id: string) => request<{ ok: true }>("DELETE", `/admin/devices/${encodeURIComponent(id)}`),
+  /** Every household on the server (server admin). */
+  households: () => request<{ items: HouseholdSummary[] }>("GET", "/admin/households"),
   logs: (limit = 500) => request<{ items: LogEntry[] }>("GET", `/admin/logs${q({ limit })}`),
 };
 

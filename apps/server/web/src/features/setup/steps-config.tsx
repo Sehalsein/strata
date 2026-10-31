@@ -101,7 +101,7 @@ export function BasicsStep({ info, onNext, onBack }: StepProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
-  const local = !info.cloud;
+  const local = info.mode !== "cloud";
 
   useEffect(() => {
     if (settings.data && !draft) setDraft(settings.data.settings);
@@ -174,7 +174,7 @@ export function BasicsStep({ info, onNext, onBack }: StepProps) {
                 checked={draft.localJoin}
                 onChange={(v) => setDraft({ ...draft, localJoin: v })}
                 label="Let devices on my home network join without a password"
-                description="They go straight to picking a profile (PINs still apply) and can watch but not change settings. Away from home, devices sign in with your account. Turn this off if the server is exposed through a tunnel or port forward."
+                description="They pick who they are from the first household's members, without a password, and can watch but not change settings. Away from home, devices sign in with your account. Turn this off if the server is exposed through a tunnel or port forward."
               />
             </>
           )}

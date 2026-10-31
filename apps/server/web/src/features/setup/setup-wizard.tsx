@@ -7,7 +7,7 @@ import { ModeToggle } from "@/components/mode-toggle";
 import { Progress } from "@/components/ui/progress";
 import { AccountStep, WelcomeStep } from "./steps-intro";
 import { BasicsStep, ServicesStep } from "./steps-config";
-import { DevicesStep, DoneStep, ProfilesStep } from "./steps-finish";
+import { DevicesStep, DoneStep, PeopleStep } from "./steps-finish";
 import { FIRST_AUTHED_STEP, STEPS, storeStep, storedStep } from "./wizard-state";
 
 function initialStep(info: ServerInfo): number {
@@ -117,7 +117,7 @@ export default function SetupWizard({ info, onDone, onAccountCreated }: { info: 
           )}
           {step === 2 && <ServicesStep info={info} onNext={next} />}
           {step === 3 && <BasicsStep info={info} onBack={back} onNext={next} />}
-          {step === 4 && <ProfilesStep info={info} onBack={back} onNext={next} />}
+          {step === 4 && <PeopleStep info={info} onBack={back} onNext={next} />}
           {step === 5 && <DevicesStep info={info} onBack={back} onNext={next} />}
           {step === 6 && <DoneStep info={info} onBack={back} onFinish={finish} />}
         </main>

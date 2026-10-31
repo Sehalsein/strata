@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, CircleCheck, CircleDashed, X } from "lucide-react";
-import { api } from "@/lib/api";
+import { authClient } from "@/lib/auth-client";
 import { queryKeys } from "@/lib/query";
 import { Link } from "@/lib/router";
 import type { AdminStatus } from "@/lib/types";
@@ -32,22 +32,31 @@ interface Item {
 }
 
 /** "Finish setting up" on the Overview while the basics aren't in place. */
-export function SetupChecklist({ status }: { status: AdminStatus }) {
+export function SetupChecklist({ status, isServerAdmin }: { status: AdminStatus; isServerAdmin: boolean }) {
   const [dismissed, setDismissed] = useState(readDismissed);
-  const profiles = useQuery({ queryKey: queryKeys.profiles, queryFn: api.profiles, enabled: !dismissed });
-  const devices = useQuery({ queryKey: queryKeys.devices, queryFn: api.devices, enabled: !dismissed });
+  const household = useQuery({ queryKey: queryKeys.household, queryFn: authClient.getHousehold, enabled: !dismissed });
+  const sessions = useQuery({ queryKey: queryKeys.sessions, queryFn: authClient.listSessions, enabled: !dismissed });
+  const token = useQuery({ queryKey: queryKeys.sessionToken, queryFn: authClient.currentSessionToken, enabled: !dismissed, staleTime: Infinity });
 
-  if (dismissed || !profiles.data || !devices.data) return null;
+  if (dismissed || !household.data || !sessions.data || token.isPending) return null;
 
   const items: Item[] = [
-    { key: "tmdb", label: "Add a TMDB key", hint: "Powers the catalog, artwork and file matching.", done: status.tmdb.configured, href: "/settings#keys", cta: "Add key" },
+    ...(isServerAdmin ? [{ key: "tmdb", label: "Add a TMDB key", hint: "Powers the catalog, artwork and file matching.", done: status.tmdb.configured, href: "/settings#keys", cta: "Add key" }] : []),
     { key: "torbox", label: "Connect TorBox", hint: "Play titles straight from your TorBox library.", done: status.torbox.configured, optional: true, href: "/settings#keys", cta: "Connect" },
-    { key: "profiles", label: "Create a profile", hint: "Each person gets their own progress and My List.", done: profiles.data.length > 0, href: "/profiles", cta: "Add profile" },
+    {
+      key: "people",
+      label: "Invite people",
+      hint: "Everyone gets their own account, progress and My List.",
+      done: household.data.members.length > 1 || household.data.invitations.some((i) => i.status === "pending"),
+      optional: true,
+      href: "/members",
+      cta: "Invite",
+    },
     {
       key: "device",
       label: "Connect a device",
       hint: "Open Strata on an iPhone, iPad, Mac or Apple TV and pick this server.",
-      done: devices.data.items.some((d) => !d.isCurrent),
+      done: sessions.data.some((s) => s.token !== token.data),
       href: "/devices",
       cta: "View devices",
     },

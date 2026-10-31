@@ -1,30 +1,42 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CircleCheck, CircleDashed, Copy, LayoutDashboard, Library, LoaderCircle, RefreshCw, Tv } from "lucide-react";
+import { ArrowRight, CircleCheck, CircleDashed, Copy, LayoutDashboard, Library, LoaderCircle, RefreshCw, Tv, UserPlus } from "lucide-react";
 import { renderSVG } from "uqr";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
+import { authClient } from "@/lib/auth-client";
 import { queryKeys } from "@/lib/query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ProfileManager } from "@/features/profiles/profile-manager";
+import { InvitationList, InviteDialog } from "@/features/members/household-people";
 import type { StepProps } from "./setup-wizard";
 import { StepCard } from "./step-card";
 
-export function ProfilesStep({ onNext, onBack }: StepProps) {
+export function PeopleStep({ onNext, onBack }: StepProps) {
+  const [inviting, setInviting] = useState(false);
+  const household = useQuery({ queryKey: queryKeys.household, queryFn: authClient.getHousehold });
+  const pending = (household.data?.invitations ?? []).some((i) => i.status === "pending");
   return (
     <StepCard
-      title="Who's watching?"
-      description="Your first profile was created from your username — rename it if you like. Add one per person: each keeps its own progress and My List. A Kids profile only shows family-friendly titles, and a PIN keeps a profile private."
+      title="Invite people"
+      description="Everyone who watches gets their own account, with their own progress and My List. Invite them now or later from Members: Strata gives you a link to send them (it doesn't send email). You can mark kids' accounts and set content limits from Members once they've joined."
       onBack={onBack}
       actions={
-        <Button size="lg" onClick={onNext}>
-          Continue <ArrowRight />
+        <Button size="lg" onClick={onNext} variant={pending ? "default" : "outline"}>
+          {pending ? "Continue" : "Skip for now"} <ArrowRight />
         </Button>
       }
     >
-      <ProfileManager />
+      <div className="flex flex-col gap-4">
+        <div>
+          <Button variant="outline" onClick={() => setInviting(true)}>
+            <UserPlus /> Invite someone
+          </Button>
+        </div>
+        <InvitationList compact />
+      </div>
+      <InviteDialog open={inviting} onOpenChange={setInviting} householdName={household.data?.name} />
     </StepCard>
   );
 }
@@ -80,14 +92,14 @@ export function DevicesStep({ info, onNext, onBack }: StepProps) {
             {lan && lan !== address && <p className="text-muted-foreground text-xs">On your home network: {lan}</p>}
           </div>
           <ol className="text-muted-foreground list-decimal space-y-1.5 pl-5 text-sm">
-            <li>On your home network, “{info.serverName}” shows up in the app by itself (Bonjour).</li>
+            {info.mode !== "cloud" && <li>On your home network, “{info.serverName}” shows up in the app by itself (Bonjour).</li>}
             <li>Otherwise, enter the address above, or scan the code with your iPhone's camera.</li>
-            <li>Sign in with the admin account you just created, then pick a profile.</li>
+            <li>Sign in with your account. Everyone you invite signs in with their own.</li>
           </ol>
           <div className="flex gap-3 rounded-lg border p-3">
             <Tv className="text-muted-foreground mt-0.5 size-5 shrink-0" />
             <p className="text-muted-foreground text-sm">
-              <span className="text-foreground font-medium">Apple TV:</span> choose to sign in with a code. The TV shows a code and a QR code; scan it with an iPhone that's already signed in to this server and approve it there — no typing a password with the remote.
+              <span className="text-foreground font-medium">Apple TV:</span> choose to sign in with a code. The TV shows a code and a QR code; scan it with a phone, or open <span className="font-mono">Link a TV</span> in this dashboard, and approve it there — no typing a password with the remote.
             </p>
           </div>
         </div>
@@ -96,9 +108,9 @@ export function DevicesStep({ info, onNext, onBack }: StepProps) {
   );
 }
 
-export function DoneStep({ onBack, onFinish }: Omit<StepProps, "onNext"> & { onFinish: (to?: string) => void }) {
+export function DoneStep({ info, onBack, onFinish }: Omit<StepProps, "onNext"> & { onFinish: (to?: string) => void }) {
   const settings = useQuery({ queryKey: queryKeys.settings, queryFn: api.settings });
-  const profiles = useQuery({ queryKey: queryKeys.profiles, queryFn: api.profiles });
+  const household = useQuery({ queryKey: queryKeys.household, queryFn: authClient.getHousehold });
   const [syncing, setSyncing] = useState(false);
   const [leaving, setLeaving] = useState<string | null>(null);
 
@@ -147,7 +159,7 @@ export function DoneStep({ onBack, onFinish }: Omit<StepProps, "onNext"> & { onF
         </>
       }
     >
-      {!s || !profiles.data ? (
+      {!s || !household.data ? (
         <div className="flex flex-col gap-2">
           {Array.from({ length: 4 }, (_, i) => (
             <Skeleton key={i} className="h-10" />
@@ -171,13 +183,25 @@ export function DoneStep({ onBack, onFinish }: Omit<StepProps, "onNext"> & { onF
               )
             }
           />
+          {info.mode !== "cloud" && (
+            <Summary
+              done={s.settings.mediaFolders.length > 0}
+              optional
+              label="Media folders"
+              detail={s.settings.mediaFolders.length ? `${s.settings.mediaFolders.length} folder${s.settings.mediaFolders.length === 1 ? "" : "s"}` : "None"}
+            />
+          )}
+          <Summary done label="Household" detail={household.data.name} />
           <Summary
-            done={s.settings.mediaFolders.length > 0}
+            done={household.data.members.length > 1 || household.data.invitations.some((i) => i.status === "pending")}
             optional
-            label="Media folders"
-            detail={s.settings.mediaFolders.length ? `${s.settings.mediaFolders.length} folder${s.settings.mediaFolders.length === 1 ? "" : "s"}` : "None"}
+            label="People"
+            detail={(() => {
+              const invited = household.data.invitations.filter((i) => i.status === "pending").length;
+              const members = household.data.members.length;
+              return `${members} member${members === 1 ? "" : "s"}${invited ? ` · ${invited} invited` : ""}`;
+            })()}
           />
-          <Summary done={profiles.data.length > 0} label="Profiles" detail={profiles.data.map((p) => p.name).join(", ") || "None"} />
           <Summary done label="Server name" detail={s.settings.serverName} />
         </ul>
       )}

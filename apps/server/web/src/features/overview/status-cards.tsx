@@ -25,9 +25,11 @@ export function ServerCard({ status }: { status: AdminStatus }) {
             {status.platform}
           </KeyValue>
           <KeyValue k="Uptime">{formatDuration(status.uptimeMs)}</KeyValue>
-          <KeyValue k="Data" mono>
-            <span className="break-all">{status.dataDir}</span>
-          </KeyValue>
+          {status.dataDir && (
+            <KeyValue k="Data" mono>
+              <span className="break-all">{status.dataDir}</span>
+            </KeyValue>
+          )}
           <KeyValue k="ffmpeg" mono>
             {status.ffmpeg ? (
               <>

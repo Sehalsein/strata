@@ -66,6 +66,8 @@ const STRENGTH_COLORS = ["bg-muted", "bg-destructive", "bg-warn", "bg-ok", "bg-o
 
 export function AccountStep({ info, onNext, onBack }: StepProps) {
   const [username, setUsername] = useState("admin");
+  const [email, setEmail] = useState("");
+  const [householdName, setHouseholdName] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [setupCode, setSetupCode] = useState("");
@@ -77,7 +79,8 @@ export function AccountStep({ info, onNext, onBack }: StepProps) {
   const [pending, setPending] = useState(false);
 
   const strength = passwordStrength(password);
-  const usernameError = touched && !username.trim() ? "Choose a username." : null;
+  const usernameError = touched && !/^[a-zA-Z0-9_.-]{2,64}$/.test(username.trim()) ? "2–64 letters, numbers, dots, dashes or underscores." : null;
+  const emailError = touched && email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) ? "Enter a valid email, or leave it empty." : null;
   const passwordError = touched && password.length < 8 ? "Use at least 8 characters." : null;
   const confirmError = touched && confirm !== password ? "The passwords don't match." : null;
   const codeError = touched && needsCode && !setupCode.trim() ? "Enter the setup code from the server's log." : null;
@@ -85,11 +88,17 @@ export function AccountStep({ info, onNext, onBack }: StepProps) {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setTouched(true);
-    if (!username.trim() || password.length < 8 || confirm !== password || (needsCode && !setupCode.trim())) return;
+    if (usernameError || !/^[a-zA-Z0-9_.-]{2,64}$/.test(username.trim()) || emailError || password.length < 8 || confirm !== password || (needsCode && !setupCode.trim())) return;
     setPending(true);
     setError(null);
     try {
-      await authClient.setupAdmin({ username: username.trim(), password, setupCode: needsCode ? setupCode.trim() : undefined });
+      await authClient.setupAdmin({
+        username: username.trim(),
+        password,
+        ...(email.trim() ? { email: email.trim().toLowerCase() } : {}),
+        ...(householdName.trim() ? { householdName: householdName.trim() } : {}),
+        setupCode: needsCode ? setupCode.trim() : undefined,
+      });
       onNext();
     } catch (err) {
       const msg = errorMessage(err);
@@ -105,7 +114,7 @@ export function AccountStep({ info, onNext, onBack }: StepProps) {
     <form onSubmit={submit} noValidate>
       <StepCard
         title="Create the admin account"
-        description="This account manages the server from this dashboard and signs in the apps when you're away from home. It also gets the first viewing profile."
+        description="The server's admin account: it runs the server from this dashboard and is your own account for watching. It also owns your household — the library, settings and people you'll invite."
         onBack={onBack}
         actions={
           <Button type="submit" size="lg" disabled={pending}>
@@ -117,6 +126,12 @@ export function AccountStep({ info, onNext, onBack }: StepProps) {
         <FieldGroup className="max-w-md">
           <FormField label="Username" error={usernameError}>
             {(p) => <Input {...p} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="off" spellCheck={false} maxLength={64} />}
+          </FormField>
+          <FormField label="Email (optional)" description="You can sign in with it too." error={emailError}>
+            {(p) => <Input {...p} type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />}
+          </FormField>
+          <FormField label="Household name" description={`Your household on this server. Defaults to “${username.trim() || "admin"}'s home”.`}>
+            {(p) => <Input {...p} value={householdName} onChange={(e) => setHouseholdName(e.target.value)} placeholder={`${username.trim() || "admin"}'s home`} maxLength={64} />}
           </FormField>
           <FormField
             label="Password"

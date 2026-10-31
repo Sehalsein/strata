@@ -20,7 +20,7 @@ const KINDS: { value: MediaFolderKind; label: string }[] = [
 ];
 
 /** Editable list of media folders with a server-side folder picker. Controlled. */
-export function MediaFolders({ value, onChange }: { value: MediaFolder[]; onChange: (next: MediaFolder[]) => void }) {
+export function MediaFolders({ value, onChange, canBrowse = true }: { value: MediaFolder[]; onChange: (next: MediaFolder[]) => void; /** Browsing the server's disk is the server admin's. */ canBrowse?: boolean }) {
   const [browsing, setBrowsing] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
 
@@ -64,11 +64,15 @@ export function MediaFolders({ value, onChange }: { value: MediaFolder[]; onChan
           ))}
         </ul>
       )}
-      <div>
-        <Button variant="outline" onClick={() => setBrowsing(true)}>
-          <FolderPlus /> Add folder…
-        </Button>
-      </div>
+      {canBrowse ? (
+        <div>
+          <Button variant="outline" onClick={() => setBrowsing(true)}>
+            <FolderPlus /> Add folder…
+          </Button>
+        </div>
+      ) : (
+        <p className="text-muted-foreground text-sm">Only the server's admin can browse the server's disk to add a folder.</p>
+      )}
       <FolderBrowserDialog
         open={browsing}
         onOpenChange={setBrowsing}

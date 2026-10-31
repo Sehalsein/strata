@@ -20,12 +20,13 @@ src/
   main.tsx                 providers: theme, TanStack Query, toasts
   index.css                Tailwind v4 + the Strata palette mapped onto shadcn tokens (light/dark)
   app/
-    App.tsx                boot: /api/info → setup wizard | sign-in | dashboard
-    routes.tsx             the route table (path, title, icon, nav group, lazy page)
-    app-layout.tsx         sidebar, top bar, user menu, page outlet
-    session.tsx            server info + sign-out for the signed-in app
+    App.tsx                boot: /api/info → setup wizard | /invite/:id | sign-in | dashboard
+    routes.tsx             the route table (path, title, icon, nav group, access, lazy page)
+    app-layout.tsx         sidebar, top bar (household switcher, account menu), page outlet
+    session.tsx            server info, /api/me, roles (`can`), auth-change refresh
   features/<area>/         one folder per admin area; pages are the default export
-    overview/ library/ profiles/ devices/ settings/ logs/ auth/ setup/
+    overview/ library/ members/ devices/ link/ households/ settings/ logs/
+    auth/ (sign-in, password) invite/ (public join page) setup/
   components/
     ui/                    shadcn/ui primitives (components.json); edit like any other source
     page.tsx               PageHeader, ErrorAlert, EmptyState, KeyValue, skeletons
@@ -33,7 +34,8 @@ src/
     theme-provider.tsx     light / dark / system, class strategy, saved in localStorage
   lib/
     api.ts types.ts        the API client and response types (mirror apps/server/src/api/routes)
-    auth-client.ts         every auth/session call: setup, sign in/out, current user, password, token
+    auth-client.ts         every auth/session call, on Better Auth: setup, sign in/up/out, accounts,
+                           households, members, invitations, sessions, TV approval
     query.ts               QueryClient, query keys, useApiMutation (toasts + invalidation)
     router.tsx             tiny history router + <Link>
     format.ts utils.ts
@@ -55,13 +57,19 @@ The sidebar, top-bar title and code splitting come from the route table.
   loads. A hand-rolled hook had grown its own polling, sequencing and refresh plumbing for this;
   Query covers all of it (visibility-aware `refetchInterval`, `invalidateQueries`,
   `keepPreviousData`) for ~13 kB gzipped, and new features get caching for free.
-- **Auth behind one module.** Pages and the shell only call `authClient` (`lib/auth-client.ts`):
-  `hasSession`, `setupAdmin`, `signIn`, `signOut`, `getCurrentUser`, `changePassword`,
-  `onSessionExpired`. It owns token storage and tells `lib/api.ts` how to authenticate requests
-  (`configureApiAuth`). The server is moving to Better Auth (with organizations); that change
-  re-implements this one file on `createAuthClient()` + `organizationClient()` from
-  `better-auth/react` and leaves pages alone.
-- **Routing: no router library.** Six flat pages and the server's index.html fallback don't need
+- **Auth behind one module.** Pages and the shell only call `authClient` (`lib/auth-client.ts`),
+  a thin promise API over Better Auth's client (`better-auth/react` with the username,
+  organization, admin, multi-session and device-authorization client plugins) that throws
+  `AuthError` (an `ApiError` with Better Auth's `code`). Sessions are same-origin cookies, so
+  `lib/api.ts` sends no auth header; `configureApiAuth` only reports 401s. Results are cached
+  with TanStack Query like any other data.
+- **Who can see what.** `/api/me` gives the account, its active household and role. A route's
+  `access` is `any`, `householdAdmin` (owner/admin of the active household) or `serverAdmin`
+  (the setup account, also needing a household it runs, since `/api/admin/*` is per household).
+  Pages hide server-only fields (server name, TMDB key, transcoding, updates…) from household
+  admins. Switching account or household goes through `session.authChanged()`, which re-reads
+  `/api/me`, drops every cached response and remounts the shell.
+- **Routing: no router library.** A handful of flat pages and the server's index.html fallback don't need
   one. `lib/router.tsx` is ~50 lines; the route table is the one place pages are registered.
   If nested routes or loaders are ever needed, swapping in a router only touches `app/`.
 - **Tables:** sorting, filtering and pagination are done directly (server-side for the library,

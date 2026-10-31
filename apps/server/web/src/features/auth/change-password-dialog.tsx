@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
-import { ApiError, errorMessage } from "@/lib/api";
-import { authClient } from "@/lib/auth-client";
+import { errorMessage } from "@/lib/api";
+import { AuthError, authClient } from "@/lib/auth-client";
 import { queryClient, queryKeys } from "@/lib/query";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -48,10 +48,10 @@ function ChangePasswordForm({ onDone }: { onDone: () => void }) {
     try {
       await authClient.changePassword({ currentPassword: current, newPassword: next });
       toast.success("Password changed. Other devices were signed out.");
-      void queryClient.invalidateQueries({ queryKey: queryKeys.devices });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
       onDone();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 403) setCurrentError("That isn't your current password.");
+      if (err instanceof AuthError && err.code === "INVALID_PASSWORD") setCurrentError("That isn't your current password.");
       else setError(errorMessage(err));
     } finally {
       setPending(false);

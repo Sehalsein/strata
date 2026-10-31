@@ -1,11 +1,9 @@
-import { authClient } from "@/lib/auth-client";
-
 export const STEPS = [
   { key: "welcome", label: "Welcome" },
   { key: "account", label: "Admin account" },
   { key: "services", label: "Connect services" },
   { key: "basics", label: "Server basics" },
-  { key: "profiles", label: "Profiles" },
+  { key: "people", label: "Invite people" },
   { key: "devices", label: "Your devices" },
   { key: "done", label: "Finish" },
 ] as const;
@@ -35,10 +33,10 @@ export function storeStep(n: number | null) {
   }
 }
 
-/** True when the admin exists (we hold its token) but the remaining steps aren't finished. */
+/** True when the admin exists (call it once signed in) but the remaining steps aren't finished. */
 export function wizardInProgress(): boolean {
   const s = storedStep();
-  return s !== null && s >= FIRST_AUTHED_STEP && authClient.hasSession();
+  return s !== null && s >= FIRST_AUTHED_STEP;
 }
 
 /** Rough strength for the hint under the password field. */

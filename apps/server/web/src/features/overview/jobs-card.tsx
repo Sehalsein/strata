@@ -15,7 +15,10 @@ function JobBadge({ job }: { job: JobStatus }) {
   return <Badge variant="secondary">Idle</Badge>;
 }
 
-export function JobsCard({ jobs }: { jobs: JobStatus[] }) {
+/** Jobs a household admin may start; the rest run server-wide and need the server admin. */
+const HOUSEHOLD_JOBS = ["syncTorbox", "matchPending"];
+
+export function JobsCard({ jobs, isServerAdmin }: { jobs: JobStatus[]; isServerAdmin: boolean }) {
   const run = useApiMutation((name: string) => api.runJob(name), { success: (_, name) => `${jobLabel(name)} started`, invalidate: [queryKeys.status] });
   return (
     <Card>
@@ -51,10 +54,12 @@ export function JobsCard({ jobs }: { jobs: JobStatus[] }) {
                   </p>
                   {j.lastError && <p className="text-destructive font-mono text-xs break-words">{j.lastError}</p>}
                 </div>
+                {(isServerAdmin || HOUSEHOLD_JOBS.includes(j.name)) && (
                 <Button variant="outline" size="sm" className="shrink-0" onClick={() => run.mutate(j.name)} disabled={j.running || starting}>
                   {j.running || starting ? <LoaderCircle className="animate-spin" /> : <Play />}
                   {j.running ? "Running…" : "Run now"}
                 </Button>
+                )}
               </li>
             );
           })}
