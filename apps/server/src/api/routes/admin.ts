@@ -114,27 +114,6 @@ export const adminRoutes = new Hono<Env>()
     return c.json({ email: me.email ?? null, plan: me.plan ?? null, premiumExpiresAt: me.premium_expires_at ?? null });
   })
 
-  // Folder picker for the setup wizard. Admin-only; lists directories, never files.
-  .get("/fs", async (c) => {
-    assertServerAdmin(c);
-    if (isCloud) throw new HTTPException(404, { message: "The cloud server has no folders" });
-    const path = resolve(c.req.query("path") || homedir());
-    let entries;
-    try {
-      entries = await readdir(path, { withFileTypes: true });
-    } catch {
-      throw new HTTPException(404, { message: `Can't read ${path}` });
-    }
-    const dirs = entries
-      .filter((e) => e.isDirectory() && !e.name.startsWith("."))
-      .map((e) => ({ name: e.name, path: join(path, e.name) }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    const shortcuts = [{ name: "Home", path: homedir() }];
-    if (platform() === "darwin") shortcuts.push({ name: "Volumes", path: "/Volumes" });
-    else shortcuts.push({ name: "/mnt", path: "/mnt" }, { name: "/media", path: "/media" });
-    return c.json({ path, parent: dirname(path) === path ? null : dirname(path), dirs, shortcuts });
-  })
-
   // This household's sync and matching; anything else runs server-wide (server admin).
   .post("/jobs/:name/run", (c) => {
     const name = c.req.param("name");
@@ -147,13 +126,6 @@ export const adminRoutes = new Hono<Env>()
       void c.var.services.jobs.run(name);
     }
     return c.json({ ok: true }, 202);
-  })
-
-  // Households on this server (server admin): the dashboard's household list.
-  .get("/households", async (c) => {
-    assertServerAdmin(c);
-    const rows = await c.var.services.db.select({ id: organization.id, name: organization.name, slug: organization.slug, createdAt: organization.createdAt }).from(organization);
-    return c.json({ items: rows });
   })
 
   .get("/files", async (c) => {
@@ -227,10 +199,38 @@ export const adminRoutes = new Hono<Env>()
     if (!(await householdPlays(c.var.services, c.var.household)).some((p) => p.id === c.req.param("id"))) throw new HTTPException(404, { message: "No such play" });
     await c.var.services.sessions.stop(c.req.param("id"));
     return c.json({ ok: true });
-  })
+  });
 
+/** The server admin's own pages: they don't need a household. */
+export const serverAdminRoutes = new Hono<Env>()
+  .use("/households", requireAuth, requireServerAdmin)
+  .use("/logs", requireAuth, requireServerAdmin)
+  .use("/fs", requireAuth, requireServerAdmin)
+  // Folder picker for the setup wizard. Admin-only; lists directories, never files.
+  .get("/fs", async (c) => {
+    if (isCloud) throw new HTTPException(404, { message: "The cloud server has no folders" });
+    const path = resolve(c.req.query("path") || homedir());
+    let entries;
+    try {
+      entries = await readdir(path, { withFileTypes: true });
+    } catch {
+      throw new HTTPException(404, { message: `Can't read ${path}` });
+    }
+    const dirs = entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+      .map((e) => ({ name: e.name, path: join(path, e.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const shortcuts = [{ name: "Home", path: homedir() }];
+    if (platform() === "darwin") shortcuts.push({ name: "Volumes", path: "/Volumes" });
+    else shortcuts.push({ name: "/mnt", path: "/mnt" }, { name: "/media", path: "/media" });
+    return c.json({ path, parent: dirname(path) === path ? null : dirname(path), dirs, shortcuts });
+  })
+  // Households on this server (server admin): the dashboard's household list.
+  .get("/households", async (c) => {
+    const rows = await c.var.services.db.select({ id: organization.id, name: organization.name, slug: organization.slug, createdAt: organization.createdAt }).from(organization);
+    return c.json({ items: rows });
+  })
   .get("/logs", (c) => {
-    assertServerAdmin(c);
     return c.json({ items: recentLogs(Math.min(optionalInt(c.req.query("limit")) ?? 200, 1000)) });
   });
 

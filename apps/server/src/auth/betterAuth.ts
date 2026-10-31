@@ -6,10 +6,12 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, bearer, deviceAuthorization, multiSession, organization, username } from "better-auth/plugins";
 import type { Db } from "../db";
 import * as schema from "../db/schema";
-import { isCloud } from "../mode";
 import { runtime } from "#runtime";
 
 const DAY_S = 24 * 60 * 60;
+
+/** The header api/app.ts puts the client's address in for Better Auth's rate limits. */
+export const CLIENT_ADDRESS_HEADER = "x-strata-client-address";
 
 /** The client id the Apple TV app sends when it asks for a sign-in code. */
 export const TV_CLIENT_ID = "strata-apple-tv";
@@ -163,8 +165,9 @@ export function createAuth(options: AuthOptions) {
     },
     advanced: {
       database: { generateId: () => crypto.randomUUID() },
-      // The cloud server sits behind Cloudflare: the client's address is in its header.
-      ipAddress: { ipAddressHeaders: isCloud ? ["cf-connecting-ip", "x-forwarded-for"] : [] },
+      // Set by the app for every request here (api/app.ts): the client's address, from the
+      // connection or, behind Cloudflare or a trusted proxy, its header.
+      ipAddress: { ipAddressHeaders: [CLIENT_ADDRESS_HEADER] },
     },
     plugins: [
       username({ minUsernameLength: 2, maxUsernameLength: 64 }),

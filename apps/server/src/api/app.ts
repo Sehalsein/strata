@@ -8,13 +8,15 @@ import { NotReadyError } from "../sources/discovery";
 import type { Services } from "../services";
 import { logger } from "../log";
 import type { Env } from "./context";
-import { adminRoutes } from "./routes/admin";
+import { adminRoutes, serverAdminRoutes } from "./routes/admin";
 import { authRoutes } from "./routes/auth";
 import { catalogRoutes } from "./routes/catalog";
 import { streamRoutes } from "./routes/stream";
 import { systemRoutes } from "./routes/system";
 import { webHandler } from "../web/static";
 import { gzipJson } from "./gzip";
+import { clientAddress } from "./localNetwork";
+import { CLIENT_ADDRESS_HEADER } from "../auth/betterAuth";
 
 const log = logger("http");
 
@@ -31,13 +33,20 @@ export function createApp(services: Services) {
   app.use("/api/*", gzipJson());
 
   // Accounts, sign-in, households, members, invitations, TV codes (Better Auth).
-  app.on(["GET", "POST"], "/api/auth/*", (c) => services.auth.handler(c.req.raw));
+  // Its rate limits count per client: it reads the address from a header only this
+  // server sets (a client's own copy is dropped), worked out like everywhere else here.
+  app.on(["GET", "POST"], "/api/auth/*", (c) => {
+    const headers = new Headers(c.req.raw.headers);
+    headers.set(CLIENT_ADDRESS_HEADER, clientAddress(c));
+    return services.auth.handler(new Request(c.req.raw, { headers }));
+  });
 
   // Order matters: catalogRoutes applies requireAuth to everything it sees under /api,
   // so the public and stream routes must be registered first.
   app.route("/api", authRoutes);
   app.route("/api", streamRoutes);
   app.route("/api/admin", systemRoutes);
+  app.route("/api/admin", serverAdminRoutes);
   app.route("/api/admin", adminRoutes);
   app.route("/api", catalogRoutes);
 
