@@ -7,6 +7,7 @@
 // request; their caches are per instance and everything lasting is in the database.
 import { createApp } from "./api/app";
 import { closeScope, requestScope, type RequestScope } from "./runtime/workers";
+import { pendingReports } from "./errorReporting";
 import type { Services } from "./services";
 
 interface Env {
@@ -22,6 +23,8 @@ interface Env {
   /** Who runs the server and how to reach them, for the privacy page. */
   STRATA_OPERATOR?: string;
   STRATA_PRIVACY_CONTACT?: string;
+  /** Errors to Sentry, when set. */
+  SENTRY_DSN?: string;
   /** "Sign in with Google" shows only with both. */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
@@ -43,7 +46,7 @@ function boot(env: Env) {
       DATABASE_URL: env.DATABASE_URL,
       STRATA_SECRET_KEY: env.STRATA_SECRET_KEY,
       ...(env.STRATA_PUBLIC_URL ? { STRATA_PUBLIC_URL: env.STRATA_PUBLIC_URL } : {}),
-      ...Object.fromEntries((["RESEND_API_KEY", "STRATA_EMAIL_FROM", "STRATA_OPERATOR", "STRATA_PRIVACY_CONTACT"] as const).filter((k) => env[k]).map((k) => [k, env[k]!])),
+      ...Object.fromEntries((["RESEND_API_KEY", "STRATA_EMAIL_FROM", "STRATA_OPERATOR", "STRATA_PRIVACY_CONTACT", "SENTRY_DSN"] as const).filter((k) => env[k]).map((k) => [k, env[k]!])),
       ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET ? { GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET } : {}),
     });
     const { createServices } = await import("./services");
@@ -63,6 +66,7 @@ async function inScope<T>(env: Env, ctx: ExecutionContext, fn: () => Promise<T>)
     return await requestScope.run(scope, fn);
   } finally {
     ctx.waitUntil(closeScope(scope));
+    ctx.waitUntil(pendingReports());
   }
 }
 

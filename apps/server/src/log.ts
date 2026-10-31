@@ -1,5 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
+import { reportError } from "./errorReporting";
 
 type Level = "debug" | "info" | "warn" | "error";
 
@@ -49,6 +50,9 @@ export function logger(scope: string) {
     debug: (msg: string, extra?: unknown) => write("debug", scope, msg, extra),
     info: (msg: string, extra?: unknown) => write("info", scope, msg, extra),
     warn: (msg: string, extra?: unknown) => write("warn", scope, msg, extra),
-    error: (msg: string, extra?: unknown) => write("error", scope, msg, extra),
+    error: (msg: string, extra?: unknown) => {
+      write("error", scope, msg, extra);
+      reportError(scope, msg, extra);
+    },
   };
 }

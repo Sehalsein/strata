@@ -39,3 +39,28 @@ test("usage limits count per key and refuse once over, saying when to try again"
   // Another household has its own count.
   await throttle.spend("searches:other-household", rule, "Too many searches.");
 });
+
+test("errors go to Sentry when SENTRY_DSN is set, with secrets stripped, once a minute each", async () => {
+  const { logger } = await import("../src/log");
+  const { pendingReports } = await import("../src/errorReporting");
+  const realFetch = globalThis.fetch;
+  const sent: { url: string; body: string }[] = [];
+  globalThis.fetch = (async (input: any, init?: any) => {
+    sent.push({ url: String(input), body: String(init?.body) });
+    return new Response("{}");
+  }) as typeof fetch;
+  process.env.SENTRY_DSN = "https://publickey@o1.ingest.sentry.io/42";
+  try {
+    const log = logger("test");
+    log.error("TorBox link failed https://x.example/dl?token=secret123", new Error("boom"));
+    log.error("TorBox link failed https://x.example/dl?token=secret123", new Error("boom"));
+    await pendingReports();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.url).toBe("https://o1.ingest.sentry.io/api/42/envelope/");
+    expect(sent[0]!.body).not.toContain("secret123");
+    expect(sent[0]!.body).toContain("token=***");
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.SENTRY_DSN;
+  }
+});
