@@ -290,6 +290,8 @@ struct HeroCarousel: View {
     var watchlist: Set<String> = []
     /// Taps on + not yet reflected in `watchlist`.
     @State private var listed: [String: Bool] = [:]
+    /// What Play does for each title the carousel has shown, once the server has said.
+    @State private var plays: [String: Playability] = [:]
     @State private var index = 0
     /// When the current title started its turn, for the progress in its dot.
     @State private var turnStarted = Date.now
@@ -331,6 +333,14 @@ struct HeroCarousel: View {
             .onChange(of: watchlist) { listed = [:] }
             .onAppear { visible = true }
             .onDisappear { visible = false }
+            // Only the title on screen: asking about all of them would send the server
+            // looking for sources for ten titles at once.
+            // After watching, Up Next moves on: ask again.
+            .onChange(of: services.progressRevision) { plays = [:] }
+            .task(id: cards.isEmpty ? nil : "\(cards[min(index, cards.count - 1)].id)|\(services.progressRevision)") {
+                guard !cards.isEmpty else { return }
+                await resolvePlay(cards[min(index, cards.count - 1)])
+            }
             // Restarts on every change, manual or not, so a swipe gets a full interval.
             .task(id: AdvanceKey(index: index, running: running)) {
                 turnStarted = .now
@@ -394,8 +404,60 @@ struct HeroCarousel: View {
     private var content: some View { hero(cards[min(index, cards.count - 1)]) }
     #endif
 
-    /// Movies in the server's library get Play; everything else opens its page.
-    private func hasPlay(_ card: TitleCard) -> Bool { card.type == .movie && card.isAvailable }
+    /// What Play does for a title: a movie, or a show's Up Next episode, from the library
+    /// or a source the server found. Without one, the wide button opens the title.
+    private enum Playability: Equatable {
+        case play(WatchRequest, label: String)
+        case none
+    }
+
+    private func playRequest(_ card: TitleCard) -> (WatchRequest, String)? {
+        // A movie in the library plays straight away, before the server has been asked.
+        if case .play(let request, let label)? = plays[card.id] { return (request, label) }
+        if card.type == .movie, card.isAvailable {
+            return (WatchRequest(target: .movie(card.tmdbId), meta: meta(card, subtitle: card.yearText)), "Play")
+        }
+        return nil
+    }
+
+    private func hasPlay(_ card: TitleCard) -> Bool { playRequest(card) != nil }
+
+    private func meta(_ card: TitleCard, subtitle: String?) -> PlaybackMeta {
+        PlaybackMeta(title: card.title, subtitle: subtitle, artworkURL: card.backdropUrl)
+    }
+
+    /// Works out Play for the title on screen, as its page would: a show's Up Next
+    /// episode, and for anything not in the library, a source the server can find.
+    private func resolvePlay(_ card: TitleCard) async {
+        guard plays[card.id] == nil else { return }
+        // A moment on screen first, so swiping past titles doesn't set off lookups.
+        try? await Task.sleep(for: .milliseconds(600))
+        guard !Task.isCancelled else { return }
+        let result: Playability
+        switch card.type {
+        case .movie:
+            if card.isAvailable { return }
+            let target = PlaybackTarget.movie(card.tmdbId)
+            let found = await services.sources(for: target, discover: true)
+            result = found.first.map { .play(WatchRequest(target: target, meta: meta(card, subtitle: card.yearText), candidateId: $0.id), label: "Play") } ?? .none
+        case .show:
+            guard let show = await services.load({ try await $0.show(card.tmdbId) }).value, let next = show.upNext else {
+                result = .none
+                break
+            }
+            let target = PlaybackTarget.episode(show: card.tmdbId, season: next.season, episode: next.episode)
+            let code = Formatting.episodeCode(season: next.season, episode: next.episode)
+            let label = "\(next.isResume ? "Resume" : "Play") \(code)"
+            if next.isAvailable {
+                result = .play(WatchRequest(target: target, meta: meta(card, subtitle: code)), label: label)
+            } else {
+                let found = await services.sources(for: target, discover: true)
+                result = found.first.map { .play(WatchRequest(target: target, meta: meta(card, subtitle: code), candidateId: $0.id), label: label) } ?? .none
+            }
+        }
+        guard !Task.isCancelled else { return }
+        withAnimation(.easeInOut(duration: 0.25)) { plays[card.id] = result }
+    }
 
     private func key(_ card: TitleCard) -> String { "\(card.type.rawValue)-\(card.tmdbId)" }
     private func isListed(_ card: TitleCard) -> Bool { listed[key(card)] ?? watchlist.contains(key(card)) }
@@ -412,11 +474,9 @@ struct HeroCarousel: View {
     private func hero(_ card: TitleCard) -> some View {
         // Just the name: the carousel is for picking, the title page has the details.
         HeroBillboard(id: card.id, backdropURL: card.backdropUrl, fallbackURL: card.posterUrl, eyebrow: card.eyebrow, title: card.title, paged: true) {
-            // Only what's in the server's library plays; the rest is for browsing.
-            if hasPlay(card) {
-                PlayButton("Play", maxWidth: primaryWidth) {
-                    services.play(WatchRequest(target: .movie(card.tmdbId), meta: PlaybackMeta(title: card.title, subtitle: card.yearText, artworkURL: card.backdropUrl)))
-                }
+            // Play when the server can play it now; otherwise the wide button opens it.
+            if let (request, label) = playRequest(card) {
+                PlayButton(label, maxWidth: primaryWidth) { services.play(request) }
                 #if os(tvOS)
                 .focused($focus, equals: .play)
                 #endif
