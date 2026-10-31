@@ -12,6 +12,7 @@ import { NotReadyError, isInfoHash, type Discovery } from "../sources/discovery"
 import { embeddedTracks, findSidecars } from "./subtitles";
 import type { EpisodeRef } from "../catalog/service";
 import type { SessionManager, SessionTarget, PlaybackSession } from "./sessions";
+import { runtime } from "#runtime";
 
 const log = logger("playback");
 
@@ -175,7 +176,7 @@ export class PlaybackService {
 
     const next = await nextLookup;
     const nextInLibrary = next ? await findCandidates(this.library, this.settings(), "episode", req.tmdbId, next.season, next.episode) : [];
-    if (next) void this.prewarm({ mediaType: "episode", tmdbId: req.tmdbId, season: next.season, episode: next.episode }, nextInLibrary).catch((err) => log.debug("Pre-warm failed", err));
+    if (next) runtime.background(this.prewarm({ mediaType: "episode", tmdbId: req.tmdbId, season: next.season, episode: next.episode }, nextInLibrary).catch((err) => log.debug("Pre-warm failed", err)));
 
     return {
       sessionId: session.id,

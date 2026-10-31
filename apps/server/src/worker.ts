@@ -6,8 +6,9 @@
 // runtime/workers.ts). The services are built once per Worker instance, on its first
 // request; their caches are per instance and everything lasting is in the database.
 import { createApp } from "./api/app";
-import { closeScope, requestScope, type RequestScope } from "./runtime/workers";
+import { closeScope, drainScope, requestScope, type RequestScope } from "./runtime/workers";
 import { pendingReports } from "./errorReporting";
+import { CRON_JOBS } from "./cloudSchedule";
 import type { Services } from "./services";
 
 interface Env {
@@ -70,16 +71,12 @@ async function inScope<T>(env: Env, ctx: ExecutionContext, fn: () => Promise<T>)
   try {
     return await requestScope.run(scope, fn);
   } finally {
-    ctx.waitUntil(closeScope(scope));
+    // Work started for after the response finishes first, on this request's connection.
+    ctx.waitUntil(drainScope(scope).then(() => closeScope(scope)));
     ctx.waitUntil(pendingReports());
   }
 }
 
-/** Which jobs each Cron Trigger (wrangler.jsonc `triggers.crons`) runs. */
-const CRON_JOBS: Record<string, string[]> = {
-  "*/15 * * * *": ["syncTorbox"],
-  "17 4 * * *": ["cleanTorbox", "pruneAuth", "pruneCatalogCache", "refreshAnimeIds"],
-};
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

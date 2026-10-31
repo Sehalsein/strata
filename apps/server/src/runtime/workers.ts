@@ -16,6 +16,16 @@ export interface RequestScope {
   connectionString: string;
   pool?: Pool;
   db?: DbClient["db"];
+  /** Work started for after the response; the request stays open (and connected) until it's done. */
+  background?: Promise<unknown>[];
+}
+
+/** Waits for the scope's background work, including any it starts in turn. */
+export async function drainScope(scope: RequestScope) {
+  while (scope.background?.length) {
+    const batch = scope.background.splice(0);
+    await Promise.allSettled(batch);
+  }
 }
 
 export const requestScope = new AsyncLocalStorage<RequestScope>();
@@ -47,6 +57,11 @@ const db = new Proxy({} as DbClient["db"], {
 
 export const runtime: Runtime = {
   name: "workers",
+  background: (task) => {
+    const scope = requestScope.getStore();
+    const settled = task.catch(() => {});
+    if (scope) (scope.background ??= []).push(settled);
+  },
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   // OWASP's Argon2id minimum (19 MiB, 2 passes): within a Worker's memory and CPU.
   hashPassword: (password) =>

@@ -1,4 +1,5 @@
 import { logger } from "./log";
+import { shareInFlight } from "./inFlight";
 
 const log = logger("jobs");
 
@@ -15,9 +16,23 @@ export interface JobStatus {
 
 type JobFn = (report: (done: number, total: number, label?: string) => void) => Promise<unknown>;
 
-/** Named background jobs that run on an interval or on demand, never overlapping. */
+/** How a job's last run is kept, where servers share the database (the cloud). */
+export type SavedRun = Pick<JobStatus, "lastRunAt" | "lastDurationMs" | "lastError">;
+export interface JobHistory {
+  load(): Promise<Record<string, SavedRun>>;
+  save(name: string, run: SavedRun): Promise<void>;
+}
+
+/**
+ * Named background jobs that run on an interval or on demand, never overlapping. With a
+ * `history` (the cloud: jobs run on whichever instance a cron or a request lands on) each
+ * run is recorded, and `statusNow` reports the latest from any of them; `nextRun` says
+ * when one runs next where something other than this process schedules it.
+ */
 export class Jobs {
   private jobs = new Map<string, { fn: JobFn; status: JobStatus; timer?: ReturnType<typeof setTimeout>; intervalMs: number; current?: Promise<void> }>();
+
+  constructor(private readonly options: { history?: JobHistory; nextRun?: (name: string) => number | undefined } = {}) {}
 
   register(name: string, fn: JobFn) {
     this.jobs.set(name, { fn, status: { name, running: false }, intervalMs: 0 });
@@ -39,7 +54,8 @@ export class Jobs {
   run(name: string): Promise<void> {
     const job = this.jobs.get(name);
     if (!job) throw new Error(`Unknown job ${name}`);
-    if (job.current) return job.current;
+    // On Workers a run another request started might never finish (see inFlight.ts).
+    if (job.current && shareInFlight) return job.current;
     if (job.timer) clearTimeout(job.timer);
     const started = Date.now();
     job.status.running = true;
@@ -63,8 +79,22 @@ export class Jobs {
         job.status.lastDurationMs = Date.now() - started;
         job.current = undefined;
         if (job.intervalMs > 0) this.schedule(name, job.intervalMs);
+      })
+      .then(() => {
+        const { lastRunAt, lastDurationMs, lastError } = job.status;
+        return this.options.history?.save(name, { lastRunAt, lastDurationMs, lastError }).catch((err) => log.warn(`Couldn't record job ${name}`, err));
       });
     return job.current;
+  }
+
+  /** Every job's status, with the latest recorded run (from any server) and its next scheduled run. */
+  async statusNow(): Promise<JobStatus[]> {
+    const saved: Record<string, SavedRun> = (await this.options.history?.load().catch(() => ({}))) ?? {};
+    return this.status().map((s) => {
+      const recorded = saved[s.name];
+      const newer = recorded?.lastRunAt && (!s.lastRunAt || recorded.lastRunAt > s.lastRunAt) ? recorded : undefined;
+      return { ...s, ...(newer ?? {}), nextRunAt: s.nextRunAt ?? this.options.nextRun?.(s.name) };
+    });
   }
 
   status(): JobStatus[] {

@@ -1,5 +1,6 @@
 // Run by cloud.test.ts in its own process: the mode is fixed when the server's modules load.
 import { expect } from "bun:test";
+import { sql } from "drizzle-orm";
 import { startTestServer } from "../helpers";
 
 const server = await startTestServer();
@@ -47,6 +48,20 @@ try {
   const bossToken = boss.headers.get("set-auth-token")!;
   expect((await server.request("/api/admin/logs", { token: bossToken })).status).toBe(200);
   expect((await server.request("/api/admin/logs", { token: annToken })).status).toBe(403);
+  // Jobs run wherever a cron lands: each run is recorded, and the next comes from the crons.
+  expect((await server.request("/api/admin/jobs/pruneAuth/run", { method: "POST", token: bossToken })).status).toBe(202);
+  let pruneAuth: any;
+  for (let i = 0; i < 50 && !pruneAuth?.lastRunAt; i++) {
+    await Bun.sleep(20);
+    pruneAuth = (await json(await server.request("/api/admin/status", { token: bossToken }))).jobs.find((j: any) => j.name === "pruneAuth");
+  }
+  expect(pruneAuth.lastRunAt).toBeGreaterThan(0);
+  expect(pruneAuth.nextRunAt).toBeGreaterThan(Date.now());
+  const saved = await server.services.db.execute(sql`SELECT value FROM strata_meta WHERE key = 'job:pruneAuth'`);
+  expect(JSON.stringify(saved)).toContain("lastRunAt");
+  // Home-only jobs aren't there at all.
+  expect((await json(await server.request("/api/admin/status", { token: bossToken }))).jobs.map((j: any) => j.name)).not.toContain("scanLocal");
+
   // The environment decides, every request: off the list, no backoffice.
   const admins = process.env.STRATA_ADMIN_EMAILS;
   process.env.STRATA_ADMIN_EMAILS = "other@example.com";

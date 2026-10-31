@@ -9,6 +9,12 @@ import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 export interface Runtime {
   name: "bun" | "workers";
   sleep(ms: number): Promise<void>;
+  /**
+   * Work that goes on after the response (a sync after a key is saved, a job someone
+   * started). Bun just lets it run; Workers end a request's work once it has answered, so
+   * there the request is kept open until the work is done (src/worker.ts).
+   */
+  background(task: Promise<unknown>): void;
   /** Argon2id, PHC string ("$argon2id$v=19$m=…"): either runtime verifies the other's. */
   hashPassword(password: string): Promise<string>;
   verifyPassword(password: string, hash: string): Promise<boolean>;

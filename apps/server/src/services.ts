@@ -31,6 +31,7 @@ import { API_VERSION, VERSION } from "./version";
 import { Households, type Household } from "./household";
 import { runtime } from "#runtime";
 import { globalFetch } from "./net";
+import { nextScheduledRun } from "./cloudSchedule";
 
 const log = logger("server");
 const MINUTE = 60_000;
@@ -115,7 +116,22 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     return { households: done };
   };
 
-  const jobs = new Jobs();
+  // The cloud's jobs run on whichever instance a cron or a request lands on: their last
+  // runs are kept in the database, and the crons say when they run next.
+  const jobs = new Jobs(
+    isCloud
+      ? {
+          history: {
+            load: async () =>
+              Object.fromEntries(rowsOf<{ key: string; value: string }>(await db.execute(sql`SELECT key, value FROM strata_meta WHERE key LIKE 'job:%'`)).map((r) => [r.key.slice(4), JSON.parse(r.value)])),
+            save: async (name, run) => {
+              await db.execute(sql`INSERT INTO strata_meta (key, value) VALUES (${`job:${name}`}, ${JSON.stringify(run)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
+            },
+          },
+          nextRun: (name) => nextScheduledRun(name),
+        }
+      : {},
+  );
   // Local folders, the bundled database, ffmpeg and self-updates are a home server's only.
   if (!isCloud) jobs.register("scanLocal", () => eachHousehold("Scanning folders", (h) => scanLocal(h.library, h.settings().mediaFolders, () => {})));
   // Each household with a key, at most every `torboxSyncMinutes` (the job itself runs every 15).

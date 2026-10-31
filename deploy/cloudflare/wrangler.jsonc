@@ -21,7 +21,8 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
-  // TorBox sync every 15 minutes; cleanup and pruning once a day (src/worker.ts).
+  // TorBox sync every 15 minutes; cleanup and pruning once a day. Which jobs each runs is in
+  // apps/server/src/cloudSchedule.ts, which must list the same expressions.
   "triggers": { "crons": ["*/15 * * * *", "17 4 * * *"] },
   "limits": { "cpu_ms": 30000 },
   "observability": { "enabled": true },

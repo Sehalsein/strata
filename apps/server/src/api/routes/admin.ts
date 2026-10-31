@@ -21,6 +21,7 @@ import type { Household } from "../../household";
 import type { Services } from "../../services";
 import { body, intParam, optionalInt, requireAuth, requireHousehold, requireHouseholdAdmin, requireServerAdmin, type Env } from "../context";
 import type { Context } from "hono";
+import { runtime } from "#runtime";
 
 /** Server-only actions (its keys, updates, logs, folders on its disk) also need the server admin. */
 function assertServerAdmin(c: Context<Env>) {
@@ -98,7 +99,7 @@ export const adminRoutes = new Hono<Env>()
       ffmpegSetup: s.ffmpegSetup(),
       tmdb: { configured: h.settingsStore.hasSecret("tmdbApiKey") },
       torbox: { configured: !!h.torbox() },
-      jobs: s.jobs.status(),
+      jobs: await s.jobs.statusNow(),
       sessions: await Promise.all((await householdPlays(s, h)).map(sessionDto)),
       library: await h.library.stats(),
       // Read-only: port and bind host come from the CLI/env (see README).
@@ -149,8 +150,8 @@ export const adminRoutes = new Hono<Env>()
       }
     }
     await h.settingsStore.setSecret(key, value);
-    if (value && key === "torboxApiKey") void syncNow(h);
-    if (key === "tmdbApiKey") void h.library.matchPending();
+    if (value && key === "torboxApiKey") runtime.background(syncNow(h));
+    if (key === "tmdbApiKey") runtime.background(h.library.matchPending());
     return c.json({ ok: true });
   })
 
@@ -165,12 +166,12 @@ export const adminRoutes = new Hono<Env>()
   .post("/jobs/:name/run", (c) => {
     const name = c.req.param("name");
     const h = c.var.household;
-    if (name === "syncTorbox") void syncNow(h);
-    else if (name === "matchPending") void h.library.matchPending();
+    if (name === "syncTorbox") runtime.background(syncNow(h));
+    else if (name === "matchPending") runtime.background(h.library.matchPending());
     else {
       assertServerAdmin(c);
       if (!c.var.services.jobs.status().some((j) => j.name === name)) throw new HTTPException(404, { message: "No such job" });
-      void c.var.services.jobs.run(name);
+      runtime.background(c.var.services.jobs.run(name));
     }
     return c.json({ ok: true }, 202);
   })
@@ -223,7 +224,7 @@ export const adminRoutes = new Hono<Env>()
 
   .post("/files/:id/unignore", async (c) => {
     await c.var.household.library.unignore(intParam(c, "id"));
-    void c.var.household.library.matchPending();
+    runtime.background(c.var.household.library.matchPending());
     return c.json({ ok: true });
   })
 

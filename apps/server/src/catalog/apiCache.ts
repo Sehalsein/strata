@@ -3,6 +3,7 @@ import type { Db } from "../db";
 import { apiCache } from "../db/schema";
 import { logger } from "../log";
 import { shareInFlight } from "../inFlight";
+import { runtime } from "#runtime";
 
 const log = logger("cache");
 
@@ -60,7 +61,7 @@ export class ApiCache {
       return entry.value as T;
     } else if (entry && age < (options.maxStale ?? 30 * DAY)) {
       if (!this.inflight.has(key) && !this.backingOff(key, options)) {
-        this.fetch(key, options, fetch).catch(() => {}); // a failed refresh keeps the old copy
+        runtime.background(this.fetch(key, options, fetch)); // a failed refresh keeps the old copy
       }
       return entry.value as T;
     }

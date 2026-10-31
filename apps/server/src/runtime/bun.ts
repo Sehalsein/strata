@@ -7,6 +7,7 @@ import type { DbClient, Runtime } from "./types";
 
 export const runtime: Runtime = {
   name: "bun",
+  background: (task) => void task.catch(() => {}),
   sleep: (ms) => Bun.sleep(ms),
   hashPassword: (password) => Bun.password.hash(password, { algorithm: "argon2id" }),
   verifyPassword: (password, hash) => Bun.password.verify(password, hash),
