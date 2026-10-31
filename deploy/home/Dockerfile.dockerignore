@@ -1,0 +1,10 @@
+# Build context is the repo root; send only the server and its dashboard.
+*
+!package.json
+!bun.lock
+!apps/server
+apps/server/node_modules
+apps/server/web/node_modules
+apps/server/web/dist
+apps/server/dist
+**/*.test.ts
