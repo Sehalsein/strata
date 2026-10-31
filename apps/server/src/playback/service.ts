@@ -70,6 +70,18 @@ function isNetworkStall(err: unknown): boolean {
   return /timed out|connection|reset by peer|I\/O error|Server returned 5\d\d|Network is unreachable/i.test(String(err));
 }
 
+/**
+ * TorBox files never stream through the server: the app plays them straight from TorBox
+ * (direct, or repackaged on the device). One the app can't play that way, the server
+ * won't remux or transcode either, so a cloud-hosted server serves no video. Files on the
+ * server's own disk still stream from it, as their bytes are only here.
+ */
+export function refuseServerStream(plan: PlaybackPlan, inputKind: "path" | "url", caps: ClientCaps): void {
+  if (inputKind !== "url" || plan.mode === "direct" || plan.mode === "device") return;
+  if (!caps.deviceRemux) throw new PlaybackError("Update the Strata app to play this.", 422);
+  throw new PlaybackError(`This source can't play on this device (${plan.reasons.join("; ")}). Pick another source.`, 422);
+}
+
 export class PlaybackService {
   private links = new Map<number, { url: string; at: number }>();
   private probing = new Map<number, Promise<MediaInfo>>();
@@ -86,7 +98,6 @@ export class PlaybackService {
     private readonly findNextEpisode: (showId: number, season: number, episode: number) => Promise<EpisodeRef | null>,
     /** Told when a TorBox torrent is played, so housekeeping keeps it. */
     private readonly onPlayedTorrent: (torrentId: number) => void = () => {},
-    /** The TorBox API key, so a link that embeds it is never handed to an app. */
   ) {}
 
   async play(user: { userId: number; profileId: number }, req: PlayRequest): Promise<PlayResponse> {
@@ -99,6 +110,7 @@ export class PlaybackService {
     // The probe may have swapped a stalled TorBox link for a fresh one.
     const { input, inputKind } = await this.resolveInput(file);
     const plan = decide(info, req.caps, req.audioStreamIndex, this.settings().language);
+    refuseServerStream(plan, inputKind, req.caps);
 
     let startMs = req.startMs;
     if (startMs === undefined) {
