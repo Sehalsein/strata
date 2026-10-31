@@ -22,11 +22,15 @@ public struct StrataError: Error, LocalizedError, Sendable, Equatable {
     /// HTTP status for `.http`.
     public var status: Int?
     public var message: String
+    /// The server's machine-readable code when it sent one (Better Auth's `code`, e.g.
+    /// "INVALID_USERNAME_OR_PASSWORD", or an OAuth `error` like "expired_token").
+    public var code: String?
 
-    public init(kind: Kind, status: Int? = nil, message: String) {
+    public init(kind: Kind, status: Int? = nil, message: String, code: String? = nil) {
         self.kind = kind
         self.status = status
         self.message = message
+        self.code = code
     }
 
     public var errorDescription: String? { message }
@@ -35,14 +39,16 @@ public struct StrataError: Error, LocalizedError, Sendable, Equatable {
     public var isConnectivity: Bool { kind == .network }
     /// The token is no longer valid; the user must sign in again.
     public var isUnauthorized: Bool { status == 401 }
-    /// 409 "Select a profile first".
-    public var needsProfile: Bool { status == 409 && message.localizedCaseInsensitiveContains("profile") }
+    /// 409 "Choose a household first": this sign-in has no active household yet.
+    public var needsHousehold: Bool { status == 409 && message.localizedCaseInsensitiveContains("household") }
+    /// 429: too many attempts (sign-in is rate-limited).
+    public var isRateLimited: Bool { status == 429 }
     public var isNotFound: Bool { status == 404 }
 
-    static func http(_ status: Int, serverMessage: String?) -> StrataError {
+    static func http(_ status: Int, serverMessage: String?, code: String? = nil) -> StrataError {
         let msg = serverMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let msg, !msg.isEmpty {
-            return StrataError(kind: .http, status: status, message: msg)
+            return StrataError(kind: .http, status: status, message: msg, code: code)
         }
         let fallback: String
         switch status {
@@ -50,10 +56,11 @@ public struct StrataError: Error, LocalizedError, Sendable, Equatable {
         case 403: fallback = "You don't have access to that."
         case 404: fallback = "Not found."
         case 409: fallback = "That conflicts with the server's current state."
+        case 429: fallback = "Too many attempts. Wait a few minutes and try again."
         case 500...599: fallback = "The server ran into a problem (\(status))."
         default: fallback = "Request failed (\(status))."
         }
-        return StrataError(kind: .http, status: status, message: fallback)
+        return StrataError(kind: .http, status: status, message: fallback, code: code)
     }
 
     /// Maps any thrown error to a `StrataError` with a friendly message.

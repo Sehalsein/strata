@@ -2,18 +2,29 @@ import SwiftUI
 import StrataKit
 import StrataDesign
 
-/// First run and "Add Server": servers found on the network, or a typed
-/// address, then sign-in.
+/// A server picked on the Connect screen, ready to sign in to.
+struct ServerTarget: Identifiable, Hashable {
+    let url: URL
+    let info: ServerInfo
+    var id: String { url.absoluteString }
+}
+
+/// First run and "Add Account": servers this device knows or finds on the network, or a
+/// typed address; then, on a home network, who's watching (no password), otherwise
+/// sign-in (a code approved from a phone on a TV).
 struct ConnectView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
-    var isAddingServer = false
+    /// Adding another account (as a sheet over the app or "Who's watching?").
+    var isAdding = false
+    /// Called once an account is added (after this sheet dismisses itself).
+    var onAdded: () -> Void = {}
 
     @State private var address = ""
     @State private var probing: String?
     @State private var error: String?
-    @State private var signInTarget: SignInTarget?
-    @State private var codeTarget: ServerTarget?
+    @State private var signInTarget: ServerTarget?
+    @State private var joinTarget: ServerTarget?
     @State private var showAddressEntry = false
     /// Servers appear a moment after the screen; on tvOS focus moves to the first one
     /// (otherwise it sits on "Enter Address", the only button at first).
@@ -24,12 +35,6 @@ struct ConnectView: View {
     #else
     static let columnWidth: CGFloat = 560
     #endif
-
-    struct SignInTarget: Identifiable, Hashable {
-        let address: String
-        let name: String
-        var id: String { address }
-    }
 
     var body: some View {
         NavigationStack {
@@ -51,23 +56,22 @@ struct ConnectView: View {
             .scrollBounceBehavior(.basedOnSize)
             .background(Theme.bg.ignoresSafeArea())
             .toolbar {
-                if isAddingServer {
+                if isAdding {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 }
             }
             .navigationDestination(item: $signInTarget) { target in
-                SignInView(address: target.address, serverName: target.name) {
-                    services.refreshClient()
-                    if isAddingServer { dismiss() }
-                }
+                #if os(tvOS)
+                // Typing a password with the remote is slow; scanning a code with a phone isn't.
+                TVCodeSignInView(target: target, onSignedIn: signedIn)
+                #else
+                SignInView(target: target, onSignedIn: signedIn)
+                #endif
+            }
+            .navigationDestination(item: $joinTarget) { target in
+                JoinMemberPickerView(target: target, onSignedIn: signedIn)
             }
             #if os(tvOS)
-            .navigationDestination(item: $codeTarget) { target in
-                TVCodeSignInView(target: target) {
-                    services.refreshClient()
-                    if isAddingServer { dismiss() }
-                }
-            }
             .navigationDestination(isPresented: $showAddressEntry) {
                 VStack(alignment: .leading, spacing: Metrics.space8) {
                     Text("Enter the server address").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
@@ -84,14 +88,22 @@ struct ConnectView: View {
         // `-StrataServer 127.0.0.1:8460` connects at launch, for UI tests and screenshots
         // (typing an address with a remote is slow to script).
         .task {
-            guard let preset = UserDefaults.standard.string(forKey: "StrataServer"), !preset.isEmpty else { return }
+            guard !isAdding, let preset = UserDefaults.standard.string(forKey: "StrataServer"), !preset.isEmpty else { return }
             address = preset
             await probe(preset)
         }
         #endif
         .onDisappear { services.browser.stop() }
-        .onChange(of: found.first?.id) { _, first in
+        .onChange(of: rows.first?.id) { _, first in
             if focusedServer == nil { focusedServer = first }
+        }
+    }
+
+    private func signedIn() {
+        services.refreshClient()
+        if isAdding {
+            dismiss()
+            onAdded()
         }
     }
 
@@ -106,21 +118,33 @@ struct ConnectView: View {
     private var header: some View {
         VStack(alignment: Self.alignment, spacing: Metrics.space3) {
             StrataMark().frame(height: 44).padding(.bottom, Metrics.space2)
-            Text(isAddingServer ? "Add Server" : "Connect to Strata")
+            Text(isAdding ? "Add an account" : "Connect to Strata")
                 .font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-            Text("Pick a server on your network, or enter its address.")
+            Text(isAdding ? "Pick the server it's on, or enter its address." : "Pick a server on your network, or enter its address.")
                 .font(.stCallout).foregroundStyle(Theme.ink2)
                 .multilineTextAlignment(Self.alignment == .center ? .center : .leading)
         }
     }
 
-    private var found: [DiscoveredServer] {
-        services.browser.servers.filter { found in !isAddingServer || !services.store.servers.contains { $0.id == found.id } }
+    /// A server to offer: one this device already uses, or one found on the network.
+    private struct Row: Identifiable {
+        let id: String
+        let name: String
+        let url: URL
+        var isCompatible = true
+    }
+
+    private var rows: [Row] {
+        let saved = services.store.servers.map { Row(id: $0.id, name: $0.name, url: $0.url) }
+        let found = services.browser.servers
+            .filter { found in !saved.contains { $0.id == found.id } }
+            .map { Row(id: $0.id, name: $0.name, url: $0.url, isCompatible: $0.isCompatible) }
+        return saved + found
     }
 
     @ViewBuilder private var serverList: some View {
         VStack(spacing: Metrics.space2) {
-            if found.isEmpty {
+            if rows.isEmpty {
                 HStack(spacing: Metrics.space3) {
                     if services.browser.state == .denied {
                         Image(systemName: "wifi.exclamationmark").foregroundStyle(Theme.warning)
@@ -135,7 +159,7 @@ struct ConnectView: View {
                 .frame(maxWidth: .infinity, alignment: Self.frameAlignment)
                 .padding(.vertical, Metrics.space4)
             }
-            ForEach(found) { server in
+            ForEach(rows) { server in
                 Button {
                     Task { await probe(server.url.absoluteString) }
                 } label: {
@@ -153,7 +177,7 @@ struct ConnectView: View {
         }
     }
 
-    private func serverRow(_ server: DiscoveredServer) -> some View {
+    private func serverRow(_ server: Row) -> some View {
         HStack(spacing: Metrics.space4) {
             Image(systemName: "server.rack")
                 .font(.stHeadline)
@@ -207,62 +231,56 @@ struct ConnectView: View {
     private func probe(_ value: String) async {
         probing = value
         error = nil
+        services.store.lastError = nil
         defer { probing = nil }
         do {
             let (url, info) = try await services.store.probeServer(value)
             if info.setupRequired {
-                error = "\(info.serverName) isn't set up yet. Open \(url.absoluteString) in a browser to finish setup, then try again."
+                let code = info.setupCodeRequired == false ? "" : " You'll need the setup code from the server's log."
+                error = "\(info.serverName) isn't set up yet. Open \(url.absoluteString) in a browser to create the first account, then try again.\(code)"
                 return
             }
-            // On the server's home network there's no password: straight to "Who's watching?".
+            let target = ServerTarget(url: url, info: info)
+            // On the server's home network there's no password: pick who's watching.
             if info.localJoin == true {
-                if await services.store.join(url: url, info: info) {
-                    services.refreshClient()
-                    if isAddingServer { dismiss() }
-                } else {
-                    error = services.store.lastError
-                }
-                return
+                joinTarget = target
+            } else {
+                signInTarget = target
             }
-            #if os(tvOS)
-            // Typing a password with the remote is slow; scanning a code with a phone isn't.
-            codeTarget = ServerTarget(url: url, info: info)
-            #else
-            signInTarget = SignInTarget(address: url.absoluteString, name: info.serverName)
-            #endif
         } catch {
             self.error = StrataError.wrap(error).message
         }
     }
 }
 
+/// Username (or email) and password.
 struct SignInView: View {
     @Environment(AppServices.self) private var services
-    let address: String
-    let serverName: String
+    let target: ServerTarget
     let onSignedIn: () -> Void
 
-    @State private var username = ""
+    @State private var login = ""
     @State private var password = ""
     @FocusState private var field: Field?
-    enum Field { case username, password }
+    enum Field { case login, password }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Metrics.space6) {
                 VStack(alignment: .leading, spacing: Metrics.space2) {
-                    Text("Sign in to \(serverName)").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                    Text("Use the account you created in the server’s dashboard. You’ll pick a profile next.")
+                    Text("Sign in to \(target.info.serverName)").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                    Text("Use your Strata account. New here? Ask the household's owner for an invitation.")
                         .font(.stCallout).foregroundStyle(Theme.ink2)
                 }
                 VStack(spacing: Metrics.space3) {
-                    TextField("Username", text: $username)
+                    TextField("Username or email", text: $login)
                         .textContentType(.username)
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
+                        .keyboardType(.emailAddress)
                         #endif
                         .autocorrectionDisabled()
-                        .focused($field, equals: .username)
+                        .focused($field, equals: .login)
                         .submitLabel(.next)
                         .onSubmit { field = .password }
                         .modifier(FieldStyle())
@@ -279,7 +297,7 @@ struct SignInView: View {
                 PrimaryButton("Sign In", isLoading: services.store.isAuthenticating) {
                     Task { await signIn() }
                 }
-                .disabled(username.isEmpty || password.isEmpty || services.store.isAuthenticating)
+                .disabled(login.isEmpty || password.isEmpty || services.store.isAuthenticating)
             }
             .frame(maxWidth: 480, alignment: .leading)
             .padding(.horizontal, Metrics.gutter)
@@ -287,11 +305,15 @@ struct SignInView: View {
             .frame(maxWidth: .infinity)
         }
         .background(Theme.bg.ignoresSafeArea())
-        .onAppear { field = .username }
+        .onAppear {
+            services.store.lastError = nil
+            field = .login
+        }
     }
 
     private func signIn() async {
-        if await services.store.signIn(address: address, username: username, password: password) {
+        guard !login.isEmpty, !password.isEmpty else { return }
+        if await services.store.signIn(address: target.url.absoluteString, login: login, password: password) {
             onSignedIn()
         }
     }

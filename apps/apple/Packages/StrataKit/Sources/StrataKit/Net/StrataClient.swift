@@ -53,49 +53,34 @@ public final class StrataClient: Sendable {
         try await info().setupRequired
     }
 
-    /// First-run only: creates the admin (and a first profile). Returns a token.
-    public func setupAdmin(username: String, password: String, deviceName: String = DeviceInfo.deviceName) async throws -> String {
-        let body = Credentials(username: username, password: password, deviceName: deviceName)
+    /// First-run only: creates the server admin and their household. Returns a token.
+    /// Needs `setupCode` (from the server's log) unless asked from the server's own machine.
+    public func setupAdmin(username: String, password: String, householdName: String? = nil, setupCode: String? = nil) async throws -> String {
+        let body = SetupBody(username: username, password: password, householdName: householdName, setupCode: setupCode)
         let res: TokenResponse = try await send("POST", "/api/setup/admin", body: body)
         return res.token
     }
 
-    /// Returns a bearer token. Use `withToken(_:)` to get an authenticated client.
-    public func login(username: String, password: String, deviceName: String = DeviceInfo.deviceName) async throws -> String {
-        let body = Credentials(username: username, password: password, deviceName: deviceName)
-        let res: TokenResponse = try await send("POST", "/api/auth/login", body: body)
-        return res.token
+    /// Signs in with a username, or an email when `login` has an "@". Returns the bearer
+    /// token; use `withToken(_:)` for an authenticated client.
+    public func signIn(login: String, password: String) async throws -> String {
+        let login = login.trimmingCharacters(in: .whitespacesAndNewlines)
+        let req: URLRequest
+        if login.contains("@") {
+            req = try request("POST", "/api/auth/sign-in/email", body: EmailCredentials(email: login, password: password))
+        } else {
+            req = try request("POST", "/api/auth/sign-in/username", body: Credentials(username: login, password: password))
+        }
+        let (data, response) = try await performWithResponse(req)
+        // The bearer plugin puts the signed token in this header; the body has it too.
+        if let token = response.value(forHTTPHeaderField: "set-auth-token"), !token.isEmpty { return token }
+        if let token = try decode(SignInResponse.self, from: data).token, !token.isEmpty { return token }
+        throw StrataError(kind: .decoding, message: "The server signed you in but sent no session. Is the app up to date?")
     }
 
-    /// Joins from the home network without a password (only when `ServerInfo.localJoin`).
-    /// The session can watch but not administer; profile PINs still apply.
-    public func join(deviceName: String = DeviceInfo.deviceName) async throws -> String {
-        let res: TokenResponse = try await send("POST", "/api/auth/join", body: DeviceNameBody(deviceName: deviceName))
-        return res.token
-    }
-
-    // MARK: Sign-in by code (a TV shows a QR code; a signed-in phone approves it)
-
-    /// Starts a code for this device. Unauthenticated: the device isn't signed in yet.
-    public func startDeviceLink(deviceName: String = DeviceInfo.deviceName) async throws -> DeviceLink {
-        try await send("POST", "/api/auth/device", body: DeviceNameBody(deviceName: deviceName))
-    }
-
-    public func pollDeviceLink(_ pollToken: String) async throws -> DeviceLinkPoll {
-        try await send("POST", "/api/auth/device/poll", body: PollBody(pollToken: pollToken))
-    }
-
-    /// What a code would sign in, so the phone can ask before approving.
-    public func pendingDeviceLink(code: String) async throws -> PendingDeviceLink {
-        try await get("/api/auth/device/\(DeviceLink.normalize(code))", cached: false)
-    }
-
-    public func approveDeviceLink(code: String) async throws {
-        let _: OKResponse = try await send("POST", "/api/auth/device/\(DeviceLink.normalize(code))/approve")
-    }
-
-    public func logout() async throws {
-        let _: OKResponse = try await send("POST", "/api/auth/logout")
+    /// Ends this session on the server.
+    public func signOut() async throws {
+        let _: OKResponse = try await send("POST", "/api/auth/sign-out", body: EmptyBody())
         await cache.clear()
     }
 
@@ -103,14 +88,83 @@ public final class StrataClient: Sendable {
         try await get("/api/me", cached: false)
     }
 
-    public func profiles() async throws -> [Profile] {
-        try await get("/api/profiles", cached: false)
+    // MARK: Households
+
+    /// The households this account belongs to.
+    public func households() async throws -> [HouseholdSummary] {
+        try await get("/api/auth/organization/list", cached: false)
     }
 
-    /// Binds this token to a profile. Throws 403 "Wrong PIN".
-    public func selectProfile(id: Int, pin: String? = nil) async throws {
-        let _: OKResponse = try await send("POST", "/api/profiles/\(id)/select", body: PinBody(pin: pin))
+    /// Makes `id` this session's household: the library, lists and limits it sees.
+    public func setActiveHousehold(_ id: String) async throws {
+        let _: OKResponse = try await send("POST", "/api/auth/organization/set-active", body: SetActiveBody(organizationId: id))
         await cache.clear()
+    }
+
+    /// Changes the account's password and signs it out everywhere else. Returns the new
+    /// session's token when the server issued one (the old one stops working).
+    public func changePassword(current: String, new: String) async throws -> String? {
+        let body = ChangePasswordBody(currentPassword: current, newPassword: new, revokeOtherSessions: true)
+        let (data, response) = try await performWithResponse(request("POST", "/api/auth/change-password", body: body))
+        if let token = response.value(forHTTPHeaderField: "set-auth-token"), !token.isEmpty { return token }
+        return (try? JSONDecoder().decode(SignInResponse.self, from: data))?.token
+    }
+
+    // MARK: Home-network join
+
+    /// Who can be picked to join a home server without a password (only when `ServerInfo.localJoin`).
+    public func homeJoinChoices() async throws -> HomeJoinChoices {
+        try await send("POST", "/api/join", body: JoinBody(userId: nil))
+    }
+
+    /// Joins as `userId` without a password. The session can watch but not administer.
+    public func join(userId: String) async throws -> String {
+        let res: TokenResponse = try await send("POST", "/api/join", body: JoinBody(userId: userId))
+        return res.token
+    }
+
+    // MARK: Sign-in by code (RFC 8628: a TV shows a code; a signed-in phone approves it)
+
+    /// The client id the server accepts for the Apple TV app.
+    public static let tvClientID = "strata-apple-tv"
+
+    /// Starts a code for this device. Unauthenticated: the device isn't signed in yet.
+    public func startDeviceCode(clientID: String = StrataClient.tvClientID) async throws -> DeviceCode {
+        try await send("POST", "/api/auth/device/code", body: DeviceCodeBody(client_id: clientID))
+    }
+
+    /// One poll for the code's token. The server answers 400 with an OAuth error while
+    /// it waits, so those come back as states, not errors.
+    public func pollDeviceCode(_ deviceCode: String, clientID: String = StrataClient.tvClientID) async throws -> DeviceTokenPoll {
+        let body = DeviceTokenBody(grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: deviceCode, client_id: clientID)
+        let (data, response) = try await rawData(request("POST", "/api/auth/device/token", body: body))
+        if (200..<300).contains(response.statusCode) {
+            let token = try decode(DeviceAccessToken.self, from: data).access_token
+            return .approved(token: token)
+        }
+        let err = httpError(response.statusCode, data)
+        switch err.code {
+        case "authorization_pending": return .pending
+        case "slow_down": return .slowDown
+        case "expired_token": return .expired
+        case "access_denied": return .denied
+        default: throw err
+        }
+    }
+
+    /// The phone side: looks a code up, which also claims it for this account (needed
+    /// before it can be approved).
+    public func deviceCodeStatus(userCode: String) async throws -> DeviceCodeStatus {
+        try await get("/api/auth/device", query: [URLQueryItem(name: "user_code", value: DeviceCode.normalize(userCode))], cached: false)
+    }
+
+    /// Signs the TV in as this account, in this session's household, able only to watch.
+    public func approveDevice(userCode: String) async throws {
+        let _: OKResponse = try await send("POST", "/api/auth/device/approve", body: UserCodeBody(userCode: DeviceCode.normalize(userCode)))
+    }
+
+    public func denyDevice(userCode: String) async throws {
+        let _: OKResponse = try await send("POST", "/api/auth/device/deny", body: UserCodeBody(userCode: DeviceCode.normalize(userCode)))
     }
 
     // MARK: - Catalog
@@ -154,7 +208,7 @@ public final class StrataClient: Sendable {
         return res.shelves
     }
 
-    /// Episodes of the shows on this profile's list: the last week and the next month.
+    /// Episodes of the shows on this account's list: the last week and the next month.
     public func calendar() async throws -> [CalendarEpisode] {
         let res: ItemsResponse<CalendarEpisode> = try await get("/api/calendar")
         return res.items
@@ -287,6 +341,7 @@ public final class StrataClient: Sendable {
         while true {
             let target = resolve(url)
             var req = URLRequest(url: target)
+            req.httpShouldHandleCookies = false
             req.setValue("text/vtt, */*", forHTTPHeaderField: "Accept")
             // Credentials only ever go to this server, never to a URL elsewhere.
             if let token, isSameOrigin(target) { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
@@ -356,6 +411,10 @@ public final class StrataClient: Sendable {
         }
         var req = URLRequest(url: url)
         req.httpMethod = method
+        // The bearer token is the only credential. Better Auth also sets a session cookie;
+        // sending it back would mix accounts between saved sign-ins, and makes Better Auth
+        // demand a browser's Origin header (403 "Missing or null Origin").
+        req.httpShouldHandleCookies = false
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body {
@@ -367,10 +426,15 @@ public final class StrataClient: Sendable {
 
     /// Returns body + status for 2xx; throws `StrataError` otherwise.
     private func perform(_ req: URLRequest) async throws -> (Data, Int) {
+        let (data, response) = try await performWithResponse(req)
+        return (data, response.statusCode)
+    }
+
+    /// `perform`, keeping the response for its headers.
+    private func performWithResponse(_ req: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let (data, response) = try await rawData(req)
-        let status = response.statusCode
-        guard (200..<300).contains(status) else { throw httpError(status, data) }
-        return (data, status)
+        guard (200..<300).contains(response.statusCode) else { throw httpError(response.statusCode, data) }
+        return (data, response)
     }
 
     private func rawData(_ req: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -385,9 +449,16 @@ public final class StrataClient: Sendable {
         }
     }
 
+    /// Strata's own routes answer `{ error }`; Better Auth `{ message, code }`, and its
+    /// device-code routes OAuth's `{ error, error_description }`.
     private func httpError(_ status: Int, _ data: Data) -> StrataError {
-        let message = (try? JSONDecoder().decode(ErrorBody.self, from: data))?.error
-        return StrataError.http(status, serverMessage: message)
+        guard let body = try? JSONDecoder().decode(ErrorBody.self, from: data) else {
+            return StrataError.http(status, serverMessage: nil)
+        }
+        if body.error_description != nil {
+            return StrataError.http(status, serverMessage: body.error_description, code: body.error)
+        }
+        return StrataError.http(status, serverMessage: body.message ?? body.error, code: body.code)
     }
 
     private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
@@ -407,11 +478,23 @@ public final class StrataClient: Sendable {
 // MARK: - Bodies
 
 private struct Empty: Encodable {}
-private struct ErrorBody: Decodable { var error: String? }
-private struct Credentials: Encodable { var username: String; var password: String; var deviceName: String }
-private struct PinBody: Encodable { var pin: String? }
-private struct DeviceNameBody: Encodable { var deviceName: String }
-private struct PollBody: Encodable { var pollToken: String }
+private struct EmptyBody: Encodable {}
+private struct ErrorBody: Decodable {
+    var error: String?
+    var message: String?
+    var code: String?
+    var error_description: String?
+}
+private struct Credentials: Encodable { var username: String; var password: String }
+private struct EmailCredentials: Encodable { var email: String; var password: String }
+private struct SetupBody: Encodable { var username: String; var password: String; var householdName: String?; var setupCode: String? }
+private struct SetActiveBody: Encodable { var organizationId: String }
+private struct ChangePasswordBody: Encodable { var currentPassword: String; var newPassword: String; var revokeOtherSessions: Bool }
+private struct JoinBody: Encodable { var userId: String? }
+private struct DeviceCodeBody: Encodable { var client_id: String }
+private struct DeviceTokenBody: Encodable { var grant_type: String; var device_code: String; var client_id: String }
+private struct DeviceAccessToken: Decodable { var access_token: String }
+private struct UserCodeBody: Encodable { var userCode: String }
 private struct WatchlistBody: Encodable { var type: TitleType; var tmdbId: Int; var on: Bool }
 
 private struct LinkResponse: Decodable {

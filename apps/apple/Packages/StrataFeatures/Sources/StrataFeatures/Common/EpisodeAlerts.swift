@@ -6,7 +6,7 @@ import UserNotifications
 
 /// Notifications when episodes of the shows on My List air (iPhone and iPad). The app
 /// schedules them itself from the server's calendar, so the server needs no push setup;
-/// they're rescheduled whenever the app comes back, the profile changes or My List does.
+/// they're rescheduled whenever the app comes back, the account or household changes, or My List does.
 @MainActor
 public enum EpisodeAlerts {
     private static let enabledKey = "episodeAlerts"
@@ -73,7 +73,7 @@ public enum EpisodeAlerts {
 }
 
 public extension AppServices {
-    /// Reschedules episode notifications from the active profile's calendar (or clears
+    /// Reschedules episode notifications from the active account's calendar (or clears
     /// them when signed out). Quietly keeps the old ones if the server can't be reached.
     func refreshEpisodeAlerts() async {
         guard EpisodeAlerts.isAvailable, EpisodeAlerts.isEnabled else { return }

@@ -4,7 +4,7 @@ import StrataKit
 @testable import StrataPlayerUI
 
 /// Plays real streams from a running Strata server. Set STRATA_TEST_SERVER and
-/// STRATA_TEST_TOKEN (a token with a profile selected) to run.
+/// STRATA_TEST_TOKEN (a token whose session has a household) to run.
 @MainActor
 final class EngineLiveTests: XCTestCase {
     func testPlaysAndAdvances() async throws {

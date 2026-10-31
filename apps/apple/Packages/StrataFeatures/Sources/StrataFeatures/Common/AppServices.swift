@@ -55,7 +55,7 @@ public final class AppServices {
     }
 
     /// Runs a request and turns failures into a readable message, letting the
-    /// store fail over to another address, sign out on 401, or ask for a profile.
+    /// store fail over to another address, sign out on 401, or ask for a household (409).
     public func load<T>(_ work: (StrataClient) async throws -> T) async -> Loadable<T> {
         guard let client = store.client else { return .failed("Not connected to a server.") }
         do {
@@ -138,15 +138,23 @@ public extension Array where Element == Provider {
 /// A TV's sign-in code to approve, from a scanned QR code or typed in Settings.
 public struct LinkRequest: Identifiable, Hashable {
     public let code: String
-    /// The server the TV is signing in to; nil means the active one.
-    public let serverID: String?
+    /// The server the TV is signing in to, as the link named it (a server id or one of
+    /// its addresses); nil means the active sign-in's. Only ever matched against servers
+    /// this device is already signed in to.
+    public let server: String?
     public var id: String { code }
+
+    public init(code: String, server: String? = nil) {
+        self.code = code
+        self.server = server
+    }
 }
 
 /// Handles `strata://` deep links:
 /// `strata://movie/<id>`, `strata://show/<id>`,
 /// `strata://watch/movie/<id>`, `strata://watch/episode/<show>/<season>/<episode>`,
-/// `strata://link?code=<code>&server=<id>` (approve a TV's sign-in).
+/// `strata://link?user_code=<code>&server=<id or address>` (approve a TV's sign-in), and
+/// the TV's own `https://<server>/link?user_code=<code>` when it opens the app.
 @MainActor
 @Observable
 public final class AppCoordinator {
@@ -157,6 +165,15 @@ public final class AppCoordinator {
     public init() {}
 
     public func handle(url: URL) {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
+        // The QR code on the TV is the server's own page; opened in the app, the server is
+        // the link's origin.
+        if url.scheme == "http" || url.scheme == "https" {
+            guard url.path == "/link", let code = value("user_code") else { return }
+            link(code, server: url.absoluteString)
+            return
+        }
         guard url.scheme == "strata" else { return }
         let parts = url.pathComponents.dropFirst().compactMap { Int($0) }
         switch url.host {
@@ -167,13 +184,15 @@ public final class AppCoordinator {
             if kind == "movie", let id = parts.first { pendingWatch = .movie(id) }
             if kind == "episode", parts.count == 3 { pendingWatch = .episode(show: parts[0], season: parts[1], episode: parts[2]) }
         case "link":
-            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
-            if let code = value("code"), !DeviceLink.normalize(code).isEmpty {
-                pendingLink = LinkRequest(code: DeviceLink.normalize(code), serverID: value("server"))
-            }
+            if let code = value("user_code") ?? value("code") { link(code, server: value("server")) }
         default: break
         }
+    }
+
+    private func link(_ code: String, server: String?) {
+        let code = DeviceCode.normalize(code)
+        guard !code.isEmpty else { return }
+        pendingLink = LinkRequest(code: code, server: server)
     }
 
     public func consume() -> Route? {

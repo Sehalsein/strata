@@ -21,18 +21,79 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertFalse(info.id.isEmpty)
     }
 
-    func testTokenMeProfiles() throws {
-        XCTAssertFalse(try Fixture.decode(TokenResponse.self, "login").token.isEmpty)
+    func testHomeServerInfo() throws {
+        let info = try Fixture.decode(ServerInfo.self, "info_home")
+        XCTAssertEqual(info.mode, "home")
+        XCTAssertEqual(info.localJoin, true)
+        XCTAssertEqual(info.setupCodeRequired, false)
+        XCTAssertFalse(info.setupRequired)
+    }
+
+    func testAccountAndHousehold() throws {
         XCTAssertFalse(try Fixture.decode(TokenResponse.self, "setup").token.isEmpty)
+        XCTAssertEqual(try Fixture.decode(SignInResponse.self, "sign_in").token?.isEmpty, false)
         let me = try Fixture.decode(Me.self, "me")
-        XCTAssertEqual(me.user.username, "sehal")
-        XCTAssertTrue(me.user.isAdmin)
-        XCTAssertEqual(me.profile?.id, 1)
-        XCTAssertNil(me.profile?.avatar)
-        let profiles = try Fixture.decode([Profile].self, "profiles")
-        XCTAssertEqual(profiles.map(\.name), ["sehal", "Kids"])
-        XCTAssertEqual(profiles.map(\.hasPin), [false, true])
-        XCTAssertEqual(profiles[1].initial, "K")
+        XCTAssertEqual(me.user.username, "owner")
+        XCTAssertEqual(me.user.name, "owner")
+        XCTAssertTrue(me.user.isServerAdmin)
+        XCTAssertFalse(me.viewerOnly)
+        let household = try XCTUnwrap(me.household)
+        XCTAssertEqual(household.name, "owner's home")
+        XCTAssertTrue(household.isOwner)
+        XCTAssertTrue(household.isAdmin)
+        XCTAssertEqual(household.roleLabel, "Owner")
+        XCTAssertFalse(household.isKids)
+        XCTAssertEqual(household.contentLimit, "none")
+
+        // No household chosen yet, and an account without a username.
+        let bare = try JSONDecoder().decode(Me.self, from: Data(#"{"user":{"id":"u1","username":null,"name":"Ann","email":"ann@example.com","isServerAdmin":false},"viewerOnly":true,"household":null}"#.utf8))
+        XCTAssertNil(bare.household)
+        XCTAssertNil(bare.user.username)
+        XCTAssertTrue(bare.viewerOnly)
+        XCTAssertEqual(Household(id: "h", name: "H", role: "member,admin").roleLabel, "Admin")
+        XCTAssertFalse(Household(id: "h", name: "H", role: "member").isAdmin)
+
+        let households = try Fixture.decode([HouseholdSummary].self, "households")
+        XCTAssertEqual(households.map(\.name), ["owner's home"])
+        XCTAssertEqual(households.first?.id, household.id)
+    }
+
+    func testHomeJoinChoices() throws {
+        let choices = try Fixture.decode(HomeJoinChoices.self, "join_choices")
+        XCTAssertEqual(choices.household.name, "owner's home")
+        XCTAssertEqual(choices.members.map(\.name), ["owner"])
+        XCTAssertEqual(choices.members.first?.isKids, false)
+        XCTAssertEqual(choices.members.first?.initial, "O")
+    }
+
+    func testDeviceCode() throws {
+        let code = try Fixture.decode(DeviceCode.self, "device_code")
+        XCTAssertEqual(code.userCode.count, 8)
+        XCTAssertEqual(code.interval, 2)
+        XCTAssertEqual(code.expiresIn, 600)
+        XCTAssertFalse(code.deviceCode.isEmpty)
+        XCTAssertEqual(code.verificationURIComplete, "http://127.0.0.1:8434/link?user_code=\(code.userCode)")
+        let status = try Fixture.decode(DeviceCodeStatus.self, "device_status")
+        XCTAssertEqual(status.userCode, code.userCode)
+        XCTAssertTrue(status.isPending)
+        XCTAssertEqual(status.clientId, "strata-apple-tv")
+    }
+
+    func testDeviceCodeFormatting() throws {
+        XCTAssertEqual(DeviceCode.normalize(" k7qf-2mxd "), "K7QF2MXD")
+        XCTAssertEqual(DeviceCode.normalize("K7QF 2MXD"), "K7QF2MXD")
+        XCTAssertEqual(DeviceCode.display("k7qf2mxd"), "K7QF-2MXD")
+        XCTAssertEqual(DeviceCode.display("ABC"), "ABC")
+        var code = DeviceCode(deviceCode: "secret", userCode: "K7QF2MXD", verificationURI: "/link",
+                              verificationURIComplete: "https://strata.example.com/link?user_code=K7QF2MXD", expiresIn: 600, interval: 2)
+        XCTAssertEqual(code.displayCode, "K7QF-2MXD")
+        let server = URL(string: "http://192.168.1.20:8420")!
+        XCTAssertEqual(code.qrURL(server: server)?.absoluteString, "https://strata.example.com/link?user_code=K7QF2MXD")
+        // A relative or missing link is built from the address the TV reached the server at.
+        code.verificationURIComplete = "/link?user_code=K7QF2MXD"
+        XCTAssertEqual(code.qrURL(server: server)?.absoluteString, "http://192.168.1.20:8420/link?user_code=K7QF2MXD")
+        // The device code (the polling secret) is never in the link.
+        XCTAssertFalse(code.qrURL(server: server)!.absoluteString.contains("secret"))
     }
 
     func testHome() throws {

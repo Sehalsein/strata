@@ -153,14 +153,140 @@ final class ClientTests: XCTestCase {
         }
     }
 
-    func testProfileRequired409() async throws {
-        StubProtocol.reset { _ in .json(409, ["error": "Select a profile first"]) }
+    func testHouseholdRequired409() async throws {
+        StubProtocol.reset { _ in .json(409, ["error": "Choose a household first"]) }
         do {
             _ = try await client().home()
             XCTFail("expected error")
         } catch let e as StrataError {
-            XCTAssertTrue(e.needsProfile)
+            XCTAssertTrue(e.needsHousehold)
         }
+    }
+
+    func testSignInByUsernameOrEmailUsesTheHeaderToken() async throws {
+        StubProtocol.reset { _ in
+            StubProtocol.Reply(status: 200, body: try! Fixture.data("sign_in"),
+                               headers: ["Content-Type": "application/json", "set-auth-token": "signed.token"])
+        }
+        let anon = client(token: nil)
+        let token = try await anon.signIn(login: " owner ", password: "pw")
+        XCTAssertEqual(token, "signed.token")
+        _ = try await anon.signIn(login: "ann@example.com", password: "pw")
+        let reqs = StubProtocol.recorded
+        XCTAssertEqual(reqs.map(\.url!.path), ["/api/auth/sign-in/username", "/api/auth/sign-in/email"])
+        XCTAssertEqual(reqs[0].jsonBody?["username"] as? String, "owner")
+        XCTAssertEqual(reqs[1].jsonBody?["email"] as? String, "ann@example.com")
+        XCTAssertNil(reqs[0].value(forHTTPHeaderField: "Authorization"))
+
+        // Without the header, the body's token.
+        StubProtocol.reset { _ in .fixture("sign_in") }
+        let fromBody = try await anon.signIn(login: "owner", password: "pw")
+        XCTAssertEqual(fromBody, "ckKMkx9x4y1bMdUJgg0hvdQ3Ki05Z6CF")
+    }
+
+    func testBetterAuthErrorsAreReadable() async throws {
+        StubProtocol.reset { _ in .fixture("error_sign_in", status: 401) }
+        do {
+            _ = try await client(token: nil).signIn(login: "owner", password: "nope")
+            XCTFail("expected error")
+        } catch let e as StrataError {
+            XCTAssertEqual(e.status, 401)
+            XCTAssertEqual(e.message, "Invalid username or password")
+            XCTAssertEqual(e.code, "INVALID_USERNAME_OR_PASSWORD")
+        }
+        StubProtocol.reset { _ in .json(429, ["message": "Too many requests. Please try again later."]) }
+        do {
+            _ = try await client(token: nil).signIn(login: "owner", password: "nope")
+            XCTFail("expected error")
+        } catch let e as StrataError {
+            XCTAssertTrue(e.isRateLimited)
+            XCTAssertEqual(e.message, "Too many requests. Please try again later.")
+        }
+        StubProtocol.reset { _ in .fixture("error_device", status: 400) }
+        do {
+            _ = try await client(token: nil).pollDeviceCode("nope")
+            XCTFail("expected error")
+        } catch let e as StrataError {
+            XCTAssertEqual(e.code, "invalid_grant")
+            XCTAssertEqual(e.message, "Invalid device code")
+        }
+    }
+
+    func testDeviceCodeFlow() async throws {
+        var answers: [StubProtocol.Reply] = [
+            .json(400, ["error": "authorization_pending", "error_description": "Authorization pending"]),
+            .json(400, ["error": "slow_down", "error_description": "Polling too frequently"]),
+            .json(400, ["error": "access_denied", "error_description": "Access denied"]),
+            .json(400, ["error": "expired_token", "error_description": "Expired"]),
+            .json(200, ["access_token": "tv-token", "token_type": "Bearer", "expires_in": 100, "scope": ""]),
+        ]
+        StubProtocol.reset { req in
+            switch req.url?.path {
+            case "/api/auth/device/code": return .fixture("device_code")
+            case "/api/auth/device/token": return answers.removeFirst()
+            case "/api/auth/device": return .fixture("device_status")
+            default: return .json(200, ["success": true])
+            }
+        }
+        let tv = client(token: nil)
+        let code = try await tv.startDeviceCode()
+        var polls: [DeviceTokenPoll] = []
+        for _ in 0..<5 { polls.append(try await tv.pollDeviceCode(code.deviceCode)) }
+        XCTAssertEqual(polls, [.pending, .slowDown, .denied, .expired, .approved(token: "tv-token")])
+
+        let phone = client(token: "phone")
+        let status = try await phone.deviceCodeStatus(userCode: "k9y9-33ub")
+        XCTAssertTrue(status.isPending)
+        try await phone.approveDevice(userCode: "k9y9-33ub")
+        try await phone.denyDevice(userCode: "K9Y933UB")
+
+        let reqs = StubProtocol.recorded
+        XCTAssertEqual(reqs[0].jsonBody?["client_id"] as? String, "strata-apple-tv")
+        XCTAssertEqual(reqs[1].jsonBody?["grant_type"] as? String, "urn:ietf:params:oauth:grant-type:device_code")
+        XCTAssertEqual(reqs[1].jsonBody?["device_code"] as? String, code.deviceCode)
+        XCTAssertEqual(reqs[1].jsonBody?["client_id"] as? String, "strata-apple-tv")
+        XCTAssertEqual(reqs[6].url?.query, "user_code=K9Y933UB")
+        XCTAssertEqual(reqs[6].value(forHTTPHeaderField: "Authorization"), "Bearer phone")
+        XCTAssertEqual(reqs[7].url?.path, "/api/auth/device/approve")
+        XCTAssertEqual(reqs[7].jsonBody?["userCode"] as? String, "K9Y933UB")
+        XCTAssertEqual(reqs[8].url?.path, "/api/auth/device/deny")
+    }
+
+    func testHouseholdsJoinAndPassword() async throws {
+        StubProtocol.reset { req in
+            switch req.url?.path {
+            case "/api/auth/organization/list": return .fixture("households")
+            case "/api/join": return req.jsonBody?["userId"] == nil ? .fixture("join_choices") : .json(200, ["token": "joined"])
+            case "/api/auth/change-password":
+                return StubProtocol.Reply(status: 200, body: Data(#"{"token":"new-raw","user":{}}"#.utf8),
+                                          headers: ["Content-Type": "application/json", "set-auth-token": "new-signed"])
+            default: return .json(200, ["id": "h2", "name": "Cabin"])
+            }
+        }
+        let c = client()
+        let households = try await c.households()
+        XCTAssertEqual(households.count, 1)
+        try await c.setActiveHousehold("h2")
+        let choices = try await client(token: nil).homeJoinChoices()
+        XCTAssertEqual(choices.members.count, 1)
+        let joined = try await client(token: nil).join(userId: "u1")
+        XCTAssertEqual(joined, "joined")
+        let newToken = try await c.changePassword(current: "old-pass", new: "new-pass-1")
+        XCTAssertEqual(newToken, "new-signed")
+        try await c.signOut()
+
+        let reqs = StubProtocol.recorded
+        XCTAssertEqual(reqs.map { "\($0.httpMethod!) \($0.url!.path)" }, [
+            "GET /api/auth/organization/list", "POST /api/auth/organization/set-active", "POST /api/join", "POST /api/join",
+            "POST /api/auth/change-password", "POST /api/auth/sign-out",
+        ])
+        XCTAssertEqual(reqs[1].jsonBody?["organizationId"] as? String, "h2")
+        XCTAssertEqual(reqs[3].jsonBody?["userId"] as? String, "u1")
+        XCTAssertEqual(reqs[4].jsonBody?["currentPassword"] as? String, "old-pass")
+        XCTAssertEqual(reqs[4].jsonBody?["newPassword"] as? String, "new-pass-1")
+        XCTAssertEqual(reqs[4].jsonBody?["revokeOtherSessions"] as? Bool, true)
+        // Better Auth's POSTs take JSON even when there's nothing to send.
+        XCTAssertEqual(reqs[5].value(forHTTPHeaderField: "Content-Type"), "application/json")
     }
 
     func testDecodingErrorIsReadable() async throws {
@@ -201,19 +327,16 @@ final class ClientTests: XCTestCase {
         XCTAssertTrue(p.completed)
         try await c.setWatched(.episode(show: 1, season: 1, episode: 1), true)
         try await c.setWatchlist(.show, tmdbId: 9001, true)
-        try await c.selectProfile(id: 2, pin: "1234")
         try await c.stopPlayback(sessionId: "abc")
-        try await c.logout()
         let reqs = StubProtocol.recorded
         XCTAssertEqual(reqs.map { "\($0.httpMethod!) \($0.url!.path)" }, [
-            "POST /api/progress", "POST /api/watched", "PUT /api/watchlist", "POST /api/profiles/2/select", "DELETE /api/play/abc", "POST /api/auth/logout",
+            "POST /api/progress", "POST /api/watched", "PUT /api/watchlist", "DELETE /api/play/abc",
         ])
         XCTAssertEqual(reqs[0].jsonBody?["sessionId"] as? String, "abc")
         XCTAssertEqual(reqs[1].jsonBody?["watched"] as? Bool, true)
         XCTAssertEqual(reqs[2].jsonBody?["type"] as? String, "show")
         XCTAssertEqual(reqs[2].jsonBody?["on"] as? Bool, true)
-        XCTAssertEqual(reqs[3].jsonBody?["pin"] as? String, "1234")
-        for r in reqs.prefix(4) { XCTAssertEqual(r.value(forHTTPHeaderField: "Content-Type"), "application/json") }
+        for r in reqs.prefix(3) { XCTAssertEqual(r.value(forHTTPHeaderField: "Content-Type"), "application/json") }
     }
 
     func testCacheAndClear() async throws {

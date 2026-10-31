@@ -2,22 +2,25 @@ import SwiftUI
 import StrataKit
 import StrataDesign
 
-/// Chooses between connecting, picking a profile, and the main app.
+/// Chooses between connecting, "Who's watching?", picking a household, and the main app.
 public struct RootView: View {
     @Environment(AppServices.self) private var services
-    @State private var didConnect = false
 
     public init() {}
 
     public var body: some View {
         Group {
-            if !services.store.isSignedIn {
+            if services.store.signIns.isEmpty {
                 ConnectView()
-            } else if services.store.needsProfileSelection || services.store.active?.hasProfile == false {
-                ProfilePickerView()
+            } else if !services.store.isSignedIn {
+                WhoIsWatchingView()
+            } else if services.store.needsHousehold {
+                HouseholdPickerView()
             } else {
+                // A new account or household starts the app afresh: nothing from the last
+                // one's screens or caches carries over.
                 MainShell()
-                    .id(services.store.activeID.map { "\($0)-\(services.store.active?.profileId ?? 0)" })
+                    .id("\(services.store.activeID ?? "")/\(services.store.active?.household?.id ?? "")")
             }
         }
         .background(Theme.bg.ignoresSafeArea())
@@ -28,9 +31,10 @@ public struct RootView: View {
         #else
         .tint(Theme.accentText)
         #endif
-        .task {
-            guard !didConnect else { return }
-            didConnect = true
+        // At launch and on every switch: find the server, check the session is still good
+        // and refresh the account and household.
+        .task(id: services.store.activeID) {
+            guard services.store.activeID != nil else { return }
             _ = await services.store.connect()
             services.refreshClient()
         }
@@ -44,8 +48,9 @@ public struct RootView: View {
             WatchView(request: request)
         }
         #if os(iOS)
-        // A TV's QR code was scanned: confirm and approve its sign-in.
-        .sheet(item: Binding(get: { services.coordinator.pendingLink }, set: { services.coordinator.pendingLink = $0 })) { request in
+        // A TV's sign-in link was opened: confirm and approve it.
+        .sheet(item: Binding(get: { services.store.signIns.isEmpty ? nil : services.coordinator.pendingLink },
+                             set: { services.coordinator.pendingLink = $0 })) { request in
             ApproveDeviceView(request: request)
         }
         #endif
@@ -134,12 +139,12 @@ struct MainShell: View {
             }
             #endif
             #if os(tvOS)
-            // tvOS has no toolbar for the avatar button, so the profile lives in the
-            // tab bar like the TV app's: switching profiles, servers and sign-out.
+            // tvOS has no toolbar for the avatar button, so the account lives in the
+            // tab bar like the TV app's: switching accounts, households and sign-out.
             Tab(value: AppTab.profile) {
                 SettingsView(embedded: true)
             } label: {
-                Label(services.store.active?.profileName ?? "Profile", systemImage: "person.crop.circle")
+                Label(services.store.active?.name ?? "Account", systemImage: "person.crop.circle")
             }
             #endif
         }
@@ -150,8 +155,8 @@ struct MainShell: View {
         .tint(Theme.ink)
         .sheet(isPresented: $showSettings) { SettingsView() }
         #endif
-        // Episode notifications follow the calendar: on launch, profile switches and return.
-        .task(id: services.store.active.map { "\($0.id)/\($0.profileName ?? "")" }) { await services.refreshEpisodeAlerts() }
+        // Episode notifications follow the calendar: on launch, account switches and return.
+        .task(id: services.store.active.map { "\($0.id)/\($0.household?.id ?? "")" }) { await services.refreshEpisodeAlerts() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await services.refreshEpisodeAlerts() } }
         }
@@ -216,7 +221,7 @@ struct ProfileToolbarButton: View {
         Button {
             showSettings = true
         } label: {
-            ProfileAvatar(name: services.store.active?.profileName ?? "?", seed: "\(services.store.active?.profileId ?? 0)", size: 30)
+            ProfileAvatar(name: services.store.active?.name ?? "?", seed: services.store.activeID ?? "", size: 30)
         }
         .accessibilityLabel("Settings")
         .sheet(isPresented: $showSettings) { SettingsView() }

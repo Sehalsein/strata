@@ -314,7 +314,7 @@ struct SearchView: View {
     }
 }
 
-/// The profile's watchlist, from the server's My List shelf.
+/// The account's watchlist, from the server's My List shelf.
 struct MyListView: View {
     @Environment(AppServices.self) private var services
     @State private var items: Loadable<[TitleCard]> = .loading
