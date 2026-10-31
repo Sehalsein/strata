@@ -29,7 +29,24 @@ export interface PlayRequest extends SessionTarget {
   /** Start position; omitted means resume from saved progress. */
   startMs?: number;
   audioStreamIndex?: number;
+  /** Without a chosen source, prefer one no taller than this (the app on cellular data). */
+  preferMaxHeight?: number;
   caps: ClientCaps;
+}
+
+/** What the app downloads to watch offline: the file's link and how to play it on the device. */
+export interface DownloadResponse {
+  fileId: number;
+  /** The TorBox link, or `/api/files/:id/content` for a file on this server's disk. */
+  url: string;
+  mode: "direct" | "device";
+  remux: PlayResponse["remux"];
+  durationMs: number;
+  candidate: Candidate;
+  audioTracks: PlayResponse["audioTracks"];
+  /** Embedded text tracks only: the app reads them from the file. */
+  subtitleTracks: PlayResponse["subtitleTracks"];
+  chapters: PlayResponse["chapters"];
 }
 
 export interface PlayResponse {
@@ -192,6 +209,52 @@ export class PlaybackService {
   }
 
   /**
+   * A file to download and watch offline, chosen like `play` (without a session): it must
+   * play on the device as it is or repackaged there.
+   */
+  async prepareDownload(req: Omit<PlayRequest, "startMs">): Promise<DownloadResponse> {
+    const file = await this.chooseFile(req);
+    const first = await this.resolveInput(file);
+    const info = await this.probeFile(file, first.input);
+    const { input, inputKind } = await this.resolveInput(file);
+    const plan = decide(info, req.caps, req.audioStreamIndex, this.settings().language);
+    if (plan.mode !== "direct" && plan.mode !== "device") {
+      throw new PlaybackError(`This source can't play on this device (${plan.reasons.join("; ")}). Pick another source.`, 422);
+    }
+    return {
+      fileId: file.id,
+      url: inputKind === "url" ? input : `/api/files/${file.id}/content`,
+      mode: plan.mode,
+      remux:
+        plan.mode === "device"
+          ? { audio: plan.audio, audioStreamIndex: plan.audioStreamIndex, videoStreamIndex: plan.videoStreamIndex, stripDolbyVision: plan.stripDolbyVision }
+          : null,
+      durationMs: info.durationMs,
+      candidate: toCandidate((await this.library.get(file.id))!),
+      audioTracks: info.audio.map((a) => ({ index: a.index, codec: a.codec, channels: a.channels, language: a.language, title: a.title, selected: a.index === plan.audioStreamIndex })),
+      subtitleTracks: embeddedTracks(info)
+        .filter((t) => t.text && typeof t.source === "number")
+        .map((t) => ({ id: t.id, codec: t.codec, language: t.language, title: t.title, forced: t.forced, isDefault: t.isDefault, external: false, url: null, embedded: true, streamIndex: t.source as number })),
+      chapters: info.chapters,
+    };
+  }
+
+  /** A fresh link to a library file (a download whose link expired), or null for a file on disk. */
+  async fileLink(fileId: number): Promise<string | null> {
+    const file = await this.library.get(fileId);
+    if (!file) throw new PlaybackError("File no longer exists", 410);
+    if (file.provider === "local") return null;
+    this.links.delete(file.id);
+    return (await this.resolveInput(file)).input;
+  }
+
+  /** The path of a library file on this server's disk (downloads of local media). */
+  async localPath(fileId: number): Promise<string | null> {
+    const file = await this.library.get(fileId);
+    return file?.provider === "local" ? file.ref : null;
+  }
+
+  /**
    * Gets the next episode ready while this one plays: probe (and fetch a TorBox link for)
    * the file that would play, or warm the scraper cache when it isn't in the library.
    * Never adds anything to TorBox on its own.
@@ -232,7 +295,10 @@ export class PlaybackService {
       }
     } else {
       const candidates = await findCandidates(this.library, this.settings(), req.mediaType, req.tmdbId, req.season, req.episode);
-      const candidate = req.candidateId ? candidates.find((c) => c.id === req.candidateId) : candidates[0];
+      const limit = req.preferMaxHeight;
+      const candidate = req.candidateId
+        ? candidates.find((c) => c.id === req.candidateId)
+        : ((limit ? candidates.find((c) => c.resolution !== undefined && c.resolution <= limit) : undefined) ?? candidates[0]);
       if (candidate) return (await this.library.get(candidate.fileId))!;
       if (req.candidateId) throw new PlaybackError("Unknown source", 404);
       if (this.discovery.available) hash = (await this.discovery.bestCached(target))?.hash;

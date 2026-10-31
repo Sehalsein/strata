@@ -1,3 +1,4 @@
+import { serveRange } from "./stream";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -114,6 +115,7 @@ export const catalogRoutes = new Hono<Env>()
           candidateId: z.string().optional(),
           startMs: z.number().min(0).optional(),
           audioStreamIndex: z.number().int().optional(),
+          preferMaxHeight: z.number().int().min(240).optional(),
           caps: capsSchema.default({}),
         })
         .refine(...episodeRule),
@@ -127,6 +129,42 @@ export const catalogRoutes = new Hono<Env>()
       if (err instanceof NeedsProbeError) return c.json({ needsProbe: { fileId: err.fileId, url: err.url } }, 428);
       throw err;
     }
+  })
+
+  // A file to download and watch offline (iPhone and iPad): its link and how to play it.
+  .post("/downloads", async (c) => {
+    const req = await body(
+      c,
+      target
+        .extend({
+          candidateId: z.string().optional(),
+          audioStreamIndex: z.number().int().optional(),
+          preferMaxHeight: z.number().int().min(240).optional(),
+          caps: capsSchema.default({}),
+        })
+        .refine(...episodeRule),
+    );
+    await c.var.household.content.assertAllowed(userOf(c), req.mediaType === "movie" ? "movie" : "show", req.tmdbId);
+    try {
+      return c.json(await c.var.household.playback.prepareDownload(req));
+    } catch (err) {
+      if (err instanceof NeedsProbeError) return c.json({ needsProbe: { fileId: err.fileId, url: err.url } }, 428);
+      throw err;
+    }
+  })
+
+  // A fresh link for a download whose link expired.
+  .post("/files/:id/link", async (c) => {
+    const id = intParam(c, "id");
+    const url = await c.var.household.playback.fileLink(id);
+    return c.json({ url: url ?? `/api/files/${id}/content` });
+  })
+
+  // A file on this server's disk, for downloading (TorBox files download from TorBox).
+  .get("/files/:id/content", async (c) => {
+    const path = await c.var.household.playback.localPath(intParam(c, "id"));
+    if (!path) throw new HTTPException(404, { message: "No such file" });
+    return serveRange(path, c.req.header("range"));
   })
 
   // Media info the app read from a file (see NeedsProbeError): codecs, tracks, length.
