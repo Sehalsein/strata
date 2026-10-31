@@ -8,6 +8,18 @@
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Strata</title>
+    <script>
+      // Apply the saved theme before first paint so there's no light/dark flash.
+      (function () {
+        var t = "system";
+        try {
+          t = localStorage.getItem("strata.theme") || "system";
+        } catch (e) {}
+        var dark = t === "dark" || (t !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

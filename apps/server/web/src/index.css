@@ -1,0 +1,145 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Class strategy: <html class="dark"> is set by the theme provider (and index.html before paint). */
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Strata's palette mapped onto shadcn's tokens. Apricot is the one accent that means "go";
+ * sand and rust come from the logo; ok/warn/error are status colors used by badges and alerts.
+ */
+:root {
+  --radius: 0.75rem;
+  --background: #ffffff;
+  --foreground: #111317;
+  --card: #fafafb;
+  --card-foreground: #111317;
+  --popover: #ffffff;
+  --popover-foreground: #111317;
+  --primary: #f08a48;
+  --primary-foreground: #1a0e06;
+  --secondary: #ebebef;
+  --secondary-foreground: #111317;
+  --muted: #f4f4f6;
+  --muted-foreground: #62666f;
+  --accent: #ebebef;
+  --accent-foreground: #111317;
+  --destructive: #c4242c;
+  --border: rgba(11, 12, 15, 0.1);
+  --input: rgba(11, 12, 15, 0.16);
+  --ring: #f08a48;
+  --sidebar: #f7f7f9;
+  --sidebar-foreground: #111317;
+  --sidebar-primary: #f08a48;
+  --sidebar-primary-foreground: #1a0e06;
+  --sidebar-accent: #ebebef;
+  --sidebar-accent-foreground: #111317;
+  --sidebar-border: rgba(11, 12, 15, 0.08);
+  --sidebar-ring: #f08a48;
+
+  --brand-text: #b04f17;
+  --sand: #f2b544;
+  --rust: #c2502f;
+  --local: #1f66c9;
+  --torbox: #6a4fd1;
+  --ok: #18804a;
+  --warn: #9a6a00;
+}
+
+.dark {
+  --background: #0b0c0f;
+  --foreground: #f5f3ef;
+  --card: #111316;
+  --card-foreground: #f5f3ef;
+  --popover: #14161a;
+  --popover-foreground: #f5f3ef;
+  --primary: #f39256;
+  --primary-foreground: #1a0e06;
+  --secondary: #1d2025;
+  --secondary-foreground: #f5f3ef;
+  --muted: #1d2025;
+  --muted-foreground: #8a8e97;
+  --accent: #23262c;
+  --accent-foreground: #f5f3ef;
+  --destructive: #ff6b6b;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.13);
+  --ring: #f39256;
+  --sidebar: #0f1114;
+  --sidebar-foreground: #f5f3ef;
+  --sidebar-primary: #f39256;
+  --sidebar-primary-foreground: #1a0e06;
+  --sidebar-accent: #1d2025;
+  --sidebar-accent-foreground: #f5f3ef;
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+  --sidebar-ring: #f39256;
+
+  --brand-text: #f6a574;
+  --sand: #f7c873;
+  --rust: #d2603f;
+  --local: #7db7ff;
+  --torbox: #b9a4ff;
+  --ok: #4cd08a;
+  --warn: #f7c873;
+}
+
+@theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-brand-text: var(--brand-text);
+  --color-sand: var(--sand);
+  --color-rust: var(--rust);
+  --color-local: var(--local);
+  --color-torbox: var(--torbox);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  a {
+    @apply underline-offset-4;
+  }
+  code {
+    @apply font-mono;
+  }
+}
