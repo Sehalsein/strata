@@ -15,7 +15,8 @@ const LoginPage = lazy(() => import("@/features/auth/login-page"));
 const SetupWizard = lazy(() => import("@/features/setup/setup-wizard"));
 const InvitePage = lazy(() => import("@/features/invite/invite-page"));
 const PrivacyPage = lazy(() => import("@/features/account/privacy-page"));
-const ChooseNewPasswordScreen = lazy(() => import("@/features/account/choose-new-password").then((m) => ({ default: m.ChooseNewPasswordScreen })));
+const AppOnlyScreen = lazy(() => import("@/features/account/app-only-screen").then((m) => ({ default: m.AppOnlyScreen })));
+const LinkPage = lazy(() => import("@/features/link/link-page"));
 const ForgotPasswordPage = lazy(() => import("@/features/account/password-reset-pages").then((m) => ({ default: m.ForgotPasswordPage })));
 const ResetPasswordPage = lazy(() => import("@/features/account/password-reset-pages").then((m) => ({ default: m.ResetPasswordPage })));
 
@@ -125,12 +126,22 @@ export function App() {
     screen = <FullscreenSpinner />;
   } else if (me.isError) {
     screen = <Unreachable error={me.error} retrying={me.isFetching} onRetry={() => void me.refetch()} />;
-  } else if (session && me.data?.mustChangePassword && !addingAccount) {
-    // Signed in with a temporary password from an admin: a new one before anything else.
+  } else if (session && !addingAccount && path === "/link" && !(session.isHouseholdAdmin || session.isServerAdmin)) {
+    // A TV's QR code opens this on anyone's phone: approving it needs no dashboard.
     screen = (
-      <ChooseNewPasswordScreen
-        name={me.data.user.name}
-        onDone={authChanged}
+      <SessionContext.Provider value={session}>
+        <div className="mx-auto max-w-xl px-4 py-10">
+          <LinkPage />
+        </div>
+      </SessionContext.Provider>
+    );
+  } else if (session && !addingAccount && (me.data?.mustChangePassword || !(session.isHouseholdAdmin || session.isServerAdmin))) {
+    // The dashboard is for running households; everyone else uses the app, and a
+    // temporary password is replaced there too.
+    screen = (
+      <AppOnlyScreen
+        name={me.data!.user.name}
+        reason={me.data?.mustChangePassword ? "temporary-password" : "member"}
         onSignOut={async () => {
           await authClient.signOutAll();
           await authChanged();

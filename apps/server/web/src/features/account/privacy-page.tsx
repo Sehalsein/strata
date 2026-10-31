@@ -128,16 +128,16 @@ export default function PrivacyPage() {
               <p>You can, at any time:</p>
               <ul>
                 <li>
-                  <b>Get a copy</b> of everything above: sign in to this dashboard, open your account menu › Your data › Download my data.
+                  <b>Get a copy</b> of everything above: in the Strata app on your iPhone or iPad, Settings › Your data › Download my data.
                 </li>
                 <li>
                   <b>Correct it:</b> your household's admin can rename you; ask them or the contact below for anything else.
                 </li>
                 <li>
-                  <b>Delete it:</b> account menu › Your data › Delete account removes your account and everything kept about you. Devices are signed out at once.
+                  <b>Delete it:</b> in the app, Settings › Your data › Delete account removes your account and everything kept about you. Devices are signed out at once.
                 </li>
                 <li>
-                  <b>Sign out a device</b> you don't recognise, from Devices.
+                  <b>Sign out a device</b> you don't recognise: ask your household's admin, who sees every device in the household, or change your password, which signs out all the others.
                 </li>
               </ul>
               <p className="mt-3">

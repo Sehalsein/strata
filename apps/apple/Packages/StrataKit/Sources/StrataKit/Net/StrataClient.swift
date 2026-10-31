@@ -110,6 +110,19 @@ public final class StrataClient: Sendable {
         return (try? JSONDecoder().decode(SignInResponse.self, from: data))?.token
     }
 
+    // MARK: Your data
+
+    /// Everything the server keeps about the signed-in account, as a JSON file.
+    public func exportMyData() async throws -> Data {
+        try await performWithResponse(request("GET", "/api/me/export")).0
+    }
+
+    /// Deletes the signed-in account and everything kept about it (Better Auth's
+    /// delete-user, with the account's password).
+    public func deleteAccount(password: String) async throws {
+        _ = try await performWithResponse(request("POST", "/api/auth/delete-user", body: DeleteAccountBody(password: password)))
+    }
+
     // MARK: Home-network join
 
     /// Who can be picked to join a home server without a password (only when `ServerInfo.localJoin`).
@@ -527,6 +540,7 @@ public final class StrataClient: Sendable {
 // MARK: - Bodies
 
 private struct Empty: Encodable {}
+private struct DeleteAccountBody: Encodable { let password: String }
 private struct EmptyBody: Encodable {}
 private struct ErrorBody: Decodable {
     var error: String?
