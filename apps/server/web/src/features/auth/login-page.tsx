@@ -5,10 +5,10 @@ import { api, ApiError, errorMessage } from "@/lib/api";
 import { queryKeys } from "@/lib/query";
 import { authClient } from "@/lib/auth-client";
 import { BrandMark } from "@/components/brand-mark";
+import { PosterWall } from "@/components/poster-wall";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FieldGroup, FormField } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -30,67 +30,93 @@ export default function LoginPage({
 }) {
   const info = useQuery({ queryKey: queryKeys.info, queryFn: api.info, staleTime: 60_000 });
   const [tab, setTab] = useState(() => (window.location.pathname === "/signup" ? "create" : "signin"));
-  if (info.data?.signIn?.signUp && !adding && onAccountCreated) {
-    return (
-      <AuthScreen>
-        <Card>
-          <CardHeader className="text-center">
-            <CardTitle className="text-xl">{tab === "create" ? "Create your account" : "Welcome back"}</CardTitle>
-            <CardDescription>{tab === "create" ? "Your own streaming service, with your keys, for your household." : "Sign in to run your household"}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Tabs value={tab} onValueChange={setTab} className="gap-5">
-              <TabsList className="w-full">
-                <TabsTrigger value="signin">Sign in</TabsTrigger>
-                <TabsTrigger value="create">Create account</TabsTrigger>
-              </TabsList>
-              <TabsContent value="signin">
-                <SignInForm onSignedIn={onSignedIn} />
-              </TabsContent>
-              <TabsContent value="create">
-                <CreateAccountForm onCreated={onAccountCreated} />
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
-        <p className="text-muted-foreground text-center text-xs">
-          Joining someone's household? Open the invitation link they sent you. ·{" "}
-          <a href="/privacy" className="hover:text-foreground underline underline-offset-4">
-            Privacy
-          </a>
-        </p>
-      </AuthScreen>
-    );
-  }
+  const signUp = !!info.data?.signIn?.signUp && !adding && !!onAccountCreated;
+  const named = serverName && serverName !== "Strata" ? serverName : null;
   return (
     <AuthScreen>
-      <Card>
-        <CardHeader className="text-center">
-          <CardTitle className="text-xl">{adding ? "Add an account" : serverName && serverName !== "Strata" ? serverName : "Sign in"}</CardTitle>
-          <CardDescription>{adding ? "Sign in with another account. Switch between them from the account menu." : "Sign in with your Strata account"}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <SignInForm onSignedIn={onSignedIn} onCancel={onCancel} />
-        </CardContent>
-      </Card>
+      {adding ? (
+        <AuthHeading title="Add an account" description="Sign in with another account. Switch between them from the account menu." />
+      ) : signUp ? (
+        <AuthHeading
+          title={tab === "create" ? "Create your account" : "Welcome back"}
+          description={tab === "create" ? "Set up your own household in a few minutes." : "Sign in to run your household."}
+        />
+      ) : (
+        <AuthHeading title={named ?? "Welcome back"} description={named ? "Sign in with your Strata account." : "Sign in to run your household."} />
+      )}
+      {signUp ? (
+        <Tabs value={tab} onValueChange={setTab} className="gap-6">
+          <TabsList className="h-10 w-full">
+            <TabsTrigger value="signin">Sign in</TabsTrigger>
+            <TabsTrigger value="create">Create account</TabsTrigger>
+          </TabsList>
+          <TabsContent value="signin">
+            <SignInForm onSignedIn={onSignedIn} />
+          </TabsContent>
+          <TabsContent value="create">
+            <CreateAccountForm onCreated={onAccountCreated!} />
+          </TabsContent>
+        </Tabs>
+      ) : (
+        <SignInForm onSignedIn={onSignedIn} onCancel={onCancel} />
+      )}
+      <p className="text-muted-foreground text-xs">
+        {signUp && "Joining someone's household? Open the invitation link they sent you. "}
+        <a href="/privacy" className="hover:text-foreground underline">
+          Privacy
+        </a>
+      </p>
     </AuthScreen>
   );
 }
 
-/** The centered brand + card layout of the signed-out screens (sign-in, invitations). */
+/**
+ * The signed-out screens (sign-in, invitations, password reset): a drifting wall of
+ * posters with the brand on one side, the form on the other. Small screens get the form
+ * alone, under a strip of the wall.
+ */
 export function AuthScreen({ children }: { children: ReactNode }) {
   return (
-    <div className="bg-muted/30 relative flex min-h-svh items-center justify-center p-4">
-      <div className="absolute top-4 right-4">
-        <ModeToggle />
-      </div>
-      <div className="flex w-full max-w-sm flex-col gap-6">
-        <div className="flex items-center gap-2 self-center font-semibold">
-          <BrandMark size={30} />
-          <span className="text-lg">Strata</span>
+    <div className="bg-background grid min-h-svh lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+      <aside className="relative hidden overflow-hidden bg-[#0b0c0f] lg:block">
+        <PosterWall className="absolute -inset-x-8 -top-10 bottom-0 rotate-[-4deg] opacity-80" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#0b0c0f] via-[#0b0c0f]/70 to-[#0b0c0f]/10" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,rgba(243,146,86,0.28),transparent_60%)]" />
+        <div className="absolute inset-x-0 bottom-0 flex flex-col gap-4 p-12 text-[#f5f3ef]">
+          <div className="flex items-center gap-2.5">
+            <BrandMark size={34} />
+            <span className="text-2xl font-semibold tracking-tight">Strata</span>
+          </div>
+          <p className="max-w-md text-4xl leading-tight font-semibold tracking-tight text-balance">Your own streaming service.</p>
+          <p className="max-w-md text-base text-white/65">Every title from TMDB, playing from your own sources, on iPhone, iPad, Mac and Apple TV.</p>
         </div>
-        {children}
-      </div>
+      </aside>
+      <main className="relative flex min-h-svh flex-col">
+        <div className="relative h-36 overflow-hidden bg-[#0b0c0f] lg:hidden" aria-hidden="true">
+          <PosterWall columns={5} className="absolute -inset-x-6 -top-24 bottom-0 rotate-[-4deg] opacity-70" />
+          <div className="from-background absolute inset-0 bg-gradient-to-t to-transparent" />
+        </div>
+        <div className="flex items-center justify-between px-6 pt-5 lg:px-10 lg:pt-8">
+          <a href="/" className="flex items-center gap-2 font-semibold lg:invisible">
+            <BrandMark size={26} />
+            <span className="text-lg">Strata</span>
+          </a>
+          <ModeToggle />
+        </div>
+        <div className="flex flex-1 items-center justify-center px-6 py-10 lg:px-10">
+          <div className="flex w-full max-w-sm flex-col gap-6">{children}</div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+/** A signed-out screen's heading: big, left-aligned, no card. */
+export function AuthHeading({ title, description }: { title: ReactNode; description?: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <h1 className="text-3xl font-semibold tracking-tight">{title}</h1>
+      {description && <p className="text-muted-foreground">{description}</p>}
     </div>
   );
 }

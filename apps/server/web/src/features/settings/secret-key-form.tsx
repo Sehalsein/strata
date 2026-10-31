@@ -89,7 +89,7 @@ export function SecretKeyForm({
         {configured ? <Badge variant="success">Configured</Badge> : required ? <Badge variant="warning">Required</Badge> : <Badge variant="secondary">Optional</Badge>}
       </div>
       <p className="text-muted-foreground text-sm [&_a]:underline [&_a]:underline-offset-4">{description}</p>
-      {editing && guide}
+      {editing && guide && <div className="-mt-1">{guide}</div>}
 
       {configured && !editing ? (
         <div className="bg-muted/40 flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">

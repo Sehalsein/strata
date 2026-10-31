@@ -21,7 +21,7 @@ export function PeopleStep({ onNext, onBack }: StepProps) {
     <StepCard
       icon={Users}
       title="Invite people"
-      description="Everyone who watches gets their own account, with their own progress and My List. Invite them now or later from Members: Strata gives you a link to send them (it doesn't send email). You can mark kids' accounts and set content limits from Members once they've joined."
+      description="Everyone who watches gets their own account, progress and My List. Send each a link now, or later from Members, where you can also set up kids' accounts."
       onBack={onBack}
       actions={
         <Button size="lg" onClick={onNext} variant={pending ? "default" : "outline"}>

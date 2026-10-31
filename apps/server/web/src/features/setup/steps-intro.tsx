@@ -52,15 +52,15 @@ export function WelcomeStep({ onNext }: StepProps) {
 
 function Need({ icon: Icon, title, badge, children }: { icon: typeof Film; title: string; badge: string; children: React.ReactNode }) {
   return (
-    <li className="flex gap-3 rounded-lg border p-3">
-      <div className="bg-primary/12 text-brand-text flex size-9 shrink-0 items-center justify-center rounded-md">
-        <Icon className="size-4" />
+    <li className="bg-card/60 flex flex-col gap-3 rounded-2xl border p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="bg-primary/12 text-brand-text flex size-9 items-center justify-center rounded-xl">
+          <Icon className="size-4" />
+        </div>
+        <Badge variant={badge === "Required to browse" ? "accent" : "secondary"}>{badge}</Badge>
       </div>
       <div className="space-y-1">
-        <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
-          {title}
-          <Badge variant={badge === "Required to browse" ? "accent" : "secondary"}>{badge}</Badge>
-        </p>
+        <p className="text-sm font-medium">{title}</p>
         <p className="text-muted-foreground text-sm">{children}</p>
       </div>
     </li>
@@ -116,7 +116,7 @@ export function AccountStep({ info, onNext, onBack }: StepProps) {
   };
 
   return (
-    <form onSubmit={submit} noValidate>
+    <form onSubmit={submit} noValidate className="flex flex-1 flex-col">
       <StepCard
         icon={UserRound}
         title="Create the admin account"
@@ -218,7 +218,7 @@ export function HouseholdStep({ onNext }: StepProps) {
 
   const first = me.data?.user.name;
   return (
-    <form onSubmit={save} noValidate>
+    <form onSubmit={save} noValidate className="flex flex-1 flex-col">
       <StepCard
         icon={House}
         title={first ? `Welcome, ${first}` : "Welcome to Strata"}

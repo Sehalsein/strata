@@ -143,3 +143,19 @@
     @apply font-mono;
   }
 }
+
+/* The poster wall on the sign-in and onboarding screens: columns drift by, forever. */
+@keyframes poster-drift {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+@utility animate-poster-drift {
+  animation: poster-drift var(--drift, 60s) linear infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
