@@ -12,8 +12,8 @@
   "compatibility_date": "2026-10-01",
   // node:crypto, node:async_hooks and process.env, which the server uses.
   "compatibility_flags": ["nodejs_compat"],
-  // Cloud mode, fixed at build time: src/mode.ts reads it as modules load, before the
-  // Worker's fetch handler could set STRATA_MODE.
+  // Cloud (multi-tenant) mode, fixed at build time: nothing at run time can change it
+  // (src/mode.ts).
   "define": { "STRATA_BUILD_MODE": "\"cloud\"" },
   // The dashboard, built by `bun run build` in apps/server/web; only /api/* runs the Worker.
   "assets": {

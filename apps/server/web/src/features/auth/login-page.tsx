@@ -11,19 +11,57 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FieldGroup, FormField } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function LoginPage({
   serverName,
   onSignedIn,
+  onAccountCreated,
   adding,
   onCancel,
 }: {
   serverName?: string;
   onSignedIn: () => void;
+  /** Cloud: a new account was made (and signed in); onboarding comes next. */
+  onAccountCreated?: () => void;
   /** Someone is already signed in: this adds another account to the browser. */
   adding?: boolean;
   onCancel?: () => void;
 }) {
+  const info = useQuery({ queryKey: queryKeys.info, queryFn: api.info, staleTime: 60_000 });
+  const [tab, setTab] = useState(() => (window.location.pathname === "/signup" ? "create" : "signin"));
+  if (info.data?.signIn?.signUp && !adding && onAccountCreated) {
+    return (
+      <AuthScreen>
+        <Card>
+          <CardHeader className="text-center">
+            <CardTitle className="text-xl">{tab === "create" ? "Create your account" : "Welcome back"}</CardTitle>
+            <CardDescription>{tab === "create" ? "Your own streaming service, with your keys, for your household." : "Sign in to run your household"}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Tabs value={tab} onValueChange={setTab} className="gap-5">
+              <TabsList className="w-full">
+                <TabsTrigger value="signin">Sign in</TabsTrigger>
+                <TabsTrigger value="create">Create account</TabsTrigger>
+              </TabsList>
+              <TabsContent value="signin">
+                <SignInForm onSignedIn={onSignedIn} />
+              </TabsContent>
+              <TabsContent value="create">
+                <CreateAccountForm onCreated={onAccountCreated} />
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+        <p className="text-muted-foreground text-center text-xs">
+          Joining someone's household? Open the invitation link they sent you. ·{" "}
+          <a href="/privacy" className="hover:text-foreground underline underline-offset-4">
+            Privacy
+          </a>
+        </p>
+      </AuthScreen>
+    );
+  }
   return (
     <AuthScreen>
       <Card>
@@ -147,6 +185,69 @@ export function SignInForm({ onSignedIn, onCancel, submitLabel = "Sign in" }: { 
             Cancel
           </Button>
         )}
+      </FieldGroup>
+    </form>
+  );
+}
+
+const USERNAME_RE = /^[a-zA-Z0-9_.-]{2,64}$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Cloud: anyone makes an account, and the server gives it a household of its own. */
+function CreateAccountForm({ onCreated }: { onCreated: () => void }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [touched, setTouched] = useState(false);
+  const [error, setError] = useState<{ message: string; rateLimited: boolean } | null>(null);
+  const [pending, setPending] = useState(false);
+
+  const nameError = touched && !name.trim() ? "What should we call you?" : null;
+  const emailError = touched && !EMAIL_RE.test(email.trim()) ? "Enter a valid email." : null;
+  const usernameError = touched && !USERNAME_RE.test(username.trim()) ? "2–64 letters, numbers, dots, dashes or underscores." : null;
+  const passwordError = touched && password.length < 8 ? "Use at least 8 characters." : null;
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTouched(true);
+    if (!name.trim() || !EMAIL_RE.test(email.trim()) || !USERNAME_RE.test(username.trim()) || password.length < 8) return;
+    setPending(true);
+    setError(null);
+    try {
+      await authClient.createAccount({ name: name.trim(), email: email.trim().toLowerCase(), username: username.trim(), password });
+      onCreated();
+    } catch (err) {
+      setError({ message: errorMessage(err), rateLimited: err instanceof ApiError && err.status === 429 });
+      setPending(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} noValidate>
+      <FieldGroup>
+        <FormField label="Your name" error={nameError}>
+          {(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" maxLength={64} autoFocus />}
+        </FormField>
+        <FormField label="Email" error={emailError}>
+          {(p) => <Input {...p} type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />}
+        </FormField>
+        <FormField label="Username" description="You sign in with this or your email." error={usernameError}>
+          {(p) => <Input {...p} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="off" spellCheck={false} maxLength={64} />}
+        </FormField>
+        <FormField label="Password" description={passwordError ? undefined : "At least 8 characters."} error={passwordError}>
+          {(p) => <Input {...p} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />}
+        </FormField>
+        {error && (
+          <Alert variant={error.rateLimited ? "warning" : "destructive"}>
+            <AlertTitle>{error.rateLimited ? "Too many attempts" : "Couldn't create the account"}</AlertTitle>
+            <AlertDescription>{error.message}</AlertDescription>
+          </Alert>
+        )}
+        <Button type="submit" className="w-full" disabled={pending}>
+          {pending && <LoaderCircle className="animate-spin" />}
+          {pending ? "Creating your account…" : "Create account"}
+        </Button>
       </FieldGroup>
     </form>
   );

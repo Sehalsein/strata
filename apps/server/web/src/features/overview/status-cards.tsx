@@ -30,6 +30,7 @@ export function ServerCard({ status }: { status: AdminStatus }) {
               <span className="break-all">{status.dataDir}</span>
             </KeyValue>
           )}
+          {status.mode !== "cloud" && (
           <KeyValue k="ffmpeg" mono>
             {status.ffmpeg ? (
               <>
@@ -40,6 +41,7 @@ export function ServerCard({ status }: { status: AdminStatus }) {
               <Badge variant="warning">Not found</Badge>
             )}
           </KeyValue>
+          )}
         </KeyValueList>
       </CardContent>
     </Card>

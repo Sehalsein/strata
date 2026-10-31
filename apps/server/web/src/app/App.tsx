@@ -7,7 +7,7 @@ import { queryClient, queryKeys } from "@/lib/query";
 import { navigate, usePath } from "@/lib/router";
 import { Button } from "@/components/ui/button";
 import { BrandMark } from "@/components/brand-mark";
-import { wizardInProgress } from "@/features/setup/wizard-state";
+import { storeStep, wizardInProgress } from "@/features/setup/wizard-state";
 import { SessionContext, type Access, type Session } from "./session";
 
 const AppLayout = lazy(() => import("./app-layout"));
@@ -35,7 +35,7 @@ export function App() {
   // Mid-wizard (signed in, steps left): set by the account step, or read back after a reload.
   const [inWizardState, setInWizard] = useState(false);
   const [wizardDismissed, setWizardDismissed] = useState(false);
-  const inWizard = inWizardState || (!wizardDismissed && !!me.data && wizardInProgress());
+  const inWizard = inWizardState || (!wizardDismissed && !!me.data && wizardInProgress(info.data?.mode === "cloud"));
   const [addingAccount, setAddingAccount] = useState(false);
   // Bumped on every auth change so the signed-in app remounts with fresh queries.
   const [epoch, setEpoch] = useState(0);
@@ -149,7 +149,21 @@ export function App() {
       />
     );
   } else if (!session || addingAccount) {
-    screen = <LoginPage serverName={info.data.serverName} adding={!!session} onSignedIn={() => void authChanged()} onCancel={session ? () => setAddingAccount(false) : undefined} />;
+    screen = (
+      <LoginPage
+        serverName={info.data.serverName}
+        adding={!!session}
+        onSignedIn={() => void authChanged()}
+        onAccountCreated={() => {
+          // A new cloud account: onboarding, from its first step.
+          storeStep(0);
+          setWizardDismissed(false);
+          setInWizard(true);
+          void authChanged();
+        }}
+        onCancel={session ? () => setAddingAccount(false) : undefined}
+      />
+    );
   } else {
     screen = (
       <SessionContext.Provider value={session}>

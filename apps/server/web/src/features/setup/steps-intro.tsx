@@ -1,7 +1,11 @@
-import { useState } from "react";
-import { ArrowRight, Clapperboard, Film, KeyRound, LoaderCircle, Tv } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowRight, Clapperboard, Film, House, KeyRound, LoaderCircle, Sparkles, Tv, UserRound, UserPlus } from "lucide-react";
 import { ApiError, errorMessage } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
+import { queryClient, queryKeys } from "@/lib/query";
+import { InlineError } from "@/components/page";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +19,7 @@ import { passwordStrength } from "./wizard-state";
 export function WelcomeStep({ onNext }: StepProps) {
   return (
     <StepCard
+      icon={Sparkles}
       title="Welcome to Strata"
       description="Your own streaming service: Strata builds a catalog from TMDB and plays your files — from folders on this machine or straight from TorBox — on your iPhone, iPad, Mac and Apple TV."
       actions={
@@ -113,6 +118,7 @@ export function AccountStep({ info, onNext, onBack }: StepProps) {
   return (
     <form onSubmit={submit} noValidate>
       <StepCard
+        icon={UserRound}
         title="Create the admin account"
         description="The server's admin account: it runs the server from this dashboard and is your own account for watching. It also owns your household — the library, settings and people you'll invite."
         onBack={onBack}
@@ -175,6 +181,76 @@ export function AccountStep({ info, onNext, onBack }: StepProps) {
             </Alert>
           )}
         </FieldGroup>
+      </StepCard>
+    </form>
+  );
+}
+
+/** Cloud: the first step after signing up. The new account's household, named after them until they rename it. */
+export function HouseholdStep({ onNext }: StepProps) {
+  const household = useQuery({ queryKey: queryKeys.household, queryFn: authClient.getHousehold });
+  const me = useQuery({ queryKey: queryKeys.me, queryFn: authClient.getMe, staleTime: Infinity });
+  const [name, setName] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (household.data && name === null) setName(household.data.name);
+  }, [household.data, name]);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const h = household.data;
+    const trimmed = (name ?? "").trim();
+    if (!h || !trimmed) return;
+    if (trimmed === h.name) return onNext();
+    setSaving(true);
+    setError(null);
+    try {
+      await authClient.renameHousehold(h.id, trimmed);
+      await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.household }), queryClient.invalidateQueries({ queryKey: queryKeys.me })]);
+      onNext();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const first = me.data?.user.name;
+  return (
+    <form onSubmit={save} noValidate>
+      <StepCard
+        icon={House}
+        title={first ? `Welcome, ${first}` : "Welcome to Strata"}
+        description="Your account comes with a household: your own library, keys and settings, shared with the people you invite. Let's set it up. It takes a few minutes, and you can change everything later in Settings."
+        actions={
+          <Button type="submit" size="lg" disabled={saving || !household.data || !(name ?? "").trim()}>
+            {saving && <LoaderCircle className="animate-spin" />}
+            Continue <ArrowRight />
+          </Button>
+        }
+      >
+        {name === null ? (
+          household.error ? <InlineError error={errorMessage(household.error)} /> : <Skeleton className="h-16" />
+        ) : (
+          <FieldGroup className="max-w-md">
+            <FormField label="Household name" description="Shown to the people you invite." error={!name.trim() ? "Give your household a name." : null}>
+              {(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} maxLength={64} autoFocus />}
+            </FormField>
+          </FieldGroup>
+        )}
+        <ul className="grid gap-3 sm:grid-cols-3">
+          <Need icon={Clapperboard} title="Connect TMDB" badge="Next">
+            A free key that powers titles and artwork.
+          </Need>
+          <Need icon={UserPlus} title="Invite people" badge="Optional">
+            Each gets their own progress and My List.
+          </Need>
+          <Need icon={Tv} title="Get the apps" badge="Last">
+            Watch on iPhone, iPad, Mac and Apple TV.
+          </Need>
+        </ul>
+        <InlineError error={error} />
       </StepCard>
     </form>
   );

@@ -1,18 +1,36 @@
 import type { ReactNode } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 
-/** One wizard step: title, lede, body and a footer with Back on the left and actions on the right. */
-export function StepCard({ title, description, children, onBack, actions }: { title: string; description?: ReactNode; children?: ReactNode; onBack?: () => void; actions: ReactNode }) {
+/** One onboarding step: an icon, a big title and lede, the step's body on a card, then Back on the left and actions on the right. */
+export function StepCard({
+  icon: Icon,
+  title,
+  description,
+  children,
+  onBack,
+  actions,
+}: {
+  icon?: LucideIcon;
+  title: string;
+  description?: ReactNode;
+  children?: ReactNode;
+  onBack?: () => void;
+  actions: ReactNode;
+}) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-2xl tracking-tight">{title}</CardTitle>
-        {description && <CardDescription className="text-base">{description}</CardDescription>}
-      </CardHeader>
-      {children && <CardContent className="flex flex-col gap-6">{children}</CardContent>}
-      <CardFooter className="flex-col-reverse gap-2 border-t sm:flex-row sm:justify-between">
+    <section className="flex flex-col gap-8">
+      <div className="flex flex-col gap-3">
+        {Icon && (
+          <div className="bg-primary/12 text-brand-text flex size-12 items-center justify-center rounded-2xl">
+            <Icon className="size-6" />
+          </div>
+        )}
+        <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">{title}</h1>
+        {description && <p className="text-muted-foreground max-w-2xl text-base text-pretty sm:text-lg">{description}</p>}
+      </div>
+      {children && <div className="bg-card flex flex-col gap-6 rounded-2xl border p-5 shadow-xs sm:p-7">{children}</div>}
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
         {onBack ? (
           <Button type="button" variant="ghost" onClick={onBack}>
             <ArrowLeft /> Back
@@ -21,7 +39,7 @@ export function StepCard({ title, description, children, onBack, actions }: { ti
           <span />
         )}
         <div className="flex flex-col-reverse gap-2 sm:flex-row">{actions}</div>
-      </CardFooter>
-    </Card>
+      </div>
+    </section>
   );
 }

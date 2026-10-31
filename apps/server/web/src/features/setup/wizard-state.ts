@@ -1,24 +1,41 @@
-export const STEPS = [
+export interface WizardStep {
+  key: "welcome" | "account" | "household" | "services" | "basics" | "people" | "devices" | "done";
+  label: string;
+}
+
+/** A home server's first run: the admin's account, then the server and their household. */
+const HOME_STEPS: WizardStep[] = [
   { key: "welcome", label: "Welcome" },
   { key: "account", label: "Admin account" },
-  { key: "services", label: "Connect services" },
-  { key: "basics", label: "Server basics" },
-  { key: "people", label: "Invite people" },
-  { key: "devices", label: "Your devices" },
+  { key: "services", label: "Services" },
+  { key: "basics", label: "Server" },
+  { key: "people", label: "People" },
+  { key: "devices", label: "Devices" },
   { key: "done", label: "Finish" },
-] as const;
+];
 
-/** Steps from here on run signed in with the token the account step got. */
-export const FIRST_AUTHED_STEP = 2;
+/** A new cloud account (already signed in, with a household of its own): setting it up. */
+const CLOUD_STEPS: WizardStep[] = [
+  { key: "household", label: "Household" },
+  { key: "services", label: "Services" },
+  { key: "people", label: "People" },
+  { key: "devices", label: "Devices" },
+  { key: "done", label: "Finish" },
+];
+
+export const wizardSteps = (cloud: boolean) => (cloud ? CLOUD_STEPS : HOME_STEPS);
+
+/** Steps from here on run signed in (home: with the token the account step got). */
+export const firstAuthedStep = (cloud: boolean) => (cloud ? 0 : 2);
 
 const STEP_KEY = "strata.setupStep";
 
-export function storedStep(): number | null {
+export function storedStep(cloud: boolean): number | null {
   try {
     const v = localStorage.getItem(STEP_KEY);
     if (v === null) return null;
     const n = Number(v);
-    return Number.isInteger(n) && n >= 0 && n < STEPS.length ? n : null;
+    return Number.isInteger(n) && n >= 0 && n < wizardSteps(cloud).length ? n : null;
   } catch {
     return null;
   }
@@ -33,10 +50,10 @@ export function storeStep(n: number | null) {
   }
 }
 
-/** True when the admin exists (call it once signed in) but the remaining steps aren't finished. */
-export function wizardInProgress(): boolean {
-  const s = storedStep();
-  return s !== null && s >= FIRST_AUTHED_STEP;
+/** True when signed in but the remaining steps aren't finished (home: after the admin exists; cloud: after signing up). */
+export function wizardInProgress(cloud: boolean): boolean {
+  const s = storedStep(cloud);
+  return s !== null && s >= firstAuthedStep(cloud);
 }
 
 /** Rough strength for the hint under the password field. */

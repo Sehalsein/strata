@@ -126,13 +126,14 @@ export const authRoutes = new Hono<Env>()
       apiVersion: API_VERSION,
       /** "home" or "cloud" (stateless; no local folders or home-network join). */
       mode: isCloud ? "cloud" : "home",
-      setupRequired: !(await s.hasAccounts()),
+      /** Home servers make their admin first; the cloud has no setup (anyone signs up). */
+      setupRequired: !isCloud && !(await s.hasAccounts()),
       /** Setup asks for the code from the server's log (not from the server's own machine). */
       setupCodeRequired: !isLoopbackRequest(c),
       /** True when this client may join without a password (see /join). */
       localJoin: await canJoinLocally(c),
       /** Ways in besides a password that this server is set up for (the sign-in page's buttons). */
-      signIn: (({ google, passkeys }) => ({ google: !!google, passkey: !!passkeys, passwordReset: emailConfigured() }))(signInMethods()),
+      signIn: (({ google, passkeys }) => ({ google: !!google, passkey: !!passkeys, passwordReset: emailConfigured(), signUp: isCloud }))(signInMethods()),
     });
   })
 
@@ -150,6 +151,7 @@ export const authRoutes = new Hono<Env>()
   // First run: the server admin's account and their household. Needs the code the
   // server prints in its log, unless asked from the server's own machine.
   .post("/setup/admin", async (c) => {
+    if (isCloud) throw new HTTPException(404, { message: "Not found" });
     const s = c.var.services;
     const input = await body(
       c,

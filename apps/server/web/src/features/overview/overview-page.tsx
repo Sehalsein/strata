@@ -116,14 +116,14 @@ function AdminOverview() {
             </AlertDescription>
           </Alert>
         )}
-        {!data.ffmpeg && data.ffmpegSetup?.state === "downloading" && (
+        {!cloud && !data.ffmpeg && data.ffmpegSetup?.state === "downloading" && (
           <Alert variant="info">
             <Info />
             <AlertTitle>Setting up ffmpeg</AlertTitle>
             <AlertDescription>A one-time download of the ffmpeg Strata uses to play files that can't direct-play (MKV, DTS/TrueHD audio, some codecs). It only takes a minute.</AlertDescription>
           </Alert>
         )}
-        {!data.ffmpeg && data.ffmpegSetup?.state !== "downloading" && (
+        {!cloud && !data.ffmpeg && data.ffmpegSetup?.state !== "downloading" && (
           <Alert variant="warning">
             <TriangleAlert />
             <AlertTitle>ffmpeg isn't set up</AlertTitle>

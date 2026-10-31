@@ -25,6 +25,8 @@ interface Env {
   STRATA_PRIVACY_CONTACT?: string;
   /** Errors to Sentry, when set. */
   SENTRY_DSN?: string;
+  /** Emails whose accounts run the server (comma-separated). */
+  STRATA_ADMIN_EMAILS?: string;
   /** "Sign in with Google" shows only with both. */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
@@ -41,12 +43,11 @@ function boot(env: Env) {
   booting ??= (async () => {
     // The server reads its configuration from the environment, as on Bun.
     Object.assign(process.env, {
-      STRATA_MODE: "cloud",
       STRATA_NO_JOBS: "1", // Cron Triggers run the jobs (see `scheduled`)
       DATABASE_URL: env.DATABASE_URL,
       STRATA_SECRET_KEY: env.STRATA_SECRET_KEY,
       ...(env.STRATA_PUBLIC_URL ? { STRATA_PUBLIC_URL: env.STRATA_PUBLIC_URL } : {}),
-      ...Object.fromEntries((["RESEND_API_KEY", "STRATA_EMAIL_FROM", "STRATA_OPERATOR", "STRATA_PRIVACY_CONTACT", "SENTRY_DSN"] as const).filter((k) => env[k]).map((k) => [k, env[k]!])),
+      ...Object.fromEntries((["RESEND_API_KEY", "STRATA_EMAIL_FROM", "STRATA_OPERATOR", "STRATA_PRIVACY_CONTACT", "SENTRY_DSN", "STRATA_ADMIN_EMAILS"] as const).filter((k) => env[k]).map((k) => [k, env[k]!])),
       ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET ? { GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET } : {}),
     });
     const { createServices } = await import("./services");

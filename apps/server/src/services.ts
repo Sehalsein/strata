@@ -82,7 +82,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   const auth = createAuth({ db, secretKey: box.signingKey(), baseURL: process.env.STRATA_PUBLIC_URL || undefined });
   const hasAccounts = async () => (await db.select({ id: user.id }).from(user).limit(1)).length > 0;
   const householdIds = async () => (await db.select({ id: organization.id }).from(organization)).map((o) => o.id);
-  if (!(await hasAccounts())) await announceSetupCode(db);
+  if (!isCloud && !(await hasAccounts())) await announceSetupCode(db);
 
   let ffmpegInfo = overrides.ffmpeg !== undefined ? overrides.ffmpeg : isCloud ? null : await detectFfmpeg(paths.root);
   const ffmpeg = () => ffmpegInfo;

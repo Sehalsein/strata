@@ -4,17 +4,18 @@ import type { ServerInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/brand-mark";
 import { ModeToggle } from "@/components/mode-toggle";
-import { Progress } from "@/components/ui/progress";
-import { AccountStep, WelcomeStep } from "./steps-intro";
+import { AccountStep, HouseholdStep, WelcomeStep } from "./steps-intro";
 import { BasicsStep, ServicesStep } from "./steps-config";
 import { DevicesStep, DoneStep, PeopleStep } from "./steps-finish";
-import { FIRST_AUTHED_STEP, STEPS, storeStep, storedStep } from "./wizard-state";
+import { firstAuthedStep, storeStep, storedStep, wizardSteps, type WizardStep } from "./wizard-state";
 
 function initialStep(info: ServerInfo): number {
-  const stored = storedStep();
-  // Before the admin exists only Welcome and Account make sense.
-  if (info.setupRequired) return Math.min(stored ?? 0, FIRST_AUTHED_STEP - 1);
-  return Math.max(stored ?? FIRST_AUTHED_STEP, FIRST_AUTHED_STEP);
+  const cloud = info.mode === "cloud";
+  const stored = storedStep(cloud);
+  const first = firstAuthedStep(cloud);
+  // Before a home server's admin exists only Welcome and Account make sense.
+  if (info.setupRequired) return Math.min(stored ?? 0, first - 1);
+  return Math.max(stored ?? first, first);
 }
 
 export interface StepProps {
@@ -24,10 +25,15 @@ export interface StepProps {
 }
 
 /**
- * First-run setup: a guided, resumable wizard. The step is kept in localStorage so a reload
- * picks up where it left off; once the admin account exists every later step runs signed in.
+ * Onboarding: a guided, resumable flow with its steps across the top. A home server's
+ * first run makes the admin's account, then sets up the server and their household; a new
+ * cloud account (signed up, with a household of its own) sets up that household. The step
+ * is kept in localStorage so a reload picks up where it left off.
  */
 export default function SetupWizard({ info, onDone, onAccountCreated }: { info: ServerInfo; onDone: (to?: string) => void; onAccountCreated: () => void }) {
+  const cloud = info.mode === "cloud";
+  const steps = wizardSteps(cloud);
+  const first = firstAuthedStep(cloud);
   const [step, setStepState] = useState(() => initialStep(info));
   const [maxReached, setMaxReached] = useState(step);
 
@@ -37,91 +43,102 @@ export default function SetupWizard({ info, onDone, onAccountCreated }: { info: 
     storeStep(n);
     window.scrollTo(0, 0);
   };
-  const next = () => setStep(Math.min(step + 1, STEPS.length - 1));
-  const back = step > FIRST_AUTHED_STEP || step === 1 ? () => setStep(step - 1) : undefined;
+  const next = () => setStep(Math.min(step + 1, steps.length - 1));
+  const back = step > first || (step === 1 && !cloud) ? () => setStep(step - 1) : undefined;
 
   const finish = (to?: string) => {
     storeStep(null);
     onDone(to);
   };
 
-  const canJump = (i: number) => i !== step && i <= maxReached && (i >= FIRST_AUTHED_STEP) === (step >= FIRST_AUTHED_STEP);
+  // Steps reached before can be revisited, never back across making the account.
+  const canJump = (i: number) => i !== step && i <= maxReached && (i >= first) === (step >= first);
+  const key = steps[step]!.key;
 
   return (
-    <div className="bg-muted/30 min-h-svh">
-      <header className="flex items-center justify-between px-4 py-4 md:px-8">
-        <div className="flex items-center gap-2 font-semibold">
-          <BrandMark size={26} />
-          <span>Strata</span>
-          <span className="text-muted-foreground text-sm font-normal">
-            · Server setup{info.version ? <span className="font-mono"> v{info.version}</span> : null}
-          </span>
+    <div className="bg-muted/30 flex min-h-svh flex-col">
+      <header className="bg-background/80 sticky top-0 z-10 border-b backdrop-blur">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-3">
+          <div className="flex items-center gap-2 font-semibold">
+            <BrandMark size={24} />
+            <span>Strata</span>
+            <span className="text-muted-foreground hidden text-sm font-normal sm:inline">· {cloud ? "Getting started" : "Server setup"}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-muted-foreground text-xs font-medium tabular-nums">
+              Step {step + 1} of {steps.length}
+            </span>
+            <ModeToggle />
+          </div>
         </div>
-        <ModeToggle />
+        <Stepper steps={steps} step={step} canJump={canJump} onJump={setStep} />
       </header>
 
-      <div className="mx-auto grid max-w-5xl gap-8 px-4 pb-16 md:grid-cols-[13rem_1fr] md:px-8">
-        <nav aria-label="Setup steps" className="hidden md:block">
-          <ol className="flex flex-col gap-1">
-            {STEPS.map((s, i) => {
-              const done = i < step;
-              const current = i === step;
-              const jumpable = canJump(i);
-              return (
-                <li key={s.key}>
-                  <button
-                    type="button"
-                    disabled={!jumpable}
-                    onClick={() => setStep(i)}
-                    aria-current={current ? "step" : undefined}
-                    className={cn(
-                      "flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                      current ? "bg-background font-medium shadow-xs" : "text-muted-foreground",
-                      jumpable && "hover:bg-background/60 hover:text-foreground",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-medium",
-                        current && "border-primary bg-primary text-primary-foreground",
-                        done && "border-primary/40 bg-primary/15 text-brand-text",
-                      )}
-                    >
-                      {done ? <Check className="size-3.5" /> : i + 1}
-                    </span>
-                    {s.label}
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-        </nav>
-
-        <main id="main" className="flex min-w-0 flex-col gap-4">
-          <div className="flex flex-col gap-2 md:hidden">
-            <p className="text-muted-foreground text-xs font-medium">
-              Step {step + 1} of {STEPS.length} · {STEPS[step]!.label}
-            </p>
-            <Progress value={((step + 1) / STEPS.length) * 100} aria-label="Setup progress" />
-          </div>
-          {step === 0 && <WelcomeStep info={info} onNext={next} />}
-          {step === 1 && (
+      <main id="main" className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 py-8 sm:py-12">
+        <div key={key} className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+          {key === "welcome" && <WelcomeStep info={info} onNext={next} />}
+          {key === "account" && (
             <AccountStep
               info={info}
               onBack={back}
               onNext={() => {
                 onAccountCreated();
-                setStep(FIRST_AUTHED_STEP);
+                setStep(first);
               }}
             />
           )}
-          {step === 2 && <ServicesStep info={info} onNext={next} />}
-          {step === 3 && <BasicsStep info={info} onBack={back} onNext={next} />}
-          {step === 4 && <PeopleStep info={info} onBack={back} onNext={next} />}
-          {step === 5 && <DevicesStep info={info} onBack={back} onNext={next} />}
-          {step === 6 && <DoneStep info={info} onBack={back} onFinish={finish} />}
-        </main>
-      </div>
+          {key === "household" && <HouseholdStep info={info} onNext={next} />}
+          {key === "services" && <ServicesStep info={info} onBack={back} onNext={next} />}
+          {key === "basics" && <BasicsStep info={info} onBack={back} onNext={next} />}
+          {key === "people" && <PeopleStep info={info} onBack={back} onNext={next} />}
+          {key === "devices" && <DevicesStep info={info} onBack={back} onNext={next} />}
+          {key === "done" && <DoneStep info={info} onBack={back} onFinish={finish} />}
+        </div>
+      </main>
     </div>
+  );
+}
+
+/** The steps in a row: numbered dots joined by a line that fills as you go; names from small screens up. */
+function Stepper({ steps, step, canJump, onJump }: { steps: WizardStep[]; step: number; canJump: (i: number) => boolean; onJump: (i: number) => void }) {
+  return (
+    <nav aria-label="Steps" className="mx-auto max-w-3xl px-4 pt-1 pb-4">
+      <ol className="flex items-start">
+        {steps.map((s, i) => {
+          const done = i < step;
+          const current = i === step;
+          const jumpable = canJump(i);
+          return (
+            <li key={s.key} className="relative flex flex-1 flex-col items-center">
+              {i > 0 && (
+                <span aria-hidden="true" className="bg-border absolute top-3.5 right-[calc(50%+1.125rem)] left-[calc(-50%+1.125rem)] h-0.5 -translate-y-1/2 overflow-hidden rounded-full">
+                  <span className={cn("bg-primary block h-full transition-all duration-500", i <= step ? "w-full" : "w-0")} />
+                </span>
+              )}
+              <button
+                type="button"
+                disabled={!jumpable}
+                onClick={() => onJump(i)}
+                aria-current={current ? "step" : undefined}
+                aria-label={`${s.label}${done ? " (done)" : ""}`}
+                className={cn("group relative flex flex-col items-center gap-1.5 rounded-md outline-none", jumpable && "cursor-pointer")}
+              >
+                <span
+                  className={cn(
+                    "bg-background text-muted-foreground flex size-7 items-center justify-center rounded-full border-2 text-xs font-semibold transition-colors group-focus-visible:ring-ring/50 group-focus-visible:ring-[3px]",
+                    current && "border-primary bg-primary text-primary-foreground ring-primary/20 ring-4",
+                    done && "border-primary bg-primary text-primary-foreground",
+                    jumpable && !current && "group-hover:border-primary/70",
+                  )}
+                >
+                  {done ? <Check className="size-3.5" strokeWidth={3} /> : i + 1}
+                </span>
+                <span className={cn("hidden text-xs whitespace-nowrap sm:block", current ? "text-foreground font-medium" : "text-muted-foreground", jumpable && "group-hover:text-foreground")}>{s.label}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }

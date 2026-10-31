@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CircleCheck, CircleDashed, Copy, LayoutDashboard, Library, LoaderCircle, RefreshCw, Tv, UserPlus } from "lucide-react";
+import { ArrowRight, CircleCheck, CircleDashed, Copy, LayoutDashboard, Library, LoaderCircle, MonitorSmartphone, PartyPopper, RefreshCw, Tv, UserPlus, Users } from "lucide-react";
 import { QrCode } from "@/components/qr-code";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
@@ -19,6 +19,7 @@ export function PeopleStep({ onNext, onBack }: StepProps) {
   const pending = (household.data?.invitations ?? []).some((i) => i.status === "pending");
   return (
     <StepCard
+      icon={Users}
       title="Invite people"
       description="Everyone who watches gets their own account, with their own progress and My List. Invite them now or later from Members: Strata gives you a link to send them (it doesn't send email). You can mark kids' accounts and set content limits from Members once they've joined."
       onBack={onBack}
@@ -28,14 +29,29 @@ export function PeopleStep({ onNext, onBack }: StepProps) {
         </Button>
       }
     >
-      <div className="flex flex-col gap-4">
-        <div>
-          <Button variant="outline" onClick={() => setInviting(true)}>
+      {household.data && !household.data.invitations.length ? (
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center">
+          <div className="bg-primary/12 text-brand-text flex size-11 items-center justify-center rounded-full">
+            <UserPlus className="size-5" />
+          </div>
+          <div className="space-y-1">
+            <p className="font-medium">No one invited yet</p>
+            <p className="text-muted-foreground max-w-sm text-sm">Family, housemates, friends: send each a link and they make their own account in your household.</p>
+          </div>
+          <Button onClick={() => setInviting(true)}>
             <UserPlus /> Invite someone
           </Button>
         </div>
-        <InvitationList compact />
-      </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div>
+            <Button variant="outline" onClick={() => setInviting(true)}>
+              <UserPlus /> Invite someone
+            </Button>
+          </div>
+          <InvitationList compact />
+        </div>
+      )}
       <InviteDialog open={inviting} onOpenChange={setInviting} householdName={household.data?.name} />
     </StepCard>
   );
@@ -63,8 +79,9 @@ export function DevicesStep({ info, onNext, onBack }: StepProps) {
   };
   return (
     <StepCard
+      icon={MonitorSmartphone}
       title="Connect your devices"
-      description="Install Strata on your iPhone, iPad, Mac or Apple TV, then pick this server."
+      description={info.mode === "cloud" ? "Install Strata on your iPhone, iPad, Mac or Apple TV, then add this address." : "Install Strata on your iPhone, iPad, Mac or Apple TV, then pick this server."}
       onBack={onBack}
       actions={
         <Button size="lg" onClick={onNext}>
@@ -87,7 +104,7 @@ export function DevicesStep({ info, onNext, onBack }: StepProps) {
           </div>
           <ol className="text-muted-foreground list-decimal space-y-1.5 pl-5 text-sm">
             {info.mode !== "cloud" && <li>On your home network, “{info.serverName}” shows up in the app by itself (Bonjour).</li>}
-            <li>Otherwise, enter the address above, or scan the code with your iPhone's camera.</li>
+            <li>{info.mode === "cloud" ? "Enter" : "Otherwise, enter"} the address above, or scan the code with your iPhone's camera.</li>
             <li>Sign in with your account. Everyone you invite signs in with their own.</li>
           </ol>
           <div className="flex gap-3 rounded-lg border p-3">
@@ -137,8 +154,9 @@ export function DoneStep({ info, onBack, onFinish }: Omit<StepProps, "onNext"> &
 
   return (
     <StepCard
-      title="You're set"
-      description="Strata scans your folders and matches files in the background. Here's where things stand."
+      icon={PartyPopper}
+      title="You're all set"
+      description={info.mode === "cloud" ? "Here's where things stand. Anything left can be done later in Settings." : "Strata scans your folders and matches files in the background. Here's where things stand."}
       onBack={onBack}
       actions={
         <>
@@ -161,7 +179,7 @@ export function DoneStep({ info, onBack, onFinish }: Omit<StepProps, "onNext"> &
         </div>
       ) : (
         <ul className="divide-y rounded-lg border">
-          <Summary done label="Admin account" detail="Created" />
+          <Summary done label={info.mode === "cloud" ? "Your account" : "Admin account"} detail="Created" />
           <Summary done={s.secrets.tmdbApiKey} label="TMDB" detail={s.secrets.tmdbApiKey ? "Connected" : "Not set — add it in Settings › Provider keys"} />
           <Summary
             done={torbox}
@@ -196,10 +214,12 @@ export function DoneStep({ info, onBack, onFinish }: Omit<StepProps, "onNext"> &
               return `${members} member${members === 1 ? "" : "s"}${invited ? ` · ${invited} invited` : ""}`;
             })()}
           />
-          <Summary done label="Server name" detail={s.settings.serverName} />
+          {info.mode !== "cloud" && <Summary done label="Server name" detail={s.settings.serverName} />}
         </ul>
       )}
-      <p className="text-muted-foreground text-sm">Unmatched files can be fixed from Library. Keys, folders and playback limits live in Settings. Active streams and background jobs show on the Overview.</p>
+      <p className="text-muted-foreground text-sm">
+        {info.mode === "cloud" ? "Keys and playback limits live in Settings; people in Members." : "Unmatched files can be fixed from Library. Keys, folders and playback limits live in Settings. Active streams and background jobs show on the Overview."}
+      </p>
     </StepCard>
   );
 }

@@ -174,6 +174,11 @@ export const authClient = {
     await call(ba.passkey.deletePasskey({ id }) as Promise<BaResult<unknown>>);
   },
 
+  /** Cloud: a new account, which the server gives a household of its own (signed in, in it). */
+  async createAccount(input: { email: string; username: string; name: string; password: string }) {
+    await call(ba.$fetch<unknown>("/sign-up/email", { method: "POST", body: input }) as Promise<BaResult<unknown>>);
+  },
+
   /** Joins by invitation: a new account, the invitation accepted, its household opened. */
   async signUp(input: { email: string; username: string; name: string; password: string; invitationId: string }) {
     await call(ba.$fetch<unknown>("/sign-up/email", { method: "POST", body: input }) as Promise<BaResult<unknown>>);

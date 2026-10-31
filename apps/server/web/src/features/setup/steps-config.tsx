@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, LoaderCircle, TriangleAlert } from "lucide-react";
+import { ArrowRight, LoaderCircle, Plug, Server, TriangleAlert } from "lucide-react";
 import { api, errorMessage } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
 import type { ServerInfo, Settings, SettingsResponse } from "@/lib/types";
@@ -38,8 +38,9 @@ export function ServicesStep({ onNext, onBack }: StepProps) {
   const secrets = settings.data?.secrets;
   return (
     <StepCard
+      icon={Plug}
       title="Connect your services"
-      description="Each key is checked with its provider, then stored encrypted on this server. You can change them later in Settings."
+      description="Strata builds your catalog from TMDB and plays from TorBox, with your own keys. Each is checked with its provider, then stored encrypted. You can change them later in Settings."
       onBack={onBack}
       actions={
         <Button size="lg" onClick={onNext} variant={secrets?.tmdbApiKey ? "default" : "outline"}>
@@ -138,6 +139,7 @@ export function BasicsStep({ info, onNext, onBack }: StepProps) {
 
   return (
     <StepCard
+      icon={Server}
       title="Server basics"
       description="How this server shows up in the apps, and where your media lives."
       onBack={onBack}

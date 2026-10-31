@@ -1,4 +1,5 @@
 import { redactSecrets } from "./log";
+import { MODE } from "./mode";
 import { VERSION } from "./version";
 
 /**
@@ -36,7 +37,7 @@ export function reportError(scope: string, message: string, error?: unknown) {
     level: "error",
     logger: scope,
     release: `strata-server@${VERSION}`,
-    environment: process.env.STRATA_MODE ?? "home",
+    environment: MODE,
     message: { formatted: text },
     exception:
       error instanceof Error

@@ -11,6 +11,7 @@ import type { Db } from "../db";
 import { emailConfigured, sendEmail, simpleEmail } from "../email";
 import * as schema from "../db/schema";
 import { isAvatarImage } from "../avatars";
+import { isCloud } from "../mode";
 import { runtime } from "#runtime";
 
 const DAY_S = 24 * 60 * 60;
@@ -57,6 +58,16 @@ export function takeIssuedCode(captureId: string): string | undefined {
  *   `<address>/api/auth/callback/google`).
  * - Passkeys: a public HTTPS address (STRATA_PUBLIC_URL); browsers only allow them on HTTPS.
  */
+/** Cloud: the accounts with these emails run the server (STRATA_ADMIN_EMAILS, comma-separated). */
+export function isAdminEmail(email: string | null | undefined): boolean {
+  if (!isCloud || !email) return false;
+  const list = (process.env.STRATA_ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase());
+  return list.includes(email.toLowerCase());
+}
+
+const ownsHousehold = async (db: Db, userId: string) =>
+  (await db.select({ id: schema.member.id }).from(schema.member).where(and(eq(schema.member.userId, userId), like(schema.member.role, "%owner%"))).limit(1)).length > 0;
+
 export function signInMethods() {
   const google = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET } : null;
   let passkeys: { rpID: string; origin: string } | null = null;
@@ -173,6 +184,9 @@ export function createAuth(options: AuthOptions) {
           return;
         }
         if (ctx.path !== "/sign-up/email") return;
+        // Cloud: anyone may sign up and gets a household of their own (see `after`). With an
+        // invitation's id they join that household instead, checked as below.
+        if (isCloud && !(ctx.body as { invitationId?: unknown } | undefined)?.invitationId) return;
         // The invitation's id is the proof (it's in the link; no mail is sent): an email
         // alone, which anyone might know, doesn't open sign-up.
         const body = (ctx.body ?? {}) as { email?: unknown; invitationId?: unknown };
@@ -193,6 +207,17 @@ export function createAuth(options: AuthOptions) {
       }),
       after: createAuthMiddleware(async (ctx) => {
         const adapter = ctx.context.internalAdapter;
+        // Cloud: a new account without an invitation owns a new household, named after them
+        // (onboarding lets them rename it), and the sign-in opens in it.
+        if (ctx.path === "/sign-up/email") {
+          const created = ctx.context.newSession;
+          if (!isCloud || !created || (ctx.body as { invitationId?: unknown } | undefined)?.invitationId) return;
+          const household = await auth.api.createOrganization({
+            body: { name: `${created.user.name}'s home`, slug: `home-${crypto.randomUUID().slice(0, 8)}`, userId: created.user.id },
+          });
+          if (household) await adapter.updateSession(created.session.token, { activeOrganizationId: household.id });
+          return;
+        }
         // The TV joins the household the approving phone is in: noted at approval…
         if (ctx.path === "/device/approve") {
           const userCode = String((ctx.body as { userCode?: unknown } | undefined)?.userCode ?? "").toUpperCase();
@@ -251,6 +276,12 @@ export function createAuth(options: AuthOptions) {
     },
     databaseHooks: {
       user: {
+        create: {
+          // Cloud: the server's admins are named by email (STRATA_ADMIN_EMAILS).
+          before: async (user) => {
+            if (isAdminEmail(user.email)) return { data: { ...user, role: "admin" } };
+          },
+        },
         delete: {
           // Whoever deletes it: an owner hands their household on first (unless nobody
           // else is in it), and the server's only admin stays.
@@ -286,6 +317,11 @@ export function createAuth(options: AuthOptions) {
         create: {
           // A new sign-in opens in the account's household when it has just one.
           before: async (session) => {
+            // …and an account whose email was named after it signed up becomes one on its next sign-in.
+            if (isCloud && process.env.STRATA_ADMIN_EMAILS) {
+              const [u] = await db.select({ email: schema.user.email, role: schema.user.role }).from(schema.user).where(eq(schema.user.id, session.userId));
+              if (u && u.role !== "admin" && isAdminEmail(u.email)) await db.update(schema.user).set({ role: "admin" }).where(eq(schema.user.id, session.userId));
+            }
             if ((session as { activeOrganizationId?: string | null }).activeOrganizationId) return;
             const rows = await db.select({ id: schema.member.organizationId }).from(schema.member).where(eq(schema.member.userId, session.userId)).limit(2);
             if (rows.length === 1) return { data: { ...session, activeOrganizationId: rows[0]!.id } };
@@ -320,8 +356,8 @@ export function createAuth(options: AuthOptions) {
     },
     emailAndPassword: {
       enabled: true,
-      // Open only to someone with a pending invitation (see `hooks`); the first account
-      // comes from setup (routes/setup.ts).
+      // Home servers: open only to someone with a pending invitation (see `hooks`); the
+      // first account comes from setup (routes/auth.ts). Cloud: open to anyone.
       disableSignUp: false,
       minPasswordLength: 8,
       maxPasswordLength: 256,
@@ -408,8 +444,9 @@ export function createAuth(options: AuthOptions) {
         invitationExpiresIn: 7 * DAY_S,
         requireEmailVerificationOnInvitation: false,
         sendInvitationEmail: async () => {},
-        // Households are made by the server admin (or setup), never by anyone signed in.
-        allowUserToCreateOrganization: async (user) => (user as { role?: string }).role === "admin",
+        // Households are made by the server admin (or setup); in the cloud, also one by each
+        // new account (its own, see the sign-up `after` hook).
+        allowUserToCreateOrganization: async (user) => (user as { role?: string }).role === "admin" || (isCloud && !(await ownsHousehold(db, user.id))),
         creatorRole: "owner",
         membershipLimit: 50,
         schema: {

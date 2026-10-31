@@ -23,7 +23,7 @@ describe("setup and auth", () => {
   };
 
   test("a server without Google keys or an HTTPS address offers only passwords", async () => {
-    expect((await json(await server.request("/api/info"))).signIn).toEqual({ google: false, passkey: false, passwordReset: false });
+    expect((await json(await server.request("/api/info"))).signIn).toEqual({ google: false, passkey: false, passwordReset: false, signUp: false });
     expect((await server.request("/api/auth/sign-in/social", { method: "POST", json: { provider: "google" } })).status).not.toBe(200);
     expect((await server.request("/api/auth/passkey/generate-authenticate-options")).status).toBe(404);
   });

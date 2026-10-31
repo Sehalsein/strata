@@ -15,7 +15,7 @@ export interface ServerInfo {
   /** "cloud": hosted, without local folders, home-network join, Bonjour or self-update. */
   mode: "home" | "cloud";
   /** Ways in besides a password that this server is set up for. */
-  signIn?: { google: boolean; passkey: boolean; passwordReset?: boolean };
+  signIn?: { google: boolean; passkey: boolean; passwordReset?: boolean; /** Cloud: anyone may make an account (and gets a household of their own). */ signUp?: boolean };
 }
 
 /** A passkey saved for the signed-in account. */
