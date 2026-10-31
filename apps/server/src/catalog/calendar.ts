@@ -50,7 +50,7 @@ export class CalendarService {
     const today = Math.floor(now / 1000 / DAY_S) * DAY_S;
     const from = today - CALENDAR_PAST_DAYS * DAY_S;
     const to = today + (CALENDAR_FUTURE_DAYS + 1) * DAY_S;
-    const listed = this.progress.watchlist(profileId).filter((r) => r.type === "show").map((r) => r.tmdbId);
+    const listed = (await this.progress.watchlist(profileId)).filter((r) => r.type === "show").map((r) => r.tmdbId);
     const showIds = (await Promise.all(listed.map(async (id) => ((await this.allowed(profileId, id).catch(() => false)) ? id : null)))).filter((id): id is number => id !== null);
     await this.anime?.ids.ready().catch(() => {});
 
@@ -64,7 +64,13 @@ export class CalendarService {
       Promise.all(other.map((s) => this.tmdbEpisodes(s, isoDate(from), isoDate(to)).catch(() => [] as CalendarEpisode[]))).then((l) => l.flat()),
     ]);
     const key = (e: CalendarEpisode) => e.airsAt ?? `${e.airDate}T23:59:59Z`;
-    return [...fromAnilist, ...fromTmdb].sort((a, b) => key(a).localeCompare(key(b)) || a.title.localeCompare(b.title));
+    const all = [...fromAnilist, ...fromTmdb];
+    await Promise.all(
+      all.map(async (e) => {
+        e.available = e.season !== null && (await this.library.filesFor("episode", e.tmdbId, e.season, e.episode)).length > 0;
+      }),
+    );
+    return all.sort((a, b) => key(a).localeCompare(key(b)) || a.title.localeCompare(b.title));
   }
 
   private async animeEpisodes(shows: TmdbShow[], entries: Map<number, AnimeEntry[]>, from: number, to: number): Promise<CalendarEpisode[]> {
@@ -114,7 +120,7 @@ export class CalendarService {
       name,
       airsAt,
       airDate,
-      available: season !== null && this.library.filesFor("episode", show.id, season, episode).length > 0,
+      available: false, // filled in by episodes()
     };
   }
 }

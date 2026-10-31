@@ -87,15 +87,15 @@ export class ContentFilter {
   ) {}
 
   /** Max age for a profile, or null when it has no limit. */
-  maxAge(profileId: number): number | null {
-    const row = this.db.select({ limit: profiles.contentLimit }).from(profiles).where(eq(profiles.id, profileId)).get();
+  async maxAge(profileId: number): Promise<number | null> {
+    const [row] = await this.db.select({ limit: profiles.contentLimit }).from(profiles).where(eq(profiles.id, profileId));
     const limit = row?.limit ?? "none";
     // A value we don't know (shouldn't happen: writes are validated) means the strictest limit.
     return limit in MAX_AGE ? MAX_AGE[limit as ContentLimit] : MAX_AGE.little;
   }
 
   async allowed(profileId: number, type: TitleType, tmdbId: number): Promise<boolean> {
-    const maxAge = this.maxAge(profileId);
+    const maxAge = await this.maxAge(profileId);
     if (maxAge === null) return true;
     return this.fits(maxAge, type, tmdbId);
   }
@@ -107,7 +107,7 @@ export class ContentFilter {
 
   /** Keeps only cards the profile may see. Lookups are cached, a few at a time. */
   async filter<T extends { type: TitleType; tmdbId: number }>(profileId: number, cards: T[]): Promise<T[]> {
-    const maxAge = this.maxAge(profileId);
+    const maxAge = await this.maxAge(profileId);
     if (maxAge === null || cards.length === 0) return cards;
     const keep = new Array<boolean>(cards.length).fill(false);
     let next = 0;

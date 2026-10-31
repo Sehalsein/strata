@@ -19,7 +19,7 @@ export type Env = {
 export const requireAuth: MiddlewareHandler<Env> = createMiddleware<Env>(async (c, next) => {
   const header = c.req.header("authorization");
   const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
-  const session = token ? c.var.services.auth.verify(token) : null;
+  const session = token ? await c.var.services.auth.verify(token) : null;
   if (!session) throw new HTTPException(401, { message: "Not signed in" });
   c.set("session", session);
   await next();

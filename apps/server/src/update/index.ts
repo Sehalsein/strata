@@ -39,7 +39,7 @@ export function createUpdater(opts: {
     feedBaseUrl: UPDATE_BASE_URL,
     settings: () => opts.settings.get(),
     activeSessions: opts.activeSessions,
-    backupDb: () => (existsSync(opts.dbPath) ? backupDatabase(opts.db.$client, opts.dbPath, opts.backupsDir, `pre-update-v${VERSION}`) : null),
+    backupDb: () => backupDatabase(opts.db, opts.backupsDir, `pre-update-v${VERSION}`),
     fetch: opts.fetch,
   });
 }

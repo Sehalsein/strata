@@ -1,18 +1,18 @@
-import { eq } from "drizzle-orm";
-import type { Db } from "../db";
-import { tmdbCache } from "../db/schema";
 import { logger } from "../log";
+import type { ApiCache } from "./apiCache";
 
 const log = logger("omdb");
 const BASE = "https://www.omdbapi.com/";
 const FETCH_TIMEOUT_MS = 5_000;
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
-/** OMDb's free keys allow 1,000 requests a day, so answers are kept a while. */
-const TITLE_TTL_MS = 3 * DAY;
-const SEASON_TTL_MS = DAY;
-/** A lookup that failed (OMDb down, key over its limit) isn't retried for this long. */
+/** OMDb's free keys allow 1,000 requests a day, so answers are kept a while (ratings move slowly). */
+const TITLE_TTL_MS = 7 * DAY;
+const SEASON_TTL_MS = 3 * DAY;
+/** A lookup that failed (OMDb down) isn't retried for this long. */
 const FAILURE_TTL_MS = 10 * 60_000;
+/** Requests a day, a little under the free tier's 1,000, counted across every server. */
+export const OMDB_DAILY_BUDGET = 900;
 const IMDB_ID = /^tt\d{5,10}$/;
 
 export interface Ratings {
@@ -43,14 +43,13 @@ const percent = (value?: string) => (value && /^\d{1,3}%$/.test(value) ? Number(
 
 /**
  * OMDb: IMDb and Rotten Tomatoes ratings by IMDb id, and IMDb ratings per episode.
- * Optional: with no key every lookup answers null. Cached in tmdb_cache under "omdb:".
+ * Optional: with no key every lookup answers null. Answers are cached ("omdb:" keys), and
+ * requests are counted per UTC day: past the budget, or once OMDb says the key's limit is
+ * reached, nothing more is asked until the next day (cached answers keep showing).
  */
 export class Omdb {
-  private inflight = new Map<string, Promise<unknown>>();
-  private failures = new Map<string, number>();
-
   constructor(
-    private readonly db: Db,
+    private readonly cache: ApiCache,
     private readonly getKey: () => string | undefined,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
@@ -98,44 +97,33 @@ export class Omdb {
     const key = this.getKey();
     if (!key) return null;
     const cacheKey = "omdb:" + new URLSearchParams(Object.entries(params).sort()).toString();
-    const row = this.db.select().from(tmdbCache).where(eq(tmdbCache.key, cacheKey)).get();
-    if (row && Date.now() - row.fetchedAt < ttl) return JSON.parse(row.json) as T;
-    if (Date.now() - (this.failures.get(cacheKey) ?? 0) < FAILURE_TTL_MS) return row ? (JSON.parse(row.json) as T) : null;
-
-    const pending = (this.inflight.get(cacheKey) as Promise<T | null> | undefined) ?? this.fetch<T>(params, key, cacheKey);
-    const fresh = await pending;
-    // A failed refresh keeps the old copy.
-    return fresh ?? (row ? (JSON.parse(row.json) as T) : null);
+    try {
+      return await this.cache.get<T>(cacheKey, { ttl, maxStale: Infinity, backoff: FAILURE_TTL_MS }, () => this.fetch<T>(params, key));
+    } catch {
+      return null;
+    }
   }
 
-  private fetch<T extends { Response: string; Error?: string }>(params: Record<string, string>, key: string, cacheKey: string): Promise<T | null> {
-    const promise = (async () => {
-      try {
-        const res = await this.fetchImpl(`${BASE}?${new URLSearchParams({ ...params, apikey: key })}`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-        const text = await res.text();
-        const body = (res.headers.get("Content-Type")?.includes("json") || text.startsWith("{") ? JSON.parse(text) : { Response: "False" }) as T;
-        // "Incorrect IMDb ID" / "Series or season not found" are answers worth caching;
-        // a bad key or the daily limit is not.
-        if (!res.ok || (body.Response === "False" && !/not found|incorrect imdb id/i.test(body.Error ?? ""))) {
-          log.warn(`OMDb ${params.i}${params.Season ? ` S${params.Season}` : ""} failed: ${res.status} ${body.Error ?? ""}`.trim());
-          this.failed(cacheKey);
-          return null;
-        }
-        const fetchedAt = Date.now();
-        this.db.insert(tmdbCache).values({ key: cacheKey, json: text, fetchedAt }).onConflictDoUpdate({ target: tmdbCache.key, set: { json: text, fetchedAt } }).run();
-        return body;
-      } catch (err) {
-        log.warn(`OMDb ${params.i} failed: ${(err as Error).message}`);
-        this.failed(cacheKey);
-        return null;
-      }
-    })().finally(() => this.inflight.delete(cacheKey));
-    this.inflight.set(cacheKey, promise);
-    return promise;
-  }
-
-  private failed(cacheKey: string) {
-    this.failures.set(cacheKey, Date.now());
-    if (this.failures.size > 1_000) this.failures.delete(this.failures.keys().next().value!);
+  private async fetch<T extends { Response: string; Error?: string }>(params: Record<string, string>, key: string): Promise<T> {
+    const day = new Date().toISOString().slice(0, 10);
+    const usageKey = `omdb:usage:${day}`;
+    const used = ((await this.cache.read(usageKey))?.value as { used: number; blocked?: boolean } | undefined) ?? { used: 0 };
+    if (used.blocked || used.used >= OMDB_DAILY_BUDGET) throw new Error("OMDb daily limit reached");
+    await this.cache.write(usageKey, { used: used.used + 1 });
+    const res = await this.fetchImpl(`${BASE}?${new URLSearchParams({ ...params, apikey: key })}`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    const text = await res.text();
+    const body = (res.headers.get("Content-Type")?.includes("json") || text.startsWith("{") ? JSON.parse(text) : { Response: "False" }) as T;
+    if (/limit reached/i.test(body.Error ?? "")) {
+      log.warn("OMDb says the key's daily limit is reached; no more lookups until tomorrow (UTC)");
+      await this.cache.write(usageKey, { used: used.used + 1, blocked: true });
+      throw new Error("OMDb daily limit reached");
+    }
+    // "Incorrect IMDb ID" / "Series or season not found" are answers worth caching;
+    // a bad key or an outage is not.
+    if (!res.ok || (body.Response === "False" && !/not found|incorrect imdb id/i.test(body.Error ?? ""))) {
+      log.warn(`OMDb ${params.i}${params.Season ? ` S${params.Season}` : ""} failed: ${res.status} ${body.Error ?? ""}`.trim());
+      throw new Error(`OMDb ${res.status}`);
+    }
+    return body;
   }
 }

@@ -19,23 +19,23 @@ import { body, intParam, optionalInt, requireAdmin, requireAuth, type Env } from
 export const adminRoutes = new Hono<Env>()
   .use(requireAuth, requireAdmin)
 
-  .get("/devices", (c) => {
+  .get("/devices", async (c) => {
     const current = c.var.session.tokenHash;
-    return c.json({ items: c.var.services.auth.devices().map((d) => ({ ...d, isCurrent: d.id === current })) });
+    return c.json({ items: (await c.var.services.auth.devices()).map((d) => ({ ...d, isCurrent: d.id === current })) });
   })
 
   // Signs a device out: its token stops working and the app returns to Connect.
-  .delete("/devices/:id", (c) => {
+  .delete("/devices/:id", async (c) => {
     const id = c.req.param("id");
     if (id === c.var.session.tokenHash) throw new HTTPException(409, { message: "That's this browser. Use Sign out instead." });
     if (!/^[0-9a-f]{64}$/.test(id)) throw new HTTPException(404, { message: "No such device" });
-    c.var.services.auth.logout(id);
+    await c.var.services.auth.logout(id);
     return c.json({ ok: true });
   })
 
   .get("/status", async (c) => {
     const s = c.var.services;
-    const sessionDto = sessionDtoFor(s);
+    const sessionDto = await sessionDtoFor(s);
     const ff = s.ffmpeg();
     return c.json({
       version: VERSION,
@@ -48,8 +48,8 @@ export const adminRoutes = new Hono<Env>()
       tmdb: { configured: s.tmdb.configured },
       torbox: { configured: !!s.torbox() },
       jobs: s.jobs.status(),
-      sessions: s.sessions.list().map(sessionDto),
-      library: s.library.stats(),
+      sessions: await Promise.all(s.sessions.list().map(sessionDto)),
+      library: await s.library.stats(),
       // Read-only: port and bind host come from the CLI/env (see README).
       network: { host: s.config.host, port: s.config.port, urls: dashboardUrls(s.config.host, s.config.port), bonjour: s.bonjour.active },
       update: (({ state, updateAvailable, latest, lastError }) => ({ state, updateAvailable, latestVersion: latest?.version ?? null, lastError }))(s.updater.status()),
@@ -63,7 +63,7 @@ export const adminRoutes = new Hono<Env>()
 
   .patch("/settings", async (c) => {
     const patch = await body(c, settingsSchema.partial());
-    return c.json({ settings: c.var.services.settings.update(patch) });
+    return c.json({ settings: await c.var.services.settings.update(patch) });
   })
 
   // Keys are verified against the provider before they're stored.
@@ -82,7 +82,7 @@ export const adminRoutes = new Hono<Env>()
         }
       }
     }
-    s.settings.setSecret(key, value);
+    await s.settings.setSecret(key, value);
     if (value && key === "torboxApiKey") void s.jobs.run("syncTorbox");
     if (value && key === "tmdbApiKey") void s.jobs.run("matchPending");
     return c.json({ ok: true });
@@ -121,12 +121,12 @@ export const adminRoutes = new Hono<Env>()
     return c.json({ ok: true }, 202);
   })
 
-  .get("/files", (c) => {
+  .get("/files", async (c) => {
     const status = z.enum(["pending", "matched", "unmatched", "manual", "ignored"]).optional().parse(c.req.query("status") || undefined);
     const provider = z.enum(["local", "torbox"]).optional().parse(c.req.query("provider") || undefined);
     const limit = Math.min(optionalInt(c.req.query("limit")) ?? 100, 500);
     const offset = optionalInt(c.req.query("offset")) ?? 0;
-    const { rows, total } = c.var.services.library.list({ status, provider, limit, offset });
+    const { rows, total } = await c.var.services.library.list({ status, provider, limit, offset });
     return c.json({
       total,
       items: rows.map(({ file: f, title, year }) => ({
@@ -147,18 +147,18 @@ export const adminRoutes = new Hono<Env>()
   .post("/files/:id/match", async (c) => {
     const input = await body(c, z.object({ type: z.enum(["movie", "show"]), tmdbId: z.number().int(), season: z.number().int().optional(), episode: z.number().int().optional() }));
     const id = intParam(c, "id");
-    if (!c.var.services.library.get(id)) throw new HTTPException(404, { message: "No such file" });
+    if (!await c.var.services.library.get(id)) throw new HTTPException(404, { message: "No such file" });
     await c.var.services.library.setManualMatch(id, input.type, input.tmdbId, input.season, input.episode);
     return c.json({ ok: true });
   })
 
-  .post("/files/:id/ignore", (c) => {
-    c.var.services.library.ignore(intParam(c, "id"));
+  .post("/files/:id/ignore", async (c) => {
+    await c.var.services.library.ignore(intParam(c, "id"));
     return c.json({ ok: true });
   })
 
-  .post("/files/:id/unignore", (c) => {
-    c.var.services.library.unignore(intParam(c, "id"));
+  .post("/files/:id/unignore", async (c) => {
+    await c.var.services.library.unignore(intParam(c, "id"));
     void c.var.services.jobs.run("matchPending");
     return c.json({ ok: true });
   })
@@ -174,7 +174,10 @@ export const adminRoutes = new Hono<Env>()
     });
   })
 
-  .get("/sessions", (c) => c.json({ items: c.var.services.sessions.list().map(sessionDtoFor(c.var.services)) }))
+  .get("/sessions", async (c) => {
+    const dto = await sessionDtoFor(c.var.services);
+    return c.json({ items: await Promise.all(c.var.services.sessions.list().map(dto)) });
+  })
   .delete("/sessions/:id", (c) => {
     c.var.services.sessions.stop(c.req.param("id"));
     return c.json({ ok: true });
@@ -182,14 +185,14 @@ export const adminRoutes = new Hono<Env>()
 
   .get("/logs", (c) => c.json({ items: recentLogs(Math.min(optionalInt(c.req.query("limit")) ?? 200, 1000)) }));
 
-function sessionDtoFor(services: Services) {
-  const profileNames = new Map(services.db.select({ id: profiles.id, name: profiles.name }).from(profiles).all().map((p) => [p.id, p.name]));
-  return (s: PlaybackSession) => ({
+async function sessionDtoFor(services: Services) {
+  const profileNames = new Map((await services.db.select({ id: profiles.id, name: profiles.name }).from(profiles)).map((p) => [p.id, p.name]));
+  return async (s: PlaybackSession) => ({
     id: s.id,
     profileId: s.profileId,
     profileName: profileNames.get(s.profileId) ?? null,
     fileId: s.fileId,
-    title: services.library.titleOf(s.target.mediaType === "movie" ? "movie" : "show", s.target.tmdbId),
+    title: await services.library.titleOf(s.target.mediaType === "movie" ? "movie" : "show", s.target.tmdbId),
     target: s.target,
     mode: s.plan.mode,
     reasons: s.plan.reasons,

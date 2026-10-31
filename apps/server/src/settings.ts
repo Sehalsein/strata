@@ -56,10 +56,16 @@ export type SecretKey = (typeof SECRET_KEYS)[number];
 
 /**
  * Settings live in the `settings` key/value table. Plain settings are stored as JSON;
- * secrets are sealed with the install's SecretBox and are never returned by the API.
+ * secrets (API keys) are sealed with the server's SecretBox (AES-256-GCM, its key kept
+ * outside the database) and are never returned by the API.
+ *
+ * Everything is read once at start (`load()`) and kept in memory, so reads stay cheap
+ * and synchronous; writes go to the database first. A cloud server, where another
+ * instance may change them, reloads every minute (`watch()`).
  */
 export class SettingsStore {
   private cache?: Settings;
+  private secrets = new Map<SecretKey, string>();
   private listeners = new Set<(s: Settings) => void>();
 
   constructor(
@@ -67,25 +73,45 @@ export class SettingsStore {
     private readonly box: SecretBox,
   ) {}
 
-  get(): Settings {
-    if (this.cache) return this.cache;
-    const rows = this.db.select().from(settingsTable).all();
+  /** Reads every setting and secret into memory. Call before using the store. */
+  async load(): Promise<void> {
+    const rows = await this.db.select().from(settingsTable);
     const raw: Record<string, unknown> = {};
+    const secrets = new Map<SecretKey, string>();
     for (const row of rows) {
-      if ((SECRET_KEYS as readonly string[]).includes(row.key)) continue;
+      if ((SECRET_KEYS as readonly string[]).includes(row.key)) {
+        try {
+          secrets.set(row.key as SecretKey, this.box.open(row.value, row.key));
+        } catch {
+          // Sealed with another key (a lost or replaced STRATA_SECRET_KEY): treated as unset.
+        }
+        continue;
+      }
       raw[row.key] = JSON.parse(row.value);
     }
+    const before = this.cache ? JSON.stringify(this.cache) : undefined;
     this.cache = settingsSchema.parse(raw);
+    this.secrets = secrets;
+    if (before !== undefined && before !== JSON.stringify(this.cache)) for (const fn of this.listeners) fn(this.cache);
+  }
+
+  /** Reloads every `intervalMs` (changes made by other servers sharing the database). */
+  watch(intervalMs = 60_000) {
+    setInterval(() => void this.load().catch(() => {}), intervalMs).unref?.();
+  }
+
+  get(): Settings {
+    if (!this.cache) throw new Error("SettingsStore.load() hasn't run");
     return this.cache;
   }
 
-  update(patch: Partial<Settings>): Settings {
+  async update(patch: Partial<Settings>): Promise<Settings> {
     const next = settingsSchema.parse({ ...this.get(), ...patch });
-    this.db.transaction((tx) => {
+    await this.db.transaction(async (tx) => {
       for (const [key, value] of Object.entries(patch)) {
         if (value === undefined) continue;
         const json = JSON.stringify(next[key as keyof Settings]);
-        tx.insert(settingsTable).values({ key, value: json }).onConflictDoUpdate({ target: settingsTable.key, set: { value: json } }).run();
+        await tx.insert(settingsTable).values({ key, value: json }).onConflictDoUpdate({ target: settingsTable.key, set: { value: json } });
       }
     });
     this.cache = next;
@@ -99,17 +125,17 @@ export class SettingsStore {
 
   getSecret(key: SecretKey): string | undefined {
     const env = { tmdbApiKey: process.env.TMDB_API_KEY, torboxApiKey: process.env.TORBOX_API_KEY, omdbApiKey: process.env.OMDB_API_KEY }[key];
-    if (env) return env;
-    const row = this.db.select().from(settingsTable).where(eq(settingsTable.key, key)).get();
-    return row ? this.box.open(row.value) : undefined;
+    return env || this.secrets.get(key);
   }
 
-  setSecret(key: SecretKey, value: string | null) {
+  async setSecret(key: SecretKey, value: string | null) {
     if (value === null || value === "") {
-      this.db.delete(settingsTable).where(eq(settingsTable.key, key)).run();
+      await this.db.delete(settingsTable).where(eq(settingsTable.key, key));
+      this.secrets.delete(key);
     } else {
-      const sealed = this.box.seal(value);
-      this.db.insert(settingsTable).values({ key, value: sealed }).onConflictDoUpdate({ target: settingsTable.key, set: { value: sealed } }).run();
+      const sealed = this.box.seal(value, key);
+      await this.db.insert(settingsTable).values({ key, value: sealed }).onConflictDoUpdate({ target: settingsTable.key, set: { value: sealed } });
+      this.secrets.set(key, value);
     }
     for (const fn of this.listeners) fn(this.get());
   }

@@ -120,7 +120,7 @@ test("AniList: identical lookups share one request, failures back off", async ()
   const { startTestServer } = await import("./helpers");
   const server = await startTestServer();
   let calls = 0;
-  const anilist = new Anilist(server.services.db, (async () => {
+  const anilist = new Anilist(server.services.cache, (async () => {
     calls++;
     return new Response("busy", { status: 500 });
   }) as unknown as typeof fetch);
@@ -137,7 +137,7 @@ describe("Kitsu", () => {
     const { Kitsu } = await import("../src/catalog/anime/kitsu");
     const { startTestServer } = await import("./helpers");
     const server = await startTestServer();
-    const kitsu = new Kitsu(server.services.db, (async (url: string) => {
+    const kitsu = new Kitsu(server.services.cache, (async (url: string) => {
       seen.push(decodeURIComponent(String(url)));
       return Response.json(body);
     }) as unknown as typeof fetch);

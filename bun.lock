@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "hbo",
@@ -10,8 +11,9 @@
     },
     "apps/server": {
       "name": "@strata/server",
-      "version": "0.1.0",
+      "version": "0.1.4",
       "dependencies": {
+        "@electric-sql/pglite": "0.5.14",
         "drizzle-orm": "^0.45.2",
         "hono": "^4.13",
         "zod": "^3.25",
@@ -23,6 +25,8 @@
     },
   },
   "packages": {
+    "@electric-sql/pglite": ["@electric-sql/pglite@0.5.14", "", {}, "sha512-aAQe7iArcFB2w1xtx91l3l9trxhMzD6aZf+WnosSHNhwgp70EJz80Igw/bHnW14fUEFYWPBoQ1sGom8Xc0Jttg=="],
+
     "@strata/server": ["@strata/server@workspace:apps/server"],
 
     "@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],

@@ -17,15 +17,15 @@ describe("TorBox housekeeping", () => {
     const hk = new TorboxHousekeeping(server.services.db, server.services.library, () => now);
     const at = (daysAgo: number) => (now = 100 * DAY - daysAgo * DAY);
 
-    at(20); hk.recordAdded(1, "a".repeat(40), "Stale");
-    at(20); hk.recordAdded(2, "b".repeat(40), "Played lately");
-    at(2); hk.recordPlayed(2);
-    at(2); hk.recordAdded(3, "c".repeat(40), "Added lately");
-    at(20); hk.recordAdded(4, "d".repeat(40), "Streaming now");
+    at(20); await hk.recordAdded(1, "a".repeat(40), "Stale");
+    at(20); await hk.recordAdded(2, "b".repeat(40), "Played lately");
+    at(2); await hk.recordPlayed(2);
+    at(2); await hk.recordAdded(3, "c".repeat(40), "Added lately");
+    at(20); await hk.recordAdded(4, "d".repeat(40), "Streaming now");
     at(0);
 
-    at(20); hk.recordAdded(5, "e".repeat(40), "Id reused");
-    at(20); hk.recordAdded(6, "f".repeat(40), "Already gone");
+    at(20); await hk.recordAdded(5, "e".repeat(40), "Id reused");
+    at(20); await hk.recordAdded(6, "f".repeat(40), "Already gone");
     at(0);
 
     const remote: Record<number, string> = { 1: "a".repeat(40), 4: "d".repeat(40), 5: "9".repeat(40) };
@@ -44,7 +44,7 @@ describe("TorBox housekeeping", () => {
     // torrent and id 6 is gone: both are forgotten, never deleted. Hand-added torrents
     // aren't recorded at all, so they can't be removed.
     expect(deleted).toEqual([1]);
-    expect(hk.count()).toBe(3); // 2 (played lately), 3 (added lately), 4 (streaming)
+    expect(await hk.count()).toBe(3); // 2 (played lately), 3 (added lately), 4 (streaming)
   });
 
   test("0 days keeps everything", async () => {

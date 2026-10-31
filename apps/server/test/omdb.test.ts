@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { openDatabase } from "../src/db";
-import { tmdbCache } from "../src/db/schema";
+import { apiCache as tmdbCache } from "../src/db/schema";
+import { ApiCache } from "../src/catalog/apiCache";
 import { Omdb } from "../src/catalog/omdb";
 import { fakeTmdb, startTestServer, type TestServer } from "./helpers";
 
@@ -31,9 +32,9 @@ const fetchBoth = (async (input: string | URL | Request, init?: RequestInit) => 
 }) as typeof fetch;
 
 test("OMDb: IMDb and Rotten Tomatoes ratings, episode ratings, cached", async () => {
-  const db = openDatabase(":memory:");
+  const db = await openDatabase("memory");
   omdbCalls = 0;
-  const omdb = new Omdb(db, () => "omdb-key", fetchBoth);
+  const omdb = new Omdb(new ApiCache(db), () => "omdb-key", fetchBoth);
   expect(await omdb.ratings("tt1254207")).toEqual({ imdb: 6.4, rottenTomatoes: 88 });
   expect(await omdb.ratings("tt1254207")).toEqual({ imdb: 6.4, rottenTomatoes: 88 });
   expect(omdbCalls).toBe(1); // second answer from the cache
@@ -47,19 +48,19 @@ test("OMDb: IMDb and Rotten Tomatoes ratings, episode ratings, cached", async ()
 });
 
 test("OMDb: no key means no ratings and no requests; a bad key isn't cached", async () => {
-  const db = openDatabase(":memory:");
+  const db = await openDatabase("memory");
   omdbCalls = 0;
-  expect(await new Omdb(db, () => undefined, fetchBoth).ratings("tt1254207")).toBeNull();
+  expect(await new Omdb(new ApiCache(db), () => undefined, fetchBoth).ratings("tt1254207")).toBeNull();
   expect(omdbCalls).toBe(0);
-  expect(await new Omdb(db, () => "wrong", fetchBoth).ratings("tt1254207")).toBeNull();
-  expect(db.select().from(tmdbCache).all()).toHaveLength(0);
+  expect(await new Omdb(new ApiCache(db), () => "wrong", fetchBoth).ratings("tt1254207")).toBeNull();
+  expect((await db.select().from(tmdbCache)).filter((r) => !r.key.startsWith("omdb:usage:"))).toHaveLength(0);
 });
 
 test("OMDb: OMDb down keeps the last answer", async () => {
-  const db = openDatabase(":memory:");
-  expect(await new Omdb(db, () => "omdb-key", fetchBoth).ratings("tt1254207")).toEqual({ imdb: 6.4, rottenTomatoes: 88 });
-  db.update(tmdbCache).set({ fetchedAt: 0 }).run();
-  const down = new Omdb(db, () => "omdb-key", (async () => new Response("down", { status: 503 })) as unknown as typeof fetch);
+  const db = await openDatabase("memory");
+  expect(await new Omdb(new ApiCache(db), () => "omdb-key", fetchBoth).ratings("tt1254207")).toEqual({ imdb: 6.4, rottenTomatoes: 88 });
+  await db.update(tmdbCache).set({ fetchedAt: 0 });
+  const down = new Omdb(new ApiCache(db), () => "omdb-key", (async () => new Response("down", { status: 503 })) as unknown as typeof fetch);
   expect(await down.ratings("tt1254207")).toEqual({ imdb: 6.4, rottenTomatoes: 88 });
 });
 
@@ -67,7 +68,7 @@ let server: TestServer;
 let token: string;
 beforeAll(async () => {
   server = await startTestServer(fetchBoth);
-  await server.request("/api/setup/admin", { method: "POST", json: { username: "admin", password: "correct-horse" } });
+  await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "admin", password: "correct-horse" } });
   const res = await server.request("/api/auth/login", { method: "POST", json: { username: "admin", password: "correct-horse" } });
   token = ((await res.json()) as { token: string }).token;
 });

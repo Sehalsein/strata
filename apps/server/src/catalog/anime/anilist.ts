@@ -1,7 +1,5 @@
-import { eq } from "drizzle-orm";
-import type { Db } from "../../db";
-import { tmdbCache } from "../../db/schema";
 import { logger } from "../../log";
+import type { ApiCache } from "../apiCache";
 
 const log = logger("anilist");
 const ENDPOINT = "https://graphql.anilist.co";
@@ -100,11 +98,9 @@ export class Anilist {
   private queue: Promise<unknown> = Promise.resolve();
   private last = 0;
   private pending = 0;
-  private inFlight = new Map<string, Promise<unknown>>();
-  private failures = new Map<string, number>();
 
   constructor(
-    private readonly db: Db,
+    private readonly cache: ApiCache,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
@@ -157,26 +153,21 @@ export class Anilist {
   }
 
   private async request<T>(query: string, variables: Record<string, unknown>, cacheKey: string, ttl: number): Promise<T | null> {
-    const cached = this.db.select().from(tmdbCache).where(eq(tmdbCache.key, cacheKey)).get();
-    if (cached && Date.now() - cached.fetchedAt < ttl) return JSON.parse(cached.json) as T;
-    // Past a month a cached answer is too old to stand in for a failed refresh.
-    const stale = cached && Date.now() - cached.fetchedAt < MAX_STALE_MS ? (JSON.parse(cached.json) as T) : null;
-
-    const failedAt = this.failures.get(cacheKey);
-    if (failedAt && Date.now() - failedAt < FAILURE_TTL_MS) return stale;
-    // The same lookup already on its way: share it.
-    const sharing = this.inFlight.get(cacheKey) as Promise<T | null> | undefined;
-    if (sharing) return sharing;
-    if (this.pending >= MAX_PENDING) return stale;
-
-    const work = this.fetchAndCache<T>(query, variables, cacheKey, stale).finally(() => this.inFlight.delete(cacheKey));
-    this.inFlight.set(cacheKey, work);
-    return work;
+    if (this.pending >= MAX_PENDING) {
+      // Too many waiting for AniList's slow lane: whatever is cached will do.
+      return ((await this.cache.read(cacheKey))?.value as T | undefined) ?? null;
+    }
+    try {
+      return await this.cache.get<T | null>(cacheKey, { ttl, maxStale: MAX_STALE_MS, backoff: FAILURE_TTL_MS }, () => this.fetchQueued<T>(query, variables));
+    } catch (err) {
+      log.warn(`AniList request failed`, err);
+      return null;
+    }
   }
 
-  private async fetchAndCache<T>(query: string, variables: Record<string, unknown>, cacheKey: string, stale: T | null): Promise<T | null> {
+  /** One request at a time, at least MIN_INTERVAL_MS apart (AniList's rate limit). */
+  private async fetchQueued<T>(query: string, variables: Record<string, unknown>): Promise<T | null> {
     this.pending++;
-    // One request at a time, at least MIN_INTERVAL_MS apart.
     const run = this.queue.then(async () => {
       const wait = this.last + MIN_INTERVAL_MS - Date.now();
       if (wait > 0) await Bun.sleep(wait);
@@ -195,21 +186,7 @@ export class Anilist {
     });
     this.queue = run.catch(() => {});
     try {
-      const data = await run;
-      this.failures.delete(cacheKey);
-      if (data) {
-        const row = { key: cacheKey, json: JSON.stringify(data), fetchedAt: Date.now() };
-        this.db.insert(tmdbCache).values(row).onConflictDoUpdate({ target: tmdbCache.key, set: { json: row.json, fetchedAt: row.fetchedAt } }).run();
-      }
-      return data;
-    } catch (err) {
-      log.warn(`AniList request failed`, err);
-      this.failures.delete(cacheKey);
-      this.failures.set(cacheKey, Date.now());
-      // Oldest first (insertion order): drop the oldest rather than forgetting every backoff.
-      if (this.failures.size > 1_000) this.failures.delete(this.failures.keys().next().value!);
-      // A stale answer beats none.
-      return stale;
+      return await run;
     } finally {
       this.pending--;
     }

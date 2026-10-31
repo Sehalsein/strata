@@ -43,7 +43,7 @@ export interface UpdaterOptions {
   settings: () => { updateChannel: Channel; autoUpdate: boolean; updateManifestUrl: string };
   activeSessions: () => number;
   /** Backs up the DB; returns the backup path (null when there is nothing to back up). */
-  backupDb: () => string | null;
+  backupDb: () => Promise<string | null>;
   fetch?: typeof fetch;
   idlePollMs?: number;
   /** Runs the downloaded binary with --version and returns what it prints. */
@@ -301,7 +301,7 @@ export class Updater {
         }
       }
 
-      const dbBackupPath = this.opts.backupDb();
+      const dbBackupPath = await this.opts.backupDb();
       const oldPath = `${binary}.old`;
       writeMarker(this.opts.dataDir, {
         fromVersion: this.opts.version,

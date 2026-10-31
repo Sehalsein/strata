@@ -74,7 +74,7 @@ export class Discovery {
   /** Releases for a title, ranked, excluding ones already in the library. */
   async candidates(target: DiscoveryTarget): Promise<Candidate[]> {
     if (!this.available) return [];
-    const known = this.library.knownHashes();
+    const known = await this.library.knownHashes();
     const { showUncached } = this.settings();
     return (await this.releases(target))
       .filter((r) => !known.has(r.hash) && (r.cached || showUncached))
@@ -135,7 +135,7 @@ export class Discovery {
   async acquire(target: DiscoveryTarget, hash: string): Promise<AcquireResult> {
     hash = hash.toLowerCase();
     if (!isInfoHash(hash)) throw new Error("Invalid info-hash");
-    const existing = this.pickFile(this.library.byHash(hash), target);
+    const existing = this.pickFile(await this.library.byHash(hash), target);
     if (existing) return { status: "ready", fileId: existing.id };
 
     const client = this.torbox();
@@ -175,12 +175,12 @@ export class Discovery {
       return { status: "downloading", torrentId, progress: item.progress ?? 0, etaSeconds: item.eta ?? null, name: item.name };
     }
     this.pending.delete(hash);
-    const rows = ingestItem(this.library, "torrents", { ...item, hash: item.hash ?? hash });
+    const rows = await ingestItem(this.library, "torrents", { ...item, hash: item.hash ?? hash });
     const release = (await this.releases(target).catch(() => [])).find((r) => r.hash === hash);
     await this.assignMatches(rows, target, release?.fileName);
     // Anything else in the torrent (collections, extras) goes through normal matching.
     void this.library.matchPending().catch((err) => log.warn("Matching after import failed", err));
-    const file = this.pickFile(this.library.byHash(hash), target);
+    const file = this.pickFile(await this.library.byHash(hash), target);
     if (!file) throw new Error("The release has no playable file for this title");
     return { status: "ready", fileId: file.id };
   }

@@ -19,6 +19,7 @@ import { profiles, sessions, users } from "../../src/db/schema";
 import type { Shelf, TitleCard } from "../../src/catalog/service";
 import { imageUrl, type TmdbListItem } from "../../src/catalog/tmdb";
 import { createServices, type Services } from "../../src/services";
+import { SESSION_TTL_MS } from "../../src/auth";
 
 const arg = (name: string, fallback: string) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -37,7 +38,7 @@ let services: Services | undefined;
 /** The library's titles as TMDB list items (from cached details). */
 async function libraryItems(type: "movie" | "tv"): Promise<unknown[]> {
   if (!services) return [];
-  const rows = services.library.recentlyAdded(type === "movie" ? "movie" : "show", 50);
+  const rows = await services.library.recentlyAdded(type === "movie" ? "movie" : "show", 50);
   const details = await Promise.all(rows.map((r) => (type === "movie" ? services!.tmdb.movie(r.tmdbId) : services!.tmdb.show(r.tmdbId)).catch(() => null)));
   return details
     .filter((d): d is NonNullable<typeof d> => d !== null)
@@ -74,7 +75,7 @@ const demoFetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit
       const body = (await res.json()) as { recommendations?: { results: { id: number }[] } };
       if (body.recommendations && services) {
         const type = url.pathname.includes("/tv/") ? "show" : "movie";
-        const ids = new Set(services.library.recentlyAdded(type, 100).map((r) => r.tmdbId));
+        const ids = new Set((await services.library.recentlyAdded(type, 100)).map((r) => r.tmdbId));
         body.recommendations.results = body.recommendations.results.filter((r) => ids.has(r.id));
       }
       return Response.json(body);
@@ -92,11 +93,13 @@ services = await createServices({ dataDir, port, host: "0.0.0.0" }, { fetch: dem
 const admin = publicDemo ? { username: `admin-${randomBytes(4).toString("hex")}`, password: randomBytes(24).toString("base64url") } : { username: "Alex", password: "demo-password" };
 await services.auth.createFirstAdmin(admin.username, admin.password);
 if (publicDemo) await services.auth.createUser("demo", "strata-demo", false);
-const [alex, , kids] = ["Alex", "Sam", "Kids"].map((name) =>
-  services!.db.insert(profiles).values({ name, isKids: name === "Kids", contentLimit: name === "Kids" ? "kids" : "none" }).returning().get(),
+const [alex, , kids] = await Promise.all(
+  ["Alex", "Sam", "Kids"].map(async (name) =>
+    (await services!.db.insert(profiles).values({ name, isKids: name === "Kids", contentLimit: name === "Kids" ? "kids" : "none" }).returning())[0],
+  ),
 );
 void kids;
-services.settings.update({
+await services.settings.update({
   serverName: publicDemo ? "Strata Demo" : "Strata",
   mediaFolders: [{ path: join(media, "Movies"), kind: "movies" }, { path: join(media, "Shows"), kind: "shows" }],
   // Nothing that reaches out or costs: no release search, no join without a password.
@@ -114,17 +117,17 @@ await services.library.matchPending();
 // Something to continue, something next up, and a few saved for later (Alex's profile).
 // The anime keeps to its own rails, so these stay the same as the screenshots show.
 const anime = new Set(((await libraryItems("movie")) as TmdbListItem[]).filter(isJapanese).map((f) => f.id));
-const movies = services.library.recentlyAdded("movie", 20).map((m) => m.tmdbId).filter((id) => !anime.has(id));
-const shows = services.library.recentlyAdded("show", 20).map((s) => s.tmdbId);
+const movies = (await services.library.recentlyAdded("movie", 20)).map((m) => m.tmdbId).filter((id) => !anime.has(id));
+const shows = (await services.library.recentlyAdded("show", 20)).map((s) => s.tmdbId);
 const minutes = (n: number) => n * 60_000;
 // Positions inside the clips, which are 3 minutes long (fetch-media.ts), so resuming plays.
-if (movies[0]) services.progress.record(alex!.id, { mediaType: "movie", tmdbId: movies[0] }, minutes(1.3), minutes(3));
-if (movies[2]) services.progress.record(alex!.id, { mediaType: "movie", tmdbId: movies[2] }, minutes(0.6), minutes(3));
+if (movies[0]) await services.progress.record(alex!.id, { mediaType: "movie", tmdbId: movies[0] }, minutes(1.3), minutes(3));
+if (movies[2]) await services.progress.record(alex!.id, { mediaType: "movie", tmdbId: movies[2] }, minutes(0.6), minutes(3));
 // An episode the library actually has (the demo carries a few per show, not whole seasons).
-const episode = shows[0] ? services.library.filesFor("episode", shows[0]).sort((a, b) => (a.season! - b.season!) || (a.episode! - b.episode!))[0] : undefined;
-if (episode) services.progress.record(alex!.id, { mediaType: "episode", tmdbId: shows[0]!, season: episode.season!, episode: episode.episode! }, minutes(1), minutes(3));
-for (const id of movies.slice(3, 6)) services.progress.setWatchlist(alex!.id, "movie", id, true);
-if (shows[1]) services.progress.setWatchlist(alex!.id, "show", shows[1], true);
+const episode = shows[0] ? (await services.library.filesFor("episode", shows[0])).sort((a, b) => (a.season! - b.season!) || (a.episode! - b.episode!))[0] : undefined;
+if (episode) await services.progress.record(alex!.id, { mediaType: "episode", tmdbId: shows[0]!, season: episode.season!, episode: episode.episode! }, minutes(1), minutes(3));
+for (const id of movies.slice(3, 6)) await services.progress.setWatchlist(alex!.id, "movie", id, true);
+if (shows[1]) await services.progress.setWatchlist(alex!.id, "show", shows[1], true);
 
 // The Anime tab ranks titles with Kitsu, which the demo can't reach: here it's the
 // library's Japanese animation, with no categories to filter by.
@@ -132,7 +135,7 @@ services.catalog.animeCategories = () => [];
 services.catalog.animePage = async (category?: string): Promise<Shelf[]> => {
   if (category) return [];
   const films = ((await libraryItems("movie")) as TmdbListItem[]).filter(isJapanese);
-  const available = services!.library.availability("movie", films.map((f) => f.id));
+  const available = await services!.library.availability("movie", films.map((f) => f.id));
   const items: TitleCard[] = films.map((f) => ({
     type: "movie",
     tmdbId: f.id,
@@ -148,7 +151,7 @@ services.catalog.animePage = async (category?: string): Promise<Shelf[]> => {
 };
 
 const app = createApp(services);
-const demoUser = publicDemo ? services.db.select({ id: users.id }).from(users).where(eq(users.username, "demo")).get() : undefined;
+const demoUser = publicDemo ? (await services.db.select({ id: users.id }).from(users).where(eq(users.username, "demo")))[0] : undefined;
 const restoreKey = process.env.DEMO_RESTORE_KEY ?? "";
 
 /**
@@ -164,8 +167,8 @@ async function restoreSession(req: Request): Promise<Response> {
   }
   const { tokenHash, profileId } = (await req.json()) as { tokenHash?: unknown; profileId?: unknown };
   if (typeof tokenHash !== "string" || !/^[a-f0-9]{64}$/.test(tokenHash)) return new Response("bad request", { status: 400 });
-  const profile = typeof profileId === "number" ? services!.db.select({ id: profiles.id }).from(profiles).where(eq(profiles.id, profileId)).get() : undefined;
-  services!.db.insert(sessions).values({ tokenHash, userId: demoUser.id, profileId: profile?.id ?? null, deviceName: "Restored" }).onConflictDoNothing().run();
+  const profile = typeof profileId === "number" ? (await services!.db.select({ id: profiles.id }).from(profiles).where(eq(profiles.id, profileId)))[0] : undefined;
+  await services!.db.insert(sessions).values({ tokenHash, userId: demoUser.id, profileId: profile?.id ?? null, deviceName: "Restored", expiresAt: Date.now() + SESSION_TTL_MS }).onConflictDoNothing();
   return Response.json({ ok: true });
 }
 

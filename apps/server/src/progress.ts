@@ -38,7 +38,7 @@ export interface ProgressKey {
 export class ProgressStore {
   constructor(private readonly db: Db) {}
 
-  record(profileId: number, key: ProgressKey, positionMs: number, durationMs: number): ProgressRow {
+  async record(profileId: number, key: ProgressKey, positionMs: number, durationMs: number): Promise<ProgressRow> {
     const completed = isComplete(positionMs, durationMs);
     const values = {
       profileId,
@@ -51,52 +51,52 @@ export class ProgressStore {
       completed,
       updatedAt: Date.now(),
     };
-    return this.db
+    const [row] = await this.db
       .insert(progress)
       .values(values)
       .onConflictDoUpdate({
         target: [progress.profileId, progress.mediaType, progress.tmdbId, progress.season, progress.episode],
         set: { positionMs: values.positionMs, durationMs: values.durationMs, completed, updatedAt: values.updatedAt },
       })
-      .returning()
-      .get();
+      .returning();
+    return row!;
   }
 
-  setWatched(profileId: number, key: ProgressKey, watched: boolean) {
+  async setWatched(profileId: number, key: ProgressKey, watched: boolean) {
     const where = this.where(profileId, key);
     if (!watched) {
-      this.db.delete(progress).where(where).run();
+      await this.db.delete(progress).where(where);
       return;
     }
-    const existing = this.db.select().from(progress).where(where).get();
-    this.record(profileId, key, existing?.durationMs ?? 1, existing?.durationMs ?? 1);
+    const [existing] = await this.db.select().from(progress).where(where);
+    await this.record(profileId, key, existing?.durationMs ?? 1, existing?.durationMs ?? 1);
   }
 
-  get(profileId: number, key: ProgressKey): ProgressRow | undefined {
-    return this.db.select().from(progress).where(this.where(profileId, key)).get();
+  async get(profileId: number, key: ProgressKey): Promise<ProgressRow | undefined> {
+    return (await this.db.select().from(progress).where(this.where(profileId, key)))[0];
   }
 
-  forShow(profileId: number, showId: number): ProgressRow[] {
-    return this.db.select().from(progress).where(and(eq(progress.profileId, profileId), eq(progress.mediaType, "episode"), eq(progress.tmdbId, showId))).all();
+  forShow(profileId: number, showId: number): Promise<ProgressRow[]> {
+    return this.db.select().from(progress).where(and(eq(progress.profileId, profileId), eq(progress.mediaType, "episode"), eq(progress.tmdbId, showId)));
   }
 
-  forMovies(profileId: number, ids: number[]): Map<number, ProgressRow> {
+  async forMovies(profileId: number, ids: number[]): Promise<Map<number, ProgressRow>> {
     if (!ids.length) return new Map();
-    const rows = this.db.select().from(progress).where(and(eq(progress.profileId, profileId), eq(progress.mediaType, "movie"), inArray(progress.tmdbId, ids))).all();
+    const rows = await this.db.select().from(progress).where(and(eq(progress.profileId, profileId), eq(progress.mediaType, "movie"), inArray(progress.tmdbId, ids)));
     return new Map(rows.map((r) => [r.tmdbId, r]));
   }
 
   /** Partially watched items, most recent first. */
   /** Takes a title off Continue Watching and Next Up, keeping its progress. */
-  hideFromContinue(profileId: number, type: "movie" | "show", tmdbId: number) {
+  async hideFromContinue(profileId: number, type: "movie" | "show", tmdbId: number) {
     const hiddenAt = Date.now();
-    this.db.insert(continueHidden).values({ profileId, type, tmdbId, hiddenAt }).onConflictDoUpdate({ target: [continueHidden.profileId, continueHidden.type, continueHidden.tmdbId], set: { hiddenAt } }).run();
+    await this.db.insert(continueHidden).values({ profileId, type, tmdbId, hiddenAt }).onConflictDoUpdate({ target: [continueHidden.profileId, continueHidden.type, continueHidden.tmdbId], set: { hiddenAt } });
   }
 
   /** Whether a progress row was hidden (and not watched since). */
-  hiddenFilter(profileId: number): (row: Pick<ProgressRow, "mediaType" | "tmdbId" | "updatedAt">) => boolean {
+  async hiddenFilter(profileId: number): Promise<(row: Pick<ProgressRow, "mediaType" | "tmdbId" | "updatedAt">) => boolean> {
     const hidden = new Map(
-      this.db.select().from(continueHidden).where(eq(continueHidden.profileId, profileId)).all().map((h) => [`${h.type}-${h.tmdbId}`, h.hiddenAt]),
+      (await this.db.select().from(continueHidden).where(eq(continueHidden.profileId, profileId))).map((h) => [`${h.type}-${h.tmdbId}`, h.hiddenAt]),
     );
     return (row) => {
       const at = hidden.get(`${row.mediaType === "movie" ? "movie" : "show"}-${row.tmdbId}`);
@@ -104,7 +104,7 @@ export class ProgressStore {
     };
   }
 
-  inProgress(profileId: number, limit = 20): ProgressRow[] {
+  inProgress(profileId: number, limit = 20): Promise<ProgressRow[]> {
     return this.db
       .select()
       .from(progress)
@@ -113,23 +113,21 @@ export class ProgressStore {
           eq(progress.profileId, profileId),
           eq(progress.completed, false),
           // Same rule as isResumable().
-          sql`${progress.positionMs} > ${RESUME_FLOOR_MS} AND (${progress.positionMs} >= ${RESUME_MIN_MS} OR ${progress.positionMs} >= ${progress.durationMs} * ${RESUME_MIN_RATIO})`,
+          sql`${progress.positionMs} > ${RESUME_FLOOR_MS} AND (${progress.positionMs} >= ${RESUME_MIN_MS} OR ${progress.positionMs} >= ${progress.durationMs} * ${RESUME_MIN_RATIO}::double precision)`,
         ),
       )
       .orderBy(desc(progress.updatedAt))
-      .limit(limit)
-      .all();
+      .limit(limit);
   }
 
   /** The most recently completed episode per show, for Next Up. */
-  recentlyCompletedEpisodes(profileId: number, limit = 30): ProgressRow[] {
-    const rows = this.db
+  async recentlyCompletedEpisodes(profileId: number, limit = 30): Promise<ProgressRow[]> {
+    const rows = await this.db
       .select()
       .from(progress)
       .where(and(eq(progress.profileId, profileId), eq(progress.mediaType, "episode"), eq(progress.completed, true)))
       .orderBy(desc(progress.updatedAt))
-      .limit(500)
-      .all();
+      .limit(500);
     const latest = new Map<number, ProgressRow>();
     for (const row of rows) {
       const current = latest.get(row.tmdbId);
@@ -142,16 +140,16 @@ export class ProgressStore {
   }
 
   watchlist(profileId: number) {
-    return this.db.select().from(watchlist).where(eq(watchlist.profileId, profileId)).orderBy(desc(watchlist.addedAt)).all();
+    return this.db.select().from(watchlist).where(eq(watchlist.profileId, profileId)).orderBy(desc(watchlist.addedAt));
   }
 
-  inWatchlist(profileId: number, type: "movie" | "show", tmdbId: number): boolean {
-    return !!this.db.select().from(watchlist).where(and(eq(watchlist.profileId, profileId), eq(watchlist.type, type), eq(watchlist.tmdbId, tmdbId))).get();
+  async inWatchlist(profileId: number, type: "movie" | "show", tmdbId: number): Promise<boolean> {
+    return (await this.db.select().from(watchlist).where(and(eq(watchlist.profileId, profileId), eq(watchlist.type, type), eq(watchlist.tmdbId, tmdbId)))).length > 0;
   }
 
-  setWatchlist(profileId: number, type: "movie" | "show", tmdbId: number, on: boolean) {
-    if (on) this.db.insert(watchlist).values({ profileId, type, tmdbId }).onConflictDoNothing().run();
-    else this.db.delete(watchlist).where(and(eq(watchlist.profileId, profileId), eq(watchlist.type, type), eq(watchlist.tmdbId, tmdbId))).run();
+  async setWatchlist(profileId: number, type: "movie" | "show", tmdbId: number, on: boolean) {
+    if (on) await this.db.insert(watchlist).values({ profileId, type, tmdbId }).onConflictDoNothing();
+    else await this.db.delete(watchlist).where(and(eq(watchlist.profileId, profileId), eq(watchlist.type, type), eq(watchlist.tmdbId, tmdbId)));
   }
 
   private where(profileId: number, key: ProgressKey) {

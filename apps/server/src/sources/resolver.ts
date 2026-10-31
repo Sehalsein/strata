@@ -97,6 +97,6 @@ export function rankCandidates(candidates: Candidate[], settings: Pick<Settings,
   );
 }
 
-export function findCandidates(library: Library, settings: Settings, mediaType: "movie" | "episode", tmdbId: number, season?: number, episode?: number): Candidate[] {
-  return rankCandidates(library.filesFor(mediaType, tmdbId, season, episode).map(toCandidate), settings);
+export async function findCandidates(library: Library, settings: Settings, mediaType: "movie" | "episode", tmdbId: number, season?: number, episode?: number): Promise<Candidate[]> {
+  return rankCandidates((await library.filesFor(mediaType, tmdbId, season, episode)).map(toCandidate), settings);
 }

@@ -4,6 +4,7 @@
 //   bun scripts/build.ts --all          # every release target
 //   bun scripts/build.ts --target bun-linux-x64 --skip-web
 //   bun scripts/build.ts --all --version 0.2.0   # stamp a version (release CI does)
+//   bun scripts/build.ts --mode cloud    # the stateless cloud server (see src/mode.ts, deploy/cloud)
 //   bun scripts/build.ts --update-url https://updates.example.com/server[/nightly]
 //                                       # bake the update feed (or STRATA_UPDATE_URL); none = no self-update
 //   bun scripts/build.ts --update-url 'https://github.com/o/r/releases/download/server-{channel}' --channel nightly
@@ -25,6 +26,8 @@ const updateUrl = args.flatMap((a, i) => (a === "--update-url" && args[i + 1] ? 
 if (updateUrl && !/^https?:\/\/\S+$/.test(updateUrl)) throw new Error(`Invalid update URL ${updateUrl}`);
 const channelArg = args.flatMap((a, i) => (a === "--channel" && args[i + 1] ? [args[i + 1]!] : []))[0];
 if (channelArg && channelArg !== "stable" && channelArg !== "nightly") throw new Error(`--channel must be stable or nightly`);
+const modeArg = args.flatMap((a, i) => (a === "--mode" && args[i + 1] ? [args[i + 1]!] : []))[0] ?? "home";
+if (modeArg !== "home" && modeArg !== "cloud") throw new Error("--mode must be home or cloud");
 if (updateUrl.includes("{channel}") && !channelArg) throw new Error("An update URL naming {channel} needs --channel");
 const targets = args.includes("--all")
   ? RELEASE_TARGETS
@@ -70,16 +73,17 @@ try {
     ...(versionArg ? [`--define=STRATA_BUILD_VERSION=${JSON.stringify(versionArg)}`] : []),
     ...(updateUrl ? [`--define=STRATA_UPDATE_URL=${JSON.stringify(updateUrl.replace(/\/+$/, ""))}`] : []),
     ...(channelArg ? [`--define=STRATA_BUILD_CHANNEL=${JSON.stringify(channelArg)}`] : []),
+    `--define=STRATA_BUILD_MODE=${JSON.stringify(modeArg)}`,
   ];
   for (const target of targets) {
-    const outfile = join(ROOT, "dist", `strata-server-${target.replace(/^bun-/, "")}`);
+    const outfile = join(ROOT, "dist", `strata-server${modeArg === "cloud" ? "-cloud" : ""}-${target.replace(/^bun-/, "")}`);
     await sh(["bun", "build", "src/main.ts", "--compile", "--minify", "--sourcemap", `--target=${target}`, `--outfile=${outfile}`, ...define], ROOT);
     // Current macOS SIGKILLs Bun's linker-signed output; an explicit ad-hoc signature fixes it.
     if (target.includes("darwin")) {
       if (process.platform !== "darwin") throw new Error("darwin targets must be built on macOS (they need codesign)");
       await sh(["codesign", "--force", "--sign", "-", outfile], ROOT);
     }
-    console.log(`Built ${relative(ROOT, outfile)} (v${version}${updateUrl ? `, feed ${updateUrl}` : ", no update feed"})`);
+    console.log(`Built ${relative(ROOT, outfile)} (${modeArg}, v${version}${updateUrl ? `, feed ${updateUrl}` : ", no update feed"})`);
   }
 } finally {
   writeFileSync(EMBED, stub);

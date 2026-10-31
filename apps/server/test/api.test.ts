@@ -26,10 +26,10 @@ describe("setup and auth", () => {
   });
 
   test("first admin is created once", async () => {
-    const res = await server.request("/api/setup/admin", { method: "POST", json: { username: "sehal", password: "correct-horse" } });
+    const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "sehal", password: "correct-horse" } });
     expect(res.status).toBe(200);
     token = (await json(res)).token;
-    const again = await server.request("/api/setup/admin", { method: "POST", json: { username: "x", password: "another-pass" } });
+    const again = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "x", password: "another-pass" } });
     expect(again.status).toBe(409);
   });
 
@@ -230,8 +230,8 @@ describe("playback", () => {
     const nextFile = (await json(await server.request("/api/sources?mediaType=episode&tmdbId=9001&season=1&episode=2", { token }))).items[0];
     // Sources carry the labels the apps show as they are.
     expect(nextFile).toMatchObject({ availability: "ready", originLabel: "Library", label: expect.any(String) });
-    for (let i = 0; i < 50 && !server.services.library.get(nextFile.fileId)?.probeJson; i++) await Bun.sleep(100);
-    expect(server.services.library.get(nextFile.fileId)?.probeJson).toBeTruthy();
+    for (let i = 0; i < 50 && !(await server.services.library.get(nextFile.fileId))?.probeJson; i++) await Bun.sleep(100);
+    expect((await server.services.library.get(nextFile.fileId))?.probeJson).toBeTruthy();
     const res = await server.request(play.url, { headers: { Range: "bytes=0-99" } });
     expect(res.status).toBe(206);
     expect(res.headers.get("content-range")).toMatch(/^bytes 0-99\//);

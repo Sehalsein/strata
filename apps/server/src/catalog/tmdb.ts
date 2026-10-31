@@ -1,10 +1,7 @@
-import { eq } from "drizzle-orm";
-import type { Db } from "../db";
-import { tmdbCache } from "../db/schema";
 import { logger } from "../log";
+import { CachedMissing, type ApiCache } from "./apiCache";
 
 const FETCH_TIMEOUT_MS = 8_000;
-const MEMO_ENTRIES = 400;
 const REFRESH_BACKOFF_MS = 60_000;
 const log = logger("tmdb");
 const BASE = "https://api.themoviedb.org/3";
@@ -137,12 +134,11 @@ export interface TmdbSeason {
 }
 
 export class Tmdb {
-  private inflight = new Map<string, Promise<unknown>>();
   private active = 0;
   private queue: (() => void)[] = [];
 
   constructor(
-    private readonly db: Db,
+    private readonly cache: ApiCache,
     private readonly getKey: () => string | undefined,
     private readonly getLanguage: () => string,
     private readonly fetchImpl: typeof fetch = fetch,
@@ -172,13 +168,13 @@ export class Tmdb {
     return this.get<TmdbSeason>(`/tv/${showId}/season/${season}`, {}, DAY);
   }
   searchMovie(query: string, year?: number) {
-    return this.get<TmdbPage>("/search/movie", { query, ...(year ? { year: String(year) } : {}) }, DAY);
+    return this.get<TmdbPage>("/search/movie", { query: normalizeQuery(query), ...(year ? { year: String(year) } : {}) }, DAY);
   }
   searchShow(query: string, year?: number) {
-    return this.get<TmdbPage>("/search/tv", { query, ...(year ? { first_air_date_year: String(year) } : {}) }, DAY);
+    return this.get<TmdbPage>("/search/tv", { query: normalizeQuery(query), ...(year ? { first_air_date_year: String(year) } : {}) }, DAY);
   }
   searchMulti(query: string) {
-    return this.get<TmdbPage>("/search/multi", { query }, 6 * HOUR);
+    return this.get<TmdbPage>("/search/multi", { query: normalizeQuery(query) }, 6 * HOUR);
   }
   genres(type: "movie" | "tv") {
     return this.get<{ genres: { id: number; name: string }[] }>(`/genre/${type}/list`, {}, 7 * DAY);
@@ -205,68 +201,31 @@ export class Tmdb {
     if (!key) throw new TmdbError("The movie catalog isn't set up yet. Add a TMDB key in the server dashboard.", 503);
     const query = { ...params, language: this.getLanguage() };
     const cacheKey = path + "?" + new URLSearchParams(Object.entries(query).sort()).toString();
-
-    const cached = this.cached(cacheKey);
-    if (cached && Date.now() - cached.fetchedAt < ttl) return cached.value as T;
-    if (cached) {
-      // Stale: answer now from the cache and refresh behind it, so a page never
-      // waits on TMDB for data it already has. A failed refresh keeps the old copy.
-      const failedAt = this.refreshFailedAt.get(cacheKey) ?? 0;
-      if (!this.inflight.has(cacheKey) && Date.now() - failedAt > REFRESH_BACKOFF_MS) {
-        this.fetch<T>(path, query, key, cacheKey).catch(() => {
-          this.refreshFailedAt.set(cacheKey, Date.now());
-          if (this.refreshFailedAt.size > 1_000) this.refreshFailedAt.delete(this.refreshFailedAt.keys().next().value!);
-        });
-      }
-      return cached.value as T;
+    try {
+      return await this.cache.get<T>(
+        cacheKey,
+        // A title TMDB doesn't have (a stale anime mapping, say) is remembered for a day
+        // rather than asked about on every page view.
+        { ttl, maxStale: Infinity, missingTtl: DAY, missing: (err) => err instanceof TmdbError && err.status === 404, backoff: REFRESH_BACKOFF_MS },
+        () => this.fetch<T>(path, query, key),
+      );
+    } catch (err) {
+      if (err instanceof CachedMissing) throw new TmdbError("That title isn't in the catalog.", 404);
+      if (err instanceof TmdbError) throw err;
+      throw new TmdbError("The movie catalog isn't responding. Try again in a moment.", 502);
     }
-    return ((this.inflight.get(cacheKey) as Promise<T> | undefined) ?? this.fetch<T>(path, query, key, cacheKey));
   }
 
-  /** When a background refresh last failed, per key (TMDB down: don't retry on every view). */
-  private refreshFailedAt = new Map<string, number>();
-
-  /** Parsed responses, most recently used last; bounded, since detail pages run ~40 KB. */
-  private memo = new Map<string, { fetchedAt: number; value: unknown }>();
-
-  private cached(cacheKey: string): { fetchedAt: number; value: unknown } | null {
-    const hit = this.memo.get(cacheKey);
-    if (hit) {
-      this.memo.delete(cacheKey);
-      this.memo.set(cacheKey, hit);
-      return hit;
-    }
-    const row = this.db.select().from(tmdbCache).where(eq(tmdbCache.key, cacheKey)).get();
-    if (!row) return null;
-    return this.remember(cacheKey, { fetchedAt: row.fetchedAt, value: JSON.parse(row.json) });
-  }
-
-  private remember(cacheKey: string, entry: { fetchedAt: number; value: unknown }) {
-    this.memo.delete(cacheKey);
-    this.memo.set(cacheKey, entry);
-    if (this.memo.size > MEMO_ENTRIES) this.memo.delete(this.memo.keys().next().value!);
-    return entry;
-  }
-
-  private fetch<T>(path: string, query: Record<string, string>, key: string, cacheKey: string): Promise<T> {
-    const promise = this.limited(async () => {
+  private fetch<T>(path: string, query: Record<string, string>, key: string): Promise<T> {
+    return this.limited(async () => {
       // A hung request would hold one of the few slots and stall every page behind it.
       const res = await this.fetchImpl(this.url(path, query, key), { headers: this.headers(key), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
       if (!res.ok) {
         log.warn(`TMDB ${path} failed: ${res.status}`);
         throw new TmdbError(res.status === 404 ? "That title isn't in the catalog." : "The movie catalog isn't responding. Try again in a moment.", res.status === 404 ? 404 : 502);
       }
-      const text = await res.text();
-      const fetchedAt = Date.now();
-      this.db
-        .insert(tmdbCache)
-        .values({ key: cacheKey, json: text, fetchedAt })
-        .onConflictDoUpdate({ target: tmdbCache.key, set: { json: text, fetchedAt } })
-        .run();
-      return this.remember(cacheKey, { fetchedAt, value: JSON.parse(text) }).value as T;
-    }).finally(() => this.inflight.delete(cacheKey));
-    this.inflight.set(cacheKey, promise);
-    return promise;
+      return (await res.json()) as T;
+    });
   }
 
   private url(path: string, params: Record<string, string>, key: string) {
@@ -290,6 +249,9 @@ export class Tmdb {
     }
   }
 }
+
+/** One cache entry per search, whatever the case or spacing typed. */
+const normalizeQuery = (query: string) => query.trim().replace(/\s+/g, " ").toLowerCase();
 
 /** v4 read-access tokens are JWTs; v3 keys are 32-char hex. */
 const isBearer = (key: string) => key.startsWith("eyJ");

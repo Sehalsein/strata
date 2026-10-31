@@ -1,10 +1,18 @@
 import { randomBytes, randomInt } from "node:crypto";
+import { and, count, eq, isNull, lt, or } from "drizzle-orm";
+import type { Db } from "./db";
+import { deviceLinks } from "./db/schema";
+import { hashToken } from "./auth";
+import type { SecretBox } from "./secrets";
 
 /**
  * Sign-in by code for TVs: the TV starts a link and shows its short code (as a QR
  * code and as text), someone approves that code from a signed-in phone, and the
  * TV's next poll picks up a session of its own. The TV proves it started the link
- * with a secret poll token that never leaves it.
+ * with a secret poll token that never leaves it (only its hash is stored).
+ *
+ * Links live in the database, so a restart or another server behind the same address
+ * doesn't lose one; the approved session's token waits there sealed until the TV polls.
  */
 
 const TTL_MS = 10 * 60_000;
@@ -14,83 +22,98 @@ const MAX_PENDING = 50;
 const ABANDONED_MS = 60_000;
 /** No 0/O, 1/I/L: the code is read off a TV and may be typed on a phone. */
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-
-interface Link {
-  code: string;
-  pollToken: string;
-  deviceName: string;
-  expiresAt: number;
-  lastSeenAt: number;
-  /** Set on approval; handed to the TV once, then the link is gone. */
-  token?: string;
-}
+const SEAL_CONTEXT = "device-link";
 
 export type PollResult = { status: "pending" } | { status: "expired" } | { status: "approved"; token: string };
 
+type Row = typeof deviceLinks.$inferSelect;
+
 export class DeviceLinks {
-  private readonly byPoll = new Map<string, Link>();
-  private readonly byCode = new Map<string, Link>();
+  constructor(
+    private readonly db: Db,
+    private readonly box: SecretBox,
+    private readonly now: () => number = Date.now,
+  ) {}
 
-  constructor(private readonly now: () => number = Date.now) {}
-
-  start(deviceName: string): { code: string; pollToken: string; expiresAt: number } | null {
-    this.prune();
-    if (this.byPoll.size >= MAX_PENDING) {
+  async start(deviceName: string): Promise<{ code: string; pollToken: string; expiresAt: number } | null> {
+    await this.prune();
+    const [{ n }] = (await this.db.select({ n: count() }).from(deviceLinks).where(isNull(deviceLinks.sealedToken))) as [{ n: number }];
+    if (n >= MAX_PENDING) {
       // Full: make room by dropping the least recently polled link, so a flood of
       // starts can't lock out a TV that is actually waiting.
-      const stalest = [...this.byPoll.values()].filter((l) => !l.token).sort((a, b) => a.lastSeenAt - b.lastSeenAt)[0];
+      const [stalest] = await this.db.select().from(deviceLinks).where(isNull(deviceLinks.sealedToken)).orderBy(deviceLinks.lastSeenAt).limit(1);
       if (!stalest) return null;
-      this.remove(stalest);
+      await this.remove(stalest);
     }
-    let code = newCode();
-    while (this.byCode.has(code)) code = newCode();
     const now = this.now();
-    const link: Link = { code, pollToken: randomBytes(32).toString("base64url"), deviceName, expiresAt: now + TTL_MS, lastSeenAt: now };
-    this.byPoll.set(link.pollToken, link);
-    this.byCode.set(code, link);
-    return { code, pollToken: link.pollToken, expiresAt: link.expiresAt };
+    const pollToken = randomBytes(32).toString("base64url");
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = newCode();
+      const inserted = await this.db
+        .insert(deviceLinks)
+        .values({ code, pollHash: hashToken(pollToken), deviceName, expiresAt: now + TTL_MS, lastSeenAt: now })
+        .onConflictDoNothing()
+        .returning({ code: deviceLinks.code });
+      if (inserted.length) return { code, pollToken, expiresAt: now + TTL_MS };
+    }
+    return null;
   }
 
   /** The pending link for a code, for the approving phone to show what it's signing in. */
-  pending(code: string): { deviceName: string; expiresAt: number } | null {
-    const link = this.live(this.byCode.get(normalizeCode(code)));
-    return link && !link.token ? { deviceName: link.deviceName, expiresAt: link.expiresAt } : null;
+  async pending(code: string): Promise<{ deviceName: string; expiresAt: number } | null> {
+    const link = await this.live(await this.byCode(code));
+    return link && !link.sealedToken ? { deviceName: link.deviceName, expiresAt: link.expiresAt } : null;
   }
 
   /** Approves a code with a session token minted for the approver. False if unknown, used or expired. */
-  approve(code: string, issueToken: (deviceName: string) => string): boolean {
-    const link = this.live(this.byCode.get(normalizeCode(code)));
-    if (!link || link.token) return false;
-    link.token = issueToken(link.deviceName);
-    return true;
+  async approve(code: string, issueToken: (deviceName: string) => Promise<string>): Promise<boolean> {
+    const link = await this.live(await this.byCode(code));
+    if (!link || link.sealedToken) return false;
+    const sealed = this.box.seal(await issueToken(link.deviceName), SEAL_CONTEXT);
+    // Only if still unapproved: two approvals at once mint one sign-in, not two.
+    const updated = await this.db
+      .update(deviceLinks)
+      .set({ sealedToken: sealed })
+      .where(and(eq(deviceLinks.code, link.code), isNull(deviceLinks.sealedToken)))
+      .returning({ code: deviceLinks.code });
+    return updated.length > 0;
   }
 
-  poll(pollToken: string): PollResult {
-    const link = this.live(this.byPoll.get(pollToken));
+  async poll(pollToken: string): Promise<PollResult> {
+    const [row] = await this.db.select().from(deviceLinks).where(eq(deviceLinks.pollHash, hashToken(pollToken)));
+    const link = await this.live(row);
     if (!link) return { status: "expired" };
-    link.lastSeenAt = this.now();
-    if (!link.token) return { status: "pending" };
-    this.remove(link);
-    return { status: "approved", token: link.token };
+    if (!link.sealedToken) {
+      await this.db.update(deviceLinks).set({ lastSeenAt: this.now() }).where(eq(deviceLinks.code, link.code));
+      return { status: "pending" };
+    }
+    // Handed over once: whoever deletes the row gets the token.
+    const taken = await this.db.delete(deviceLinks).where(eq(deviceLinks.code, link.code)).returning({ sealedToken: deviceLinks.sealedToken });
+    if (!taken.length || !taken[0]!.sealedToken) return { status: "expired" };
+    return { status: "approved", token: this.box.open(taken[0]!.sealedToken, SEAL_CONTEXT) };
   }
 
-  private live(link: Link | undefined): Link | undefined {
+  private async byCode(code: string): Promise<Row | undefined> {
+    return (await this.db.select().from(deviceLinks).where(eq(deviceLinks.code, normalizeCode(code))))[0];
+  }
+
+  private async live(link: Row | undefined): Promise<Row | undefined> {
     if (!link) return undefined;
     const now = this.now();
-    if (link.expiresAt <= now || (!link.token && now - link.lastSeenAt > ABANDONED_MS)) {
-      this.remove(link);
+    if (link.expiresAt <= now || (!link.sealedToken && now - link.lastSeenAt > ABANDONED_MS)) {
+      await this.remove(link);
       return undefined;
     }
     return link;
   }
 
-  private remove(link: Link) {
-    this.byPoll.delete(link.pollToken);
-    this.byCode.delete(link.code);
+  private async remove(link: Row) {
+    await this.db.delete(deviceLinks).where(eq(deviceLinks.code, link.code));
   }
 
-  private prune() {
-    for (const link of [...this.byPoll.values()]) this.live(link);
+  private async prune() {
+    const now = this.now();
+    await this.db.delete(deviceLinks).where(or(lt(deviceLinks.expiresAt, now), and(isNull(deviceLinks.sealedToken), lt(deviceLinks.lastSeenAt, now - ABANDONED_MS))));
   }
 }
 

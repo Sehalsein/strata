@@ -78,8 +78,9 @@ export function rollback(dataDir: string, marker: PendingUpdate, reason: string)
   if (existsSync(marker.backupBinaryPath)) renameSync(marker.backupBinaryPath, marker.binaryPath);
   else throw new Error(`Can't roll back: ${marker.backupBinaryPath} is missing`);
   if (marker.dbBackupPath && existsSync(marker.dbBackupPath)) {
-    for (const suffix of ["-wal", "-shm"]) rmSync(marker.dbPath + suffix, { force: true });
-    copyFileSync(marker.dbBackupPath, marker.dbPath);
+    // The bundled database is a folder; its backup a snapshot the next open restores from.
+    rmSync(marker.dbPath, { recursive: true, force: true });
+    copyFileSync(marker.dbBackupPath, restorePathFor(marker.dbPath));
   }
   writeLastUpdate(dataDir, { result: "rolled-back", fromVersion: marker.fromVersion, toVersion: marker.toVersion, at: new Date().toISOString(), message: reason });
   clearMarker(dataDir);
@@ -116,3 +117,6 @@ export function markHealthy(dataDir: string, runningVersion: string): boolean {
   writeLastUpdate(dataDir, { result: "ok", fromVersion: marker.fromVersion, toVersion: marker.toVersion, at: new Date().toISOString() });
   return true;
 }
+
+/** Where a rollback leaves the bundled database's snapshot for the next start to restore. */
+export const restorePathFor = (dbPath: string) => `${dbPath}.restore.tar.gz`;

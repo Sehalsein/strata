@@ -99,7 +99,7 @@ export const catalogRoutes = new Hono<Env>()
     const episode = optionalInt(c.req.query("episode"));
     if (mediaType === "episode" && (season === undefined || episode === undefined)) throw new HTTPException(400, { message: "season and episode are required for episodes" });
     await c.var.services.content.assertAllowed(profileOf(c), mediaType === "movie" ? "movie" : "show", tmdbId);
-    const items = c.var.services.catalog.sources(mediaType, tmdbId, season, episode);
+    const items = await c.var.services.catalog.sources(mediaType, tmdbId, season, episode);
     if (c.req.query("discover") === "1") items.push(...(await c.var.services.discovery.candidates({ mediaType, tmdbId, season, episode })));
     return c.json({ items });
   })
@@ -140,20 +140,20 @@ export const catalogRoutes = new Hono<Env>()
   .post("/progress", async (c) => {
     const input = await body(c, target.extend({ positionMs: z.number().min(0), durationMs: z.number().min(0), sessionId: z.string().optional() }).refine(...episodeRule));
     if (input.sessionId) c.var.services.sessions.get(input.sessionId); // keeps the session alive
-    const row = c.var.services.progress.record(profileOf(c), input, input.positionMs, input.durationMs);
+    const row = await c.var.services.progress.record(profileOf(c), input, input.positionMs, input.durationMs);
     return c.json({ positionMs: row.positionMs, durationMs: row.durationMs, completed: row.completed });
   })
 
   .post("/watched", async (c) => {
     const input = await body(c, target.extend({ watched: z.boolean() }).refine(...episodeRule));
-    c.var.services.progress.setWatched(profileOf(c), input, input.watched);
+    await c.var.services.progress.setWatched(profileOf(c), input, input.watched);
     return c.json({ ok: true });
   })
 
   // Off Continue Watching / Next Up until it's watched again; progress is kept.
-  .delete("/continue/:type/:tmdbId", (c) => {
+  .delete("/continue/:type/:tmdbId", async (c) => {
     const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
-    c.var.services.progress.hideFromContinue(profileOf(c), type, intParam(c, "tmdbId"));
+    await c.var.services.progress.hideFromContinue(profileOf(c), type, intParam(c, "tmdbId"));
     return c.json({ ok: true });
   })
 
@@ -161,6 +161,6 @@ export const catalogRoutes = new Hono<Env>()
     const input = await body(c, z.object({ type: z.enum(["movie", "show"]), tmdbId: z.number().int(), on: z.boolean() }));
     // Nothing above the profile's content limit goes on its list (taking it off is fine).
     if (input.on) await c.var.services.content.assertAllowed(profileOf(c), input.type, input.tmdbId);
-    c.var.services.progress.setWatchlist(profileOf(c), input.type, input.tmdbId, input.on);
+    await c.var.services.progress.setWatchlist(profileOf(c), input.type, input.tmdbId, input.on);
     return c.json({ ok: true });
   });

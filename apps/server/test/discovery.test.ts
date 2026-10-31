@@ -108,7 +108,7 @@ describe("discovery end to end", () => {
 
     process.env.TORBOX_API_KEY = "tb-test";
     server = await startTestServer(fakeFetch);
-    token = ((await (await server.request("/api/setup/admin", { method: "POST", json: { username: "a", password: "password1" } })).json()) as { token: string }).token;
+    token = ((await (await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "a", password: "password1" } })).json()) as { token: string }).token;
   }, 60_000);
 
   afterAll(() => {
@@ -150,11 +150,11 @@ describe("discovery end to end", () => {
   });
 
   test("a library torrent can't be replayed as a different title", async () => {
-    const before = server.services.library.byHash(CACHED).map((f) => [f.id, f.mediaType, f.tmdbId]);
+    const before = (await server.services.library.byHash(CACHED)).map((f) => [f.id, f.mediaType, f.tmdbId]);
     expect(before.length).toBeGreaterThan(0);
     const res = await server.request("/api/play", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 1, candidateId: `hash:${CACHED}` } });
     expect(res.status).toBe(404);
-    expect(server.services.library.byHash(CACHED).map((f) => [f.id, f.mediaType, f.tmdbId])).toEqual(before);
+    expect((await server.services.library.byHash(CACHED)).map((f) => [f.id, f.mediaType, f.tmdbId])).toEqual(before);
   });
 
   test("an uncached release reports download progress", async () => {

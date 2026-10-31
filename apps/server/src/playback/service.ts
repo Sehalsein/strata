@@ -114,7 +114,7 @@ export class PlaybackService {
 
     let startMs = req.startMs;
     if (startMs === undefined) {
-      const saved = this.progress.get(user.profileId, req);
+      const saved = await this.progress.get(user.profileId, req);
       startMs = saved && !saved.completed ? saved.positionMs : 0;
     }
     startMs = Math.max(0, Math.min(startMs, Math.max(0, info.durationMs - 10_000)));
@@ -147,7 +147,7 @@ export class PlaybackService {
     }
 
     const next = await nextLookup;
-    const nextInLibrary = next ? findCandidates(this.library, this.settings(), "episode", req.tmdbId, next.season, next.episode) : [];
+    const nextInLibrary = next ? await findCandidates(this.library, this.settings(), "episode", req.tmdbId, next.season, next.episode) : [];
     if (next) void this.prewarm({ mediaType: "episode", tmdbId: req.tmdbId, season: next.season, episode: next.episode }, nextInLibrary).catch((err) => log.debug("Pre-warm failed", err));
 
     return {
@@ -161,7 +161,7 @@ export class PlaybackService {
       startOffsetMs: session.startOffsetMs,
       seekToMs: direct ? startMs : 0,
       durationMs: info.durationMs,
-      candidate: toCandidate(this.library.get(file.id)!),
+      candidate: toCandidate((await this.library.get(file.id))!),
       audioTracks: info.audio.map((a) => ({ index: a.index, codec: a.codec, channels: a.channels, language: a.language, title: a.title, selected: a.index === plan.audioStreamIndex })),
       subtitleTracks: session.subtitles.map((t) => ({
         id: t.id,
@@ -192,7 +192,7 @@ export class PlaybackService {
       if (this.discovery.available) await this.discovery.releases(target);
       return;
     }
-    const file = this.library.get(best.fileId);
+    const file = await this.library.get(best.fileId);
     if (!file || file.probeJson) return;
     const { input } = await this.resolveInput(file);
     // Background work: no retry, so a bad file can't cost a second probe.
@@ -212,9 +212,7 @@ export class PlaybackService {
       if (!isInfoHash(hash)) throw new PlaybackError("Unknown source", 404);
       // Only hashes already in the library, or ones discovery offered for this exact
       // title, may be added to the owner's TorBox — never an arbitrary torrent.
-      const inLibraryForTarget = this.library
-        .byHash(hash)
-        .some((r) => r.mediaType === req.mediaType && r.tmdbId === req.tmdbId && (req.mediaType === "movie" || (r.season === req.season && r.episode === req.episode)));
+      const inLibraryForTarget = (await this.library.byHash(hash)).some((r) => r.mediaType === req.mediaType && r.tmdbId === req.tmdbId && (req.mediaType === "movie" || (r.season === req.season && r.episode === req.episode)));
       if (!inLibraryForTarget) {
         if (!this.discovery.available) throw new PlaybackError("Discovery is turned off", 403);
         const offered = (await this.discovery.releases(target)).find((r) => r.hash === hash);
@@ -222,16 +220,16 @@ export class PlaybackService {
         if (!offered.cached && !this.settings().showUncached) throw new PlaybackError("That release isn't cached on TorBox", 409);
       }
     } else {
-      const candidates = findCandidates(this.library, this.settings(), req.mediaType, req.tmdbId, req.season, req.episode);
+      const candidates = await findCandidates(this.library, this.settings(), req.mediaType, req.tmdbId, req.season, req.episode);
       const candidate = req.candidateId ? candidates.find((c) => c.id === req.candidateId) : candidates[0];
-      if (candidate) return this.library.get(candidate.fileId)!;
+      if (candidate) return (await this.library.get(candidate.fileId))!;
       if (req.candidateId) throw new PlaybackError("Unknown source", 404);
       if (this.discovery.available) hash = (await this.discovery.bestCached(target))?.hash;
       if (!hash) throw new PlaybackError("No source available for this title", 404);
     }
     const result = await this.discovery.acquire(target, hash);
     if (result.status === "downloading") throw new NotReadyError(result);
-    return this.library.get(result.fileId)!;
+    return (await this.library.get(result.fileId))!;
   }
 
   /**
@@ -247,7 +245,7 @@ export class PlaybackService {
   /** A fresh TorBox link for a session whose cached one expired. */
   async refreshLink(session: PlaybackSession): Promise<string> {
     this.links.delete(session.fileId);
-    const file = this.library.get(session.fileId);
+    const file = await this.library.get(session.fileId);
     if (!file) throw new PlaybackError("File no longer exists", 410);
     const { input } = await this.resolveInput(file);
     session.input = input;
@@ -283,7 +281,7 @@ export class PlaybackService {
     const ff = this.ffmpeg();
     if (!ff) throw new PlaybackError("ffmpeg/ffprobe is not installed on the server", 503);
     try {
-      return this.saveProbe(file, await probe(ff.ffprobe, input));
+      return await this.saveProbe(file, await probe(ff.ffprobe, input));
     } catch (err) {
       // Details (already redacted) go to the log; clients get a plain message.
       log.warn(`Probe failed for file ${file.id}`, err);
@@ -295,7 +293,7 @@ export class PlaybackService {
     if (this.links.get(file.id)?.url === input) this.links.delete(file.id);
     try {
       const fresh = await this.resolveInput(file);
-      const info = this.saveProbe(file, await probe(ff.ffprobe, fresh.input, 30_000, 20_000));
+      const info = await this.saveProbe(file, await probe(ff.ffprobe, fresh.input, 30_000, 20_000));
       log.info(`Probe for file ${file.id} succeeded on retry`);
       return info;
     } catch (err) {
@@ -305,8 +303,8 @@ export class PlaybackService {
     }
   }
 
-  private saveProbe(file: FileRow, info: MediaInfo): MediaInfo {
-    this.library.saveProbe(file.id, info);
+  private async saveProbe(file: FileRow, info: MediaInfo): Promise<MediaInfo> {
+    await this.library.saveProbe(file.id, info);
     this.probeFailures.delete(file.id);
     return info;
   }

@@ -1,4 +1,4 @@
-import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, isNull, lt, or, count } from "drizzle-orm";
 import type { Db } from "../../db";
 import { torboxAdded } from "../../db/schema";
 import type { Library } from "../../library";
@@ -20,12 +20,12 @@ export class TorboxHousekeeping {
     private readonly now: () => number = Date.now,
   ) {}
 
-  recordAdded(torrentId: number, hash: string, name?: string) {
-    this.db.insert(torboxAdded).values({ torrentId, hash: hash.toLowerCase(), name: name ?? null, addedAt: this.now() }).onConflictDoNothing().run();
+  async recordAdded(torrentId: number, hash: string, name?: string) {
+    await this.db.insert(torboxAdded).values({ torrentId, hash: hash.toLowerCase(), name: name ?? null, addedAt: this.now() }).onConflictDoNothing();
   }
 
-  recordPlayed(torrentId: number) {
-    this.db.update(torboxAdded).set({ lastPlayedAt: this.now() }).where(eq(torboxAdded.torrentId, torrentId)).run();
+  async recordPlayed(torrentId: number) {
+    await this.db.update(torboxAdded).set({ lastPlayedAt: this.now() }).where(eq(torboxAdded.torrentId, torrentId));
   }
 
   /** Torrents Strata added and nobody has played for `days` days. */
@@ -34,25 +34,24 @@ export class TorboxHousekeeping {
     return this.db
       .select()
       .from(torboxAdded)
-      .where(and(lt(torboxAdded.addedAt, cutoff), or(isNull(torboxAdded.lastPlayedAt), lt(torboxAdded.lastPlayedAt, cutoff))))
-      .all();
+      .where(and(lt(torboxAdded.addedAt, cutoff), or(isNull(torboxAdded.lastPlayedAt), lt(torboxAdded.lastPlayedAt, cutoff))));
   }
 
-  count() {
-    return this.db.select({ n: sql<number>`count(*)` }).from(torboxAdded).get()?.n ?? 0;
+  async count() {
+    return (await this.db.select({ n: count() }).from(torboxAdded))[0]?.n ?? 0;
   }
 
   /**
    * Removes stale releases. `inUse` is asked right before each removal (not once up
    * front), so something that starts streaming mid-run is kept.
    */
-  async clean(client: TorboxClient, days: number, inUse: (torrentId: number) => boolean) {
+  async clean(client: TorboxClient, days: number, inUse: (torrentId: number) => boolean | Promise<boolean>) {
     if (days <= 0) return { removed: 0, skipped: "cleanup is off" };
     let removed = 0;
-    for (const candidate of this.stale(days)) {
+    for (const candidate of await this.stale(days)) {
       // Re-read: a play recorded since the list was made keeps it.
-      const row = this.stale(days).find((r) => r.torrentId === candidate.torrentId);
-      if (!row || inUse(row.torrentId)) continue;
+      const row = (await this.stale(days)).find((r) => r.torrentId === candidate.torrentId);
+      if (!row || (await inUse(row.torrentId))) continue;
       // Confirm the id is still the torrent we added (same hash) before deleting anything.
       let remote: { hash?: string } | null;
       try {
@@ -73,14 +72,14 @@ export class TorboxHousekeeping {
             continue;
           }
         }
-        this.library.markMissing("torbox", [], `torrents:${row.torrentId}:`);
+        await this.library.markMissing("torbox", [], `torrents:${row.torrentId}:`);
         removed++;
         log.info(`Removed ${row.name ?? row.hash} from TorBox (#${row.torrentId}), unplayed for ${days}+ days`);
       } else {
         // Gone, or the id now belongs to something else (e.g. another account's key): forget it.
         log.info(`Forgetting TorBox #${row.torrentId}: no longer the release Strata added`);
       }
-      this.db.delete(torboxAdded).where(eq(torboxAdded.torrentId, row.torrentId)).run();
+      await this.db.delete(torboxAdded).where(eq(torboxAdded.torrentId, row.torrentId));
     }
     return { removed };
   }
