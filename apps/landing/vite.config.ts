@@ -7,6 +7,8 @@ import tailwindcss from "@tailwindcss/vite";
 // resolve to one copy, this app's.
 const dashboard = decodeURIComponent(new URL("../server/web/src", import.meta.url).pathname);
 
+const api = { target: process.env.STRATA_API ?? "http://localhost:8420", changeOrigin: true };
+
 export default defineConfig({
   base: "/",
   plugins: [react(), tailwindcss()],
@@ -16,6 +18,6 @@ export default defineConfig({
   },
   build: { outDir: "dist", assetsDir: "assets", emptyOutDir: true, target: "es2022" },
   // The site passes /api through to the server (see deploy/landing).
-  server: { proxy: { "/api": process.env.STRATA_API ?? "http://localhost:8420" } },
-  preview: { proxy: { "/api": process.env.STRATA_API ?? "http://localhost:8420" } },
+  server: { proxy: { "/api": api } },
+  preview: { proxy: { "/api": api } },
 });

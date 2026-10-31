@@ -22,7 +22,7 @@ const SKIES = [
 type Shape = "sun" | "bands" | "peak" | "ring";
 const SHAPES: Shape[] = ["sun", "bands", "peak", "ring"];
 
-function Poster({ seed }: { seed: number }) {
+export function Poster({ seed }: { seed: number }) {
   const [from, to] = SKIES[seed % SKIES.length]!;
   const shape = SHAPES[(seed * 7) % SHAPES.length]!;
   const angle = 150 + ((seed * 37) % 60);
