@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Cable, Compass, Globe, HardDrive, Library, LoaderCircle, Network, RefreshCw, Server } from "lucide-react";
+import { ArrowDown, ArrowUp, Cable, Compass, Globe, Library, LoaderCircle, Network, RefreshCw, Server } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
@@ -43,7 +43,7 @@ function sectionFromHash(available: Section[]): SectionId {
  * bottom until saved. Keys save on their own (they're checked with the provider first).
  */
 export default function SettingsPage() {
-  const { isServerAdmin, cloud, me, info } = useSession();
+  const { isServerAdmin, cloud } = useSession();
   const sections: Section[] = [
     { id: "general", label: "General", icon: Globe, group: "household" },
     { id: "library", label: "Library", icon: Library, group: "household" },
@@ -62,7 +62,6 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const data = settings.data;
-  const householdName = me.household?.name ?? "this household";
 
   useEffect(() => {
     if (data && !draft) setDraft(data.settings);
@@ -130,16 +129,13 @@ export default function SettingsPage() {
       <PageHeader title="Settings" />
 
       <div className="flex flex-col gap-6 md:flex-row md:items-start md:gap-10">
-        <SettingsNav sections={sections} current={section} onChange={go} householdName={householdName} serverName={info.serverName} />
+        <SettingsNav sections={sections} current={section} onChange={go} />
 
         <div className="flex min-w-0 flex-1 flex-col gap-6">
-          <div>
-            <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">{current.group === "household" ? householdName : "Whole server"}</p>
-            <h2 className="text-xl font-semibold">{current.label}</h2>
-          </div>
+          <h2 className="text-xl font-semibold">{current.label}</h2>
 
           {section === "general" && (
-            <SettingsSection title="Catalog" description="How titles and dates are shown to this household.">
+            <SettingsSection title="Catalog" description="How titles and dates are shown.">
               <SettingRow
                 label="Language"
                 htmlFor="language"
@@ -162,14 +158,14 @@ export default function SettingsPage() {
           {section === "library" && (
             <>
               {!cloud && (
-                <SettingsSection title="Media folders" description="Folders on this server that hold this household's movies and shows. Strata scans them and matches each file.">
+                <SettingsSection title="Media folders" description="Folders on this server that hold the household's movies and shows. Strata scans them and matches each file.">
                   <div className="p-5">
                     <MediaFolders value={draft.mediaFolders} onChange={(v) => set("mediaFolders", v)} canBrowse={isServerAdmin} />
                   </div>
                 </SettingsSection>
               )}
               <SourcesSection draft={draft} set={set} />
-              <SettingsSection title="TorBox" description="Keeping this household's TorBox library in step.">
+              <SettingsSection title="TorBox" description="Keeping the household's TorBox library in step.">
                 <SettingRow label="Sync every" htmlFor="torbox-sync" description="How often Strata picks up what's new in TorBox. 0 turns it off.">
                   <NumberInput id="torbox-sync" min={0} suffix="min" value={draft.torboxSyncMinutes} onChange={(v) => set("torboxSyncMinutes", v)} />
                 </SettingRow>
@@ -195,7 +191,7 @@ export default function SettingsPage() {
             </SettingsSection>
           )}
 
-          {section === "connections" && <Connections secrets={data.secrets} isServerAdmin={isServerAdmin} householdName={householdName} />}
+          {section === "connections" && <Connections secrets={data.secrets} />}
 
           {section === "server" && isServerAdmin && <ServerSections draft={draft} set={set} cloud={cloud} />}
           {section === "network" && isServerAdmin && !cloud && <NetworkSection draft={draft} set={set} />}
@@ -233,10 +229,11 @@ export default function SettingsPage() {
 }
 
 /** Sections grouped by whose they are: a column on wide screens, a scrolling row on narrow ones. */
-function SettingsNav({ sections, current, onChange, householdName, serverName }: { sections: Section[]; current: SectionId; onChange: (id: SectionId) => void; householdName: string; serverName: string }) {
+function SettingsNav({ sections, current, onChange }: { sections: Section[]; current: SectionId; onChange: (id: SectionId) => void }) {
+  // The household is the one the sidebar's switcher shows; the server's sections are its admin's.
   const groups = [
-    { id: "household" as const, label: householdName, icon: HardDrive },
-    { id: "server" as const, label: `Server · ${serverName}`, icon: Server },
+    { id: "household" as const, label: "Household" },
+    { id: "server" as const, label: "Server" },
   ].filter((g) => sections.some((s) => s.group === g.id));
   return (
     <nav aria-label="Settings sections" className="md:sticky md:top-20 md:w-52 md:shrink-0">

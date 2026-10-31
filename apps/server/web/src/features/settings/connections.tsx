@@ -22,20 +22,9 @@ interface Provider {
   keyHelp: ReactNode;
   getKeyUrl: string;
   required?: boolean;
-  /** The server's (every household) or this household's. */
-  scope: "server" | "household";
 }
 
 const PROVIDERS: Provider[] = [
-  {
-    key: "torboxApiKey",
-    name: "TorBox",
-    mark: { text: "TB", className: "bg-emerald-600 text-white" },
-    what: "Plays your TorBox library straight from TorBox, and finds releases of titles you don't have. Saving a key starts a library sync.",
-    keyHelp: "Your API key from TorBox's settings.",
-    getKeyUrl: "https://torbox.app/settings",
-    scope: "household",
-  },
   {
     key: "tmdbApiKey",
     name: "TMDB",
@@ -44,7 +33,14 @@ const PROVIDERS: Provider[] = [
     keyHelp: "A v3 API key or v4 read access token (a free account works).",
     getKeyUrl: "https://www.themoviedb.org/settings/api",
     required: true,
-    scope: "server",
+  },
+  {
+    key: "torboxApiKey",
+    name: "TorBox",
+    mark: { text: "TB", className: "bg-emerald-600 text-white" },
+    what: "Plays your TorBox library straight from TorBox, and finds releases of titles you don't have. Saving a key starts a library sync.",
+    keyHelp: "Your API key from TorBox's settings.",
+    getKeyUrl: "https://torbox.app/settings",
   },
   {
     key: "omdbApiKey",
@@ -53,47 +49,26 @@ const PROVIDERS: Provider[] = [
     what: "IMDb and Rotten Tomatoes ratings on title pages.",
     keyHelp: "A free key by email (1,000 requests a day; Strata caches answers).",
     getKeyUrl: "https://www.omdbapi.com/apikey.aspx",
-    scope: "server",
   },
 ];
 
 /**
- * The services Strata connects to, each with its status, what it's for and whose it is.
- * Keys are checked with the provider before they're saved, then stored encrypted on the
- * server and never shown again. The server's keys are its admin's to change.
+ * The services this household connects to, each with its own key: a household never uses
+ * another's, nor the server's. Keys are checked with the provider before they're saved,
+ * then stored encrypted and never shown again. New add-ons join this list.
  */
-export function Connections({ secrets, isServerAdmin, householdName }: { secrets: SettingsResponse["secrets"]; isServerAdmin: boolean; householdName: string }) {
-  const household = PROVIDERS.filter((p) => p.scope === "household");
-  const server = PROVIDERS.filter((p) => p.scope === "server");
+export function Connections({ secrets }: { secrets: SettingsResponse["secrets"] }) {
   return (
-    <div className="flex flex-col gap-8">
-      <section className="flex flex-col gap-3">
-        <GroupHeading title={`For ${householdName}`} description="Only this household uses these." />
-        {household.map((p) => (
-          <ProviderCard key={p.key} provider={p} configured={!!secrets[p.key]} canEdit />
-        ))}
-      </section>
-      <section className="flex flex-col gap-3">
-        <GroupHeading title="For the whole server" description={isServerAdmin ? "Every household shares these." : "Every household shares these. The server's admin sets them."} />
-        {server.map((p) => (
-          <ProviderCard key={p.key} provider={p} configured={!!secrets[p.key]} canEdit={isServerAdmin} />
-        ))}
-      </section>
-      <p className="text-muted-foreground text-xs">Keys are checked with each service before they're saved, then stored encrypted on this server. They're never shown again.</p>
+    <div className="flex flex-col gap-3">
+      {PROVIDERS.map((p) => (
+        <ProviderCard key={p.key} provider={p} configured={!!secrets[p.key]} />
+      ))}
+      <p className="text-muted-foreground pt-2 text-xs">Keys are checked with each service before they're saved, then stored encrypted. They're never shown again.</p>
     </div>
   );
 }
 
-function GroupHeading({ title, description }: { title: string; description: string }) {
-  return (
-    <div>
-      <h2 className="font-semibold">{title}</h2>
-      <p className="text-muted-foreground text-sm">{description}</p>
-    </div>
-  );
-}
-
-function ProviderCard({ provider: p, configured, canEdit }: { provider: Provider; configured: boolean; canEdit: boolean }) {
+function ProviderCard({ provider: p, configured }: { provider: Provider; configured: boolean }) {
   const [entering, setEntering] = useState(false);
   const [value, setValue] = useState("");
   const [pending, setPending] = useState(false);
@@ -157,7 +132,7 @@ function ProviderCard({ provider: p, configured, canEdit }: { provider: Provider
           <p className="text-muted-foreground text-sm">{p.what}</p>
           {configured && p.key === "torboxApiKey" && <TorboxAccountLine />}
         </div>
-        {canEdit && !entering && (
+        {!entering && (
           <div className="flex shrink-0 gap-2">
             {configured ? (
               <>
@@ -177,7 +152,7 @@ function ProviderCard({ provider: p, configured, canEdit }: { provider: Provider
         )}
       </div>
 
-      {canEdit && entering && (
+      {entering && (
         <form onSubmit={save} noValidate className="bg-muted/30 flex flex-col gap-3 border-t p-5">
           <p className="text-muted-foreground text-sm">
             {p.keyHelp}{" "}
@@ -228,7 +203,7 @@ function ProviderCard({ provider: p, configured, canEdit }: { provider: Provider
         open={confirmRemove}
         onOpenChange={setConfirmRemove}
         title={`Disconnect ${p.name}?`}
-        description={p.scope === "server" ? "Every household stops using it until a new key is added." : "This household stops using it until a new key is added."}
+        description="This household stops using it until a new key is added."
         confirmLabel="Disconnect"
         onConfirm={remove}
       />

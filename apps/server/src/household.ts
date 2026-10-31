@@ -6,8 +6,9 @@ import { AnimeMatcher } from "./catalog/anime/match";
 import type { Anilist } from "./catalog/anime/anilist";
 import type { AnimeIds } from "./catalog/anime/ids";
 import type { Kitsu } from "./catalog/anime/kitsu";
-import type { Omdb } from "./catalog/omdb";
-import type { Tmdb } from "./catalog/tmdb";
+import { Omdb } from "./catalog/omdb";
+import { Tmdb } from "./catalog/tmdb";
+import type { ApiCache } from "./catalog/apiCache";
 import type { Db } from "./db";
 import { Library } from "./library";
 import type { FfmpegInfo } from "./platform/ffmpeg";
@@ -25,9 +26,8 @@ export interface Shared {
   db: Db;
   box: SecretBox;
   serverSettings: ServerSettingsStore;
-  /** TMDB in a language (households choose theirs; answers are cached for all). */
-  tmdb: (language: string) => Tmdb;
-  omdb: Omdb;
+  /** TMDB and OMDb answers, cached for every household (they don't depend on whose key asked). */
+  cache: ApiCache;
   anime: { ids: AnimeIds; anilist: Anilist; kitsu: Kitsu };
   progress: ProgressStore;
   sessions: SessionManager;
@@ -51,6 +51,10 @@ export class Household {
   readonly discovery: Discovery;
   readonly housekeeping: TorboxHousekeeping;
   readonly playback: PlaybackService;
+  /** TMDB in the household's language, with its key (or the server's). */
+  readonly tmdb: Tmdb;
+  /** OMDb ratings, with its key (or the server's). */
+  readonly omdb: Omdb;
   private torboxClient?: { key: string; client: TorboxClient };
 
   /** Use `Households.get`: the settings must be loaded before the rest is built. */
@@ -62,9 +66,11 @@ export class Household {
     const { db } = shared;
     this.settingsStore = settingsStore;
     const settings = () => this.settings();
+    this.tmdb = new Tmdb(shared.cache, () => settingsStore.getSecret("tmdbApiKey"), () => settingsStore.get().language, shared.fetch);
+    this.omdb = new Omdb(shared.cache, () => settingsStore.getSecret("omdbApiKey"), shared.fetch);
     const tmdb = this.tmdb;
     this.library = new Library(db, organizationId, tmdb, new Matcher(tmdb, new AnimeMatcher(shared.anime.anilist, shared.anime.ids, tmdb, shared.anime.kitsu)));
-    this.catalog = new CatalogService(tmdb, this.library, shared.progress, settings, shared.anime, shared.omdb);
+    this.catalog = new CatalogService(tmdb, this.library, shared.progress, settings, shared.anime, this.omdb);
     this.content = new ContentFilter(db, organizationId, tmdb, settings);
     this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, id) => this.content.allowed(userId, "show", id));
     this.housekeeping = new TorboxHousekeeping(db, organizationId, this.library);
@@ -76,11 +82,6 @@ export class Household {
   /** The server's settings with the household's on top. */
   settings(): Settings {
     return { ...this.shared.serverSettings.get(), ...this.settingsStore.get() };
-  }
-
-  /** TMDB in the household's language. Its getter reads the language at call time. */
-  get tmdb(): Tmdb {
-    return this.shared.tmdb(this.settingsStore.get().language);
   }
 
   /** The household's TorBox client, or null without a key. */

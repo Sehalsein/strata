@@ -3,8 +3,6 @@ import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createAuth, type Auth } from "./auth/betterAuth";
-import { Tmdb } from "./catalog/tmdb";
-import { Omdb } from "./catalog/omdb";
 import { dataPaths, type DataPaths, type RuntimeConfig } from "./config";
 import { closeDatabase, openDatabase, rowsOf, type Db } from "./db";
 import { organization, user } from "./db/schema";
@@ -40,15 +38,13 @@ export interface Services {
   config: RuntimeConfig;
   paths: DataPaths;
   db: Db;
-  /** The server's own settings and the TMDB/OMDb keys (households have their own). */
+  /** The server's own settings (its provider keys come from its environment). */
   settings: ServerSettingsStore;
   /** Accounts, sign-in and households (Better Auth). */
   auth: Auth;
   households: Households;
   throttle: Throttle;
   cache: ApiCache;
-  tmdb: (language: string) => Tmdb;
-  omdb: Omdb;
   progress: ProgressStore;
   sessions: SessionManager;
   subtitles: SubtitleService;
@@ -91,14 +87,6 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   let ffmpegInfo = overrides.ffmpeg !== undefined ? overrides.ffmpeg : isCloud ? null : await detectFfmpeg(paths.root);
   const ffmpeg = () => ffmpegInfo;
 
-  // TMDB answers are cached for every household; each language gets its own client.
-  const tmdbByLanguage = new Map<string, Tmdb>();
-  const tmdb = (language: string) => {
-    let client = tmdbByLanguage.get(language);
-    if (!client) tmdbByLanguage.set(language, (client = new Tmdb(cache, () => settings.getSecret("tmdbApiKey"), () => language, fetchImpl)));
-    return client;
-  };
-  const omdb = new Omdb(cache, () => settings.getSecret("omdbApiKey"), fetchImpl);
   const anime = {
     ids: new AnimeIds(isCloud ? cachedAnimeIdStore(cache) : fileAnimeIdStore(join(paths.root, "cache")), fetchImpl),
     anilist: new Anilist(cache, fetchImpl),
@@ -110,7 +98,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     isCloud ? null : { transcodeDir: paths.transcode, getFfmpeg: ffmpeg, keepAwake: new KeepAwake(), maxTranscodes: () => settings.get().maxTranscodes, hwAllowed: () => settings.get().hardwareAcceleration },
   );
   const subtitles = new SubtitleService(join(paths.root, "cache", "subtitles"), ffmpeg);
-  const households = new Households({ db, box, serverSettings: settings, tmdb, omdb, anime, progress, sessions, ffmpeg, fetch: fetchImpl });
+  const households = new Households({ db, box, serverSettings: settings, cache, anime, progress, sessions, ffmpeg, fetch: fetchImpl });
 
   /** Runs `fn` for every household, one after another; a failing one doesn't stop the rest. */
   const eachHousehold = async (what: string, fn: (h: Household) => Promise<unknown>) => {
@@ -227,7 +215,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   log.info(`Running as a ${MODE} server`);
 
   return {
-    config, paths, db, settings, auth, households, throttle, cache, tmdb, omdb, progress, sessions, subtitles, jobs, serverId, bonjour, updater, ffmpeg,
+    config, paths, db, settings, auth, households, throttle, cache, progress, sessions, subtitles, jobs, serverId, bonjour, updater, ffmpeg,
     ffmpegSetup: () => ffmpegSetup, hasAccounts, householdIds, startedAt: Date.now(), shutdown,
   };
 }

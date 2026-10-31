@@ -106,16 +106,14 @@ describe("discovery end to end", () => {
       return new Response("unexpected " + url, { status: 500 });
     }) as typeof fetch;
 
-    process.env.TORBOX_API_KEY = "tb-test";
     // No ffprobe here, as on the cloud server: the app reads files itself.
-    server = await startTestServer(fakeFetch, { ffmpeg: null });
+    server = await startTestServer(fakeFetch, { ffmpeg: null, keys: { tmdbApiKey: "test-key", torboxApiKey: "tb-test" } });
     token = ((await (await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "aa", password: "password1" } })).json()) as { token: string }).token;
   }, 60_000);
 
   afterAll(() => {
     server.services.shutdown();
     cdn.stop(true);
-    delete process.env.TORBOX_API_KEY;
   });
 
   test("sources lists cached releases first and drops cams", async () => {

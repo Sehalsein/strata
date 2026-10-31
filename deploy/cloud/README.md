@@ -27,8 +27,8 @@ docker run -p 8420:8420 \
 On first start the log prints a **setup code**; the dashboard asks for it when you
 create the admin account.
 
-Optional: `TMDB_API_KEY`, `TORBOX_API_KEY`, `OMDB_API_KEY` set keys from the
-environment instead of the dashboard.
+Provider keys (TMDB, TorBox, OMDb) are each household's own, set in the dashboard under
+Settings › Connections; the server keeps none for them.
 
 Sign in with Google and passkeys are off unless set up, and the sign-in page only shows
 what's on:

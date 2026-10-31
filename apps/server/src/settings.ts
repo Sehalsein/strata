@@ -62,14 +62,15 @@ export type Settings = z.infer<typeof settingsSchema>;
 export type ServerSettings = z.infer<typeof serverSettingsSchema>;
 export type HouseholdSettings = z.infer<typeof householdSettingsSchema>;
 
-/** The server admin's keys (shared by every household), and each household's own. */
-export const SERVER_SECRET_KEYS = ["tmdbApiKey", "omdbApiKey"] as const;
-export const HOUSEHOLD_SECRET_KEYS = ["torboxApiKey"] as const;
-export const SECRET_KEYS = [...SERVER_SECRET_KEYS, ...HOUSEHOLD_SECRET_KEYS] as const;
+/**
+ * Provider keys (TMDB, OMDb, TorBox) are each household's own, set from its dashboard.
+ * A household never uses another's, nor the server's.
+ */
+export const SERVER_SECRET_KEYS = [] as const;
+export const HOUSEHOLD_SECRET_KEYS = ["tmdbApiKey", "omdbApiKey", "torboxApiKey"] as const;
+export const SECRET_KEYS = HOUSEHOLD_SECRET_KEYS;
 export type SecretKey = (typeof SECRET_KEYS)[number];
 
-/** Keys can come from the environment instead (read each time: tests and Workers set them late). */
-const ENV_NAMES: Record<SecretKey, string> = { tmdbApiKey: "TMDB_API_KEY", omdbApiKey: "OMDB_API_KEY", torboxApiKey: "TORBOX_API_KEY" };
 
 type Scope = { kind: "server" } | { kind: "household"; organizationId: string };
 
@@ -148,7 +149,7 @@ export class SettingsStore<S extends z.ZodTypeAny> {
   }
 
   getSecret(key: SecretKey): string | undefined {
-    return process.env[ENV_NAMES[key]] || this.secrets.get(key);
+    return this.secrets.get(key);
   }
 
   hasSecret(key: SecretKey): boolean {

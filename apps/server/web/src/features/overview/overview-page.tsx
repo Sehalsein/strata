@@ -144,12 +144,10 @@ function AdminOverview() {
             <TriangleAlert />
             <AlertTitle>No TMDB key</AlertTitle>
             <AlertDescription>
-              <p>The catalog and file matching are off until {isServerAdmin ? "a TMDB key is added" : "the server's admin adds a TMDB key"}.</p>
-              {isServerAdmin && (
-                <Button size="sm" variant="outline" asChild className="mt-1">
-                  <Link href="/settings#keys">Add key</Link>
-                </Button>
-              )}
+              <p>This household's catalog and file matching are off until it has a TMDB key.</p>
+              <Button size="sm" variant="outline" asChild className="mt-1">
+                <Link href="/settings#connections">Add key</Link>
+              </Button>
             </AlertDescription>
           </Alert>
         )}

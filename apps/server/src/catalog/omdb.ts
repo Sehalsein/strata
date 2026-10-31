@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { logger } from "../log";
 import type { ApiCache } from "./apiCache";
 
@@ -106,7 +107,8 @@ export class Omdb {
 
   private async fetch<T extends { Response: string; Error?: string }>(params: Record<string, string>, key: string): Promise<T> {
     const day = new Date().toISOString().slice(0, 10);
-    const usageKey = `omdb:usage:${day}`;
+    // Counted per key: each household's key has OMDb's daily limit of its own.
+    const usageKey = `omdb:usage:${day}:${createHash("sha256").update(key).digest("hex").slice(0, 12)}`;
     const used = ((await this.cache.read(usageKey))?.value as { used: number; blocked?: boolean } | undefined) ?? { used: 0 };
     if (used.blocked || used.used >= OMDB_DAILY_BUDGET) throw new Error("OMDb daily limit reached");
     await this.cache.write(usageKey, { used: used.used + 1 });

@@ -41,8 +41,8 @@ export function SetupChecklist({ status, isServerAdmin }: { status: AdminStatus;
   if (dismissed || !household.data || !sessions.data || token.isPending) return null;
 
   const items: Item[] = [
-    ...(isServerAdmin ? [{ key: "tmdb", label: "Add a TMDB key", hint: "Powers the catalog, artwork and file matching.", done: status.tmdb.configured, href: "/settings#keys", cta: "Add key" }] : []),
-    { key: "torbox", label: "Connect TorBox", hint: "Play titles straight from your TorBox library.", done: status.torbox.configured, optional: true, href: "/settings#keys", cta: "Connect" },
+    { key: "tmdb", label: "Add a TMDB key", hint: "Powers the catalog, artwork and file matching.", done: status.tmdb.configured, href: "/settings#connections", cta: "Add key" },
+    { key: "torbox", label: "Connect TorBox", hint: "Play titles straight from your TorBox library.", done: status.torbox.configured, optional: true, href: "/settings#connections", cta: "Connect" },
     {
       key: "people",
       label: "Invite people",

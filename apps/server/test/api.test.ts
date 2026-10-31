@@ -109,6 +109,16 @@ describe("setup and auth", () => {
     await server.request(`/api/household/members/${bob.id}`, { method: "PATCH", token, json: { name: "bob" } });
   });
 
+  test("a household's provider keys are its own: never another's, nor the server's", async () => {
+    const h = await server.household();
+    process.env.TMDB_API_KEY = "from-the-server";
+    await h.settingsStore.setSecret("omdbApiKey", null);
+    expect(h.settingsStore.getSecret("omdbApiKey")).toBeUndefined();
+    expect(h.settingsStore.getSecret("tmdbApiKey")).toBe("test-key");
+    expect((await json(await server.request("/api/admin/settings", { token }))).secrets).toEqual({ tmdbApiKey: true, omdbApiKey: false, torboxApiKey: false });
+    delete process.env.TMDB_API_KEY;
+  });
+
   test("households don't see each other's library", async () => {
     const mine = await server.services.households.get((await json(await server.request("/api/me", { token }))).household.id);
     await mine.library.upsert({ provider: "local", ref: "/m/Only.Mine.2020.mkv", name: "Only.Mine.2020.mkv", size: 1, parsed: { title: "Only Mine", kind: "movie" } as never });

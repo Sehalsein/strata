@@ -16,8 +16,6 @@ interface Env {
   STRATA_SECRET_KEY: string;
   /** The address people reach the server at, e.g. https://strata.example.com. */
   STRATA_PUBLIC_URL?: string;
-  TMDB_API_KEY?: string;
-  OMDB_API_KEY?: string;
   /** "Sign in with Google" shows only with both. */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
@@ -39,8 +37,6 @@ function boot(env: Env) {
       DATABASE_URL: env.DATABASE_URL,
       STRATA_SECRET_KEY: env.STRATA_SECRET_KEY,
       ...(env.STRATA_PUBLIC_URL ? { STRATA_PUBLIC_URL: env.STRATA_PUBLIC_URL } : {}),
-      ...(env.TMDB_API_KEY ? { TMDB_API_KEY: env.TMDB_API_KEY } : {}),
-      ...(env.OMDB_API_KEY ? { OMDB_API_KEY: env.OMDB_API_KEY } : {}),
       ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET ? { GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET } : {}),
     });
     const { createServices } = await import("./services");

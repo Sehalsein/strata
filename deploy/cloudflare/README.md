@@ -23,8 +23,9 @@ npx wrangler secret put STRATA_SECRET_KEY    # openssl rand -base64 32 — keep 
 npx wrangler deploy
 ```
 
-Optional: `TMDB_API_KEY` / `OMDB_API_KEY` as secrets instead of setting them in the
-dashboard, and `STRATA_PUBLIC_URL` (in `wrangler.jsonc` vars) once it has a domain.
+Optional: `STRATA_PUBLIC_URL` (in `wrangler.jsonc` vars) once it has a domain. Provider
+keys (TMDB, TorBox, OMDb) are each household's own, set in the dashboard under Settings ›
+Connections; the server keeps none for them.
 
 Sign in with Google and passkeys are off unless set up, and the sign-in page only shows
 what's on:

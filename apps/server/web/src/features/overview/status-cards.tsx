@@ -141,7 +141,7 @@ export function ProvidersCard({ status }: { status: AdminStatus }) {
       </CardContent>
       <CardFooter className="mt-auto">
         <Button variant="ghost" size="sm" asChild className="-ml-3">
-          <Link href="/settings#keys">Manage keys</Link>
+          <Link href="/settings#connections">Manage keys</Link>
         </Button>
       </CardFooter>
     </Card>

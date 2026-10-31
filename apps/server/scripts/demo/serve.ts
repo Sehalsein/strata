@@ -100,6 +100,8 @@ const setup = await setupApp.fetch(
 );
 const { householdId } = (await setup.json()) as { householdId: string };
 home = await services.households.get(householdId);
+// Keys are each household's own: the demo's one household gets the operator's TMDB key.
+await home.settingsStore.setSecret("tmdbApiKey", process.env.TMDB_API_KEY!);
 const alex = (await services.db.select({ id: user.id }).from(user).where(eq(user.username, admin.username)))[0]!;
 const people = [
   { username: "Sam", password: "demo-password", isKids: false },

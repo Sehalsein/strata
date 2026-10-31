@@ -6,7 +6,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { recentLogs } from "../../log";
 import { dashboardUrls } from "../../platform/network";
-import { householdSettingsSchema, HOUSEHOLD_SECRET_KEYS, SECRET_KEYS, serverSettingsSchema, SERVER_SECRET_KEYS, settingsSchema, type SecretKey } from "../../settings";
+import { householdSettingsSchema, SECRET_KEYS, serverSettingsSchema, settingsSchema, type SecretKey } from "../../settings";
 import { TorboxClient } from "../../sources/torbox/client";
 import { toCandidate } from "../../sources/resolver";
 import { imageUrl, yearOf } from "../../catalog/tmdb";
@@ -96,7 +96,7 @@ export const adminRoutes = new Hono<Env>()
       uptimeMs: Date.now() - s.startedAt,
       ffmpeg: ff ? { version: ff.version, path: ff.ffmpeg, hwEncoder: ff.hwEncoder ?? null } : null,
       ffmpegSetup: s.ffmpegSetup(),
-      tmdb: { configured: s.settings.hasSecret("tmdbApiKey") },
+      tmdb: { configured: h.settingsStore.hasSecret("tmdbApiKey") },
       torbox: { configured: !!h.torbox() },
       jobs: s.jobs.status(),
       sessions: await Promise.all((await householdPlays(s, h)).map(sessionDto)),
@@ -107,11 +107,11 @@ export const adminRoutes = new Hono<Env>()
     });
   })
 
-  // The server's settings with the household's; secrets only say whether they're set.
+  // The server's settings with the household's; secrets (the household's keys) only say
+  // whether they're set.
   .get("/settings", (c) => {
-    const server = c.var.services.settings;
     const household = c.var.household.settingsStore;
-    const secrets = Object.fromEntries(SECRET_KEYS.map((k) => [k, (SERVER_SECRET_KEYS as readonly string[]).includes(k) ? server.hasSecret(k) : household.hasSecret(k)]));
+    const secrets = Object.fromEntries(SECRET_KEYS.map((k) => [k, household.hasSecret(k)]));
     return c.json({ settings: c.var.household.settings(), secrets });
   })
 
@@ -136,12 +136,10 @@ export const adminRoutes = new Hono<Env>()
     const s = c.var.services;
     const h = c.var.household;
     const key = z.enum(SECRET_KEYS).parse(c.req.param("key")) as SecretKey;
-    const forHousehold = (HOUSEHOLD_SECRET_KEYS as readonly string[]).includes(key);
-    if (!forHousehold) assertServerAdmin(c);
     const { value } = await body(c, z.object({ value: z.string().trim().max(512).nullable() }));
     if (value) {
-      if (key === "tmdbApiKey" && !(await s.tmdb("en-US").testKey(value))) throw new HTTPException(400, { message: "TMDB rejected that key" });
-      if (key === "omdbApiKey" && !(await s.omdb.testKey(value))) throw new HTTPException(400, { message: "OMDb rejected that key" });
+      if (key === "tmdbApiKey" && !(await h.tmdb.testKey(value))) throw new HTTPException(400, { message: "TMDB rejected that key" });
+      if (key === "omdbApiKey" && !(await h.omdb.testKey(value))) throw new HTTPException(400, { message: "OMDb rejected that key" });
       if (key === "torboxApiKey") {
         try {
           await new TorboxClient(value).me();
@@ -150,9 +148,9 @@ export const adminRoutes = new Hono<Env>()
         }
       }
     }
-    await (forHousehold ? h.settingsStore : s.settings).setSecret(key, value);
+    await h.settingsStore.setSecret(key, value);
     if (value && key === "torboxApiKey") void syncNow(h);
-    if (value && key === "tmdbApiKey") void s.jobs.run("matchPending");
+    if (key === "tmdbApiKey") void h.library.matchPending();
     return c.json({ ok: true });
   })
 

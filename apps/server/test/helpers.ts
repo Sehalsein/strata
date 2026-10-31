@@ -1,3 +1,4 @@
+import type { SecretKey } from "../src/settings";
 import { mkdirSync, mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -92,11 +93,21 @@ export interface TestServer {
   dataDir: string;
 }
 
-export async function startTestServer(fetchImpl: typeof fetch = fakeTmdb, overrides: { ffmpeg?: null } = {}): Promise<TestServer> {
+export async function startTestServer(
+  fetchImpl: typeof fetch = fakeTmdb,
+  overrides: { ffmpeg?: null; /** Keys every household gets (each household has its own). */ keys?: Partial<Record<SecretKey, string>> } = {},
+): Promise<TestServer> {
   const dataDir = mkdtempSync(join(tmpdir(), "strata-test-"));
-  process.env.TMDB_API_KEY = "test-key";
   process.env.STRATA_NO_FFMPEG_DOWNLOAD = "1"; // tests use the machine's ffmpeg, never a download
-  const services = await createServices({ dataDir, port: 0, host: "127.0.0.1", databaseUrl: "memory" }, { fetch: fetchImpl, ...overrides });
+  const { keys = { tmdbApiKey: "test-key" }, ...serviceOverrides } = overrides;
+  const services = await createServices({ dataDir, port: 0, host: "127.0.0.1", databaseUrl: "memory" }, { fetch: fetchImpl, ...serviceOverrides });
+  // Each household gets the test keys the first time it's loaded.
+  const loadHousehold = services.households.get.bind(services.households);
+  services.households.get = async (id) => {
+    const h = await loadHousehold(id);
+    for (const [key, value] of Object.entries(keys) as [SecretKey, string][]) if (!h.settingsStore.hasSecret(key)) await h.settingsStore.setSecret(key, value);
+    return h;
+  };
   const app = createApp(services);
   /** `ip` simulates the client address (otherwise the request has none, i.e. not local). */
   const request = async (path: string, init: RequestInit & { json?: unknown; token?: string; ip?: string } = {}) => {

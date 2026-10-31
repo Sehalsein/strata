@@ -27,10 +27,8 @@ services:
       # - /path/to/shows:/media/shows:ro
     environment:
       TZ: UTC
-      # Optional: keys from here instead of the dashboard.
-      # TMDB_API_KEY: ""
-      # TORBOX_API_KEY: ""
-      # OMDB_API_KEY: ""
+      # Provider keys (TMDB, TorBox, OMDb) are each household's: set them in the
+      # dashboard under Settings › Connections.
       # Optional: your own Postgres instead of the bundled database (e.g. the
       # `postgres` service below, or Neon). Uncomment both.
       # DATABASE_URL: postgres://strata:strata@localhost:5432/strata
