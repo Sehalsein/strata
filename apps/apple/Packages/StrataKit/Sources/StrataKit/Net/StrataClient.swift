@@ -258,7 +258,8 @@ public final class StrataClient: Sendable {
                      audioStreamIndex: Int? = nil,
                      caps: ClientCaps = .current) async throws -> PlayOutcome {
         let body = PlayBody(mediaType: target.mediaType, tmdbId: target.tmdbId, season: target.season, episode: target.episode,
-                            candidateId: candidateId, startMs: startMs, audioStreamIndex: audioStreamIndex, caps: caps)
+                            candidateId: candidateId, startMs: startMs, audioStreamIndex: audioStreamIndex,
+                            preferMaxHeight: candidateId == nil ? NetworkConditions.shared.preferredMaxHeight : nil, caps: caps)
         let (data, response) = try await rawData(request("POST", "/api/play", body: body))
         let status = response.statusCode
         if status == 428 {
@@ -509,6 +510,8 @@ private struct PlayBody: Encodable {
     var candidateId: String?
     var startMs: Int?
     var audioStreamIndex: Int?
+    /// Without a chosen source: prefer one no taller than this (on cellular data).
+    var preferMaxHeight: Int?
     var caps: ClientCaps
 }
 
