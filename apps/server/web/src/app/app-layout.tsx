@@ -91,7 +91,7 @@ function AppSidebar({ path }: { path: string }) {
       </SidebarHeader>
       <SidebarContent>
         {NAV_GROUPS.map((group) => {
-          const items = routes.filter((r) => r.group === group && can(r.access));
+          const items = routes.filter((r) => r.group === group && !r.hidden && can(r.access));
           if (items.length === 0) return null;
           return (
             <SidebarGroup key={group}>

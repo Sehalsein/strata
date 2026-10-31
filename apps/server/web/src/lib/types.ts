@@ -75,6 +75,19 @@ export interface AuthSession {
   viewerOnly?: boolean | null;
 }
 
+/** GET /api/admin/devices: a device signed in to the household, and whose it is. */
+export interface HouseholdDevice {
+  id: string;
+  userId: string;
+  userName: string;
+  username: string | null;
+  userAgent: string | null;
+  viewerOnly: boolean;
+  createdAt: string;
+  updatedAt: string;
+  isCurrent: boolean;
+}
+
 /** An account signed in on this browser (multi-session). */
 export interface DeviceAccount {
   session: AuthSession;

@@ -11,7 +11,8 @@ import { TorboxClient } from "../../sources/torbox/client";
 import { toCandidate } from "../../sources/resolver";
 import { imageUrl, yearOf } from "../../catalog/tmdb";
 import { API_VERSION, VERSION } from "../../version";
-import { organization, user } from "../../db/schema";
+import { member, organization, session as authSession, user } from "../../db/schema";
+import { and, desc, eq, gt } from "drizzle-orm";
 import { isCloud } from "../../mode";
 import type { PlaybackSession } from "../../playback/sessions";
 import type { Household } from "../../household";
@@ -31,6 +32,41 @@ function assertServerAdmin(c: Context<Env>) {
  */
 export const adminRoutes = new Hono<Env>()
   .use(requireAuth, requireHousehold, requireHouseholdAdmin)
+
+  // Every device signed in to this household, with whose sign-in it is (tokens never leave).
+  .get("/devices", async (c) => {
+    const h = c.var.household;
+    const rows = await c.var.services.db
+      .select({
+        id: authSession.id,
+        userId: authSession.userId,
+        userName: user.name,
+        username: user.username,
+        userAgent: authSession.userAgent,
+        viewerOnly: authSession.viewerOnly,
+        createdAt: authSession.createdAt,
+        updatedAt: authSession.updatedAt,
+        token: authSession.token,
+      })
+      .from(authSession)
+      .innerJoin(user, eq(user.id, authSession.userId))
+      .innerJoin(member, and(eq(member.userId, authSession.userId), eq(member.organizationId, h.organizationId)))
+      .where(and(eq(authSession.activeOrganizationId, h.organizationId), gt(authSession.expiresAt, new Date())))
+      .orderBy(desc(authSession.updatedAt));
+    const current = c.var.session.token;
+    return c.json({ items: rows.map(({ token, ...row }) => ({ ...row, viewerOnly: !!row.viewerOnly, isCurrent: token === current })) });
+  })
+
+  // Signs a device out of this household (it goes back to the sign-in screen).
+  .delete("/devices/:id", async (c) => {
+    const h = c.var.household;
+    const [row] = await c.var.services.db
+      .delete(authSession)
+      .where(and(eq(authSession.id, c.req.param("id")), eq(authSession.activeOrganizationId, h.organizationId)))
+      .returning({ id: authSession.id });
+    if (!row) throw new HTTPException(404, { message: "No such device" });
+    return c.json({ ok: true });
+  })
 
   .get("/status", async (c) => {
     const s = c.var.services;

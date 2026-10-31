@@ -16,6 +16,8 @@ export interface AppRoute {
   icon: LucideIcon;
   group: NavGroup;
   access: Access;
+  /** Reached by a link, not the sidebar (a TV's QR code opens /link). */
+  hidden?: boolean;
   component: LazyExoticComponent<ComponentType>;
 }
 
@@ -27,7 +29,7 @@ export const routes: AppRoute[] = [
   { path: "/library", title: "Library", icon: Library, group: "Media", access: "householdAdmin", component: lazy(() => import("@/features/library/library-page")) },
   { path: "/members", title: "Members", icon: Users, group: "People", access: "householdAdmin", component: lazy(() => import("@/features/members/members-page")) },
   { path: "/devices", title: "Devices", icon: MonitorSmartphone, group: "People", access: "any", component: lazy(() => import("@/features/devices/devices-page")) },
-  { path: "/link", title: "Link a TV", icon: Tv, group: "People", access: "any", component: lazy(() => import("@/features/link/link-page")) },
+  { path: "/link", title: "Link a TV", icon: Tv, group: "People", access: "any", hidden: true, component: lazy(() => import("@/features/link/link-page")) },
   { path: "/households", title: "Households", icon: Building2, group: "System", access: "serverAdmin", component: lazy(() => import("@/features/households/households-page")) },
   { path: "/settings", title: "Settings", icon: Settings, group: "System", access: "householdAdmin", component: lazy(() => import("@/features/settings/settings-page")) },
   { path: "/logs", title: "Logs", icon: ScrollText, group: "System", access: "serverAdmin", component: lazy(() => import("@/features/logs/logs-page")) },

@@ -13,6 +13,7 @@ import type {
   UpdateStatus,
   ContentLimit,
   HouseholdSummary,
+  HouseholdDevice,
 } from "./types";
 
 export class ApiError extends Error {
@@ -107,6 +108,9 @@ export const api = {
   checkUpdate: () => request<UpdateStatus>("POST", "/admin/update/check"),
   applyUpdate: () => request<UpdateStatus>("POST", "/admin/update/apply"),
 
+  /** Every device signed in to the household, with whose it is (its admins). */
+  devices: () => request<{ items: HouseholdDevice[] }>("GET", "/admin/devices"),
+  signOutDevice: (id: string) => request<{ ok: true }>("DELETE", `/admin/devices/${encodeURIComponent(id)}`),
   stopSession: (id: string) => request<{ ok: true }>("DELETE", `/admin/sessions/${encodeURIComponent(id)}`),
   /** Every household on the server (server admin). */
   households: () => request<{ items: HouseholdSummary[] }>("GET", "/admin/households"),

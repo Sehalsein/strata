@@ -38,6 +38,8 @@ export const queryKeys = {
   /** Accounts signed in on this browser. */
   accounts: ["auth", "accounts"] as const,
   sessionToken: ["auth", "token"] as const,
+  /** Every device in the household (its admins). */
+  devices: ["admin", "devices"] as const,
   deviceCode: (code: string) => ["auth", "device", code] as const,
   logs: (limit: number) => ["admin", "logs", limit] as const,
   files: (filters: LibraryFilters) => ["admin", "files", filters] as const,

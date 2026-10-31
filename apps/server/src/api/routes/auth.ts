@@ -40,7 +40,13 @@ async function countStart(c: Context<Env>, what: string) {
 async function sessionFor(c: Context<Env>, userId: string, organizationId: string, viewerOnly: boolean): Promise<string> {
   const ctx = await c.var.services.auth.$context;
   const created = await ctx.internalAdapter.createSession(userId, false);
-  await ctx.internalAdapter.updateSession(created.token, { activeOrganizationId: organizationId, viewerOnly });
+  // Made here rather than by Better Auth, so the device (for the Devices page) is set here too.
+  await ctx.internalAdapter.updateSession(created.token, {
+    activeOrganizationId: organizationId,
+    viewerOnly,
+    userAgent: c.req.header("user-agent") ?? null,
+    ipAddress: clientAddress(c),
+  });
   return created.token;
 }
 
