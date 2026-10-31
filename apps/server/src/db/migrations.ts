@@ -119,5 +119,17 @@ export const migrations: string[] = [
     hidden_at BIGINT NOT NULL,
     PRIMARY KEY (profile_id, type, tmdb_id)
   );
+  CREATE TABLE play_sessions (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    profile_id INTEGER NOT NULL,
+    file_id INTEGER NOT NULL,
+    target_json TEXT NOT NULL,
+    plan_json TEXT NOT NULL,
+    input TEXT NOT NULL,
+    created_at BIGINT NOT NULL,
+    last_access_at BIGINT NOT NULL
+  );
+  CREATE INDEX play_sessions_user ON play_sessions(user_id);
   `,
 ];

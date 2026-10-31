@@ -82,6 +82,16 @@ export function refuseServerStream(plan: PlaybackPlan, inputKind: "path" | "url"
   throw new PlaybackError(`This source can't play on this device (${plan.reasons.join("; ")}). Pick another source.`, 422);
 }
 
+/** The server has no media info for this TorBox file: the app reads it from `url` and sends it. */
+export class NeedsProbeError extends Error {
+  constructor(
+    readonly fileId: number,
+    readonly url: string,
+  ) {
+    super("The app needs to read this file's details");
+  }
+}
+
 export class PlaybackService {
   private links = new Map<number, { url: string; at: number }>();
   private probing = new Map<number, Promise<MediaInfo>>();
@@ -124,12 +134,12 @@ export class PlaybackService {
       if (ref.kind === "torrents") this.onPlayedTorrent(ref.itemId);
     }
 
-    this.sessions.stopForTarget(user.userId, req);
+    await this.sessions.stopForTarget(user.userId, req);
     // Direct and device play start at t=0 and seek on the client; HLS encodes from the resume point.
     const direct = plan.mode === "direct" || plan.mode === "device";
     let session: PlaybackSession;
     try {
-      session = this.sessions.create({
+      session = await this.sessions.create({
         profileId: user.profileId,
         userId: user.userId,
         fileId: file.id,
@@ -193,7 +203,8 @@ export class PlaybackService {
       return;
     }
     const file = await this.library.get(best.fileId);
-    if (!file || file.probeJson) return;
+    // Without ffprobe the app reads the next file when it gets there.
+    if (!file || file.probeJson || !this.ffmpeg()) return;
     const { input } = await this.resolveInput(file);
     // Background work: no retry, so a bad file can't cost a second probe.
     await this.probeFile(file, input, { allowRetry: false });
@@ -248,7 +259,7 @@ export class PlaybackService {
     const file = await this.library.get(session.fileId);
     if (!file) throw new PlaybackError("File no longer exists", 410);
     const { input } = await this.resolveInput(file);
-    session.input = input;
+    await this.sessions.updateLink(session, input);
     return input;
   }
 
@@ -279,7 +290,12 @@ export class PlaybackService {
 
   private async probeOnce(file: FileRow, input: string, allowRetry: boolean): Promise<MediaInfo> {
     const ff = this.ffmpeg();
-    if (!ff) throw new PlaybackError("ffmpeg/ffprobe is not installed on the server", 503);
+    if (!ff) {
+      // No ffprobe here (the cloud server never has one): the app reads the file's
+      // details itself from the same link and sends them (POST /files/:id/probe).
+      if (file.provider === "torbox") throw new NeedsProbeError(file.id, input);
+      throw new PlaybackError("ffmpeg/ffprobe is not installed on the server", 503);
+    }
     try {
       return await this.saveProbe(file, await probe(ff.ffprobe, input));
     } catch (err) {
@@ -301,6 +317,17 @@ export class PlaybackService {
       this.links.delete(file.id);
       return this.probeFailed(file);
     }
+  }
+
+  /**
+   * Media info the app read itself (from the link this server gave it). Stored like a
+   * probe; a file already probed keeps what it has.
+   */
+  async acceptProbe(fileId: number, info: MediaInfo): Promise<boolean> {
+    const file = await this.library.get(fileId);
+    if (!file) return false;
+    if (!file.probeJson) await this.saveProbe(file, info);
+    return true;
   }
 
   private async saveProbe(file: FileRow, info: MediaInfo): Promise<MediaInfo> {

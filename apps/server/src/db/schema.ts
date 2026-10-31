@@ -174,3 +174,23 @@ export const watchlist = pgTable(
   },
   (t) => [primaryKey({ columns: [t.profileId, t.type, t.tmdbId] })],
 );
+
+/**
+ * Plays of TorBox files: the server only handed the app a link, so any server sharing
+ * the database can refresh it, record progress against it or end it. (Local files,
+ * streamed by this server's ffmpeg, keep their sessions in memory.)
+ */
+export const playSessions = pgTable("play_sessions", {
+  id: text("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  profileId: integer("profile_id").notNull(),
+  fileId: integer("file_id").notNull(),
+  /** { mediaType, tmdbId, season?, episode? } */
+  targetJson: text("target_json").notNull(),
+  /** The playback plan (mode, audio, reasons…). */
+  planJson: text("plan_json").notNull(),
+  /** The TorBox link handed out. */
+  input: text("input").notNull(),
+  createdAt: ms("created_at").notNull(),
+  lastAccessAt: ms("last_access_at").notNull(),
+});

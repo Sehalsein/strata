@@ -48,7 +48,7 @@ export const adminRoutes = new Hono<Env>()
       tmdb: { configured: s.tmdb.configured },
       torbox: { configured: !!s.torbox() },
       jobs: s.jobs.status(),
-      sessions: await Promise.all(s.sessions.list().map(sessionDto)),
+      sessions: await Promise.all((await s.sessions.list()).map(sessionDto)),
       library: await s.library.stats(),
       // Read-only: port and bind host come from the CLI/env (see README).
       network: { host: s.config.host, port: s.config.port, urls: dashboardUrls(s.config.host, s.config.port), bonjour: s.bonjour.active },
@@ -176,10 +176,10 @@ export const adminRoutes = new Hono<Env>()
 
   .get("/sessions", async (c) => {
     const dto = await sessionDtoFor(c.var.services);
-    return c.json({ items: await Promise.all(c.var.services.sessions.list().map(dto)) });
+    return c.json({ items: await Promise.all((await c.var.services.sessions.list()).map(dto)) });
   })
-  .delete("/sessions/:id", (c) => {
-    c.var.services.sessions.stop(c.req.param("id"));
+  .delete("/sessions/:id", async (c) => {
+    await c.var.services.sessions.stop(c.req.param("id"));
     return c.json({ ok: true });
   })
 

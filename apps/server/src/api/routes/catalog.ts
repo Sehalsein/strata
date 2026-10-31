@@ -3,6 +3,8 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { body, intParam, optionalInt, profileOf, requireAuth, type Env } from "../context";
 import { capsSchema } from "../../playback/decide";
+import { NeedsProbeError } from "../../playback/service";
+import { mediaInfoSchema } from "../../media/probe";
 import type { Shelf } from "../../catalog/service";
 
 const target = z.object({
@@ -118,28 +120,41 @@ export const catalogRoutes = new Hono<Env>()
     );
     const profileId = profileOf(c);
     await c.var.services.content.assertAllowed(profileId, req.mediaType === "movie" ? "movie" : "show", req.tmdbId);
-    return c.json(await c.var.services.playback.play({ userId: c.var.session.user.id, profileId }, req));
+    try {
+      return c.json(await c.var.services.playback.play({ userId: c.var.session.user.id, profileId }, req));
+    } catch (err) {
+      // The app reads the file's details itself, sends them, and asks again.
+      if (err instanceof NeedsProbeError) return c.json({ needsProbe: { fileId: err.fileId, url: err.url } }, 428);
+      throw err;
+    }
+  })
+
+  // Media info the app read from a file (see NeedsProbeError): codecs, tracks, length.
+  .post("/files/:id/probe", async (c) => {
+    const info = await body(c, mediaInfoSchema);
+    if (!(await c.var.services.playback.acceptProbe(intParam(c, "id"), info))) throw new HTTPException(404, { message: "No such file" });
+    return c.json({ ok: true });
   })
 
   // A TorBox link expired mid-play (device and direct play fetch it themselves).
   .post("/play/:sessionId/link", async (c) => {
     const services = c.var.services;
-    const session = services.sessions.get(c.req.param("sessionId"));
+    const session = await services.sessions.get(c.req.param("sessionId"));
     if (!session || session.userId !== c.var.session.user.id) throw new HTTPException(404, { message: "No such session" });
     await services.playback.refreshLink(session);
     return c.json({ url: services.playback.handOff(session) });
   })
 
-  .delete("/play/:sessionId", (c) => {
+  .delete("/play/:sessionId", async (c) => {
     const s = c.var.services.sessions;
-    const session = s.get(c.req.param("sessionId"));
-    if (session && session.userId === c.var.session.user.id) s.stop(session.id);
+    const session = await s.get(c.req.param("sessionId"));
+    if (session && session.userId === c.var.session.user.id) await s.stop(session.id);
     return c.json({ ok: true });
   })
 
   .post("/progress", async (c) => {
     const input = await body(c, target.extend({ positionMs: z.number().min(0), durationMs: z.number().min(0), sessionId: z.string().optional() }).refine(...episodeRule));
-    if (input.sessionId) c.var.services.sessions.get(input.sessionId); // keeps the session alive
+    if (input.sessionId) await c.var.services.sessions.get(input.sessionId); // keeps the session alive
     const row = await c.var.services.progress.record(profileOf(c), input, input.positionMs, input.durationMs);
     return c.json({ positionMs: row.positionMs, durationMs: row.durationMs, completed: row.completed });
   })

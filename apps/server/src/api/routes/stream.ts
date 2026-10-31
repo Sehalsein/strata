@@ -20,7 +20,7 @@ const typeOf = (name: string) => CONTENT_TYPES[name.split(".").pop()?.toLowerCas
  */
 export const streamRoutes = new Hono<Env>()
   .get("/stream/:sid/file", async (c) => {
-    const session = c.var.services.sessions.get(c.req.param("sid"));
+    const session = await c.var.services.sessions.get(c.req.param("sid"));
     if (!session || (session.plan.mode !== "direct" && session.plan.mode !== "device")) throw new HTTPException(404, { message: "No such stream" });
     // A link (TorBox): the app fetches it from there, never through here.
     if (session.inputKind === "url") return c.redirect(session.input, 302);
@@ -31,7 +31,7 @@ export const streamRoutes = new Hono<Env>()
   // gets 202 and retries while it finishes in the background.
   .get("/stream/:sid/subtitles/:track{[sx]\\d+\\.vtt}", async (c) => {
     const services = c.var.services;
-    const session = services.sessions.get(c.req.param("sid"));
+    const session = await services.sessions.get(c.req.param("sid"));
     const id = c.req.param("track").replace(/\.vtt$/, "");
     const track = session?.subtitles.find((t) => t.id === id);
     if (!session || !track) throw new HTTPException(404, { message: "No such subtitle track" });
@@ -47,7 +47,7 @@ export const streamRoutes = new Hono<Env>()
 
   .get("/stream/:sid/:name{(?:stream\\.m3u8|init\\.mp4|seg\\d{5}\\.m4s)}", async (c) => {
     const services = c.var.services;
-    const session = services.sessions.get(c.req.param("sid"));
+    const session = await services.sessions.get(c.req.param("sid"));
     if (!session || !session.dir) throw new HTTPException(404, { message: "No such stream" });
     const name = c.req.param("name");
     const path = await services.sessions.waitForFile(session, name);

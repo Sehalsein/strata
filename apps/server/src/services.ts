@@ -118,7 +118,10 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   const catalog = new CatalogService(tmdb, library, progress, () => settings.get(), { ids: animeIds, anilist, kitsu }, omdb);
   const content = new ContentFilter(db, tmdb, () => settings.get());
   const calendar = new CalendarService(tmdb, library, progress, { ids: animeIds, anilist }, (profileId, id) => content.allowed(profileId, "show", id));
-  const sessions = new SessionManager(paths.transcode, ffmpeg, new KeepAwake(), () => settings.get().maxTranscodes, () => settings.get().hardwareAcceleration);
+  const sessions = new SessionManager(
+    db,
+    isCloud ? null : { transcodeDir: paths.transcode, getFfmpeg: ffmpeg, keepAwake: new KeepAwake(), maxTranscodes: () => settings.get().maxTranscodes, hwAllowed: () => settings.get().hardwareAcceleration },
+  );
   const subtitles = new SubtitleService(join(paths.root, "cache", "subtitles"), ffmpeg);
   const housekeeping = new TorboxHousekeeping(db, library);
   const discovery = new Discovery(tmdb, library, () => settings.get(), torbox, fetchImpl, (id, hash, name) => housekeeping.recordAdded(id, hash, name), animeIds);
@@ -141,7 +144,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     if (!client) return { skipped: "TorBox not configured" };
     // Never pull a torrent out from under something that's streaming it (checked per torrent).
     const streaming = async (id: number) => {
-      for (const s of sessions.list()) {
+      for (const s of await sessions.list()) {
         const ref = (await library.get(s.fileId))?.ref;
         if (ref?.startsWith("torrents:") && parseTorboxRef(ref).itemId === id) return true;
       }
@@ -154,6 +157,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   // Expired sign-ins and old failed-attempt counts.
   jobs.register("pruneAuth", async () => {
     await auth.prune();
+    await sessions.prune();
     await throttle.prune();
     return {};
   });
@@ -183,7 +187,8 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   if (!isCloud && !ffmpegInfo && overrides.ffmpeg === undefined && process.env.STRATA_NO_FFMPEG_DOWNLOAD !== "1") void jobs.run("installFfmpeg");
 
   const serverId = await loadServerId(db, paths.root);
-  const updater = createUpdater({ dataDir: paths.root, dbPath: paths.db, backupsDir: paths.backups, db, settings, activeSessions: () => sessions.list().length, fetch: fetchImpl });
+  // Only local streams run through this server; TorBox plays don't mind an update.
+  const updater = createUpdater({ dataDir: paths.root, dbPath: paths.db, backupsDir: paths.backups, db, settings, activeSessions: () => sessions.activeTranscodes(), fetch: fetchImpl });
   jobs.register("checkUpdates", () => updater.checkAndMaybeApply());
   // Started by main.ts once the HTTP server is listening; refreshed when the name/toggle changes.
   const bonjour = new Bonjour(() => {
