@@ -7,7 +7,7 @@ import type { Settings } from "../settings";
 import { findCandidates, toCandidate, type Candidate } from "../sources/resolver";
 import type { TorboxClient } from "../sources/torbox/client";
 import { parseTorboxRef } from "../sources/torbox/sync";
-import { decide, type ClientCaps } from "./decide";
+import { decide, type ClientCaps, type PlaybackPlan } from "./decide";
 import { NotReadyError, isInfoHash, type Discovery } from "../sources/discovery";
 import { embeddedTracks, findSidecars } from "./subtitles";
 import type { EpisodeRef } from "../catalog/service";
@@ -34,9 +34,15 @@ export interface PlayRequest extends SessionTarget {
 
 export interface PlayResponse {
   sessionId: string;
-  mode: "direct" | "remux" | "transcode";
-  /** Relative to the server's base URL. */
+  mode: "direct" | "device" | "remux" | "transcode";
+  /**
+   * Relative to the server's base URL, or for TorBox files in direct and device modes,
+   * the absolute TorBox link: the app fetches the file itself and nothing streams
+   * through here.
+   */
   url: string;
+  /** Device mode: what the app does as it repackages the file. */
+  remux: { audio: PlaybackPlan["audio"]; audioStreamIndex?: number; videoStreamIndex?: number; stripDolbyVision: boolean } | null;
   /** Media time at which the stream's t=0 sits (HLS starts at the resume point). */
   startOffsetMs: number;
   /** Where the client should seek after loading, in stream time. */
@@ -44,8 +50,12 @@ export interface PlayResponse {
   durationMs: number;
   candidate: Candidate;
   audioTracks: { index: number; codec: string; channels: number; language?: string; title?: string; selected: boolean }[];
-  /** `url` is set for tracks the server can serve as WebVTT (cue times are media time). */
-  subtitleTracks: { id: string; codec: string; language?: string; title?: string; forced: boolean; isDefault: boolean; external: boolean; url: string | null }[];
+  /**
+   * `url` is set for tracks the server can serve as WebVTT (cue times are media time).
+   * In device mode embedded text tracks have none: the app reads them from the stream
+   * (`embedded`, at `streamIndex`), so the server never reads the whole file for them.
+   */
+  subtitleTracks: { id: string; codec: string; language?: string; title?: string; forced: boolean; isDefault: boolean; external: boolean; url: string | null; embedded?: boolean; streamIndex?: number }[];
   chapters: { startMs: number; title?: string }[];
   reasons: string[];
   /** For episodes: what Up Next should offer, and whether it can play right away. */
@@ -76,6 +86,7 @@ export class PlaybackService {
     private readonly findNextEpisode: (showId: number, season: number, episode: number) => Promise<EpisodeRef | null>,
     /** Told when a TorBox torrent is played, so housekeeping keeps it. */
     private readonly onPlayedTorrent: (torrentId: number) => void = () => {},
+    /** The TorBox API key, so a link that embeds it is never handed to an app. */
   ) {}
 
   async play(user: { userId: number; profileId: number }, req: PlayRequest): Promise<PlayResponse> {
@@ -102,7 +113,8 @@ export class PlaybackService {
     }
 
     this.sessions.stopForTarget(user.userId, req);
-    const direct = plan.mode === "direct";
+    // Direct and device play start at t=0 and seek on the client; HLS encodes from the resume point.
+    const direct = plan.mode === "direct" || plan.mode === "device";
     let session: PlaybackSession;
     try {
       session = this.sessions.create({
@@ -129,7 +141,11 @@ export class PlaybackService {
     return {
       sessionId: session.id,
       mode: plan.mode,
-      url: direct ? `/api/stream/${session.id}/file` : `/api/stream/${session.id}/stream.m3u8`,
+      url: direct ? this.handOff(session) : `/api/stream/${session.id}/stream.m3u8`,
+      remux:
+        plan.mode === "device"
+          ? { audio: plan.audio, audioStreamIndex: plan.audioStreamIndex, videoStreamIndex: plan.videoStreamIndex, stripDolbyVision: plan.stripDolbyVision }
+          : null,
       startOffsetMs: session.startOffsetMs,
       seekToMs: direct ? startMs : 0,
       durationMs: info.durationMs,
@@ -143,7 +159,9 @@ export class PlaybackService {
         forced: t.forced,
         isDefault: t.isDefault,
         external: t.external,
-        url: t.text ? `/api/stream/${session.id}/subtitles/${t.id}.vtt` : null,
+        ...(plan.mode === "device" && !t.external
+          ? { url: null, embedded: t.text, streamIndex: typeof t.source === "number" ? t.source : undefined }
+          : { url: t.text ? `/api/stream/${session.id}/subtitles/${t.id}.vtt` : null }),
       })),
       chapters: info.chapters,
       reasons: plan.reasons,
@@ -202,6 +220,16 @@ export class PlaybackService {
     const result = await this.discovery.acquire(target, hash);
     if (result.status === "downloading") throw new NotReadyError(result);
     return this.library.get(result.fileId)!;
+  }
+
+  /**
+   * Where the app fetches a direct or device-mode file: the TorBox link itself, so the
+   * bytes never pass through here. TorBox's links carry the account key (`token=`); they
+   * go to the household's own apps only. Files on this server's disk are served by
+   * `/api/stream/:sid/file`.
+   */
+  handOff(session: PlaybackSession): string {
+    return session.inputKind === "url" ? session.input : `/api/stream/${session.id}/file`;
   }
 
   /** A fresh TorBox link for a session whose cached one expired. */

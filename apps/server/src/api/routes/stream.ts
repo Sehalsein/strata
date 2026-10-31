@@ -21,14 +21,9 @@ const typeOf = (name: string) => CONTENT_TYPES[name.split(".").pop()?.toLowerCas
 export const streamRoutes = new Hono<Env>()
   .get("/stream/:sid/file", async (c) => {
     const session = c.var.services.sessions.get(c.req.param("sid"));
-    if (!session || session.plan.mode !== "direct") throw new HTTPException(404, { message: "No such stream" });
-    if (session.inputKind === "url") {
-      const key = c.var.services.settings.getSecret("torboxApiKey");
-      // TorBox CDN links are normally key-free and safe to hand out; if one ever embeds
-      // the account key, proxy the bytes rather than leak it to the client.
-      if (!key || !session.input.includes(key)) return c.redirect(session.input, 302);
-      return proxyRange(session.input, c.req.header("range"));
-    }
+    if (!session || (session.plan.mode !== "direct" && session.plan.mode !== "device")) throw new HTTPException(404, { message: "No such stream" });
+    // A link (TorBox): the app fetches it from there, never through here.
+    if (session.inputKind === "url") return c.redirect(session.input, 302);
     return serveRange(session.input, c.req.header("range"));
   })
 
@@ -61,16 +56,6 @@ export const streamRoutes = new Hono<Env>()
       headers: { "Content-Type": typeOf(name), "Cache-Control": name.endsWith(".m3u8") ? "no-cache" : "private, max-age=3600" },
     });
   });
-
-async function proxyRange(url: string, range: string | undefined): Promise<Response> {
-  const upstream = await fetch(url, { headers: range ? { Range: range } : {} });
-  const headers = new Headers();
-  for (const h of ["content-type", "content-length", "content-range", "accept-ranges"]) {
-    const v = upstream.headers.get(h);
-    if (v) headers.set(h, v);
-  }
-  return new Response(upstream.body, { status: upstream.status, headers });
-}
 
 export function serveRange(path: string, range: string | undefined): Response {
   const file = Bun.file(path);

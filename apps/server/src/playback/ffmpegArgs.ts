@@ -28,7 +28,7 @@ export function buildHlsArgs({ ffmpeg, input, startSeconds, plan, info, outDir, 
   if (plan.video === "copy") {
     args.push("-c:v", "copy");
     if (v?.codec === "hevc") args.push("-tag:v", "hvc1");
-    if (plan.stripDolbyVision) args.push("-bsf:v", "dovi_rbsp=strip=1");
+    if (plan.stripDolbyVision) args.push("-bsf:v", "dovi_rpu=strip=1");
   } else {
     const height = Math.min(plan.targetHeight ?? v?.height ?? 1080, v?.height ?? 1080);
     const bitrate = height >= 2160 ? 20_000 : height >= 1080 ? 8_000 : height >= 720 ? 4_000 : 2_000;

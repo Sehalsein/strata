@@ -121,6 +121,15 @@ export const catalogRoutes = new Hono<Env>()
     return c.json(await c.var.services.playback.play({ userId: c.var.session.user.id, profileId }, req));
   })
 
+  // A TorBox link expired mid-play (device and direct play fetch it themselves).
+  .post("/play/:sessionId/link", async (c) => {
+    const services = c.var.services;
+    const session = services.sessions.get(c.req.param("sessionId"));
+    if (!session || session.userId !== c.var.session.user.id) throw new HTTPException(404, { message: "No such session" });
+    await services.playback.refreshLink(session);
+    return c.json({ url: services.playback.handOff(session) });
+  })
+
   .delete("/play/:sessionId", (c) => {
     const s = c.var.services.sessions;
     const session = s.get(c.req.param("sessionId"));

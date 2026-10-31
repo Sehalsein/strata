@@ -55,6 +55,9 @@ export interface PlaybackSession {
   error?: string;
 }
 
+/** Remux and transcode run ffmpeg here; direct and device play only hand out a link. */
+export const isHls = (mode: PlaybackPlan["mode"]) => mode === "remux" || mode === "transcode";
+
 export class SessionManager {
   private sessions = new Map<string, PlaybackSession>();
   private hwStalledAt = 0;
@@ -74,7 +77,7 @@ export class SessionManager {
 
   create(init: Omit<PlaybackSession, "id" | "createdAt" | "lastAccessAt" | "lastSegmentRequested">): PlaybackSession {
     const session: PlaybackSession = { ...init, id: randomBytes(16).toString("hex"), createdAt: Date.now(), lastAccessAt: Date.now(), lastSegmentRequested: 0 };
-    if (session.plan.mode !== "direct") this.startHls(session);
+    if (isHls(session.plan.mode)) this.startHls(session);
     this.sessions.set(session.id, session);
     this.keepAwake.acquire();
     log.info(`Session ${session.id.slice(0, 8)} ${session.plan.mode} file=${session.fileId}${session.plan.reasons.length ? ` (${session.plan.reasons.join("; ")})` : ""}`);
@@ -119,7 +122,7 @@ export class SessionManager {
   }
 
   activeTranscodes(): number {
-    return this.list().filter((s) => s.plan.mode !== "direct").length;
+    return this.list().filter((s) => isHls(s.plan.mode)).length;
   }
 
   /** Waits for an HLS output file to exist (ffmpeg writes .tmp then renames). */
@@ -218,7 +221,7 @@ export class SessionManager {
     for (const session of this.sessions.values()) {
       // Direct-play range requests are sparse (AVPlayer buffers minutes at a time), so
       // direct sessions live until progress stops or the client ends them.
-      const timeout = session.plan.mode === "direct" ? IDLE_TIMEOUT_MS * 4 : IDLE_TIMEOUT_MS;
+      const timeout = isHls(session.plan.mode) ? IDLE_TIMEOUT_MS : IDLE_TIMEOUT_MS * 4;
       if (now - session.lastAccessAt > timeout) this.stop(session.id);
       else this.throttle(session);
     }
