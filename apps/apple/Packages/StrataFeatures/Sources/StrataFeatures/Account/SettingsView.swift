@@ -131,7 +131,26 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("Server", value: store.activeServer?.name ?? "—")
+                    if let server = store.activeServer {
+                        // The name is this device's own; the server keeps its name for everyone else.
+                        Button { startRename(server) } label: {
+                            LabeledContent("Server") {
+                                HStack(spacing: Metrics.space2) {
+                                    Text(server.name)
+                                    Image(systemName: "pencil").font(.stFootnote)
+                                }
+                            }
+                        }
+                        .foregroundStyle(Theme.ink)
+                        LabeledContent("Address") {
+                            Text(Self.address(server.url))
+                                #if !os(tvOS)
+                                .textSelection(.enabled)
+                                #endif
+                        }
+                    } else {
+                        LabeledContent("Server", value: "—")
+                    }
                     LabeledContent("Server Version", value: store.activeServer?.version ?? "—")
                     LabeledContent("App Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
                 } header: {
@@ -185,6 +204,13 @@ struct SettingsView: View {
     private func profileLine(_ signIn: SavedSignIn) -> String {
         let server = store.server(for: signIn)?.name ?? "this server"
         return signIn.username.map { "@\($0) · \(server)" } ?? server
+    }
+
+    /// "http://192.168.1.20:8080", without a trailing slash.
+    private static func address(_ url: URL) -> String {
+        var text = url.absoluteString
+        while text.hasSuffix("/") { text.removeLast() }
+        return text
     }
 
     private func startRename(_ server: SavedServer) {
