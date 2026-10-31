@@ -88,6 +88,7 @@ export interface TmdbShow {
   vote_average?: number;
   number_of_seasons?: number;
   seasons: { season_number: number; name: string; episode_count: number; air_date?: string | null; poster_path?: string | null; overview?: string }[];
+  last_episode_to_air?: { season_number: number; episode_number: number; air_date?: string } | null;
   next_episode_to_air?: { season_number: number; episode_number: number; air_date?: string } | null;
   credits?: TmdbCredits;
   recommendations?: TmdbPage;

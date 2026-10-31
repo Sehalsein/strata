@@ -42,6 +42,7 @@ export const catalogRoutes = new Hono<Env>()
   // Episodes of the shows on this profile's list: the last week and the next month.
   .get("/calendar", async (c) => c.json({ items: await c.var.services.calendar.episodes(profileOf(c)) }))
 
+  .get("/shows", async (c) => c.json({ shelves: await allowedShelves(c, await c.var.services.catalog.showsPage()) }))
   .get("/anime/categories", (c) => c.json({ items: c.var.services.catalog.animeCategories() }))
 
   .get("/anime", async (c) => {

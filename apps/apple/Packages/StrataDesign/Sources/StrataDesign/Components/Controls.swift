@@ -4,11 +4,14 @@ import SwiftUI
 public struct PlayButton: View {
     let title: String
     let systemImage: String
+    /// Widens the button, like the TV app's hero (`.infinity` to fill the row).
+    let maxWidth: CGFloat?
     let action: () -> Void
 
-    public init(_ title: String = "Play", systemImage: String = "play.fill", action: @escaping () -> Void) {
+    public init(_ title: String = "Play", systemImage: String = "play.fill", maxWidth: CGFloat? = nil, action: @escaping () -> Void) {
         self.title = title
         self.systemImage = systemImage
+        self.maxWidth = maxWidth
         self.action = action
     }
 
@@ -18,7 +21,7 @@ public struct PlayButton: View {
                 .font(.stHeadline)
                 .foregroundStyle(Theme.onAccent)
                 .padding(.horizontal, Metrics.space2)
-                .frame(minHeight: 30)
+                .frame(maxWidth: maxWidth, minHeight: 30)
         }
         .buttonStyle(.glassProminent)
         .tint(Theme.apricot)

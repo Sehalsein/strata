@@ -10,6 +10,8 @@ struct SettingsView: View {
     @State private var showAddServer = false
     @State private var confirmSignOut = false
     @State private var showSignInTV = false
+    @State private var renaming: SavedServer?
+    @State private var newName = ""
     /// Shown as a tab (tvOS) rather than a sheet: no Done button.
     var embedded = false
 
@@ -49,14 +51,20 @@ struct SettingsView: View {
                                     Text(server.url.host() ?? server.url.absoluteString).font(.stFootnote).foregroundStyle(Theme.ink3)
                                 }
                                 Spacer()
+                                if let version = server.version { SpecBadge("v\(version)") }
                                 if server.id == services.store.activeID {
                                     Image(systemName: "checkmark").foregroundStyle(Theme.accentText)
                                 }
                             }
                         }
+                        .contextMenu {
+                            Button { startRename(server) } label: { Label("Rename", systemImage: "pencil") }
+                            Button(role: .destructive) { services.store.removeServer(server.id) } label: { Label("Remove", systemImage: "trash") }
+                        }
                         #if !os(tvOS)
                         .swipeActions {
                             Button("Remove", role: .destructive) { services.store.removeServer(server.id) }
+                            Button("Rename") { startRename(server) }
                         }
                         #endif
                     }
@@ -81,8 +89,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("Server version", value: services.store.active?.version ?? "—")
-                    LabeledContent("App version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+                    LabeledContent("App Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
                 } header: {
                     Text("About")
                 }
@@ -101,6 +108,20 @@ struct SettingsView: View {
             .sheet(isPresented: $showProfiles) { ProfilePickerView(isSheet: true) }
             .sheet(isPresented: $showAddServer) { ConnectView(isAddingServer: true) }
             .sheet(isPresented: $showSignInTV) { ApproveDeviceView() }
+            .alert("Rename Server", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+                TextField("Name", text: $newName)
+                Button("Cancel", role: .cancel) {}
+                Button("Save") {
+                    if let renaming { services.store.renameServer(renaming.id, to: newName) }
+                }
+            } message: {
+                Text("Only on this device.")
+            }
         }
+    }
+
+    private func startRename(_ server: SavedServer) {
+        newName = server.name
+        renaming = server
     }
 }

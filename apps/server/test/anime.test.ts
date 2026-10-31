@@ -223,7 +223,7 @@ describe("anime tab sections", () => {
     ]); // Top Upcoming has nothing, so it's left out
     // Frieren's two seasons are one card; the title AniList has but TMDB doesn't is skipped.
     expect(shelves[1]!.items.map((c) => c.title)).toEqual(["Frieren", "One Piece", "Your Name."]);
-    expect(shelves[0]!.items.map((c) => c.eyebrow)).toEqual(["#1 Spotlight", "#2 Spotlight", "#3 Spotlight"]);
+    expect(shelves[0]!.items.map((c) => c.eyebrow)).toEqual(["#1 in Anime", "#2 in Anime", "#3 in Anime"]);
     expect(shelves[2]!.items.map((c) => c.badge)).toEqual(["Episode 4", "Episode 1150", undefined]);
     expect(shelves[3]!.items.map((c) => c.badge)).toEqual([undefined, undefined, undefined]);
   });
@@ -239,5 +239,35 @@ describe("anime tab sections", () => {
 
   test("when AniList can't answer, the tab falls back to Kitsu's rails (none here)", async () => {
     expect(await catalog(null).animePage()).toEqual([]);
+  });
+});
+
+describe("shows tab", () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const item = (id: number, extra: Record<string, unknown> = {}) => ({ id, name: `Show ${id}`, overview: "…", poster_path: "/p.jpg", backdrop_path: "/b.jpg", original_language: "en", genre_ids: [18], ...extra });
+  const page = (ids: number[]) => ({ results: ids.map((id) => item(id)) });
+  const tmdb = {
+    trending: async () => page([1, 2, 3, 4]),
+    popular: async () => page([1, 2, 3]),
+    topRated: async () => page([2, 3, 4]),
+    discover: async () => page([1, 2, 3, 4]),
+    // 1–3 had an episode this week; 4's last one aired long ago.
+    show: async (id: number) => item(id, { last_episode_to_air: { season_number: 2, episode_number: id, air_date: id === 4 ? "2020-01-01" : today } }),
+  } as unknown as Tmdb;
+  const library = { availability: () => new Map() } as never;
+
+  test("rails like the Anime tab's, with the episode that just aired on each latest card", async () => {
+    const shelves = await new CatalogService(tmdb, library, {} as never, () => ({}) as never).showsPage();
+    expect(shelves.map((s) => [s.id, s.style ?? null])).toEqual([
+      ["shows-spotlight", "hero"],
+      ["shows-trending", null],
+      ["shows-latest-episodes", null],
+      ["shows-new", null],
+      ["shows-popular", null],
+      ["shows-top-rated", null],
+      ["shows-coming-soon", null],
+    ]);
+    expect(shelves[0]!.items[0]!.eyebrow).toBe("#1 in Shows");
+    expect(shelves[2]!.items.map((c) => c.badge)).toEqual(["S2 · E1", "S2 · E2", "S2 · E3"]);
   });
 });

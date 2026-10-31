@@ -139,29 +139,31 @@ export class CatalogService {
     const trendingAnime = interleave(trendingAnimeShows ?? [], animeFilms, 3).slice(0, 20);
 
     // "Recently Added" is the catalog's, not the library's: what's newly out to watch.
-    const [recentMovies, recentShows, recentAnime] = await Promise.all([
+    // "New" is the catalog's, not the library's: what's newly out to watch. Shows get the
+    // episodes that just aired, like the Anime tab's Latest Episodes; new anime only
+    // reaches the hero (the Anime tab has its own).
+    const [recentMovies, latestEpisodes, recentAnime] = await Promise.all([
       safe("recentMovies", () => this.newlyReleased("movie", (i) => !isAnimeFilm(i))).then((c) => c ?? []),
-      safe("recentShows", () => this.newlyReleased("show", (i) => !isAnimeShow(i))).then((c) => c ?? []),
+      safe("latestEpisodes", () => this.latestEpisodes((i) => !isAnimeShow(i))).then((c) => c ?? []),
       safe("recentAnime", () => this.newAnime()).then((c) => c ?? []),
     ]);
 
     const featured = await safe("featured", () =>
       this.featured([
-        { label: "Recently Added", cards: recentMovies, take: 2 },
+        { label: "New Movie", cards: recentMovies, take: 2 },
         { label: "Trending Movie", cards: trendingMovies ?? [], take: 3 },
         { label: "Trending Show", cards: trendingShows ?? [], take: 2 },
         { label: "Trending Anime", cards: trendingAnime, take: 2 },
-        { label: "Recently Added", cards: recentShows, take: 1 },
-        { label: "Recently Added Anime", cards: recentAnime, take: 1 },
+        { label: "New Episode", cards: latestEpisodes, take: 1 },
+        { label: "New Anime", cards: recentAnime, take: 1 },
       ]),
     );
     if (featured?.length) shelves.push({ id: "featured", title: "Featured", kind: "titles", items: featured });
     if (cont?.length) shelves.push({ id: "continue", title: "Continue Watching", kind: "continue", items: cont });
-    if (nextUp?.length) shelves.push({ id: "nextUp", title: "Next Up", kind: "continue", items: nextUp });
+    if (nextUp?.length) shelves.push({ id: "nextUp", title: "Up Next", kind: "continue", items: nextUp });
     if (watchlist?.length) shelves.push({ id: "watchlist", title: "My List", kind: "titles", items: watchlist });
-    if (recentMovies.length) shelves.push({ id: "recentMovies", title: "Recently Added Movies", kind: "titles", items: recentMovies });
-    if (recentShows.length) shelves.push({ id: "recentShows", title: "Recently Added Shows", kind: "titles", items: recentShows });
-    if (recentAnime.length) shelves.push({ id: "recentAnime", title: "Recently Added Anime", kind: "titles", items: recentAnime });
+    if (latestEpisodes.length) shelves.push({ id: "latestEpisodes", title: "Latest Episodes", kind: "titles", items: latestEpisodes });
+    if (recentMovies.length) shelves.push({ id: "recentMovies", title: "New Movies", kind: "titles", items: recentMovies });
     if (trendingMovies?.length) shelves.push({ id: "trendingMovies", title: "Trending Movies", kind: "titles", items: trendingMovies });
     if (trendingShows?.length) shelves.push({ id: "trendingShows", title: "Trending Shows", kind: "titles", items: trendingShows });
     if (trendingAnime.length) shelves.push({ id: "trendingAnime", title: "Trending Anime", kind: "titles", items: trendingAnime });
@@ -182,7 +184,10 @@ export class CatalogService {
         const full = await Promise.all(
           candidates.map(async (c) => (c.overview ? c : ((await this.detailCards(c.type, [c.tmdbId]))[0] ?? null))),
         );
-        return full.filter((c): c is TitleCard => !!c?.backdropUrl).map((c) => ({ ...c, eyebrow: src.label }));
+        // The hero fills the screen: list cards carry a w780 backdrop, too soft at that size.
+        return full
+          .filter((c): c is TitleCard => !!c?.backdropUrl)
+          .map((c) => ({ ...c, backdropUrl: c.backdropUrl!.replace(/\/t\/p\/w\d+\//, "/t/p/original/"), eyebrow: src.label }));
       }),
     );
     const seen = new Set<string>();
@@ -232,7 +237,7 @@ export class CatalogService {
       safe(discover({ sort_by: `${dateKey}.desc`, [`${dateKey}.lte`]: today, "vote_count.gte": "20" })),
     ]);
     const shelves: Shelf[] = [];
-    if (trending.length) shelves.push({ id: "trending", title: "Trending This Week", kind: "titles", items: trending });
+    if (trending.length) shelves.push({ id: "trending", title: "Trending", kind: "titles", items: trending });
     if (fresh.length) shelves.push({ id: "new", title: "New", kind: "titles", items: fresh });
     if (popular.length) shelves.push({ id: "popular", title: "Popular", kind: "titles", items: popular });
     if (topRated.length) shelves.push({ id: "topRated", title: "Top Rated", kind: "titles", items: topRated });
@@ -261,6 +266,72 @@ export class CatalogService {
     return this.cards(items.slice(0, 20), type);
   }
 
+  /**
+   * The Shows tab, laid out like the Anime tab: a spotlight of what's trending, the
+   * trending top 10, episodes that just aired, then new, popular, top rated and coming
+   * soon. Anime has its own tab, so it's left out.
+   */
+  async showsPage(): Promise<Shelf[]> {
+    await this.anime?.ids.ready().catch(() => {});
+    const keep = (i: TmdbListItem) => !this.isAnimeItem("show", i);
+    const day = (offset: number) => new Date(Date.now() - offset * 86_400_000).toISOString().slice(0, 10);
+    // Not daily talk, news or soaps: they "air" every day and would fill the rails.
+    const discover = (params: Record<string, string>) =>
+      this.tmdb
+        .discover("tv", { without_genres: "10763,10766,10767", sort_by: "popularity.desc", ...params })
+        .then((p) => this.cards(p.results.filter(keep), "show"))
+        .catch(() => [] as TitleCard[]);
+    const list = (work: Promise<{ results: TmdbListItem[] }>) => work.then((p) => this.cards(p.results.filter(keep), "show")).catch(() => [] as TitleCard[]);
+    const [trending, latest, fresh, popular, topRated, soon] = await Promise.all([
+      this.trendingThisWeek("show", keep, {}).catch(() => [] as TitleCard[]),
+      this.latestEpisodes(keep).catch(() => [] as TitleCard[]),
+      discover({ "first_air_date.gte": day(90), "first_air_date.lte": day(0), "vote_count.gte": "10" }),
+      list(this.tmdb.popular("tv")),
+      list(this.tmdb.topRated("tv")),
+      discover({ "first_air_date.gte": day(-1), "first_air_date.lte": day(-90) }),
+    ]);
+    const spotlight = trending
+      .filter((c) => c.backdropUrl && c.overview)
+      .slice(0, 8)
+      .map((c, i) => ({ ...c, eyebrow: `#${i + 1} in Shows` }));
+    const shelves: Shelf[] = [
+      { id: "shows-spotlight", title: "Spotlight", kind: "titles", style: "hero", items: spotlight },
+      { id: "shows-trending", title: "Trending", kind: "titles", items: trending.slice(0, 10) },
+      { id: "shows-latest-episodes", title: "Latest Episodes", kind: "titles", items: latest },
+      { id: "shows-new", title: "New Shows", kind: "titles", items: fresh },
+      { id: "shows-popular", title: "Popular", kind: "titles", items: popular },
+      { id: "shows-top-rated", title: "Top Rated", kind: "titles", items: topRated },
+      { id: "shows-coming-soon", title: "Coming Soon", kind: "titles", items: soon },
+    ];
+    return shelves.filter((s) => s.items.length >= 3);
+  }
+
+  /**
+   * Shows with an episode out in the last few days, most popular first, each labelled
+   * with that episode ("S2 · E5", as the apps write it).
+   */
+  private async latestEpisodes(keep: (item: TmdbListItem) => boolean): Promise<TitleCard[]> {
+    const day = (offset: number) => new Date(Date.now() - offset * 86_400_000).toISOString().slice(0, 10);
+    const params = { sort_by: "popularity.desc", "air_date.gte": day(3), "air_date.lte": day(0), "vote_count.gte": "10", without_genres: "10763,10766,10767" };
+    const pages = await Promise.all([1, 2].map((page) => this.tmdb.discover("tv", { ...params, page: String(page) }).then((p) => p.results).catch(() => [] as TmdbListItem[])));
+    const seen = new Set<number>();
+    const ids = pages
+      .flat()
+      .filter((i) => keep(i) && !seen.has(i.id) && seen.add(i.id))
+      .slice(0, 24)
+      .map((i) => i.id);
+    // Details (cached) say which episode aired; the discover list doesn't.
+    const shows = await Promise.all(ids.map((id) => this.tmdb.show(id).catch(() => null)));
+    const label = new Map<number, string>();
+    for (const show of shows) {
+      const last = show?.last_episode_to_air;
+      if (show && last?.air_date && last.air_date >= day(7)) label.set(show.id, `S${last.season_number} · E${last.episode_number}`);
+    }
+    return this.cards(shows.filter((s): s is TmdbShow => !!s && label.has(s.id)), "show")
+      .map((c) => ({ ...c, badge: label.get(c.tmdbId) }))
+      .slice(0, 20);
+  }
+
   /** The Anime tab's categories (Kitsu's). */
   animeCategories() {
     return ANIME_CATEGORIES;
@@ -283,14 +354,14 @@ export class CatalogService {
     const plans: Plan[] = category
       ? [
           { id: "anime-series-season", title: "This Season", kind: "series", rail: "season" },
-          { id: "anime-series-popular", title: "Popular Series", kind: "series", rail: "popular" },
-          { id: "anime-series-top", title: "Top Rated Series", kind: "series", rail: "top" },
+          { id: "anime-series-popular", title: "Popular Shows", kind: "series", rail: "popular" },
+          { id: "anime-series-top", title: "Top Rated Shows", kind: "series", rail: "top" },
           { id: "anime-films-popular", title: "Popular Movies", kind: "films", rail: "popular" },
           { id: "anime-films-top", title: "Top Rated Movies", kind: "films", rail: "top" },
         ]
       : [
           { id: "anime-series-season", title: "This Season", kind: "series", rail: "season" },
-          { id: "anime-series-top", title: "Top Rated Series", kind: "series", rail: "top" },
+          { id: "anime-series-top", title: "Top Rated Shows", kind: "series", rail: "top" },
           { id: "anime-films-recent", title: "New Movies", kind: "films", rail: "recent" },
           { id: "anime-series-lastSeason", title: "Last Season", kind: "series", rail: "lastSeason" },
           { id: "anime-series-popular", title: "All-Time Popular", kind: "series", rail: "popular" },
@@ -309,7 +380,7 @@ export class CatalogService {
       }),
     ]);
     const shelves = ranked.filter((s) => s.items.length >= 3);
-    if (trending.length >= 3) shelves.unshift({ id: "anime-series-trending", title: "Trending This Week", kind: "titles", items: trending });
+    if (trending.length >= 3) shelves.unshift({ id: "anime-series-trending", title: "Trending", kind: "titles", items: trending });
     return shelves;
   }
 
@@ -333,16 +404,16 @@ export class CatalogService {
     const spotlight = trending
       .filter((c) => c.backdropUrl && c.overview)
       .slice(0, 8)
-      .map((c, i) => ({ ...c, eyebrow: `#${i + 1} Spotlight` }));
+      .map((c, i) => ({ ...c, eyebrow: `#${i + 1} in Anime` }));
     const shelves: Shelf[] = [
       { id: "anime-spotlight", title: "Spotlight", kind: "titles", style: "hero", items: spotlight },
       { id: "anime-trending", title: "Trending", kind: "titles", items: trending.slice(0, 10) },
       { id: "anime-latest-episodes", title: "Latest Episodes", kind: "titles", items: latest },
-      { id: "anime-top-airing", title: "Top Airing", kind: "titles", items: airing },
-      { id: "anime-most-popular", title: "Most Popular", kind: "titles", items: popular },
-      { id: "anime-most-favorite", title: "Most Favorite", kind: "titles", items: favourites },
-      { id: "anime-latest-completed", title: "Latest Completed", kind: "titles", items: completed },
-      { id: "anime-upcoming", title: "Top Upcoming", kind: "titles", items: upcoming },
+      { id: "anime-top-airing", title: "Airing Now", kind: "titles", items: airing },
+      { id: "anime-most-popular", title: "Popular", kind: "titles", items: popular },
+      { id: "anime-most-favorite", title: "Fan Favorites", kind: "titles", items: favourites },
+      { id: "anime-latest-completed", title: "Recently Finished", kind: "titles", items: completed },
+      { id: "anime-upcoming", title: "Coming Soon", kind: "titles", items: upcoming },
     ];
     return shelves.filter((s) => s.items.length >= 3);
   }

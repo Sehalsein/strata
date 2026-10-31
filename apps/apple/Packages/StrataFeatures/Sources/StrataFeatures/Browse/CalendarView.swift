@@ -44,9 +44,8 @@ struct CalendarView: View {
                     }
                     .accessibilityHint("Notifies you when episodes of shows on My List air")
                 }
-                ToolbarSpacer(.fixed, placement: .primaryAction)
             }
-            ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() }
+            ProfileToolbarItems()
         }
         .refreshable { await services.client?.clearCache(); await load() }
         .alert("Notifications are off for Strata", isPresented: $alertsDenied) {

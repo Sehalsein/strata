@@ -220,10 +220,10 @@ final class TVFocusTests: XCTestCase {
         press(.down, pause: 1.2)
         print("CAROUSEL focus: \(focused().label)")
         snapshot("home-01-hero-focused")
-        press(.right, 3, pause: 1.2) // Play → More Info → next title
+        press(.right, 4, pause: 1.2) // Play → + → More Info → next title
         print("CAROUSEL after right: \(focused().label)")
         snapshot("home-02-next-title")
-        press(.left, 2, pause: 1.2)
+        press(.left, 3, pause: 1.2)
         snapshot("home-03-back")
         press(.down, pause: 1.5)
         print("CAROUSEL after down: \(focused().label)")

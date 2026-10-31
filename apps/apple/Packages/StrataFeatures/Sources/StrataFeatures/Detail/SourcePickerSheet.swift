@@ -2,7 +2,7 @@ import SwiftUI
 import StrataKit
 import StrataDesign
 
-/// "Choose a Source": whatever the server lists for a title, in its own words. Opened only
+/// "Choose Source": whatever the server lists for a title, in its own words. Opened only
 /// where the server has sources to offer.
 struct SourcePickerSheet: View {
     @Environment(AppServices.self) private var services
@@ -73,7 +73,7 @@ struct SourcePickerSheet: View {
                 }
                 .padding(Metrics.space5)
             }
-            .navigationTitle("Choose a Source")
+            .navigationTitle("Choose Source")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif

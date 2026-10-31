@@ -14,12 +14,17 @@ public struct HeroBillboard<Actions: View>: View {
     let meta: [String]
     let badges: [String]
     let overview: String?
+    /// A page of a horizontal pager: the art slides at a slower pace than the page.
+    let paged: Bool
     @ViewBuilder let actions: () -> Actions
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    public init(id: String, backdropURL: URL?, fallbackURL: URL? = nil, eyebrow: String? = nil, title: String, meta: [String] = [], badges: [String] = [], overview: String? = nil, @ViewBuilder actions: @escaping () -> Actions) {
+    public init(id: String, backdropURL: URL?, fallbackURL: URL? = nil, eyebrow: String? = nil, title: String, meta: [String] = [], badges: [String] = [], overview: String? = nil, paged: Bool = false, @ViewBuilder actions: @escaping () -> Actions) {
         self.id = id
-        self.backdropURL = backdropURL
+        // Full size: list-sized TMDB art (w780) is soft across a whole screen.
+        self.backdropURL = backdropURL.map(TMDBImage.original)
+        self.paged = paged
         self.fallbackURL = fallbackURL
         self.eyebrow = eyebrow
         self.title = title
@@ -32,8 +37,14 @@ public struct HeroBillboard<Actions: View>: View {
     #if os(tvOS)
     private static var backdropPixels: Int { 1920 }
     #else
-    private static var backdropPixels: Int { 1600 }
+    // The art fills the hero's height, so on a 3x phone it's ~2,800px wide.
+    private static var backdropPixels: Int { 2400 }
     #endif
+
+    /// How far the art lags behind a page as it slides, as a fraction of the page width.
+    private static var pageParallax: CGFloat { 0.3 }
+    /// How fast the art moves as the page scrolls up, relative to the page.
+    private static var scrollParallax: CGFloat { 0.45 }
 
     #if os(tvOS)
     private let titleFont = Font.stDisplayTV
@@ -67,16 +78,38 @@ public struct HeroBillboard<Actions: View>: View {
     /// full-bleed placeholder. Whichever it is runs to the top edge of the page.
     private var backdrop: some View {
         let blurred = backdropURL == nil
+        #if os(iOS)
+        let moves = !reduceMotion
+        #else
+        let moves = false
+        #endif
         // The container sets the size and the image fills it as an overlay: an
         // aspect-fill image laid out directly would widen the page past the screen.
         return Color.clear
             .overlay {
-                // A blurred poster needs few pixels; a backdrop, about the screen's width.
-                RemoteImage(url: backdropURL ?? fallbackURL, maxPixel: blurred ? 320 : Self.backdropPixels, blur: blurred ? 40 : 0) {
-                    StrataPlaceholder.hero(seed: id)
+                GeometryReader { geo in
+                    // In a pager the art is wider than the page, so it can slide within it.
+                    let bleed = paged && moves ? (geo.size.width * Self.pageParallax).rounded() : 0
+                    // A blurred poster needs few pixels; a backdrop, about the screen's width.
+                    RemoteImage(url: backdropURL ?? fallbackURL, maxPixel: blurred ? 320 : Self.backdropPixels, blur: blurred ? 40 : 0) {
+                        StrataPlaceholder.hero(seed: id)
+                    }
+                    .frame(width: geo.size.width + 2 * bleed, height: geo.size.height)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .visualEffect { [paged, moves, pageParallax = Self.pageParallax, scrollParallax = Self.scrollParallax] content, proxy in
+                        // Like the TV app: the art lags behind as the page slides or scrolls
+                        // up, and stretches to fill the gap when the page is pulled down.
+                        let x = paged && moves ? proxy.frame(in: .scrollView(axis: .horizontal)).minX : 0
+                        let y = moves ? proxy.frame(in: .scrollView(axis: .vertical)).minY : 0
+                        let height = max(proxy.size.height, 1)
+                        return content
+                            .offset(x: -x * pageParallax, y: y < 0 ? -y * scrollParallax : 0)
+                            .scaleEffect(y > 0 ? (height + y) / height : 1, anchor: .bottom)
+                    }
                 }
             }
-            .clipped()
+            // Open at the top so the stretched art can run up into a pulled-down page.
+            .clipShape(OpenTopRectangle())
             .accessibilityHidden(true)
     }
 
@@ -175,6 +208,25 @@ public struct HeroBillboard<Actions: View>: View {
         .padding(.bottom, Metrics.space2)
     }
     #endif
+}
+
+/// A rectangle with no top edge: clips the sides and bottom, and lets content run up
+/// past the top (hero art stretching into a pulled-down page).
+public struct OpenTopRectangle: Shape {
+    public init() {}
+    public func path(in rect: CGRect) -> Path {
+        Path(CGRect(x: rect.minX, y: rect.minY - 10_000, width: rect.width, height: rect.height + 10_000))
+    }
+}
+
+/// TMDB image URLs carry their size in the path (`/t/p/w780/…`).
+public enum TMDBImage {
+    /// The full-size image, for art that fills the screen. Other URLs are left as they are.
+    public static func original(_ url: URL) -> URL {
+        guard url.host() == "image.tmdb.org" else { return url }
+        let path = url.absoluteString.replacingOccurrences(of: #"/t/p/w\d+/"#, with: "/t/p/original/", options: .regularExpression)
+        return URL(string: path) ?? url
+    }
 }
 
 /// The shape of a `HeroBillboard` while its page loads: same height, with bars where

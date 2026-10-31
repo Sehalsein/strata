@@ -13,7 +13,7 @@ struct ProfilePickerView: View {
     @State private var pin = ""
     @State private var pinError: String?
     /// Profiles load after the screen appears; without this, tvOS focus lands on
-    /// "Use a different server" (the only button at first) and one click signs out.
+    /// "Use a Different Server" (the only button at first) and one click signs out.
     @FocusState private var focusedProfile: Int?
 
     #if os(tvOS)
@@ -69,7 +69,7 @@ struct ProfilePickerView: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
             }
             if !isSheet {
-                Button("Use a different server") {
+                Button("Use a Different Server") {
                     Task { await services.store.signOut() }
                 }
                 .font(.stCallout)

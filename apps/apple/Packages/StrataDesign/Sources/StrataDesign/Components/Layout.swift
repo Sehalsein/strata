@@ -15,19 +15,7 @@ public struct Rail<Content: View>: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title).railHeaderStyle().accessibilityAddTraits(.isHeader)
-                Spacer()
-                #if !os(tvOS)
-                if let seeAll {
-                    Button("See all", action: seeAll)
-                        .font(.stCallout)
-                        .foregroundStyle(Theme.accentText)
-                        .buttonStyle(.plain)
-                }
-                #endif
-            }
-            .padding(.horizontal, Metrics.gutter)
+            header.padding(.horizontal, Metrics.gutter)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: Metrics.cardGap) {
@@ -40,6 +28,34 @@ public struct Rail<Content: View>: View {
             }
             .scrollClipDisabled()
         }
+    }
+}
+
+extension Rail {
+    /// The title; with `seeAll`, a link to the full list with a chevron, like the TV
+    /// app's ("Trending Movies ›"). tvOS headers can't take focus, so rails there end
+    /// in a See All tile instead.
+    @ViewBuilder private var header: some View {
+        #if os(tvOS)
+        Text(title).railHeaderStyle().accessibilityAddTraits(.isHeader)
+        #else
+        if let seeAll {
+            Button(action: seeAll) {
+                HStack(spacing: 4) {
+                    Text(title).railHeaderStyle()
+                    Image(systemName: "chevron.right")
+                        .font(.stCallout.weight(.bold))
+                        .foregroundStyle(Theme.ink3)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityHint("Shows all")
+        } else {
+            Text(title).railHeaderStyle().accessibilityAddTraits(.isHeader)
+        }
+        #endif
     }
 }
 

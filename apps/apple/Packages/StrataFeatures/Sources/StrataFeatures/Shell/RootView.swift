@@ -52,7 +52,7 @@ public struct RootView: View {
     }
 }
 
-enum AppTab: String, Hashable { case home, movies, shows, anime, calendar, search, profile }
+enum AppTab: String, Hashable { case home, movies, shows, anime, calendar, search, myList, profile }
 
 /// The signed-in app: a floating Liquid Glass tab bar (iPhone), a sidebar
 /// that adapts to a tab bar (iPad), or the top tab bar (tvOS).
@@ -72,11 +72,13 @@ struct MainShell: View {
         #endif
     }
 
-    private static var calendarTab: Bool {
+    /// iPad's sidebar also lists My List, Calendar and the profile, like the TV app's
+    /// Library and account; the tab bar keeps the same five tabs as iPhone.
+    private static var sidebar: Bool {
         #if os(iOS)
         Metrics.isPad
         #else
-        true
+        false
         #endif
     }
 
@@ -102,15 +104,35 @@ struct MainShell: View {
             Tab("Anime", image: "StrawHat", value: AppTab.anime) {
                 StackHost { AnimeView() }
             }
-            // iPhone's tab bar has room for five: there it's a button on Home instead.
-            if Self.calendarTab {
-                Tab("Calendar", systemImage: "calendar", value: AppTab.calendar) {
-                    StackHost { CalendarView() }
-                }
+            #if os(tvOS)
+            // The TV's top tab bar has room for it; iPhone and iPad reach it from Home's
+            // Coming Up rail (and iPad's sidebar).
+            Tab("Calendar", systemImage: "calendar", value: AppTab.calendar) {
+                StackHost { CalendarView() }
             }
+            #endif
             Tab(value: AppTab.search, role: .search) {
                 StackHost { SearchView() }
             }
+            #if os(iOS)
+            if Self.sidebar {
+                TabSection("Library") {
+                    Tab("My List", systemImage: "bookmark", value: AppTab.myList) {
+                        StackHost { MyListView() }
+                    }
+                    Tab("Calendar", systemImage: "calendar", value: AppTab.calendar) {
+                        StackHost { CalendarView() }
+                    }
+                }
+                .tabPlacement(.sidebarOnly)
+                Tab(value: AppTab.profile) {
+                    SettingsView(embedded: true)
+                } label: {
+                    Label(services.store.active?.profileName ?? "Profile", systemImage: "person.crop.circle")
+                }
+                .tabPlacement(.sidebarOnly)
+            }
+            #endif
             #if os(tvOS)
             // tvOS has no toolbar for the avatar button, so the profile lives in the
             // tab bar like the TV app's: switching profiles, servers and sign-out.
@@ -146,11 +168,44 @@ struct StackHost<Root: View>: View {
         NavigationStack(path: $path) {
             root().routeDestinations()
         }
+        .environment(\.pushRoute, PushRouteAction { path.append($0) })
         .onChange(of: services.coordinator.pendingRoute) { _, route in
             if route != nil, let next = services.coordinator.consume() { path.append(next) }
         }
     }
 }
+
+/// Pushes a page onto the enclosing `StackHost`'s stack, for taps that aren't a
+/// NavigationLink (the Home hero's artwork).
+struct PushRouteAction {
+    let push: @MainActor @Sendable (Route) -> Void
+    @MainActor func callAsFunction(_ route: Route) { push(route) }
+}
+
+extension EnvironmentValues {
+    @Entry var pushRoute = PushRouteAction { _ in }
+}
+
+#if !os(tvOS)
+/// The avatar button, after a gap, at the end of a page's toolbar. Not on iPad,
+/// where the profile is in the sidebar.
+struct ProfileToolbarItems: ToolbarContent {
+    var body: some ToolbarContent {
+        if showsButton {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() }
+        }
+    }
+
+    private var showsButton: Bool {
+        #if os(iOS)
+        !Metrics.isPad
+        #else
+        true
+        #endif
+    }
+}
+#endif
 
 /// Avatar button that opens Settings, for the navigation bar.
 struct ProfileToolbarButton: View {

@@ -56,7 +56,7 @@ struct ShowDetailView: View {
             HeroBillboard(id: show.id,
                           backdropURL: show.backdropUrl,
                           fallbackURL: show.posterUrl,
-                          eyebrow: show.availabilityLabel ?? "Series",
+                          eyebrow: show.availabilityLabel ?? "Show",
                           title: show.title,
                           meta: [show.genres.first, show.yearRangeText, show.certification, seasonCount(show), show.ratingText.map { "★ \($0)" }].compactMap { $0 },
                           overview: show.overview) {
@@ -99,14 +99,14 @@ struct ShowDetailView: View {
             }
 
             InfoGrid(rows: [
-                ("Original title", show.anime?.originalTitle ?? ""),
+                ("Original Title", show.anime?.originalTitle ?? ""),
                 ("Studio", show.anime?.studios.joined(separator: ", ") ?? ""),
                 ("Status", show.status ?? ""),
                 ("Genres", show.genres.joined(separator: ", ")),
-                ("First aired", Formatting.date(show.firstAirDate)?.formatted(date: .abbreviated, time: .omitted) ?? ""),
+                ("First Aired", Formatting.date(show.firstAirDate)?.formatted(date: .abbreviated, time: .omitted) ?? ""),
                 ("Rating", show.ratingText.map { "\($0) / 10" } ?? ""),
                 ("AniList score", show.anime?.scoreText ?? ""),
-                ("Next episode", show.anime?.nextEpisodeText ?? ""),
+                ("Next Episode", show.anime?.nextEpisodeText ?? ""),
             ])
         }
         .padding(.bottom, Metrics.space12)

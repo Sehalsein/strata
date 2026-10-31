@@ -50,8 +50,7 @@ struct AnimeView: View {
         #endif
         .toolbar {
             if !categories.isEmpty { ToolbarItem(placement: .primaryAction) { menu } }
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-            ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() }
+            ProfileToolbarItems()
         }
         .refreshable { await services.client?.clearCache(); await load() }
         #endif

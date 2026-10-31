@@ -137,6 +137,12 @@ public final class StrataClient: Sendable {
         return res.shelves
     }
 
+    /// `GET /api/shows`: the Shows tab's spotlight and rails (servers from 0.1.5).
+    public func shows() async throws -> [Shelf] {
+        let res: ShelvesResponse = try await get("/api/shows")
+        return res.shelves
+    }
+
     public func animeCategories() async throws -> [AnimeCategory] {
         let res: ItemsResponse<AnimeCategory> = try await get("/api/anime/categories")
         return res.items

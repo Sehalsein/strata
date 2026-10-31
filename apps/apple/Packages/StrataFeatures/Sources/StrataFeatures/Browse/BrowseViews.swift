@@ -3,23 +3,31 @@ import StrataKit
 import StrataDesign
 
 /// Movies or Shows tab: genre chips, then rails for the library and TMDB lists,
-/// or for the chosen genre.
+/// or for the chosen genre. Shows, from a server that has its page, are laid out like
+/// the Anime tab: a spotlight, then Trending, Latest Episodes and more.
 struct BrowseView: View {
     @Environment(AppServices.self) private var services
+    @Environment(\.pushRoute) private var pushRoute
     let type: TitleType
     @State private var lists: [BrowseList: [TitleCard]] = [:]
     @State private var error: String?
     @State private var genres: [Genre] = []
     @State private var genre: Genre?
     @State private var genreShelves: Loadable<[Shelf]> = .loading
+    /// The server's Shows page; `nil` before it loads, or from an older server.
+    @State private var page: [Shelf]?
 
     private let order: [BrowseList] = [.trending, .popular, .topRated]
     private var title: String { type == .movie ? "Movies" : "Shows" }
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: Metrics.railGap) {
+            PageStack {
+                if let hero, genre == nil {
+                    HeroCarousel(cards: hero.items)
+                }
                 #if os(tvOS)
+                if hero == nil || genre != nil { Color.clear.frame(height: 120) } // clear the top tab bar
                 if !genres.isEmpty {
                     // Full width, so down from the tab bar reaches it (see AnimeView).
                     HStack { GenreMenu(genres: genres, selected: $genre); Spacer() }
@@ -33,20 +41,31 @@ struct BrowseView: View {
                     allContent
                 }
             }
-            .padding(.vertical, Metrics.space4)
+            #if !os(tvOS)
+            .padding(.top, showsHero ? 0 : Metrics.space4)
+            #endif
+            .padding(.bottom, Metrics.space4)
         }
+        #if !os(tvOS)
+        // The spotlight runs to the top edge, under the bar, like Home's hero.
+        .heroUnderBar(showsHero)
+        #endif
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
-        #if !os(tvOS)
+        #if os(tvOS)
+        .ignoresSafeArea(edges: .top)
+        #else
         .navigationTitle(title)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(showsHero ? .inline : .automatic)
+        #endif
         // The active genre stays visible however far you scroll.
         .navigationSubtitle(genre?.name ?? "")
         .toolbar {
             if !genres.isEmpty {
                 ToolbarItem(placement: .primaryAction) { GenreMenu(genres: genres, selected: $genre) }
             }
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-            ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() }
+            ProfileToolbarItems()
         }
         .refreshable { await services.client?.clearCache(); await load() }
         #endif
@@ -75,7 +94,19 @@ struct BrowseView: View {
         }
     }
 
+    /// The spotlight, when the server sends a Shows page with one.
+    private var hero: Shelf? { page?.first { $0.style == .hero && !$0.items.isEmpty } }
+    private var showsHero: Bool { hero != nil && genre == nil }
+
     @ViewBuilder private var allContent: some View {
+                if let page {
+                    ForEach(page.filter { $0.style != .hero }) { shelf in ShelfRail(shelf: shelf) }
+                } else {
+                    listContent
+                }
+    }
+
+    @ViewBuilder private var listContent: some View {
                 if lists.isEmpty, error == nil {
                     SkeletonRail(width: Metrics.posterWidth)
                     SkeletonRail(width: Metrics.posterWidth)
@@ -88,15 +119,17 @@ struct BrowseView: View {
                 }
                 ForEach(order, id: \.self) { list in
                     if let items = lists[list], !items.isEmpty {
-                        Rail(railTitle(list), seeAll: nil) {
+                        Rail(railTitle(list), seeAll: items.count > 20 ? { pushRoute(.browse(type, list)) } : nil) {
                             ForEach(items.prefix(20)) { card in
                                 NavigationLink(value: card.route) { PosterCardLabel(card: card) }
                                     .buttonStyle(StrataCardStyle())
                             }
+                            #if os(tvOS)
                             if items.count > 20 {
                                 NavigationLink(value: Route.browse(type, list)) { SeeAllTile() }
                                 .buttonStyle(StrataCardStyle())
                             }
+                            #endif
                         }
                     }
                 }
@@ -109,13 +142,18 @@ struct BrowseView: View {
     private func railTitle(_ list: BrowseList) -> String {
         switch list {
         case .library: "In Your Library"
-        case .trending: "Trending This Week"
+        case .trending: "Trending"
         case .popular: "Popular"
         case .topRated: "Top Rated"
         }
     }
 
     private func load() async {
+        // Older servers have no Shows page: they get the lists below.
+        if type == .show, let shelves = try? await services.client?.shows(), !shelves.isEmpty {
+            page = shelves
+            return
+        }
         await withTaskGroup(of: (BrowseList, Loadable<[TitleCard]>).self) { group in
             for list in order {
                 group.addTask { @MainActor in (list, await services.load { try await $0.browse(type, list: list) }) }
@@ -200,7 +238,7 @@ struct BrowseListView: View {
         ScrollView {
             switch items {
             case .loading: ProgressView().padding(Metrics.space12)
-            case .failed(let message): MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load", message: message)
+            case .failed(let message): MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load \(list.title)", message: message)
             case .loaded(let cards):
                 PosterGrid {
                     ForEach(cards) { card in
@@ -221,6 +259,16 @@ struct SearchView: View {
     @Environment(AppServices.self) private var services
     @State private var query = ""
     @State private var results: Loadable<[TitleCard]>?
+
+    /// On iPad the field sits in the page, under the title, like the TV app's: in the
+    /// toolbar it was a second search button beside the tab bar's Search tab.
+    private static var fieldPlacement: SearchFieldPlacement {
+        #if os(iOS)
+        Metrics.isPad ? .navigationBarDrawer(displayMode: .always) : .automatic
+        #else
+        .automatic
+        #endif
+    }
 
     var body: some View {
         ScrollView {
@@ -249,7 +297,7 @@ struct SearchView: View {
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
         .navigationTitle("Search")
-        .searchable(text: $query, prompt: "Movies and shows")
+        .searchable(text: $query, placement: Self.fieldPlacement, prompt: "Movies and shows")
         .task(id: query) {
             let q = query.trimmingCharacters(in: .whitespaces)
             guard q.count >= 2 else { results = nil; return }

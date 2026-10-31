@@ -104,7 +104,7 @@ struct MovieDetailView: View {
             }
 
             InfoGrid(rows: [
-                ("Original title", movie.anime?.originalTitle ?? ""),
+                ("Original Title", movie.anime?.originalTitle ?? ""),
                 ("Studio", movie.anime?.studios.joined(separator: ", ") ?? ""),
                 ("Directed by", movie.directors.joined(separator: ", ")),
                 ("Genres", movie.genres.joined(separator: ", ")),

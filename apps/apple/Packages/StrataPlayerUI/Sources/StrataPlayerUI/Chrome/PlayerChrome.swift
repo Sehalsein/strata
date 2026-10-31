@@ -83,7 +83,7 @@ public struct PlayerChrome: View {
                         .padding(7)
                         .glassEffect(.regular.interactive(), in: .circle)
                     #endif
-                    PlayerIconButton("Stream details", systemImage: "info", action: onDetails)
+                    PlayerIconButton("Stream Details", systemImage: "info", action: onDetails)
                 }
             }
         }

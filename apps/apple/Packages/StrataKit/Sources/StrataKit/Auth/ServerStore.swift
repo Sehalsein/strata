@@ -16,6 +16,8 @@ public struct SavedServer: Codable, Sendable, Hashable, Identifiable {
     public var profileName: String?
     public var version: String?
     public var isAdmin: Bool?
+    /// A name given on this device; kept over the server's own when signing in again.
+    public var customName: String?
 
     public init(id: String, name: String, addresses: [URL], username: String, profileId: Int? = nil,
                 profileName: String? = nil, version: String? = nil, isAdmin: Bool? = nil) {
@@ -247,7 +249,7 @@ public final class ServerStore {
             let previous = StrataClient(baseURL: oldURL, token: old, session: session, cacheTTL: 0)
             Task { try? await previous.logout() }
         }
-        server.name = info.serverName
+        server.name = server.customName ?? info.serverName
         server.version = info.version
         server.username = me.user.username
         server.isAdmin = me.user.isAdmin
@@ -273,6 +275,15 @@ public final class ServerStore {
             Task { try? await c.logout() }
         }
         forget(id)
+    }
+
+    /// Names a saved server on this device.
+    public func renameServer(_ id: String, to name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let i = servers.firstIndex(where: { $0.id == id }) else { return }
+        servers[i].name = name
+        servers[i].customName = name
+        persist()
     }
 
     public func switchServer(_ id: String) {

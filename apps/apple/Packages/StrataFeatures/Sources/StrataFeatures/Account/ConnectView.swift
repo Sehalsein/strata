@@ -2,7 +2,7 @@ import SwiftUI
 import StrataKit
 import StrataDesign
 
-/// First run and "Add server": servers found on the network, or a typed
+/// First run and "Add Server": servers found on the network, or a typed
 /// address, then sign-in.
 struct ConnectView: View {
     @Environment(AppServices.self) private var services
@@ -106,7 +106,7 @@ struct ConnectView: View {
     private var header: some View {
         VStack(alignment: Self.alignment, spacing: Metrics.space3) {
             StrataMark().frame(height: 44).padding(.bottom, Metrics.space2)
-            Text(isAddingServer ? "Add a server" : "Connect to Strata")
+            Text(isAddingServer ? "Add Server" : "Connect to Strata")
                 .font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
             Text("Pick a server on your network, or enter its address.")
                 .font(.stCallout).foregroundStyle(Theme.ink2)

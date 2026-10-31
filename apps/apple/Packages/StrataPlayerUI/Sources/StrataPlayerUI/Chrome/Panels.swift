@@ -40,7 +40,7 @@ public struct SubtitleOverlay: View {
     }
 }
 
-/// "Up next" card that counts down to the next episode.
+/// "Up Next" card that counts down to the next episode.
 public struct UpNextCard: View {
     let next: NextEpisode
     let countdown: Int
@@ -59,7 +59,7 @@ public struct UpNextCard: View {
             ArtworkImage(url: next.stillUrl, aspectRatio: 16 / 9, seed: next.code, cornerRadius: Metrics.radiusSM)
                 .frame(width: 160)
             VStack(alignment: .leading, spacing: Metrics.space1) {
-                Text("Up next in \(countdown)s").eyebrowStyle(Theme.accentText)
+                Text("Up Next in \(countdown)s").eyebrowStyle(Theme.accentText)
                 Text(next.name).font(.stHeadline).foregroundStyle(Theme.onArtwork).lineLimit(2)
                 Text(next.code).font(.stFootnote).foregroundStyle(Theme.onArtwork.opacity(0.7))
                 GlassEffectContainer(spacing: Metrics.space2) {
@@ -85,7 +85,7 @@ public struct StreamDetailsPanel: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space4) {
-            Text("Stream details").font(.stTitle2).foregroundStyle(Theme.ink)
+            Text("Stream Details").font(.stTitle2).foregroundStyle(Theme.ink)
             if let session {
                 let c = session.candidate
                 Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Metrics.space4, verticalSpacing: Metrics.space3) {
