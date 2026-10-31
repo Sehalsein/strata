@@ -9,7 +9,7 @@ struct ServerTarget: Identifiable, Hashable {
     var id: String { url.absoluteString }
 }
 
-/// First run and "Add Account": servers this device knows or finds on the network, or a
+/// First run and "Add Profile": servers this device knows or finds on the network, or a
 /// typed address; then, on a home network, who's watching (no password), otherwise
 /// sign-in (a code approved from a phone on a TV).
 struct ConnectView: View {
@@ -118,7 +118,7 @@ struct ConnectView: View {
     private var header: some View {
         VStack(alignment: Self.alignment, spacing: Metrics.space3) {
             StrataMark().frame(height: 44).padding(.bottom, Metrics.space2)
-            Text(isAdding ? "Add an account" : "Connect to Strata")
+            Text(isAdding ? "Add a profile" : "Connect to Strata")
                 .font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
             Text(isAdding ? "Pick the server it's on, or enter its address." : "Pick a server on your network, or enter its address.")
                 .font(.stCallout).foregroundStyle(Theme.ink2)
@@ -269,7 +269,7 @@ struct SignInView: View {
             VStack(alignment: .leading, spacing: Metrics.space6) {
                 VStack(alignment: .leading, spacing: Metrics.space2) {
                     Text("Sign in to \(target.info.serverName)").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                    Text("Use your Strata account. New here? Ask the household's owner for an invitation.")
+                    Text("Sign in with your Strata username and password. New here? Ask whoever runs this server for an invite.")
                         .font(.stCallout).foregroundStyle(Theme.ink2)
                 }
                 VStack(spacing: Metrics.space3) {

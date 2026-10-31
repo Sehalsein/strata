@@ -2,21 +2,20 @@ import SwiftUI
 import StrataKit
 import StrataDesign
 
-/// "Who's watching?": the accounts signed in on this device, across servers, plus "Add
-/// Account". Each person's account is their profile; picking one switches the whole app to
-/// its server, account and household.
+/// "Who's watching?": the profiles signed in on this device, across servers, plus "Add
+/// Profile". Each profile is a person's sign-in; picking one switches the whole app to it.
 struct WhoIsWatchingView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
-    /// Shown over the app (Settings › Switch Account) rather than in its place.
+    /// Shown over the app rather than in its place.
     var isSheet = false
 
     @State private var addAccount = false
-    /// tvOS focus starts on the active account (or the first), not on "Add Account".
+    /// tvOS focus starts on the active profile (or the first), not on "Add Profile".
     @FocusState private var focused: String?
 
     private var store: ServerStore { services.store }
-    /// Server names only matter when the accounts span more than one.
+    /// Server names only matter when the profiles span more than one.
     private var showsServers: Bool { Set(store.signIns.map(\.serverID)).count > 1 }
 
     var body: some View {
@@ -39,7 +38,7 @@ struct WhoIsWatchingView: View {
                     .focused($focused, equals: signIn.id)
                     #if !os(tvOS)
                     .contextMenu {
-                        Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                        Button("Remove from This Device", systemImage: "minus.circle", role: .destructive) {
                             store.remove(signIn.id)
                             services.refreshClient()
                         }
@@ -49,7 +48,7 @@ struct WhoIsWatchingView: View {
                 Button {
                     addAccount = true
                 } label: {
-                    AvatarTile(name: "Add Account", seed: "", systemImage: "plus")
+                    AvatarTile(name: "Add Profile", seed: "", systemImage: "plus")
                 }
                 .buttonStyle(StrataCardStyle())
                 .focused($focused, equals: "add")
@@ -75,8 +74,9 @@ struct WhoIsWatchingView: View {
     }
 }
 
-/// Signed in, but this session has no household yet (the account is in several): pick
-/// one. Also Settings › Household, to switch.
+/// Signed in, but the profile can watch more than one library (it was invited to another
+/// household on the server) and hasn't picked one: pick it. Also Settings › Library.
+/// People only see "libraries": households stay a server and dashboard idea.
 struct HouseholdPickerView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
@@ -90,8 +90,8 @@ struct HouseholdPickerView: View {
     var body: some View {
         VStack(spacing: Metrics.space8) {
             VStack(spacing: Metrics.space2) {
-                Text("Choose a household").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                Text("\(services.store.active?.name ?? "This account") belongs to more than one. Each has its own library and lists.")
+                Text("Choose a library").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                Text("\(services.store.active?.name ?? "This profile") can watch more than one. Each has its own titles and lists.")
                     .font(.stCallout).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
             }
             .padding(.horizontal, Metrics.gutter)
@@ -99,7 +99,7 @@ struct HouseholdPickerView: View {
             case .loading:
                 ProgressView()
             case .failed(let message):
-                MessageView(systemImage: "house.badge.exclamationmark", title: "Couldn't load households", message: message, actionTitle: "Try Again") {
+                MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load libraries", message: message, actionTitle: "Try Again") {
                     Task { await load() }
                 }
             case .loaded(let list):
@@ -109,7 +109,7 @@ struct HouseholdPickerView: View {
                             Task { await choose(household) }
                         } label: {
                             HStack(spacing: Metrics.space4) {
-                                Image(systemName: "house").font(.stHeadline).foregroundStyle(Theme.ink2).frame(width: 32)
+                                Image(systemName: "play.rectangle.on.rectangle").font(.stHeadline).foregroundStyle(Theme.ink2).frame(width: 32)
                                 Text(household.name).font(.stHeadline).foregroundStyle(Theme.ink)
                                 Spacer(minLength: Metrics.space2)
                                 if choosing == household.id {
@@ -138,7 +138,7 @@ struct HouseholdPickerView: View {
                 Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
             }
             if !isSheet {
-                Button("Switch Account") { services.store.deactivate() }
+                Button("Switch Profile") { services.store.deactivate() }
                     .font(.stCallout)
                     #if !os(tvOS)
                     .buttonStyle(.plain)
@@ -198,14 +198,14 @@ struct JoinMemberPickerView: View {
         VStack(spacing: Metrics.space8) {
             VStack(spacing: Metrics.space2) {
                 Text("Who's watching?").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                Text(choices.value.map { "\($0.household.name) on \(target.info.serverName)" } ?? target.info.serverName)
+                Text(target.info.serverName)
                     .font(.stCallout).foregroundStyle(Theme.ink2)
             }
             switch choices {
             case .loading:
                 ProgressView()
             case .failed(let message):
-                MessageView(systemImage: "person.crop.circle.badge.exclamationmark", title: "Couldn't load the household", message: message, actionTitle: "Try Again") {
+                MessageView(systemImage: "person.crop.circle.badge.exclamationmark", title: "Couldn't load profiles", message: message, actionTitle: "Try Again") {
                     Task { await load() }
                 }
             case .loaded(let home):
@@ -226,7 +226,7 @@ struct JoinMemberPickerView: View {
             if let error = services.store.lastError, joining == nil, choices.value != nil {
                 Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
             }
-            Button("Sign In with Your Account") { usePassword = true }
+            Button("Sign In with a Password") { usePassword = true }
                 .font(.stCallout)
                 #if !os(tvOS)
                 .buttonStyle(.plain)

@@ -2,72 +2,72 @@ import SwiftUI
 import StrataKit
 import StrataDesign
 
-/// The account and household in use, the other accounts signed in on this device, and
-/// app info. Members and household settings are managed in the server's web dashboard.
+/// Settings, around the profile in use: who's watching, the other profiles on this device,
+/// what this profile can do here, and app info. Each profile is a person's sign-in (on any
+/// server); how the server groups people is the dashboard's business, not this page's.
 struct SettingsView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
-    @State private var showAccounts = false
-    @State private var showHouseholds = false
-    @State private var showAddAccount = false
+    @State private var showLibraries = false
+    @State private var showAddProfile = false
     @State private var showLinkTV = false
     @State private var showChangePassword = false
     @State private var confirmSignOut = false
-    /// Asked first: signing an account out of this device.
+    /// Asked first: removing a profile from this device.
     @State private var removing: SavedSignIn?
     @State private var renaming: SavedServer?
     @State private var newName = ""
-    /// How many households the account is in: "Switch Household" only shows with several.
-    @State private var householdCount = 0
+    /// How many libraries the profile can watch: "Library" only shows with several.
+    @State private var libraryCount = 0
     /// Shown as a tab (tvOS) rather than a sheet: no Done button.
     var embedded = false
 
     private var store: ServerStore { services.store }
+    /// Server names only matter when the profiles span more than one.
+    private var showsServers: Bool { Set(store.signIns.map(\.serverID)).count > 1 }
 
     var body: some View {
         NavigationStack {
             Form {
                 if let active = store.active {
                     Section {
-                        HStack(spacing: Metrics.space3) {
-                            ProfileAvatar(name: active.name, seed: active.id, size: 44)
+                        HStack(spacing: Metrics.space4) {
+                            ProfileAvatar(name: active.name, seed: active.id, size: 56)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(active.name).font(.stHeadline)
-                                Text(accountLine(active)).font(.stFootnote).foregroundStyle(Theme.ink3)
+                                Text(active.name).font(.stTitle2)
+                                Text(profileLine(active)).font(.stFootnote).foregroundStyle(Theme.ink3)
                             }
+                            Spacer(minLength: 0)
+                            if active.isKids { Text("Kids").eyebrowStyle(Theme.accentText) }
                         }
-                        Button("Switch Account") { showAccounts = true }
+                        .padding(.vertical, Metrics.space1)
                         #if os(tvOS)
-                        // The TV's tab bar has no room for My List; it lives with the account.
+                        // The TV's tab bar has no room for My List; it lives with the profile.
                         NavigationLink(value: Route.myList) { Label("My List", systemImage: "bookmark") }
                         #endif
-                    } footer: {
-                        if active.viewerOnly {
-                            Text("Signed in without a password: this device can watch, but not change the household's settings.")
+                        if libraryCount > 1 {
+                            Button {
+                                showLibraries = true
+                            } label: {
+                                LabeledContent("Library", value: active.household?.name ?? "Choose")
+                            }
                         }
-                    }
-
-                    Section("Household") {
-                        LabeledContent(active.household?.name ?? "None chosen", value: active.household?.roleLabel ?? "")
-                        if active.isKids {
-                            LabeledContent("Kids account", value: "Titles above its limit are hidden")
-                        }
-                        if householdCount > 1 {
-                            Button("Switch Household") { showHouseholds = true }
-                        }
-                    }
-
-                    #if os(iOS)
-                    Section {
-                        Button("Link a TV") { showLinkTV = true }
+                        #if os(iOS)
                         if !active.viewerOnly {
                             Button("Change Password") { showChangePassword = true }
                         }
+                        Button("Link a TV") { showLinkTV = true }
+                        #endif
+                    } footer: {
+                        if active.isKids {
+                            Text("A kids profile only sees titles within its age limit.")
+                        } else if active.viewerOnly {
+                            Text("Opened on this device without a password: \(active.name) can watch here, but changing settings needs the password.")
+                        }
                     }
-                    #endif
                 }
 
-                Section("Accounts on this device") {
+                Section("Profiles on This Device") {
                     ForEach(store.signIns) { signIn in
                         Button {
                             store.switchTo(signIn.id)
@@ -77,11 +77,12 @@ struct SettingsView: View {
                                 ProfileAvatar(name: signIn.name, seed: signIn.id, size: 32)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(signIn.name).foregroundStyle(Theme.ink)
-                                    Text([store.server(for: signIn)?.name, signIn.household?.name].compactMap { $0 }.joined(separator: " · "))
-                                        .font(.stFootnote).foregroundStyle(Theme.ink3)
+                                    if showsServers, let server = store.server(for: signIn)?.name {
+                                        Text(server).font(.stFootnote).foregroundStyle(Theme.ink3)
+                                    }
                                 }
                                 Spacer()
-                                if let version = store.server(for: signIn)?.version { SpecBadge("v\(version)") }
+                                if signIn.isKids { Text("Kids").eyebrowStyle(Theme.ink3) }
                                 if signIn.id == store.activeID {
                                     Image(systemName: "checkmark").foregroundStyle(Theme.accentText)
                                 }
@@ -91,28 +92,28 @@ struct SettingsView: View {
                             if let server = store.server(for: signIn) {
                                 Button { startRename(server) } label: { Label("Rename Server", systemImage: "pencil") }
                             }
-                            Button(role: .destructive) { removing = signIn } label: { Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") }
+                            Button(role: .destructive) { removing = signIn } label: { Label("Remove from This Device", systemImage: "minus.circle") }
                         }
                         #if !os(tvOS)
                         // No full swipe, and no destructive role: that animates the row away
                         // before anyone has confirmed, and it springs back if they cancel.
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button { removing = signIn } label: { Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") }
+                            Button { removing = signIn } label: { Label("Remove", systemImage: "minus.circle") }
                                 .tint(.red)
                         }
                         #endif
                     }
                     Button {
-                        showAddAccount = true
+                        showAddProfile = true
                     } label: {
-                        Label("Add Account", systemImage: "plus")
+                        Label("Add Profile", systemImage: "plus")
                     }
                 }
 
                 if let active = store.active {
                     Section {
                         Button("Sign Out \(active.name)", role: .destructive) { confirmSignOut = true }
-                            .confirmationDialog("Sign \(active.name) out of \(store.activeServer?.name ?? "this server")?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+                            .confirmationDialog("Sign \(active.name) out?", isPresented: $confirmSignOut, titleVisibility: .visible) {
                                 Button("Sign Out", role: .destructive) {
                                     Task {
                                         await store.signOut()
@@ -120,6 +121,8 @@ struct SettingsView: View {
                                         if !embedded { dismiss() }
                                     }
                                 }
+                            } message: {
+                                Text("\(active.name) is removed from this device. You can sign in again later.")
                             }
                     }
                 }
@@ -132,16 +135,16 @@ struct SettingsView: View {
                     Text("About")
                 }
             }
-            .confirmationDialog("Sign \(removing?.name ?? "this account") out of this device?",
+            .confirmationDialog("Remove \(removing?.name ?? "this profile") from this device?",
                                 isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
                                 titleVisibility: .visible, presenting: removing) { signIn in
-                Button("Sign Out", role: .destructive) {
+                Button("Remove", role: .destructive) {
                     store.remove(signIn.id)
                     services.refreshClient()
                 }
                 Button("Cancel", role: .cancel) {}
             } message: { _ in
-                Text("You can sign in again later.")
+                Text("It's signed out here. You can add it again later.")
             }
             .alert("Rename Server", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
                 TextField("Name", text: $newName)
@@ -164,11 +167,10 @@ struct SettingsView: View {
                 }
             }
             .task(id: store.activeID) {
-                householdCount = (try? await store.households().count) ?? 0
+                libraryCount = (try? await store.households().count) ?? 0
             }
-            .sheet(isPresented: $showAccounts) { NavigationStack { WhoIsWatchingView(isSheet: true) } }
-            .sheet(isPresented: $showHouseholds) { NavigationStack { HouseholdPickerView(isSheet: true) } }
-            .sheet(isPresented: $showAddAccount) { ConnectView(isAdding: true) }
+            .sheet(isPresented: $showLibraries) { NavigationStack { HouseholdPickerView(isSheet: true) } }
+            .sheet(isPresented: $showAddProfile) { ConnectView(isAdding: true) }
             #if os(iOS)
             .sheet(isPresented: $showLinkTV) { ApproveDeviceView() }
             .sheet(isPresented: $showChangePassword) { ChangePasswordView() }
@@ -176,9 +178,10 @@ struct SettingsView: View {
         }
     }
 
-    private func accountLine(_ signIn: SavedSignIn) -> String {
-        let who = signIn.username.map { "@\($0)" } ?? "Signed in"
-        return "\(who) on \(store.server(for: signIn)?.name ?? "this server")"
+    /// "@sam on Home Server", or just the server.
+    private func profileLine(_ signIn: SavedSignIn) -> String {
+        let server = store.server(for: signIn)?.name ?? "this server"
+        return signIn.username.map { "@\($0) · \(server)" } ?? server
     }
 
     private func startRename(_ server: SavedServer) {
@@ -188,7 +191,7 @@ struct SettingsView: View {
 }
 
 #if os(iOS)
-/// Changes the active account's password. Every other device signed in to the account is
+/// Changes the active profile's password. Every other device signed in as it is
 /// signed out; this one carries on.
 struct ChangePasswordView: View {
     @Environment(AppServices.self) private var services

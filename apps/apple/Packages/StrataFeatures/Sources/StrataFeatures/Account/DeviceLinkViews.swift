@@ -24,7 +24,7 @@ struct TVCodeSignInView: View {
             VStack(alignment: .leading, spacing: Metrics.space10) {
                 VStack(alignment: .leading, spacing: Metrics.space3) {
                     Text("Sign in to \(target.info.serverName)").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                    Text("Scan the code with your phone's camera and approve this TV with your account.")
+                    Text("Scan the code with your phone's camera and approve this TV from your profile.")
                         .font(.stBody).foregroundStyle(Theme.ink2)
                 }
                 if let code {
@@ -179,7 +179,7 @@ struct ApproveDeviceView: View {
             VStack(alignment: .leading, spacing: Metrics.space3) {
                 Image(systemName: "checkmark.circle.fill").font(.system(size: 44)).foregroundStyle(Theme.success)
                 Text("Your TV is signed in").font(.stTitle2).foregroundStyle(Theme.ink)
-                Text("It's watching as \(signIn?.name ?? "you") in \(signIn?.household?.name ?? "your household").")
+                Text("It's watching as \(signIn?.name ?? "you").")
                     .font(.stCallout).foregroundStyle(Theme.ink2)
             }
         } else if phase == .denied {
@@ -191,7 +191,7 @@ struct ApproveDeviceView: View {
         } else if looked != nil {
             VStack(alignment: .leading, spacing: Metrics.space2) {
                 Text("Approve this TV?").font(.stTitle2).foregroundStyle(Theme.ink)
-                Text("It will be signed in to \(server?.name ?? "this server") as \(signIn?.name ?? "you")\(signIn?.household.map { " in \($0.name)" } ?? ""), able to watch but not change settings.")
+                Text("It will watch as \(signIn?.name ?? "you") on \(server?.name ?? "this server"), and can't change settings.")
                     .font(.stCallout).foregroundStyle(Theme.ink2)
             }
             // Someone could show you a code for their own device; matching the code on

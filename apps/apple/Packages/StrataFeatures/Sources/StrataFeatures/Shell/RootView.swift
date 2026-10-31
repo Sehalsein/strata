@@ -2,7 +2,7 @@ import SwiftUI
 import StrataKit
 import StrataDesign
 
-/// Chooses between connecting, "Who's watching?", picking a household, and the main app.
+/// Chooses between connecting, "Who's watching?", picking a library, and the main app.
 public struct RootView: View {
     @Environment(AppServices.self) private var services
 
@@ -133,7 +133,7 @@ struct MainShell: View {
                 Tab(value: AppTab.profile) {
                     SettingsView(embedded: true)
                 } label: {
-                    Label(services.store.active?.name ?? "Account", systemImage: "person.crop.circle")
+                    Label(services.store.active?.name ?? "Profile", systemImage: "person.crop.circle")
                 }
                 .tabPlacement(.sidebarOnly)
             }
@@ -144,7 +144,7 @@ struct MainShell: View {
             Tab(value: AppTab.profile) {
                 SettingsView(embedded: true)
             } label: {
-                Label(services.store.active?.name ?? "Account", systemImage: "person.crop.circle")
+                Label(services.store.active?.name ?? "Profile", systemImage: "person.crop.circle")
             }
             #endif
         }
