@@ -9,7 +9,7 @@
 // --public (the hosted demo): sign in as "demo" / "strata-demo", a viewer-only account;
 // the admin's password is random and never shown, admin routes are refused for everyone,
 // and nothing reaches out (no TorBox, release search, updates or home-network join).
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -19,7 +19,7 @@ import type { Shelf, TitleCard } from "../../src/catalog/service";
 import { imageUrl, type TmdbListItem } from "../../src/catalog/tmdb";
 import { createServices, type Services } from "../../src/services";
 import type { Household } from "../../src/household";
-import { member, user } from "../../src/db/schema";
+import { member, session, user } from "../../src/db/schema";
 
 const arg = (name: string, fallback: string) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -31,7 +31,6 @@ const publicDemo = process.argv.includes("--public");
 if (!process.env.TMDB_API_KEY) throw new Error("Set TMDB_API_KEY: the demo shows real TMDB details for its public-domain titles.");
 process.env.STRATA_NO_JOBS = "1";
 process.env.STRATA_DOCKER = "1"; // no self-update
-if (publicDemo) process.env.STRATA_DEMO = "1"; // admin routes refused (api/context.ts)
 
 let services: Services | undefined;
 let home: Household | undefined;
@@ -92,7 +91,7 @@ services = await createServices({ dataDir, port, host: "0.0.0.0" }, { fetch: dem
 
 // Accounts, as setup makes them: the admin (Alex, or an unguessable one for the public
 // demo) and their household, then its other members (the demo refuses admin routes).
-const admin = publicDemo ? { username: `admin-${randomBytes(4).toString("hex")}`, password: randomBytes(24).toString("base64url") } : { username: "Alex", password: "demo-password" };
+const admin = publicDemo ? { username: `admin_${randomBytes(4).toString("hex")}`, password: randomBytes(24).toString("base64url") } : { username: "Alex", password: "demo-password" };
 const setupApp = createApp(services);
 const setup = await setupApp.fetch(
   new Request("http://demo/api/setup/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...admin, householdName: "The Demo House" }) }),
@@ -167,14 +166,42 @@ home.catalog.animePage = async (category?: string): Promise<Shelf[]> => {
   return items.length ? [{ id: "anime-demo-classics", title: "Classic Anime", kind: "titles", items }] : [];
 };
 
+/**
+ * The hosted demo starts from scratch whenever its container wakes, which would sign
+ * everyone out. Its Worker (deploy/cloudflare-demo) remembers each sign-in it saw (by the
+ * token's hash) and, when one comes back to an empty server, asks here to put it back: the
+ * same token, for the same account (a TV's is the demo account's), in the demo household.
+ * The server's key comes from the Worker too, so the token's signature still holds. Only
+ * with the restore key, which only the Worker has.
+ */
+async function restoreSession(req: Request): Promise<Response> {
+  const key = process.env.DEMO_RESTORE_KEY ?? "";
+  const given = req.headers.get("X-Demo-Key") ?? "";
+  if (!key || given.length !== key.length || !timingSafeEqual(Buffer.from(given), Buffer.from(key))) return new Response("Not found", { status: 404 });
+  const body = (await req.json().catch(() => null)) as { token?: unknown; username?: unknown; viewerOnly?: unknown } | null;
+  const token = typeof body?.token === "string" && /^[A-Za-z0-9_-]{16,128}$/.test(body.token) ? body.token : null;
+  if (!token) return Response.json({ error: "Bad request" }, { status: 400 });
+  const username = typeof body?.username === "string" ? body.username : publicDemo ? "demo" : admin.username;
+  const [account] = await services!.db.select({ id: user.id }).from(user).where(eq(user.username, username));
+  if (!account) return Response.json({ error: "No such account" }, { status: 404 });
+  const now = new Date();
+  await services!.db
+    .insert(session)
+    .values({ id: randomUUID(), token, userId: account.id, activeOrganizationId: householdId, viewerOnly: body?.viewerOnly === true, createdAt: now, updatedAt: now, expiresAt: new Date(now.getTime() + 30 * 86_400_000) })
+    .onConflictDoNothing();
+  return Response.json({ ok: true });
+}
+
+// Only now, with the demo set up: admin routes and changes to the accounts and households
+// are refused from here on (api/context.ts, auth/betterAuth.ts). Seeding above needs them.
+if (publicDemo) process.env.STRATA_DEMO = "1";
+
 const app = createApp(services);
 Bun.serve({
   hostname: "0.0.0.0",
   port,
   idleTimeout: 120,
-  // The hosted demo starts from scratch whenever its container wakes; its visitors sign in
-  // again (Better Auth keeps sign-ins in the database, which starts empty here).
-  fetch: (req, server) => app.fetch(req, server),
+  fetch: (req, server) => (new URL(req.url).pathname === "/__demo/restore-session" && req.method === "POST" ? restoreSession(req) : app.fetch(req, server)),
 });
 const matched = movies.length + shows.length;
 const signIn = publicDemo ? "demo / strata-demo (viewer only)" : "Alex / demo-password";

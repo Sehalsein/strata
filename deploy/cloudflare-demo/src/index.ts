@@ -23,7 +23,9 @@ export class StrataDemo extends Container<Env> {
 
   constructor(ctx: DurableObjectState<{}>, env: Env) {
     super(ctx, env);
-    this.envVars = { TMDB_API_KEY: env.TMDB_API_KEY, DEMO_RESTORE_KEY: env.DEMO_RESTORE_KEY };
+    // The server's key comes from the restore key, so it's the same every time the container
+    // starts: sign-in tokens are signed with it, and stay valid across restarts.
+    this.envVars = { TMDB_API_KEY: env.TMDB_API_KEY, DEMO_RESTORE_KEY: env.DEMO_RESTORE_KEY, STRATA_SECRET_KEY: hexToBase64(env.DEMO_RESTORE_KEY) };
   }
 }
 
@@ -34,24 +36,37 @@ const IN_FLIGHT_EXPIRY_MS = 10 * 60_000;
 
 type Kind = "api" | "signin" | "play" | "stream";
 
-/** What the demo answers, and how each request counts. Everything else is refused. */
+/** Signing in with a password (Better Auth); and the Apple TV's code sign-in, which the TV asks to start. */
+const SIGN_IN = /^\/api\/auth\/(sign-in\/(username|email)|device\/code)$/;
+
+/**
+ * What the demo answers, and how each request counts: what the Strata apps need to sign in,
+ * browse, play and keep progress. Everything else is refused, including changing the shared
+ * accounts (name, picture, password), joining without a password and anything admin.
+ */
 function classify(method: string, url: URL): Kind | null {
   const p = url.pathname;
   if (method === "GET") {
     if (p.startsWith("/api/stream/")) return "stream";
     if (p === "/api/sources" && url.searchParams.has("discover")) return null; // release search
-    if (/^\/api\/(info|me|profiles|home|search|sources|anime|anime\/categories)$/.test(p)) return "api";
+    if (/^\/api\/(info|me|home|search|sources|shows|calendar|anime|anime\/categories|avatars)$/.test(p)) return "api";
     if (/^\/api\/(genres|browse|titles|person)\//.test(p)) return "api";
+    if (/^\/api\/avatars\/[a-z0-9-]+\.png$/.test(p)) return "api";
+    if (/^\/api\/auth\/(get-session|organization\/list|device)$/.test(p)) return "api";
     return null;
   }
   if (method === "POST") {
-    if (p === "/api/auth/login") return "signin";
-    if (p === "/api/play") return "play";
-    if (/^\/api\/(auth\/logout|progress|watched|profiles\/\d+\/select)$/.test(p)) return "api";
+    if (SIGN_IN.test(p)) return "signin";
+    if (p === "/api/play" || p === "/api/downloads") return "play";
+    if (/^\/api\/(progress|watched)$/.test(p)) return "api";
+    if (/^\/api\/(play\/[A-Za-z0-9-]{8,64}\/link|files\/\d+\/(probe|link))$/.test(p)) return "api";
+    // Signing out, picking the household, and the TV's code sign-in (it polls for its token
+    // every few seconds; a phone signed in to the demo approves or denies it).
+    if (/^\/api\/auth\/(sign-out|organization\/set-active|device\/(token|approve|deny))$/.test(p)) return "api";
     return null;
   }
   if (method === "PUT" && p === "/api/watchlist") return "api";
-  if (method === "DELETE" && /^\/api\/(play\/[a-f0-9]{16,64}|continue\/(movie|show)\/\d+)$/.test(p)) return "api";
+  if (method === "DELETE" && /^\/api\/(play\/[A-Za-z0-9-]{8,64}|continue\/(movie|show)\/\d+)$/.test(p)) return "api";
   return null;
 }
 
@@ -95,11 +110,10 @@ export default {
       res = await send();
       // The container starts from scratch after sleeping, which would sign everyone out.
       // A sign-in the Gate remembers is put back, and the request tried once more.
-      const token = bearer(request);
+      const token = sessionToken(bearer(request));
       if (res.status === 401 && token) {
-        const hash = await sha256(token);
-        const session = await gate.session(hash);
-        if (session && (await restore(container, env, hash, session.profileId)).ok) res = await send();
+        const session = await gate.session(await sha256(token));
+        if (session && (await restore(container, env, token, session)).ok) res = await send();
       }
     } catch (err) {
       if (kind === "stream") ctx.waitUntil(gate.settle(ip, reserve, 0, bookedAt, Date.now()));
@@ -130,33 +144,60 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+/** A sign-in to put back after a restart: whose it is (a TV's is the demo account's), and whether it only watches. */
+interface RememberedSession {
+  username: string | null;
+  viewerOnly: boolean;
+}
+
 /** Keeps the Gate's record of sign-ins (by token hash only) in step with the server's. */
 async function rememberSession(gate: DurableObjectStub<Gate>, request: Request, url: URL, res: Response): Promise<void> {
   const p = url.pathname;
-  if (p === "/api/auth/login") {
-    const { token } = (await res.json().catch(() => ({}))) as { token?: string };
-    if (token) await gate.remember(await sha256(token), null);
+  if (/^\/api\/auth\/sign-in\/(username|email)$/.test(p)) {
+    const body = (await res.json().catch(() => ({}))) as { token?: string; user?: { username?: string } };
+    const token = sessionToken(res.headers.get("set-auth-token") ?? body.token ?? null);
+    if (token) await gate.remember(await sha256(token), { username: body.user?.username ?? null, viewerOnly: false });
     return;
   }
-  const token = bearer(request);
-  if (!token) return;
-  const select = /^\/api\/profiles\/(\d+)\/select$/.exec(p);
-  if (select) await gate.remember(await sha256(token), Number(select[1]));
-  else if (p === "/api/auth/logout") await gate.forget(await sha256(token));
+  if (p === "/api/auth/device/token") {
+    const { access_token } = (await res.json().catch(() => ({}))) as { access_token?: string };
+    const token = sessionToken(access_token ?? null);
+    if (token) await gate.remember(await sha256(token), { username: null, viewerOnly: true });
+    return;
+  }
+  const token = sessionToken(bearer(request));
+  if (token && p === "/api/auth/sign-out") await gate.forget(await sha256(token));
 }
 
-/** Recreates a session in a freshly started container (scripts/demo/serve.ts). */
-function restore(container: DurableObjectStub<StrataDemo>, env: Env, tokenHash: string, profileId: number | null): Promise<Response> {
+/**
+ * Recreates a session in a freshly started container (scripts/demo/serve.ts): the same
+ * token, for the same account, so the app carries on signed in. Only this Worker can ask
+ * (the restore key), and only for a sign-in it saw happen.
+ */
+function restore(container: DurableObjectStub<StrataDemo>, env: Env, token: string, session: RememberedSession): Promise<Response> {
   return container.fetch(
     new Request("http://demo/__demo/restore-session", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Demo-Key": env.DEMO_RESTORE_KEY },
-      body: JSON.stringify({ tokenHash, profileId }),
+      body: JSON.stringify({ token, username: session.username, viewerOnly: session.viewerOnly }),
     }),
   );
 }
 
 const bearer = (request: Request) => /^Bearer (.+)$/.exec(request.headers.get("Authorization") ?? "")?.[1] ?? null;
+
+/** The session token in what the apps hold: Better Auth's signed form is "<token>.<signature>". */
+function sessionToken(held: string | null): string | null {
+  if (!held) return null;
+  const decoded = held.includes("%") ? decodeURIComponent(held) : held;
+  return decoded.split(".")[0] || null;
+}
+
+/** The restore key (64 hex characters) as the server's base64 secret key. */
+function hexToBase64(hex: string): string {
+  const bytes = new Uint8Array((hex.match(/../g) ?? []).map((h) => parseInt(h, 16)));
+  return btoa(String.fromCharCode(...bytes));
+}
 
 async function sha256(text: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -220,13 +261,15 @@ export class Gate extends DurableObject<Env> {
   }
 
   /** Sign-ins to restore after the container restarts, by token hash (never the token). */
-  async remember(tokenHash: string, profileId: number | null): Promise<void> {
-    await this.ctx.storage.put(`sess:${tokenHash}`, { profileId, at: Date.now() });
+  async remember(tokenHash: string, session: RememberedSession): Promise<void> {
+    await this.ctx.storage.put(`sess:${tokenHash}`, { ...session, at: Date.now() });
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + 60 * 60_000);
   }
 
-  async session(tokenHash: string): Promise<{ profileId: number | null } | undefined> {
-    return this.ctx.storage.get<{ profileId: number | null; at: number }>(`sess:${tokenHash}`);
+  async session(tokenHash: string): Promise<RememberedSession | undefined> {
+    const saved = await this.ctx.storage.get<RememberedSession & { at: number }>(`sess:${tokenHash}`);
+    // Sign-ins remembered by the demo before Better Auth (a profile id, no username) can't be put back.
+    return saved && "viewerOnly" in saved ? saved : undefined;
   }
 
   async forget(tokenHash: string): Promise<void> {
