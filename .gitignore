@@ -28,3 +28,6 @@ deploy/cloudflare/.dev.vars
 
 # Wrangler local state
 deploy/cloudflare/.wrangler/
+
+# Local scripts that run the hosted servers by hand (they name its accounts)
+*.local.sh
