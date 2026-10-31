@@ -14,7 +14,11 @@ struct SourcePickerSheet: View {
     /// Ask the server to look further than `known` (its library) when the sheet opens; if it
     /// can't or won't, `known` is what's shown.
     var lookFurther = true
+    /// Picking what to play, or what to download (sizes and free space matter more).
+    var purpose: Purpose = .play
     let onChoose: (Candidate) -> Void
+
+    enum Purpose { case play, download }
 
     @State private var sources: Loadable<[Candidate]> = .loading
     @State private var filter: Filter = .all
@@ -40,6 +44,11 @@ struct SourcePickerSheet: View {
                         ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
+                    #if os(iOS)
+                    if purpose == .download, let free = DownloadStore.freeSpace, let text = Formatting.size(bytes: Int(free)) {
+                        Text("\(text) free on this device").font(.stFootnote).foregroundStyle(Theme.ink3)
+                    }
+                    #endif
 
                     switch sources {
                     case .loading:
@@ -73,7 +82,7 @@ struct SourcePickerSheet: View {
                 }
                 .padding(Metrics.space5)
             }
-            .navigationTitle("Choose Source")
+            .navigationTitle(purpose == .download ? "Download" : "Choose Source")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif

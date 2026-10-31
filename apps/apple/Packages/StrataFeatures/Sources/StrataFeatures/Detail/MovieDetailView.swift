@@ -69,6 +69,12 @@ struct MovieDetailView: View {
                 if let sources, !sources.isEmpty {
                     GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV) { showSources = true }
                 }
+                #if os(iOS)
+                if canPlay(movie) {
+                    DownloadButton(target: movie.target, title: movie.title, subtitle: movie.yearText,
+                                   artworkURL: movie.backdropUrl ?? movie.posterUrl, known: sources ?? [])
+                }
+                #endif
                 if let trailer = movie.trailer?.youtubeURL { TrailerButton(url: trailer) }
             }
             #if os(tvOS)

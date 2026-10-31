@@ -8,10 +8,24 @@ public struct RootView: View {
 
     public init() {}
 
+    /// With no connection, the profile's downloads (when it has some) instead of pages
+    /// that can't load.
+    private var showsOfflineDownloads: Bool {
+        #if os(iOS)
+        !services.isOnline && DownloadStore.shared.items(for: services.store.activeID).contains(where: \.isDone)
+        #else
+        false
+        #endif
+    }
+
     public var body: some View {
         Group {
             if services.store.signIns.isEmpty {
                 ConnectView()
+            } else if showsOfflineDownloads {
+                #if os(iOS)
+                OfflineDownloadsView()
+                #endif
             } else if !services.store.isSignedIn {
                 WhoIsWatchingView()
             } else if services.store.needsHousehold {
@@ -57,7 +71,7 @@ public struct RootView: View {
     }
 }
 
-enum AppTab: String, Hashable { case home, movies, shows, anime, calendar, search, myList, profile }
+enum AppTab: String, Hashable { case home, movies, shows, anime, calendar, search, myList, downloads, profile }
 
 /// The signed-in app: a floating Liquid Glass tab bar (iPhone), a sidebar
 /// that adapts to a tab bar (iPad), or the top tab bar (tvOS).
@@ -127,6 +141,9 @@ struct MainShell: View {
                     }
                     Tab("Calendar", systemImage: "calendar", value: AppTab.calendar) {
                         StackHost { CalendarView() }
+                    }
+                    Tab("Downloads", systemImage: "arrow.down.circle", value: AppTab.downloads) {
+                        StackHost { DownloadsView() }
                     }
                 }
                 .tabPlacement(.sidebarOnly)

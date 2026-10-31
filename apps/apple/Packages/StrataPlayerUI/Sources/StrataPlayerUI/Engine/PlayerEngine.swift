@@ -158,6 +158,11 @@ public final class PlayerEngine {
     private var endObserver: NSObjectProtocol?
     private var externalObservation: NSKeyValueObservation?
 
+    /// Told every position the engine reports (a download keeps where it was left).
+    @ObservationIgnored public var onProgress: (@MainActor (PlaybackTarget, _ positionMs: Int, _ durationMs: Int) -> Void)?
+    /// Told a position that couldn't reach the server, to send later.
+    @ObservationIgnored public var onUndeliveredProgress: (@Sendable (PlaybackTarget, _ positionMs: Int, _ durationMs: Int) -> Void)?
+
     /// Progress is reported this often while playing.
     public var progressInterval: TimeInterval = 10
     /// How long rapid scrubs are coalesced before an HLS restart.
@@ -209,6 +214,35 @@ public final class PlayerEngine {
                 guard gen == self.generation, !(error is CancellationError) else { return }
                 let e = StrataError.wrap(error)
                 if e.kind != .cancelled { self.status = .failed(e.message) }
+            }
+        }
+        loadTask = task
+        await task.value
+    }
+
+    /// Plays a downloaded file (`res` from `DownloadItem.playResponse`) without the server:
+    /// the same engine as a stream, reading the file from disk.
+    public func load(offline res: PlayResponse, target: PlaybackTarget, meta: PlaybackMeta) async {
+        await teardown(reportFinal: true)
+        generation += 1
+        let gen = generation
+        skipNativeSubtitles = false
+        probedFiles = []
+        self.target = target
+        self.meta = meta
+        status = .loading
+        position = TimeInterval(res.seekToMs) / 1000
+        nowPlaying?.update(meta: meta, position: position, duration: duration, rate: 0)
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.start(res, gen: gen, newTitle: true, autoplay: true)
+            } catch let failure as DeviceFailure {
+                guard gen == self.generation else { return }
+                self.status = .failed(failure.message)
+            } catch {
+                guard gen == self.generation, !(error is CancellationError) else { return }
+                self.status = .failed(StrataError.wrap(error).message)
             }
         }
         loadTask = task
@@ -804,7 +838,7 @@ public final class PlayerEngine {
     }
 
     private func stopSession(_ id: String) {
-        guard let client else { return }
+        guard let client, !id.hasPrefix("offline-") else { return }
         Task.detached { try? await client.stopPlayback(sessionId: id) }
     }
 
@@ -815,14 +849,18 @@ public final class PlayerEngine {
     @ObservationIgnored private var nowPlayingRate: Float = -1
 
     private func reportProgress(force: Bool) {
-        guard let client, let target, let session, didStartPlayback else { return }
+        guard let target, let session, didStartPlayback else { return }
         let ms = timeline.ms(restartTarget ?? position)
         guard force || Date().timeIntervalSince(lastReportAt) >= progressInterval else { return }
         guard ms != lastReportedMs || force else { return }
         lastReportAt = Date()
         lastReportedMs = ms
         let durationMs = session.durationMs
-        let sessionId = session.sessionId
+        onProgress?(target, ms, durationMs)
+        let undelivered = onUndeliveredProgress
+        guard let client else { undelivered?(target, ms, durationMs); return }
+        // A downloaded file has no session on the server.
+        let sessionId = session.isOffline ? nil : session.sessionId
         // In order: a slow earlier report must never land after (and overwrite) a later one.
         let previous = reportChain
         reportChain = Task.detached {
@@ -831,6 +869,7 @@ public final class PlayerEngine {
                 try await client.reportProgress(target, positionMs: ms, durationMs: durationMs, sessionId: sessionId)
             } catch {
                 Log.player.warning("progress report failed: \(StrataError.wrap(error).message, privacy: .public)")
+                if StrataError.wrap(error).kind == .network { undelivered?(target, ms, durationMs) }
             }
         }
     }

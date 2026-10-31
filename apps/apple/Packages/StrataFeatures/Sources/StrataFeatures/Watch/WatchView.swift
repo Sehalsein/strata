@@ -108,7 +108,7 @@ struct WatchView: View {
         #endif
         .task {
             if let client = services.client { engine.configure(client: client) }
-            await engine.load(target: request.target, meta: request.meta, candidateId: request.candidateId, startMs: request.startMs)
+            await start()
             scheduleHide()
         }
         .onChange(of: engine.status) { _, status in
@@ -172,7 +172,7 @@ struct WatchView: View {
                 GlassEffectContainer(spacing: Metrics.space2) {
                     HStack(spacing: Metrics.space2) {
                         PlayButton("Try Again", systemImage: "arrow.clockwise") {
-                            Task { await engine.load(target: request.target, meta: request.meta, candidateId: request.candidateId, startMs: request.startMs) }
+                            Task { await start() }
                         }
                         GlassButton("Close", action: close)
                     }
@@ -183,6 +183,20 @@ struct WatchView: View {
         default:
             EmptyView()
         }
+    }
+
+    /// Streams the title, or plays its download from the device.
+    private func start() async {
+        #if os(iOS)
+        if let id = request.downloadID {
+            let downloads = DownloadStore.shared
+            guard let item = downloads.item(id: id), let file = downloads.fileURL(for: item) else { close(); return }
+            await engine.load(offline: item.playResponse(fileURL: file, resumeMs: request.startMs ?? item.positionMs),
+                              target: request.target, meta: request.meta)
+            return
+        }
+        #endif
+        await engine.load(target: request.target, meta: request.meta, candidateId: request.candidateId, startMs: request.startMs)
     }
 
     private func playNext() {

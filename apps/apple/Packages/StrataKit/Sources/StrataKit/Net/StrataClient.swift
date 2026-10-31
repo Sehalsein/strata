@@ -291,6 +291,42 @@ public final class StrataClient: Sendable {
         return resolve(res.url)
     }
 
+    // MARK: Downloads
+
+    /// A file to download and watch offline: its link and how to play it on the device.
+    /// Like `play`, the server may first need the file's media info, or time to get it ready.
+    public func prepareDownload(_ target: PlaybackTarget, candidateId: String? = nil, caps: ClientCaps = .current) async throws -> DownloadOutcome {
+        let body = PlayBody(mediaType: target.mediaType, tmdbId: target.tmdbId, season: target.season, episode: target.episode,
+                            candidateId: candidateId, startMs: nil, audioStreamIndex: nil,
+                            preferMaxHeight: candidateId == nil ? NetworkConditions.shared.preferredMaxHeight : nil, caps: caps)
+        let (data, response) = try await rawData(request("POST", "/api/downloads", body: body))
+        let status = response.statusCode
+        if status == 428 {
+            let probe = try decode(NeedsProbeResponse.self, from: data).needsProbe
+            return .needsProbe(fileId: probe.fileId, url: probe.url)
+        }
+        guard (200..<300).contains(status) else { throw httpError(status, data) }
+        if status == 202 { return .preparing(try decode(PreparingStatus.self, from: data)) }
+        var res = try decode(DownloadResponse.self, from: data)
+        res.url = resolve(res.url)
+        return .ready(res)
+    }
+
+    /// A fresh link for a download whose link stopped working.
+    public func fileLink(fileId: Int) async throws -> URL {
+        let res: LinkResponse = try await send("POST", "/api/files/\(fileId)/link", body: Empty())
+        return resolve(res.url)
+    }
+
+    /// A request for a file to download: with this account's token when it's on this
+    /// server (a file on the server's disk), never for a link elsewhere (TorBox).
+    public func downloadRequest(_ url: URL) -> URLRequest {
+        var req = URLRequest(url: url)
+        req.httpShouldHandleCookies = false
+        if let token, isSameOrigin(url) { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        return req
+    }
+
     /// Ends a session (stops its ffmpeg job). Best-effort callers can ignore errors.
     public func stopPlayback(sessionId: String) async throws {
         let _: OKResponse = try await send("DELETE", "/api/play/\(sessionId)")

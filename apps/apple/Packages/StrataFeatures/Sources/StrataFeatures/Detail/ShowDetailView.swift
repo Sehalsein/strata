@@ -14,6 +14,8 @@ struct ShowDetailView: View {
     /// What the server can play Up Next from; nil until it answers.
     @State private var upNextSources: [Candidate]?
     @State private var sourcesFor: EpisodeItem?
+    /// The episode whose source is being chosen to download.
+    @State private var downloadFor: EpisodeItem?
     @State private var showUpNextSources = false
     /// "Not in your library" after asking the server about an episode it has nothing for.
     @State private var notice: String?
@@ -116,6 +118,16 @@ struct ShowDetailView: View {
                 play(show, season: episode.season, episode: episode.episode, name: episode.name, still: episode.stillUrl, candidateId: candidate.id)
             }
         }
+        #if os(iOS)
+        .sheet(item: $downloadFor) { episode in
+            SourcePickerSheet(target: episode.target(show: show.tmdbId), title: "\(show.title) · \(episode.code)", purpose: .download) { candidate in
+                Task {
+                    notice = await services.download(episode.target(show: show.tmdbId), candidateId: candidate.id, title: show.title,
+                                                     subtitle: "\(episode.code) · \(episode.name)", artworkURL: episode.stillUrl ?? show.backdropUrl)
+                }
+            }
+        }
+        #endif
         .sheet(isPresented: $showUpNextSources) {
             if let upNext = show.upNext {
                 SourcePickerSheet(target: .episode(show: show.tmdbId, season: upNext.season, episode: upNext.episode),
@@ -172,6 +184,11 @@ struct ShowDetailView: View {
                                        stillURL: episode.stillUrl,
                                        progress: episode.progressFraction,
                                        isCurrent: show.upNext.map { $0.season == episode.season && $0.episode == episode.episode } ?? false) {
+                                #if os(iOS)
+                                if let item = DownloadStore.shared.item(signInID: services.store.activeID, target: episode.target(show: show.tmdbId)) {
+                                    DownloadStateLabel(item: item).font(.stHeadline).foregroundStyle(Theme.ink3)
+                                }
+                                #endif
                                 // Playable is the default, so only exceptions get an icon.
                                 if let state = rowState(episode) {
                                     Image(systemName: state.systemImage)
@@ -195,6 +212,15 @@ struct ShowDetailView: View {
                             if !episode.isUpcoming {
                                 Button { sourcesFor = episode } label: { Label("Choose Source", systemImage: "rectangle.stack") }
                             }
+                            #if os(iOS)
+                            if !episode.isUpcoming {
+                                if let item = DownloadStore.shared.item(signInID: services.store.activeID, target: episode.target(show: show.tmdbId)) {
+                                    DownloadActions(item: item)
+                                } else {
+                                    Button { downloadFor = episode } label: { Label("Download Episode", systemImage: "arrow.down.circle") }
+                                }
+                            }
+                            #endif
                         }
                         if episode.id != detail.episodes.last?.id { Divider().overlay(Theme.hairline).padding(.leading, Metrics.space4) }
                     }

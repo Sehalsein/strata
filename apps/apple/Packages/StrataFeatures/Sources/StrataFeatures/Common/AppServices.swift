@@ -25,9 +25,43 @@ public final class AppServices {
         progressRevision += 1
     }
 
+    /// Whether the device has a network connection. Offline, the app shows downloads.
+    public private(set) var isOnline = NetworkConditions.shared.isOnline
+
     public init(store: ServerStore? = nil) {
         self.store = store ?? ServerStore()
         RemoteCommandBridge.shared.attach(engine)
+        #if os(iOS)
+        DownloadStore.shared.clientFor = { [weak self] id in self?.store.client(forSignIn: id) }
+        #endif
+        engine.onProgress = { [weak self] target, ms, _ in self?.rememberOfflinePosition(target, ms: ms) }
+        engine.onUndeliveredProgress = { [weak self] target, ms, duration in
+            Task { @MainActor [weak self] in
+                guard let id = self?.store.activeID else { return }
+                await ProgressQueue.shared.enqueue(signInID: id, target: target, positionMs: ms, durationMs: duration)
+            }
+        }
+        NetworkConditions.shared.onReachabilityChange { [weak self] online in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.isOnline = online
+                if online { await self.sendQueuedProgress() }
+            }
+        }
+    }
+
+    /// Sends watch progress kept while offline, for the profile in use.
+    public func sendQueuedProgress() async {
+        guard let client = store.client, let id = store.activeID else { return }
+        await ProgressQueue.shared.flush(client: client, signInID: id)
+    }
+
+    /// A downloaded title keeps where it was left (it plays without the server).
+    private func rememberOfflinePosition(_ target: PlaybackTarget, ms: Int) {
+        #if os(iOS)
+        guard engine.session?.isOffline == true, let item = DownloadStore.shared.item(signInID: store.activeID, target: target) else { return }
+        DownloadStore.shared.setPosition(item, ms: ms)
+        #endif
     }
 
     /// The active server's client. Screens read it through here so a server
@@ -37,6 +71,7 @@ public final class AppServices {
     /// Re-points the player at the active server. Call after sign-in or a switch.
     public func refreshClient() {
         if let client = store.client { engine.configure(client: client, nowPlaying: nowPlaying) }
+        Task { await sendQueuedProgress() }
     }
 
     public func play(_ request: WatchRequest) {
@@ -96,15 +131,18 @@ public struct WatchRequest: Identifiable, Hashable {
     public let meta: PlaybackMeta
     /// A source the server listed; nil lets the server choose.
     public let candidateId: String?
-    /// nil resumes from the server's saved position.
+    /// nil resumes from the server's saved position (or, for a download, where it was left).
     public let startMs: Int?
+    /// Plays this download (`DownloadItem.id`) from the device instead of streaming.
+    public let downloadID: String?
     public let id = UUID()
 
-    public init(target: PlaybackTarget, meta: PlaybackMeta, candidateId: String? = nil, startMs: Int? = nil) {
+    public init(target: PlaybackTarget, meta: PlaybackMeta, candidateId: String? = nil, startMs: Int? = nil, downloadID: String? = nil) {
         self.target = target
         self.meta = meta
         self.candidateId = candidateId
         self.startMs = startMs
+        self.downloadID = downloadID
     }
 }
 

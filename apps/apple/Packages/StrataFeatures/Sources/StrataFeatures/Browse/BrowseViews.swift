@@ -340,6 +340,16 @@ struct MyListView: View {
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
         .navigationTitle("My List")
+        #if os(iOS)
+        // iPad has Downloads in its sidebar.
+        .toolbar {
+            if !Metrics.isPad {
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink { DownloadsView() } label: { Label("Downloads", systemImage: "arrow.down.circle") }
+                }
+            }
+        }
+        #endif
         .task {
             await services.client?.clearCache()
             items = await services.load { try await $0.home().first { $0.id == "watchlist" }?.items ?? [] }
