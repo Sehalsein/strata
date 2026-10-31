@@ -33,6 +33,8 @@ export interface Me {
   user: { id: string; username: string | null; name: string; email: string; isServerAdmin: boolean };
   /** Joined without a password, or a TV: can watch, never administer. */
   viewerOnly: boolean;
+  /** Signed in with a temporary password from an admin: a new one is needed first. */
+  mustChangePassword?: boolean;
   household: { id: string; name: string; role: string; contentLimit: ContentLimit; isKids: boolean } | null;
 }
 

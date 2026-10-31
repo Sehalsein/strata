@@ -15,6 +15,7 @@ const LoginPage = lazy(() => import("@/features/auth/login-page"));
 const SetupWizard = lazy(() => import("@/features/setup/setup-wizard"));
 const InvitePage = lazy(() => import("@/features/invite/invite-page"));
 const PrivacyPage = lazy(() => import("@/features/account/privacy-page"));
+const ChooseNewPasswordScreen = lazy(() => import("@/features/account/choose-new-password").then((m) => ({ default: m.ChooseNewPasswordScreen })));
 const ForgotPasswordPage = lazy(() => import("@/features/account/password-reset-pages").then((m) => ({ default: m.ForgotPasswordPage })));
 const ResetPasswordPage = lazy(() => import("@/features/account/password-reset-pages").then((m) => ({ default: m.ResetPasswordPage })));
 
@@ -124,6 +125,18 @@ export function App() {
     screen = <FullscreenSpinner />;
   } else if (me.isError) {
     screen = <Unreachable error={me.error} retrying={me.isFetching} onRetry={() => void me.refetch()} />;
+  } else if (session && me.data?.mustChangePassword && !addingAccount) {
+    // Signed in with a temporary password from an admin: a new one before anything else.
+    screen = (
+      <ChooseNewPasswordScreen
+        name={me.data.user.name}
+        onDone={authChanged}
+        onSignOut={async () => {
+          await authClient.signOutAll();
+          await authChanged();
+        }}
+      />
+    );
   } else if (!session || addingAccount) {
     screen = <LoginPage serverName={info.data.serverName} adding={!!session} onSignedIn={() => void authChanged()} onCancel={session ? () => setAddingAccount(false) : undefined} />;
   } else {

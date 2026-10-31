@@ -216,6 +216,15 @@ export const authClient = {
     await call(ba.changePassword({ currentPassword, newPassword, revokeOtherSessions: true }));
   },
 
+  /**
+   * Sets a temporary password for someone in the household (Better Auth's admin
+   * set-user-password; the server allows it only over someone below you). They're signed
+   * out everywhere and choose a new password at their next sign-in.
+   */
+  async setTemporaryPassword(userId: string, newPassword: string) {
+    await call(ba.admin.setUserPassword({ userId, newPassword }) as Promise<BaResult<unknown>>);
+  },
+
   /** Every sign-in of the current account (apps, TVs, browsers). */
   async listSessions(): Promise<AuthSession[]> {
     return call(ba.listSessions() as Promise<BaResult<AuthSession[]>>);

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, LoaderCircle, Mail, MoreHorizontal, Pencil, QrCode as QrCodeIcon, Trash, UserPlus, Users, X } from "lucide-react";
+import { Check, Copy, KeyRound, LoaderCircle, Mail, MoreHorizontal, Pencil, QrCode as QrCodeIcon, Trash, UserPlus, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/app/session";
 import { api } from "@/lib/api";
@@ -10,6 +10,7 @@ import { queryKeys, useApiMutation } from "@/lib/query";
 import type { ContentLimit, HouseholdRole, Invitation, Member } from "@/lib/types";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { SignInCodeDialog } from "./sign-in-code-dialog";
+import { ResetPasswordDialog } from "./reset-password-dialog";
 import { EmptyState, ErrorAlert, InlineError } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,8 +66,14 @@ export function useHousehold() {
 }
 
 /** The active household's people: role, kids flag and content limit, removal. */
+/** Owner 2, admin 1, member 0 (as the server ranks them for password resets). */
+const rank = (role: string | undefined) => ((role ?? "").split(",").includes("owner") ? 2 : (role ?? "").split(",").includes("admin") ? 1 : 0);
+
 export function MemberList({ selfId }: { selfId: string }) {
-  const { authChanged } = useSession();
+  const { authChanged, me, isServerAdmin } = useSession();
+  const [resetting, setResetting] = useState<{ userId: string; name: string } | null>(null);
+  // Who you may reset: someone below you here (the server's admin: anyone else).
+  const canReset = (m: Member) => m.userId !== selfId && (isServerAdmin || rank(m.role) < rank(me.household?.role));
   const household = useHousehold();
   const [removing, setRemoving] = useState<Member | null>(null);
   const [showingCode, setShowingCode] = useState<{ id: string; name: string } | null>(null);
@@ -143,6 +150,11 @@ export function MemberList({ selfId }: { selfId: string }) {
                     <DropdownMenuItem onSelect={() => setShowingCode({ id: m.id, name: m.user.name })}>
                       <QrCodeIcon /> Sign-in code
                     </DropdownMenuItem>
+                    {canReset(m) && (
+                      <DropdownMenuItem onSelect={() => setResetting({ userId: m.userId, name: m.user.name })}>
+                        <KeyRound /> Reset password…
+                      </DropdownMenuItem>
+                    )}
                     {!self && (
                       <>
                         <DropdownMenuSeparator />
@@ -202,6 +214,7 @@ export function MemberList({ selfId }: { selfId: string }) {
         })}
       </ul>
       <SignInCodeDialog member={showingCode} onOpenChange={(o) => !o && setShowingCode(null)} />
+      <ResetPasswordDialog member={resetting} onOpenChange={(o) => !o && setResetting(null)} />
       <RenameMemberDialog
         key={renaming?.id}
         member={renaming}
