@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
-import { ExternalLink } from "lucide-react";
+import { CircleHelp, ExternalLink } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import type { SecretKey } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -74,7 +76,7 @@ export function KeyGuide({ secretKey, className }: { secretKey: SecretKey; class
         ))}
         <li className="flex gap-3">
           <span className="bg-muted text-foreground flex size-5 shrink-0 items-center justify-center rounded-full text-xs font-medium">{guide.steps.length + 1}</span>
-          <span>Paste it below. Strata checks it with the service before saving it.</span>
+          <span>Paste it into Strata's key field. Strata checks it with the service before saving it.</span>
         </li>
       </ol>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -87,12 +89,31 @@ export function KeyGuide({ secretKey, className }: { secretKey: SecretKey; class
   );
 }
 
-/** The same steps, folded behind "How do I get one?" (the setup wizard). */
-export function KeyGuideDisclosure({ secretKey }: { secretKey: SecretKey }) {
+const NAMES: Record<SecretKey, string> = { tmdbApiKey: "TMDB", torboxApiKey: "TorBox", omdbApiKey: "OMDb" };
+
+/** "How do I get a key?": opens the steps in a dialog. */
+export function KeyGuideButton({ secretKey, className }: { secretKey: SecretKey; className?: string }) {
   return (
-    <details className="group rounded-md border px-3 py-2">
-      <summary className="text-foreground cursor-pointer text-sm font-medium select-none">How do I get one?</summary>
-      <KeyGuide secretKey={secretKey} className="pt-3 pb-1" />
-    </details>
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button type="button" variant="link" size="sm" className={cn("h-auto px-0", className)}>
+          <CircleHelp /> How do I get a key?
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Getting a {NAMES[secretKey]} key</DialogTitle>
+          <DialogDescription>A few minutes on {NAMES[secretKey]}'s website, then paste the key into Strata.</DialogDescription>
+        </DialogHeader>
+        <KeyGuide secretKey={secretKey} />
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button type="button" variant="outline">
+              Done
+            </Button>
+          </DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

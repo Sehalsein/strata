@@ -12,7 +12,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { KeyGuide } from "./key-guides";
+import { KeyGuideButton } from "./key-guides";
 
 interface Provider {
   key: SecretKey;
@@ -147,7 +147,10 @@ function ProviderCard({ provider: p, configured }: { provider: Provider; configu
 
       {entering && (
         <form onSubmit={save} noValidate className="bg-muted/30 flex flex-col gap-3 border-t p-5">
-          <KeyGuide secretKey={p.key} />
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-medium">Paste your {p.name} key</p>
+            <KeyGuideButton secretKey={p.key} />
+          </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input
               aria-label={`${p.name} API key`}
