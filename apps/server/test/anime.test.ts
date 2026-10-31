@@ -188,6 +188,28 @@ test("an unreadable anime id list is thrown away and retried later, not reread o
   expect(downloads).toBe(1); // one try for a fresh copy, then a pause before the next
 });
 
+test("on Workers lookups never download the list; only the daily refresh does", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "strata-anime-"));
+  let downloads = 0;
+  const map = new AnimeIds(
+    fileAnimeIdStore(dir),
+    (async () => {
+      downloads++;
+      return Response.json(Array.from({ length: 1000 }, (_, i) => ({ anilist_id: i + 1, themoviedb_id: { tv: i + 1 } })));
+    }) as unknown as typeof fetch,
+    false,
+  );
+  await map.ready();
+  expect(downloads).toBe(0);
+  expect(map.size).toBe(0);
+  await map.refresh();
+  expect(downloads).toBe(1);
+  expect(map.anilist(5)?.tmdbTv).toBe(5);
+});
+
 describe("anime tab sections", () => {
   const detail = (id: number, name: string) => ({ id, name, title: name, overview: `${name}.`, poster_path: "/p.jpg", backdrop_path: "/b.jpg", first_air_date: "2023-09-29", release_date: "2016-08-26" });
   const tmdb = {

@@ -11,8 +11,8 @@ struct ShowDetailView: View {
     @State private var selectedSeason: Int?
     @State private var season: Loadable<SeasonDetail> = .loading
     @State private var inWatchlist = false
-    /// What the server can play Up Next from; nil until it answers.
-    @State private var upNextSources: [Candidate]?
+    /// What Play does (Up Next), and the sources behind it; nil until the server answers.
+    @State private var playOptions: PlayOptions?
     @State private var sourcesFor: EpisodeItem?
     /// The episode whose source is being chosen to download.
     @State private var downloadFor: EpisodeItem?
@@ -64,11 +64,8 @@ struct ShowDetailView: View {
                           ratings: show.ratings.badges,
                           overview: show.overview) {
                 // Plays when it's in the library or the server lists a source for it.
-                if let upNext = show.upNext, upNext.isAvailable || upNextSources?.isEmpty == false {
-                    PlayButton(upNext.isResume ? "Resume \(code(upNext.season, upNext.episode))" : "Play \(code(upNext.season, upNext.episode))") {
-                        play(show, season: upNext.season, episode: upNext.episode, name: nil, still: nil,
-                             candidateId: upNext.isAvailable ? nil : upNextSources?.first?.id)
-                    }
+                if let choice = (playOptions ?? TitleActions.libraryPlay(show)).choice {
+                    PlayButton(choice.label) { services.play(choice, title: show.title, artworkURL: show.backdropUrl) }
                     #if os(tvOS)
                     .focused($playFocused)
                     #endif
@@ -77,7 +74,7 @@ struct ShowDetailView: View {
                     Task { await toggleWatchlist(show) }
                 }
                 // Only when the server has sources to show.
-                if let upNextSources, !upNextSources.isEmpty {
+                if let sources = playOptions?.sources, !sources.isEmpty {
                     GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV) { showUpNextSources = true }
                 }
                 if let trailer = show.trailer?.youtubeURL { TrailerButton(url: trailer) }
@@ -131,7 +128,7 @@ struct ShowDetailView: View {
         .sheet(isPresented: $showUpNextSources) {
             if let upNext = show.upNext {
                 SourcePickerSheet(target: .episode(show: show.tmdbId, season: upNext.season, episode: upNext.episode),
-                                  title: "\(show.title) · \(code(upNext.season, upNext.episode))", known: upNextSources ?? [], lookFurther: upNext.isAvailable) { candidate in
+                                  title: "\(show.title) · \(code(upNext.season, upNext.episode))", known: playOptions?.sources ?? [], lookFurther: playOptions?.lookedFurther == false) { candidate in
                     play(show, season: upNext.season, episode: upNext.episode, name: nil, still: nil, candidateId: candidate.id)
                 }
             }
@@ -139,10 +136,10 @@ struct ShowDetailView: View {
         .alert(notice ?? "", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button("OK", role: .cancel) { notice = nil }
         }
-        .task(id: show.upNext.map { "\($0.season)x\($0.episode)" }) {
-            guard let upNext = show.upNext else { upNextSources = nil; return }
-            // Looking further than the library only where that decides whether it can play.
-            upNextSources = await services.sources(for: .episode(show: show.tmdbId, season: upNext.season, episode: upNext.episode), discover: !upNext.isAvailable)
+        // Asked again when Up Next moves on, or Play's answer for it could change.
+        .task(id: show.upNext.map { "\($0.season)x\($0.episode)|\($0.isAvailable)|\($0.isResume)" }) {
+            playOptions = nil
+            playOptions = await services.titles.play(show)
         }
     }
 
@@ -262,12 +259,8 @@ struct ShowDetailView: View {
 
     /// An episode in the library plays; otherwise the server is asked what it can play it from.
     private func playEpisode(_ show: ShowDetail, _ episode: EpisodeItem) async {
-        guard !episode.isAvailable else {
-            return play(show, season: episode.season, episode: episode.episode, name: episode.name, still: episode.stillUrl)
-        }
-        let found = await services.sources(for: episode.target(show: show.tmdbId), discover: true)
-        if let first = found.first {
-            play(show, season: episode.season, episode: episode.episode, name: episode.name, still: episode.stillUrl, candidateId: first.id)
+        if let choice = await services.titles.play(episode, of: show.tmdbId) {
+            services.play(choice, title: show.title, artworkURL: episode.stillUrl ?? show.backdropUrl)
         } else {
             notice = "\(code(episode.season, episode.episode)) isn't in your library."
         }
@@ -297,17 +290,14 @@ struct ShowDetailView: View {
         season = result
     }
 
+    /// The page reloads (with Up Next) on the change that follows.
     private func setWatched(_ show: ShowDetail, _ episode: EpisodeItem, _ watched: Bool) async {
-        _ = await services.load { try await $0.setWatched(episode.target(show: show.tmdbId), watched) }
-        await services.client?.clearCache()
-        await loadSeason()
+        try? await services.titles.setWatched(episode.target(show: show.tmdbId), watched)
     }
 
     private func toggleWatchlist(_ show: ShowDetail) async {
         inWatchlist.toggle()
         let on = inWatchlist
-        if case .failed = await services.load({ try await $0.setWatchlist(.show, tmdbId: show.tmdbId, on) }) { inWatchlist = !on; return }
-        // Its episodes join (or leave) the calendar and its notifications.
-        await services.refreshEpisodeAlerts()
+        do { try await services.titles.setOnList(.show, tmdbId: show.tmdbId, on) } catch { inWatchlist = !on }
     }
 }

@@ -10,7 +10,7 @@ export const CHANNELS = ["stable", "nightly"] as const;
 export type Channel = (typeof CHANNELS)[number];
 
 export const platformAssetSchema = z.object({
-  url: z.string().url(),
+  url: z.url(),
   sha256: z.string().regex(/^[0-9a-f]{64}$/, "sha256 must be 64 lowercase hex characters"),
   size: z.number().int().positive(),
 });

@@ -108,12 +108,28 @@ export function signInMethods() {
 const accessControl = createAccessControl(defaultStatements);
 
 /**
- * Better Auth paths a watch-only session (viewerOnly) may not call: the admin plugin, the
- * household changes beyond picking one, and anything that adds or removes a way in.
+ * The only Better Auth paths a watch-only session (viewerOnly) may call: signing in or out
+ * (adding a profile), its own session, picking among its households, approving a TV (which
+ * only watches too), its name and picture, and changing a password it knows. Everything
+ * else (the admin plugin, the household's members and invitations, other sessions and
+ * their tokens, new ways in) needs a password sign-in. An allowlist, so a path added by a
+ * plugin later is refused until it's listed here.
  */
-const VIEWER_REFUSED =
-  /^\/(admin\/|organization\/(?!(list|set-active|get-full-organization|get-active-member|get-active-member-role)$)|passkey\/|link-social|unlink-account|delete-user|set-password|revoke-sessions|revoke-other-sessions|multi-session\/revoke)/;
+const VIEWER_ALLOWED =
+  /^\/(get-session|sign-out|sign-in\/.+|sign-up\/.+|magic-link\/verify|callback\/.+|device|device\/(code|token|approve|deny)|organization\/(list|set-active|get-full-organization|get-active-member|get-active-member-role)|update-user|change-password|multi-session\/(list-device-sessions|set-active)|request-password-reset|forget-password|reset-password(\/.+)?|verify-email|send-verification-email|error|ok)$/;
 
+/** Whether a watch-only session (viewerOnly) may call this Better Auth path. */
+export function viewerMayCall(path: string): boolean {
+  return VIEWER_ALLOWED.test(path);
+}
+
+/** Better Auth paths the public demo refuses for everyone: changes to its accounts and household. */
+const DEMO_REFUSED = /^\/(change-password|update-user|change-email|delete-user|set-password|admin\/|organization\/(create|update|delete|invite-member|remove-member|update-member-role|leave|cancel-invitation)$)/;
+
+/** Whether the read-only demo refuses this Better Auth path. */
+export function demoRefuses(path: string): boolean {
+  return DEMO_REFUSED.test(path);
+}
 
 /**
  * May the signed-in caller manage `userId`'s account (reset its password, delete it)? The
@@ -190,54 +206,119 @@ export function createAuth(options: AuthOptions) {
   const { db, profile } = options;
   const methods = signInMethods();
   const confirmEmail = profile.openSignUp && emailConfigured();
-  // Hooks below ask Better Auth's own API (getSession) of the instance they belong to.
-  const auth = betterAuth({
-    appName: "Strata",
-    hooks: {
-      before: createAuthMiddleware(async (ctx) => {
-        // The hosted public demo shares one account: nobody may change it.
-        if (profile.readOnly && /^\/(change-password|update-user|change-email|delete-user|set-password|admin\/|organization\/(create|update|delete|invite-member|remove-member|update-member-role|leave|cancel-invitation)$)/.test(ctx.path)) {
-          throw new APIError("FORBIDDEN", { message: "The demo can't be changed." });
+  /**
+   * Whether the caller (by their headers) is an owner or admin of `organizationId` (or of
+   * their active household), signed in with a password.
+   */
+  const callerRunsHousehold = async (headers: Headers | undefined, organizationId?: string | null): Promise<boolean> => {
+    const caller = headers ? await auth.api.getSession({ headers }) : null;
+    const session = caller?.session as { activeOrganizationId?: string | null; viewerOnly?: boolean | null } | undefined;
+    const household = organizationId || session?.activeOrganizationId;
+    if (!caller || session?.viewerOnly || !household) return false;
+    const [row] = await db
+      .select({ role: schema.member.role })
+      .from(schema.member)
+      .where(and(eq(schema.member.organizationId, household), eq(schema.member.userId, caller.user.id)));
+    return roleRank(row?.role) >= 1;
+  };
+  type HookContext = Parameters<Parameters<typeof createAuthMiddleware>[0]>[0];
+  type PathRule = { before?: (ctx: HookContext) => Promise<void>; after?: (ctx: HookContext) => Promise<unknown> };
+  const returnedOk = (ctx: HookContext) => !!ctx.context.returned && !(ctx.context.returned instanceof Error);
+
+  // An invitation's id lets whoever has it sign up into its role: only the household's
+  // owner and admins see them.
+  const invitationsForAdmins: PathRule = {
+    before: async (ctx) => {
+      if (!(await callerRunsHousehold(ctx.headers, (ctx.query as { organizationId?: string } | undefined)?.organizationId))) {
+        throw new APIError("FORBIDDEN", { message: "Only the household's owner or admins can see its invitations." });
+      }
+    },
+  };
+  // Resetting someone's password or deleting their account (the admin plugin's
+  // set-user-password and remove-user): the server's admin, or a household's owner or
+  // admin for someone below them in it.
+  const mayManageTarget = async (ctx: HookContext) => {
+    await assertMayManage(db, profile, (headers) => auth.api.getSession({ headers }), ctx.headers, String((ctx.body as { userId?: unknown } | undefined)?.userId ?? ""));
+  };
+  // A profile picture is one of Strata's own (src/avatars) or none: nobody can point
+  // their profile at an image from elsewhere.
+  const ownPicture: PathRule = {
+    before: async (ctx) => {
+      if (!ctx.body || typeof ctx.body !== "object") return;
+      const image = (ctx.body as { image?: unknown; data?: { image?: unknown } }).image ?? (ctx.body as { data?: { image?: unknown } }).data?.image;
+      if (image != null && !isAvatarImage(image)) throw new APIError("BAD_REQUEST", { message: "Pick one of the server's profile pictures." });
+    },
+  };
+  // Password reset is by email: without email set up there's nothing to send.
+  const needsEmail: PathRule = {
+    before: async () => {
+      if (!emailConfigured()) throw new APIError("NOT_FOUND", { message: "This server can't send email. Ask your household's admin to help." });
+    },
+  };
+  // Cloud: a new account without an invitation owns a new household, named after them
+  // (onboarding lets them rename it), and the sign-in opens in it. By password, or by
+  // Google: its first sign-in (an account in no household yet, just made).
+  // An account that must confirm its email first gets no sign-in yet: the household is
+  // made now, and its first sign-in opens in it (databaseHooks.session).
+  const ownHousehold = async (ctx: HookContext) => {
+    const created = ctx.context.newSession;
+    const returned = ctx.context.returned as { user?: { id: string; name: string; createdAt: Date | string } } | undefined;
+    const user = created?.user ?? (ctx.path === "/sign-up/email" && returned && !(returned instanceof Error) ? returned.user : undefined);
+    if (!profile.openSignUp || !user || (ctx.body as { invitationId?: unknown } | undefined)?.invitationId) return;
+    if (ctx.path === "/callback/:id") {
+      const isNew = Date.now() - new Date(user.createdAt).getTime() < 10 * 60_000;
+      const [inOne] = await db.select({ id: schema.member.id }).from(schema.member).where(eq(schema.member.userId, user.id)).limit(1);
+      if (!isNew || inOne) return;
+    }
+    const household = await auth.api.createOrganization({
+      body: { name: `${user.name}'s home`, slug: `home-${crypto.randomUUID().slice(0, 8)}`, userId: user.id },
+    });
+    if (household && created) await ctx.context.internalAdapter.updateSession(created.session.token, { activeOrganizationId: household.id });
+  };
+
+  /** What each Better Auth path needs besides Better Auth's own checks: before it runs, and after. */
+  const policy: Record<string, PathRule> = {
+    "/organization/list-invitations": invitationsForAdmins,
+    // Anyone else in the household gets it without the pending invitations.
+    "/organization/get-full-organization": {
+      after: async (ctx) => {
+        const full = ctx.context.returned as { id?: string; invitations?: unknown[] } | null | undefined;
+        if (full && !(full instanceof Error) && full.invitations?.length && !(await callerRunsHousehold(ctx.headers, full.id))) {
+          return ctx.json({ ...full, invitations: [] });
         }
-        // A device that joined without a password (home network, QR code, TV) may watch and
-        // tend its own sign-in, never administer: its session can't reach the admin plugin,
-        // change households, or add a way in (passkey, Google) that outlives it.
-        if (VIEWER_REFUSED.test(ctx.path)) {
-          const caller = ctx.headers ? await auth.api.getSession({ headers: ctx.headers }) : null;
-          if ((caller?.session as { viewerOnly?: boolean | null } | undefined)?.viewerOnly) {
-            throw new APIError("FORBIDDEN", { message: "Sign in with your password to do that." });
-          }
-        }
-        // Sign-in codes are only made by the server (api/routes/auth.ts, for a household's
-        // admins or the member themself), never asked for from outside.
-        if (ctx.path === "/sign-in/magic-link" && !sameSecret(ctx.headers?.get(SIGN_IN_CODE_HEADER) ?? "", signInCodeSecret())) {
-          throw new APIError("NOT_FOUND", { message: "Not found" });
-        }
-        // Password reset is by email: without email set up there's nothing to send.
-        if ((ctx.path === "/request-password-reset" || ctx.path === "/forget-password") && !emailConfigured()) {
-          throw new APIError("NOT_FOUND", { message: "This server can't send email. Ask your household's admin to help." });
-        }
-        // Resetting someone's password or deleting their account (the admin plugin's
-        // set-user-password and remove-user): the server's admin, or a household's owner or
-        // admin for someone below them in it.
-        if (ctx.path === "/admin/set-user-password" || ctx.path === "/admin/remove-user") {
-          await assertMayManage(db, profile, (headers) => auth.api.getSession({ headers }), ctx.headers, String((ctx.body as { userId?: unknown } | undefined)?.userId ?? ""));
-          return;
-        }
-        // A profile picture is one of Strata's own (src/avatars) or none: nobody can point
-        // their profile at an image from elsewhere.
-        if ((ctx.path === "/update-user" || ctx.path === "/admin/update-user") && ctx.body && typeof ctx.body === "object") {
-          const image = (ctx.body as { image?: unknown; data?: { image?: unknown } }).image ?? (ctx.body as { data?: { image?: unknown } }).data?.image;
-          if (image != null && !isAvatarImage(image)) throw new APIError("BAD_REQUEST", { message: "Pick one of the server's profile pictures." });
-          return;
-        }
-        if (ctx.path !== "/sign-up/email") return;
-        // Cloud: anyone may sign up and gets a household of their own (see `after`). With an
-        // invitation's id they join that household instead, checked as below.
-        if (profile.openSignUp && !(ctx.body as { invitationId?: unknown } | undefined)?.invitationId) return;
-        // The invitation's id is the proof (it's in the link; no mail is sent): an email
-        // alone, which anyone might know, doesn't open sign-up.
+      },
+    },
+    // Sign-in codes are only made by the server (api/routes/auth.ts, for a household's
+    // admins or the member themself), never asked for from outside.
+    "/sign-in/magic-link": {
+      before: async (ctx) => {
+        if (!sameSecret(ctx.headers?.get(SIGN_IN_CODE_HEADER) ?? "", signInCodeSecret())) throw new APIError("NOT_FOUND", { message: "Not found" });
+      },
+    },
+    "/request-password-reset": needsEmail,
+    "/forget-password": needsEmail,
+    "/admin/set-user-password": {
+      before: mayManageTarget,
+      // A password set by someone else is temporary: every device of theirs is signed out,
+      // and their next sign-in asks for a new one before anything else (api/context.ts).
+      after: async (ctx) => {
+        const userId = String((ctx.body as { userId?: unknown } | undefined)?.userId ?? "");
+        if (!userId || !returnedOk(ctx)) return;
+        await ctx.context.internalAdapter.deleteUserSessions(userId);
+        await db.update(schema.user).set({ mustChangePassword: true }).where(eq(schema.user.id, userId));
+      },
+    },
+    "/admin/remove-user": { before: mayManageTarget },
+    "/update-user": ownPicture,
+    "/admin/update-user": ownPicture,
+    "/sign-up/email": {
+      // Cloud: anyone may sign up and gets a household of their own (`ownHousehold`). With
+      // an invitation's id they join that household instead. The invitation's id is the
+      // proof (it's in the link; no mail is sent): an email alone, which anyone might
+      // know, doesn't open sign-up.
+      before: async (ctx) => {
         const body = (ctx.body ?? {}) as { email?: unknown; invitationId?: unknown };
+        if (profile.openSignUp && !body.invitationId) return;
         const email = String(body.email ?? "").toLowerCase();
         const [pending] = await db
           .select({ id: schema.invitation.id })
@@ -252,85 +333,79 @@ export function createAuth(options: AuthOptions) {
           )
           .limit(1);
         if (!pending) throw new APIError("FORBIDDEN", { message: "Signing up needs an invitation to a household. Ask its owner for one." });
-      }),
-      after: createAuthMiddleware(async (ctx) => {
+      },
+      after: ownHousehold,
+    },
+    "/callback/:id": { after: ownHousehold },
+    // Choosing a new password replaces a temporary one from an admin.
+    "/change-password": {
+      after: async (ctx) => {
+        const userId = ctx.context.session?.user.id;
+        if (userId && returnedOk(ctx)) await db.update(schema.user).set({ mustChangePassword: false }).where(eq(schema.user.id, userId));
+      },
+    },
+    // The TV joins the household the approving phone is in: noted at approval…
+    "/device/approve": {
+      after: async (ctx) => {
+        const userCode = String((ctx.body as { userCode?: unknown } | undefined)?.userCode ?? "").toUpperCase();
+        const household = (ctx.context.session?.session as { activeOrganizationId?: string | null } | undefined)?.activeOrganizationId;
+        const [code] = userCode ? await db.select({ deviceCode: schema.deviceCode.deviceCode }).from(schema.deviceCode).where(eq(schema.deviceCode.userCode, userCode)) : [];
+        if (code && household) {
+          await ctx.context.internalAdapter.createVerificationValue({ identifier: `tv-household:${code.deviceCode}`, value: household, expiresAt: new Date(Date.now() + 15 * 60_000) });
+        }
+      },
+    },
+    // …and applied when the TV picks up its sign-in, which can watch, never administer.
+    "/device/token": {
+      after: async (ctx) => {
         const adapter = ctx.context.internalAdapter;
-        // Cloud: a new account without an invitation owns a new household, named after them
-        // (onboarding lets them rename it), and the sign-in opens in it. By password, or by
-        // Google: its first sign-in (an account in no household yet, just made).
-        // An account that must confirm its email first gets no sign-in yet: the household is
-        // made now, and its first sign-in opens in it (databaseHooks.session).
-        if (ctx.path === "/sign-up/email" || ctx.path === "/callback/:id") {
-          const created = ctx.context.newSession;
-          const returned = ctx.context.returned as { user?: { id: string; name: string; createdAt: Date | string } } | undefined;
-          const user = created?.user ?? (ctx.path === "/sign-up/email" && returned && !(returned instanceof Error) ? returned.user : undefined);
-          if (!profile.openSignUp || !user || (ctx.body as { invitationId?: unknown } | undefined)?.invitationId) return;
-          if (ctx.path === "/callback/:id") {
-            const isNew = Date.now() - new Date(user.createdAt).getTime() < 10 * 60_000;
-            const [inOne] = await db.select({ id: schema.member.id }).from(schema.member).where(eq(schema.member.userId, user.id)).limit(1);
-            if (!isNew || inOne) return;
-          }
-          const household = await auth.api.createOrganization({
-            body: { name: `${user.name}'s home`, slug: `home-${crypto.randomUUID().slice(0, 8)}`, userId: user.id },
-          });
-          if (household && created) await adapter.updateSession(created.session.token, { activeOrganizationId: household.id });
-          return;
-        }
-        // The TV joins the household the approving phone is in: noted at approval…
-        if (ctx.path === "/device/approve") {
-          const userCode = String((ctx.body as { userCode?: unknown } | undefined)?.userCode ?? "").toUpperCase();
-          const household = (ctx.context.session?.session as { activeOrganizationId?: string | null } | undefined)?.activeOrganizationId;
-          const [code] = userCode ? await db.select({ deviceCode: schema.deviceCode.deviceCode }).from(schema.deviceCode).where(eq(schema.deviceCode.userCode, userCode)) : [];
-          if (code && household) {
-            await adapter.createVerificationValue({ identifier: `tv-household:${code.deviceCode}`, value: household, expiresAt: new Date(Date.now() + 15 * 60_000) });
-          }
-          return;
-        }
-        // A password set by someone else is temporary: every device of theirs is signed out,
-        // and their next sign-in asks for a new one before anything else (api/context.ts).
-        if (ctx.path === "/admin/set-user-password") {
-          const userId = String((ctx.body as { userId?: unknown } | undefined)?.userId ?? "");
-          if (userId && ctx.context.returned && !(ctx.context.returned instanceof Error)) {
-            await adapter.deleteUserSessions(userId);
-            await db.update(schema.user).set({ mustChangePassword: true }).where(eq(schema.user.id, userId));
-          }
-          return;
-        }
-        // Choosing a new password replaces a temporary one from an admin.
-        if (ctx.path === "/change-password") {
-          const userId = ctx.context.session?.user.id;
-          if (userId && ctx.context.returned && !(ctx.context.returned instanceof Error)) {
-            await db.update(schema.user).set({ mustChangePassword: false }).where(eq(schema.user.id, userId));
-          }
-          return;
-        }
-        // A sign-in code (a member's QR code) opens the household it was made in, to watch:
-        // the device can't administer. A code for someone no longer in it signs nobody in.
-        if (ctx.path === "/magic-link/verify") {
-          const created = ctx.context.newSession;
-          const token = String((ctx.query as { token?: unknown } | undefined)?.token ?? "");
-          if (!created || !token) return;
-          const noted = await adapter.findVerificationValue(signInCodeNote(token));
-          if (noted) await adapter.deleteVerificationByIdentifier(noted.identifier).catch(() => {});
-          const [stillMember] = noted
-            ? await db.select({ id: schema.member.id }).from(schema.member).where(and(eq(schema.member.organizationId, noted.value), eq(schema.member.userId, created.user.id)))
-            : [];
-          if (!noted || !stillMember) {
-            await adapter.deleteSession(created.session.token);
-            throw new APIError("FORBIDDEN", { message: "That code is no longer valid. Ask for a new one." });
-          }
-          await adapter.updateSession(created.session.token, { activeOrganizationId: noted.value, viewerOnly: true });
-          return;
-        }
-        // …and applied when the TV picks up its sign-in, which can watch, never administer.
-        if (ctx.path !== "/device/token") return;
         const token = (ctx.context.returned as { access_token?: string } | undefined)?.access_token;
         if (!token) return;
         const deviceCode = String((ctx.body as { device_code?: unknown } | undefined)?.device_code ?? "");
         const noted = deviceCode ? await adapter.findVerificationValue(`tv-household:${deviceCode}`) : null;
         await adapter.updateSession(token, { viewerOnly: true, ...(noted ? { activeOrganizationId: noted.value } : {}) });
         if (noted) await adapter.deleteVerificationByIdentifier(noted.identifier).catch(() => {});
+      },
+    },
+    // A sign-in code (a member's QR code) opens the household it was made in, to watch:
+    // the device can't administer. A code for someone no longer in it signs nobody in.
+    "/magic-link/verify": {
+      after: async (ctx) => {
+        const adapter = ctx.context.internalAdapter;
+        const created = ctx.context.newSession;
+        const token = String((ctx.query as { token?: unknown } | undefined)?.token ?? "");
+        if (!created || !token) return;
+        const noted = await adapter.findVerificationValue(signInCodeNote(token));
+        if (noted) await adapter.deleteVerificationByIdentifier(noted.identifier).catch(() => {});
+        const [stillMember] = noted
+          ? await db.select({ id: schema.member.id }).from(schema.member).where(and(eq(schema.member.organizationId, noted.value), eq(schema.member.userId, created.user.id)))
+          : [];
+        if (!noted || !stillMember) {
+          await adapter.deleteSession(created.session.token);
+          throw new APIError("FORBIDDEN", { message: "That code is no longer valid. Ask for a new one." });
+        }
+        await adapter.updateSession(created.session.token, { activeOrganizationId: noted.value, viewerOnly: true });
+      },
+    },
+  };
+
+  // Hooks below ask Better Auth's own API (getSession) of the instance they belong to.
+  const auth = betterAuth({
+    appName: "Strata",
+    // Every Better Auth path's rules are in `policy` (below): the two checks every path
+    // gets first, then that path's own before and after steps.
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        if (profile.readOnly && demoRefuses(ctx.path)) throw new APIError("FORBIDDEN", { message: "The demo can't be changed." });
+        if (!viewerMayCall(ctx.path)) {
+          const caller = ctx.headers ? await auth.api.getSession({ headers: ctx.headers }) : null;
+          if ((caller?.session as { viewerOnly?: boolean | null } | undefined)?.viewerOnly) {
+            throw new APIError("FORBIDDEN", { message: "Sign in with your password to do that." });
+          }
+        }
+        await policy[ctx.path]?.before?.(ctx);
       }),
+      after: createAuthMiddleware(async (ctx) => policy[ctx.path]?.after?.(ctx)),
     },
     databaseHooks: {
       user: {

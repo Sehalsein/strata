@@ -55,11 +55,6 @@ public struct RootView: View {
             services.refreshClient()
         }
         .onChange(of: services.store.activeID) { services.refreshClient() }
-        .onChange(of: services.coordinator.pendingWatch) { _, target in
-            guard let target, services.store.isSignedIn else { return }
-            services.coordinator.pendingWatch = nil
-            Task { await services.play(target) }
-        }
         .fullScreenCover(item: Binding(get: { services.watching }, set: { services.watching = $0 })) { request in
             WatchView(request: request)
         }

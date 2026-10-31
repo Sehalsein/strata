@@ -66,9 +66,9 @@ public struct SavedSignIn: Codable, Sendable, Hashable, Identifiable {
     public var isKids: Bool { household?.isKids ?? false }
 }
 
-/// Where tokens live. The default keeps them in the Keychain and mirrors to
-/// UserDefaults, so "stay signed in" survives when the Keychain is unavailable
-/// (unsigned simulator builds, MDM restrictions).
+/// Where tokens live. The default keeps them in the Keychain, never in plaintext: when
+/// the Keychain won't take one (unsigned builds, MDM restrictions), the sign-in lasts
+/// for this run only, kept in memory, and the failure is logged.
 public struct TokenStorage: Sendable {
     public var read: @Sendable (_ id: String) -> String?
     public var write: @Sendable (_ token: String?, _ id: String) -> Void
@@ -78,28 +78,48 @@ public struct TokenStorage: Sendable {
         self.write = write
     }
 
-    public static let keychain = TokenStorage(
-        read: { id in
-            Keychain.get("strata.token.\(id)") ?? UserDefaults.standard.string(forKey: "strata.token.fallback.\(id)")
-        },
-        write: { token, id in
-            let fallbackKey = "strata.token.fallback.\(id)"
-            guard let token else {
-                Keychain.set(nil, for: "strata.token.\(id)")
-                UserDefaults.standard.removeObject(forKey: fallbackKey)
-                return
-            }
-            let status = Keychain.set(token, for: "strata.token.\(id)")
+    public static let keychain = TokenStorage.keychain(defaults: .standard, set: { Keychain.set($0, for: $1) }, get: { Keychain.get($0) })
+
+    /// The Keychain-backed storage, with its pieces swappable for tests.
+    static func keychain(defaults: UserDefaults,
+                         set: @escaping @Sendable (_ token: String?, _ key: String) -> OSStatus,
+                         get: @escaping @Sendable (_ key: String) -> String?) -> TokenStorage {
+        // Tokens the Keychain wouldn't take: this run only.
+        let session = TokenBox()
+        // UserDefaults is thread-safe.
+        nonisolated(unsafe) let defaults = defaults
+        @Sendable func store(_ token: String, _ id: String) {
+            let status = set(token, "strata.token.\(id)")
             if status == errSecSuccess {
-                // The Keychain holds it; never keep a plaintext copy.
-                UserDefaults.standard.removeObject(forKey: fallbackKey)
+                session.set(id, nil)
             } else {
-                // Only when the Keychain is unusable (e.g. an unsigned simulator build).
-                Log.auth.warning("Keychain write failed (\(status)); using UserDefaults fallback")
-                UserDefaults.standard.set(token, forKey: fallbackKey)
+                Log.auth.error("Keychain write failed (\(status)); keeping the session in memory until the app quits")
+                session.set(id, token)
             }
         }
-    )
+        return TokenStorage(
+            read: { id in
+                if let token = session.get(id) { return token }
+                if let token = get("strata.token.\(id)") { return token }
+                // Older versions kept a plaintext copy when the Keychain failed: move it
+                // into the Keychain, and off UserDefaults either way.
+                let legacyKey = "strata.token.fallback.\(id)"
+                guard let legacy = defaults.string(forKey: legacyKey) else { return nil }
+                defaults.removeObject(forKey: legacyKey)
+                store(legacy, id)
+                return legacy
+            },
+            write: { token, id in
+                defaults.removeObject(forKey: "strata.token.fallback.\(id)")
+                guard let token else {
+                    _ = set(nil, "strata.token.\(id)")
+                    session.set(id, nil)
+                    return
+                }
+                store(token, id)
+            }
+        )
+    }
 
     /// For tests and previews.
     public static func inMemory() -> TokenStorage {

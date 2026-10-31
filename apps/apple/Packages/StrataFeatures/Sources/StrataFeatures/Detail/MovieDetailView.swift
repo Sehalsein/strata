@@ -9,8 +9,8 @@ struct MovieDetailView: View {
     let tmdbId: Int
     @State private var detail: Loadable<MovieDetail> = .loading
     @State private var inWatchlist = false
-    /// What the server can play this from; nil until it answers.
-    @State private var sources: [Candidate]?
+    /// What Play does, and the sources behind it; nil until the server answers.
+    @State private var playOptions: PlayOptions?
     @State private var showSources = false
 
     var body: some View {
@@ -55,8 +55,8 @@ struct MovieDetailView: View {
                           ratings: movie.ratings.badges,
                           overview: movie.overview) {
                 // Plays when it's in the library or the server lists a source for it.
-                if canPlay(movie) {
-                    PlayButton(movie.resumeMs != nil ? "Resume" : "Play") { play(movie, candidateId: movie.isAvailable ? nil : sources?.first?.id) }
+                if let choice = playChoice(movie) {
+                    PlayButton(choice.label) { services.play(choice, title: movie.title, artworkURL: movie.backdropUrl ?? movie.posterUrl) }
                         .glassEffectID("play", in: namespace)
                         #if os(tvOS)
                         .focused($playFocused)
@@ -66,13 +66,13 @@ struct MovieDetailView: View {
                     Task { await toggleWatchlist(movie) }
                 }
                 // Only when the server has sources to show.
-                if let sources, !sources.isEmpty {
+                if let sources = playOptions?.sources, !sources.isEmpty {
                     GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV) { showSources = true }
                 }
                 #if os(iOS)
-                if canPlay(movie) {
+                if playChoice(movie) != nil {
                     DownloadButton(target: movie.target, title: movie.title, subtitle: movie.yearText,
-                                   artworkURL: movie.backdropUrl ?? movie.posterUrl, known: sources ?? [])
+                                   artworkURL: movie.backdropUrl ?? movie.posterUrl, known: playOptions?.sources ?? [])
                 }
                 #endif
                 if let trailer = movie.trailer?.youtubeURL { TrailerButton(url: trailer) }
@@ -82,7 +82,7 @@ struct MovieDetailView: View {
             .overlay(alignment: .topLeading) { TVBackButton { dismiss() } }
             #endif
 
-            if !movie.isAvailable, sources?.isEmpty == true {
+            if let playOptions, playOptions.choice == nil {
                 AvailabilityLabel(.unavailable).padding(.horizontal, Metrics.gutter)
             }
 
@@ -123,17 +123,21 @@ struct MovieDetailView: View {
         .padding(.bottom, Metrics.space12)
         .sheet(isPresented: $showSources) {
             // In the library, the page has only library sources: the sheet asks the server for more.
-            SourcePickerSheet(target: movie.target, title: movie.title, known: sources ?? [], lookFurther: movie.isAvailable) { candidate in
+            SourcePickerSheet(target: movie.target, title: movie.title, known: playOptions?.sources ?? [], lookFurther: playOptions?.lookedFurther == false) { candidate in
                 play(movie, candidateId: candidate.id)
             }
         }
-        // Looking further than the library only where that decides whether it can play.
-        .task(id: movie.tmdbId) { sources = await services.sources(for: movie.target, discover: !movie.isAvailable) }
+        // Asked again only when Play's answer could change (it joins the library, or Play becomes Resume).
+        .task(id: "\(movie.isAvailable)|\(movie.resumeMs != nil)") {
+            playOptions = nil
+            playOptions = await services.titles.play(movie)
+        }
     }
 
     @Namespace private var namespace
 
-    private func canPlay(_ movie: MovieDetail) -> Bool { movie.isAvailable || sources?.isEmpty == false }
+    /// The server's answer once it's in; until then, the library's.
+    private func playChoice(_ movie: MovieDetail) -> PlayChoice? { (playOptions ?? TitleActions.libraryPlay(movie)).choice }
     #if os(tvOS)
     @FocusState private var playFocused: Bool
     #endif
@@ -159,7 +163,7 @@ struct MovieDetailView: View {
     private func toggleWatchlist(_ movie: MovieDetail) async {
         inWatchlist.toggle()
         let on = inWatchlist
-        if case .failed = await services.load({ try await $0.setWatchlist(.movie, tmdbId: movie.tmdbId, on) }) { inWatchlist = !on }
+        do { try await services.titles.setOnList(.movie, tmdbId: movie.tmdbId, on) } catch { inWatchlist = !on }
     }
 }
 

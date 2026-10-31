@@ -204,7 +204,11 @@ final class TVFocusTests: XCTestCase {
         Thread.sleep(forTimeInterval: 2)
         snapshot("03-episodes")
 
+        // A watch link opens the title's page (it never plays by itself); Play has focus.
         open("strata://watch/movie/992") // Sherlock Jr., resumed mid-scene
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume'")).firstMatch.waitForExistence(timeout: 20))
+        Thread.sleep(forTimeInterval: 2)
+        press(.select)
         Thread.sleep(forTimeInterval: 14)
         press(.up, pause: 1) // controls
         snapshot("04-player")

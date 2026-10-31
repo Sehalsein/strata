@@ -90,9 +90,10 @@ export class Viewer {
     return this.household.catalog.sources(target.mediaType, target.tmdbId, target.season, target.episode);
   }
 
-  /** Releases from the scrapers (a few seconds). */
+  /** Releases from the scrapers (a few seconds), within the household's hourly allowance. */
   async discover(target: DiscoveryTarget) {
     await this.assertAllowed(titleType(target.mediaType), target.tmdbId);
+    await this.household.spendSearch();
     return this.household.discovery.candidates(target);
   }
 
@@ -104,6 +105,24 @@ export class Viewer {
   async prepareDownload(req: Omit<PlayRequest, "startMs">) {
     await this.assertAllowed(titleType(req.mediaType), req.tmdbId);
     return this.household.playback.prepareDownload(req);
+  }
+
+  /** A fresh link for this person's TorBox play whose link expired; null when there's no such play. */
+  async refreshPlayLink(sessionId: string): Promise<string | null> {
+    const session = await this.household.plays.mine(this.userId, sessionId);
+    if (!session) return null;
+    await this.household.playback.refreshLink(session);
+    return this.household.playback.handOff(session);
+  }
+
+  /** Stops this person's play (someone else's, or one that's over, is left alone). */
+  async stopPlay(sessionId: string) {
+    if (await this.household.plays.mine(this.userId, sessionId)) await this.household.plays.stop(sessionId);
+  }
+
+  /** Keeps this person's play alive while they report progress. */
+  async touchPlay(sessionId: string) {
+    await this.household.plays.mine(this.userId, sessionId);
   }
 
   /** May this person have `type`/`tmdbId` on their list? Taking it off always is. */

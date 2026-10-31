@@ -21,12 +21,8 @@ import {
 import { FieldGroup, FormField } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
-import { InviteDialog } from "@/features/members/household-people";
+import { InviteDialog, roleLabel } from "@/features/members/household-people";
 
-function roleLabel(role: string | undefined): string {
-  if (!role) return "";
-  return role.split(",").includes("owner") ? "Owner" : role.split(",").includes("admin") ? "Admin" : "Member";
-}
 
 /** A household's initials in a rounded square, like a team avatar. */
 function HouseholdMark({ name, className }: { name: string; className?: string }) {

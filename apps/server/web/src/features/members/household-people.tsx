@@ -36,6 +36,11 @@ export const ROLE_LABELS: Record<HouseholdRole, { label: string; hint: string }>
   member: { label: "Member", hint: "Watches; can't change anything" },
 };
 
+/** "Owner", "Admin" or "Member" for a member's role (empty when there's none). */
+export function roleLabel(role: string | undefined): string {
+  return role ? ROLE_LABELS[primaryRole(role)].label : "";
+}
+
 export function primaryRole(role: string): HouseholdRole {
   const roles = role.split(",");
   return roles.includes("owner") ? "owner" : roles.includes("admin") ? "admin" : "member";
@@ -68,16 +73,14 @@ export function useHousehold() {
 }
 
 /** The active household's people: role, kids flag and content limit, removal. */
-/** Owner 2, admin 1, member 0 (as the server ranks them for password resets). */
-const rank = (role: string | undefined) => ((role ?? "").split(",").includes("owner") ? 2 : (role ?? "").split(",").includes("admin") ? 1 : 0);
-
 export function MemberList({ selfId }: { selfId: string }) {
-  const { authChanged, me, isServerAdmin } = useSession();
+  const { authChanged } = useSession();
   const [resetting, setResetting] = useState<{ userId: string; name: string } | null>(null);
   const [deletingAccount, setDeletingAccount] = useState<Member | null>(null);
-  // Whose account you may manage (reset, data, delete): someone below you here (the
-  // server's admin: anyone else).
-  const canManage = (m: Member) => m.userId !== selfId && (isServerAdmin || rank(m.role) < rank(me.household?.role));
+  // Whose account you may manage (reset, data, delete): the server says (someone below you
+  // here, only in this household; the server's admin: anyone else).
+  const manageable = useQuery({ queryKey: [...queryKeys.household, "manageable"], queryFn: api.manageable });
+  const canManage = (m: Member) => m.userId !== selfId && !!manageable.data?.userIds.includes(m.userId);
   const deleteAccount = useApiMutation((m: Member) => authClient.deleteMemberAccount(m.userId), {
     success: (_, m) => `Deleted ${m.user.name}'s account`,
     invalidate: [queryKeys.household],

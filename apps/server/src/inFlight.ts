@@ -10,8 +10,10 @@ export const shareInFlight = runtime.name !== "workers";
 export interface SharedWorkOptions {
   /** Keep finished values for later callers (a memo), not only share work in progress. */
   remember?: boolean;
-  /** Past this many remembered values, start over. */
+  /** Past this many remembered values, the oldest is let go. */
   max?: number;
+  /** Remembered values older than this are worked out again. */
+  ttlMs?: number;
   /** Whether callers may wait on work another started (default: the runtime's rule above). */
   shareInFlight?: boolean;
 }
@@ -23,7 +25,7 @@ export interface SharedWorkOptions {
  */
 export class SharedWork<K, V> {
   private readonly inProgress = new Map<K, Promise<V>>();
-  private readonly done = new Map<K, V>();
+  private readonly done = new Map<K, { value: V; at: number }>();
   private readonly share: boolean;
 
   constructor(private readonly options: SharedWorkOptions = {}) {
@@ -31,7 +33,9 @@ export class SharedWork<K, V> {
   }
 
   get(key: K, work: () => Promise<V>): Promise<V> {
-    if (this.done.has(key)) return Promise.resolve(this.done.get(key)!);
+    const kept = this.done.get(key);
+    if (kept && (this.options.ttlMs === undefined || Date.now() - kept.at < this.options.ttlMs)) return Promise.resolve(kept.value);
+    if (kept) this.done.delete(key);
     const running = this.share ? this.inProgress.get(key) : undefined;
     if (running) return running;
     const started = work();
@@ -45,8 +49,10 @@ export class SharedWork<K, V> {
     if (this.options.remember) {
       started.then(
         (value) => {
-          if (this.options.max !== undefined && this.done.size >= this.options.max) this.done.clear();
-          this.done.set(key, value);
+          this.done.delete(key);
+          this.done.set(key, { value, at: Date.now() });
+          // Maps keep insertion order: the first key is the oldest.
+          if (this.options.max !== undefined && this.done.size > this.options.max) this.done.delete(this.done.keys().next().value!);
         },
         () => {},
       );

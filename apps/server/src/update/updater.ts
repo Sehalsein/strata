@@ -1,3 +1,4 @@
+import type { SelfUpdate } from "./index";
 import { createHash } from "node:crypto";
 import { accessSync, chmodSync, constants, existsSync, renameSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
@@ -93,7 +94,7 @@ export const defaultCodesign = async (binary: string) => {
   await run(["codesign", "--force", "--sign", "-", binary]);
 };
 
-export class Updater {
+export class Updater implements SelfUpdate {
   private state: UpdateState = "idle";
   private latest: Manifest | null = null;
   private lastCheckedAt: number | null = null;

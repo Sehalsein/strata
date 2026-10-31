@@ -35,6 +35,8 @@ export const streamRoutes = new Hono<Env>()
     const id = c.req.param("track").replace(/\.vtt$/, "");
     const track = session?.subtitles.find((t) => t.id === id);
     if (!session || !track) throw new HTTPException(404, { message: "No such subtitle track" });
+    // Converting needs ffmpeg and a disk (not the cloud server: its apps read subtitles from the file).
+    if (!services.ffmpeg()) throw new HTTPException(404, { message: "This server can't convert subtitles" });
     if (!track.text) throw new HTTPException(415, { message: "Bitmap subtitles can't be converted to WebVTT" });
     const job = services.subtitles.vtt(session.fileId, session.input, track);
     const path = await Promise.race([job, Bun.sleep(25_000).then(() => null)]);

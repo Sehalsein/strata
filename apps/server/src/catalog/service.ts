@@ -139,8 +139,12 @@ export class CatalogService {
 
     // Anime gets rails of its own on Home: it's left out of the movie and show rails.
     // Usually instant (the list is cached); never hold Home up for long on a slow load.
+    // A load that outlasts the wait carries on in the background, tied to this request (on
+    // Workers its database connection stays open until it's done).
     let timer: Timer | undefined;
-    await Promise.race([this.anime?.ids.ready().catch(() => {}), new Promise<void>((resolve) => (timer = setTimeout(resolve, 1_500)))]);
+    const loading = this.anime?.ids.ready().catch(() => {});
+    if (loading) runtime.background(loading);
+    await Promise.race([loading, new Promise<void>((resolve) => (timer = setTimeout(resolve, 1_500)))]);
     clearTimeout(timer);
     const isAnimeShow = (i: TmdbListItem) => this.isAnimeItem("show", i);
     const isAnimeFilm = (i: TmdbListItem) => this.isAnimeItem("movie", i);

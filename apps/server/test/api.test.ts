@@ -277,8 +277,16 @@ describe("setup and auth", () => {
     const carol = (await signIn("carol", "carols-password")).token!;
     expect((await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: carol, json: { invitationId: invite.id } })).status).toBe(200);
     const carolId = (await json(await server.request("/api/me", { token: carol }))).user.id;
+    // As a member, Bob sees nobody's pending invitations.
+    const bobAsMember = (await signIn("bob", "bobs-password")).token!;
+    expect((await json(await server.request("/api/auth/organization/get-full-organization", { token: bobAsMember }))).invitations).toEqual([]);
     expect((await server.request("/api/auth/organization/update-member-role", { method: "POST", token, json: { memberId: bobMember.id, role: "admin" } })).status).toBe(200);
     const bob = (await signIn("bob", "bobs-password")).token!;
+    // An admin, he still can't point the household at folders on the server's disk…
+    expect((await server.request("/api/admin/settings", { method: "PATCH", token: bob, json: { mediaFolders: [{ path: "/etc", kind: "movies" }] } })).status).toBe(403);
+    // …or sign the owner's own devices out.
+    const ownersDevice = (await json(await server.request("/api/admin/devices", { token }))).items.find((d: any) => d.userId === owner.userId && !d.viewerOnly);
+    expect((await server.request(`/api/admin/devices/${ownersDevice.id}`, { method: "DELETE", token: bob })).status).toBe(403);
     // No sign-in code for the owner above him…
     expect((await server.request(`/api/household/members/${owner.id}/sign-in-code`, { method: "POST", token: bob })).status).toBe(403);
     // …and Carol's account isn't this household's alone to reset.
@@ -384,6 +392,14 @@ describe("setup and auth", () => {
     expect((await call("/admin/impersonate-user", { method: "POST", json: { userId: adminId } })).status).toBe(403);
     expect((await call("/organization/invite-member", { method: "POST", json: { email: "x@example.com", role: "owner" } })).status).toBe(403);
     expect((await call("/link-social", { method: "POST", json: { provider: "google" } })).status).toBe(403);
+    // Nor the account's other sessions, whose tokens would be full sign-ins.
+    expect((await call("/list-sessions")).status).toBe(403);
+    expect((await call("/revoke-session", { method: "POST", json: { token: "x" } })).status).toBe(403);
+    // Nor the household's pending invitations (an invitation's id signs someone up into its role).
+    await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "pending@example.com", role: "admin" } });
+    expect((await json(await call("/organization/get-full-organization"))).invitations).toEqual([]);
+    expect((await call("/organization/list-invitations")).status).toBe(403);
+    expect((await json(await server.request("/api/auth/organization/get-full-organization", { token }))).invitations.length).toBeGreaterThan(0);
     // The same account signed in with its password still can.
     expect((await server.request("/api/auth/admin/list-users", { token })).status).toBe(200);
   });

@@ -88,6 +88,9 @@ export const api = {
   updateMember: (memberId: string, patch: { name?: string; contentLimit?: ContentLimit; isKids?: boolean }) =>
     request<{ id: string; name?: string; contentLimit: ContentLimit; isKids: boolean }>("PATCH", `/household/members/${encodeURIComponent(memberId)}`, patch),
 
+  /** Whose accounts the signed-in person may manage in the active household (reset, data, delete). */
+  manageable: () => request<{ userIds: string[] }>("GET", "/household/manageable"),
+
   /** A member's sign-in QR code (works once, for a minute; ask again every 30 seconds). */
   signInCode: (memberId: string) =>
     request<SignInCode>("POST", `/household/members/${encodeURIComponent(memberId)}/sign-in-code`),

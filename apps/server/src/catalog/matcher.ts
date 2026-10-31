@@ -18,7 +18,7 @@ export interface MatchResult {
 
 /** Maps parsed file names to TMDB ids. Results are memoized per (kind, title, year). */
 export class Matcher {
-  private memo = new SharedWork<string, MatchResult | null>({ remember: true });
+  private memo = new SharedWork<string, MatchResult | null>({ remember: true, max: 5_000 });
 
   constructor(
     private readonly tmdb: Tmdb,

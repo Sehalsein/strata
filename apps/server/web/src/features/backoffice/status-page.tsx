@@ -14,7 +14,7 @@ import { ServerCard } from "@/features/overview/status-cards";
 
 /** The backoffice's front page: how the server is doing, what needs the system admin, and its jobs. */
 export default function StatusPage() {
-  const { cloud } = useSession();
+  const { capabilities } = useSession();
   const status = useQuery({ queryKey: queryKeys.status, queryFn: api.status, refetchInterval: 3000 });
   const data = status.data;
 
@@ -33,7 +33,7 @@ export default function StatusPage() {
       <PageHeader title="Status" description={<>Up {formatDuration(data.uptimeMs)}</>} actions={<LiveIndicator lost={status.isError} />} />
 
       <div className="flex flex-col gap-3 empty:hidden">
-        {!cloud && data.update?.updateAvailable && (
+        {capabilities.selfUpdate && data.update?.updateAvailable && (
           <Alert variant="info">
             <Download />
             <AlertTitle>Update available</AlertTitle>
@@ -49,14 +49,14 @@ export default function StatusPage() {
             </AlertDescription>
           </Alert>
         )}
-        {!cloud && !data.ffmpeg && data.ffmpegSetup?.state === "downloading" && (
+        {capabilities.localMedia && !data.ffmpeg && data.ffmpegSetup?.state === "downloading" && (
           <Alert variant="info">
             <Info />
             <AlertTitle>Setting up ffmpeg</AlertTitle>
             <AlertDescription>A one-time download of the ffmpeg Strata uses to play files that can't direct-play (MKV, DTS/TrueHD audio, some codecs). It only takes a minute.</AlertDescription>
           </Alert>
         )}
-        {!cloud && !data.ffmpeg && data.ffmpegSetup?.state !== "downloading" && (
+        {capabilities.localMedia && !data.ffmpeg && data.ffmpegSetup?.state !== "downloading" && (
           <Alert variant="warning">
             <TriangleAlert />
             <AlertTitle>ffmpeg isn't set up</AlertTitle>

@@ -14,23 +14,24 @@ public final class AppServices {
     public let coordinator = AppCoordinator()
     private let nowPlaying = NowPlayingBridge()
 
+    /// What Play does for a title, and changes to My List, watched and Continue Watching.
+    public let titles: TitleActions
+
     /// What the full-screen player is showing, if anything.
     public var watching: WatchRequest?
-    /// Bumped after playback stops and its final position is saved, so screens
-    /// showing progress (Continue Watching, Resume buttons) can reload.
+    /// Bumped on every `titles` change (and after playback stops and its final position
+    /// is saved), so screens showing lists and progress (Home, Resume buttons) can reload.
     public private(set) var progressRevision = 0
-
-    public func progressChanged() async {
-        await client?.clearCache()
-        progressRevision += 1
-    }
 
     /// Whether the device has a network connection. Offline, the app shows downloads.
     public private(set) var isOnline = NetworkConditions.shared.isOnline
 
     public init(store: ServerStore? = nil) {
         DeviceInfo.captureName()
-        self.store = store ?? ServerStore()
+        let store = store ?? ServerStore()
+        self.store = store
+        titles = TitleActions(client: { @MainActor [weak store] in store?.client },
+                              recover: { @MainActor [weak store] error in await store?.recover(from: error) ?? false })
         RemoteCommandBridge.shared.attach(engine)
         #if os(iOS)
         DownloadStore.shared.clientFor = { [weak self] id in self?.store.client(forSignIn: id) }
@@ -49,6 +50,15 @@ public final class AppServices {
                 if online { await self.sendQueuedProgress() }
             }
         }
+        Task { [weak self, changes = titles.changes] in
+            for await change in changes { await self?.titleChanged(change) }
+        }
+    }
+
+    private func titleChanged(_ change: TitleChange) async {
+        progressRevision += 1
+        // Its episodes join (or leave) the calendar and its notifications.
+        if change.changesCalendar { await refreshEpisodeAlerts() }
     }
 
     /// Sends watch progress kept while offline, for the profile in use.
@@ -79,15 +89,10 @@ public final class AppServices {
         watching = request
     }
 
-    /// Plays a deep-linked target, looking up its title for the player first.
-    public func play(_ target: PlaybackTarget) async {
-        var meta = PlaybackMeta(title: "Strata")
-        if target.mediaType == .movie, let movie = await load({ try await $0.movie(target.tmdbId) }).value {
-            meta = PlaybackMeta(title: movie.title, subtitle: movie.yearText, artworkURL: movie.backdropUrl)
-        } else if let show = await load({ try await $0.show(target.tmdbId) }).value {
-            meta = PlaybackMeta(title: show.title, subtitle: "S\(target.season ?? 1) · E\(target.episode ?? 1)", artworkURL: show.backdropUrl)
-        }
-        play(WatchRequest(target: target, meta: meta))
+    /// Plays what Play chose for a title, with its title and artwork in the player.
+    public func play(_ choice: PlayChoice, title: String, artworkURL: URL?, startMs: Int? = nil) {
+        play(WatchRequest(target: choice.target, meta: PlaybackMeta(title: title, subtitle: choice.subtitle, artworkURL: artworkURL),
+                          candidateId: choice.candidateId, startMs: startMs))
     }
 
     /// Runs a request and turns failures into a readable message, letting the
@@ -199,7 +204,8 @@ public struct LinkRequest: Identifiable, Hashable {
 
 /// Handles `strata://` deep links:
 /// `strata://movie/<id>`, `strata://show/<id>`,
-/// `strata://watch/movie/<id>`, `strata://watch/episode/<show>/<season>/<episode>`,
+/// `strata://watch/movie/<id>`, `strata://watch/episode/<show>/<season>/<episode>` (open the
+/// title's page: a link never starts playback by itself),
 /// `strata://link?user_code=<code>&server=<id or address>` (approve a TV's sign-in),
 /// `strata://sign-in?server=<address>&code=<code>` (a member's QR code: sign in as them), and
 /// the TV's own `https://<server>/link?user_code=<code>` when it opens the app.
@@ -207,7 +213,6 @@ public struct LinkRequest: Identifiable, Hashable {
 @Observable
 public final class AppCoordinator {
     public var pendingRoute: Route?
-    public var pendingWatch: PlaybackTarget?
     public var pendingLink: LinkRequest?
     public var pendingSignIn: SignInCodeRequest?
 
@@ -230,8 +235,8 @@ public final class AppCoordinator {
         case "show": if let id = parts.first { pendingRoute = .show(id) }
         case "watch":
             let kind = url.pathComponents.dropFirst().first
-            if kind == "movie", let id = parts.first { pendingWatch = .movie(id) }
-            if kind == "episode", parts.count == 3 { pendingWatch = .episode(show: parts[0], season: parts[1], episode: parts[2]) }
+            if kind == "movie", let id = parts.first { pendingRoute = .movie(id) }
+            if kind == "episode", parts.count == 3 { pendingRoute = .show(parts[0]) }
         case "link":
             if let code = value("user_code") ?? value("code") { link(code, server: value("server")) }
         case "sign-in":

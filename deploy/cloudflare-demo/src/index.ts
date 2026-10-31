@@ -106,6 +106,7 @@ export default {
       if (res.status === 401 && token) {
         const session = await gate.session(await sha256(token));
         if (session) {
+          await res.body?.cancel();
           const restored = await restore(container, env, token, session);
           await restored.body?.cancel();
           if (restored.ok) res = await send();
@@ -113,7 +114,9 @@ export default {
       }
     } catch (err) {
       if (kind === "stream") ctx.waitUntil(gate.settle(ip, reserve, 0, bookedAt, Date.now()));
-      throw err;
+      // Usually the container still starting (or failing to): try again shortly.
+      console.error(JSON.stringify({ message: "Demo server unreachable", error: err instanceof Error ? err.message : String(err) }));
+      return json(503, "The demo server is starting. Try again in a moment.", 10);
     }
     if (kind !== "stream") {
       // Only sign-ins are read back (for their token); other responses aren't copied.
@@ -191,7 +194,12 @@ const bearer = (request: Request) => /^Bearer (.+)$/.exec(request.headers.get("A
 /** The session token in what the apps hold: Better Auth's signed form is "<token>.<signature>". */
 function sessionToken(held: string | null): string | null {
   if (!held) return null;
-  const decoded = held.includes("%") ? decodeURIComponent(held) : held;
+  let decoded = held;
+  try {
+    if (held.includes("%")) decoded = decodeURIComponent(held);
+  } catch {
+    return null; // not a token this server made
+  }
   return decoded.split(".")[0] || null;
 }
 
@@ -307,16 +315,23 @@ export class Gate extends DurableObject<Env> {
   async alarm(): Promise<void> {
     const now = Date.now();
     const keep = [`day:${day(now)}`, `month:${month(now)}`];
-    const all = await this.ctx.storage.list<unknown>();
-    const stale = [...all.entries()]
-      .filter(([k, v]) => {
-        if (k.startsWith("win:")) return !(v as number[]).some((t) => now - t < 60 * 60_000);
-        // Remembered sign-ins are let go after 30 days.
-        if (k.startsWith("sess:")) return now - (v as { at: number }).at > SESSION_DAYS * 24 * 60 * 60_000;
-        return !keep.some((prefix) => k.startsWith(prefix));
-      })
-      .map(([k]) => k);
-    for (let i = 0; i < stale.length; i += 128) await this.ctx.storage.delete(stale.slice(i, i + 128));
+    // A page at a time, so a long list of remembered sign-ins never sits in memory at once.
+    let startAfter: string | undefined;
+    for (;;) {
+      const page = await this.ctx.storage.list<unknown>({ limit: 512, ...(startAfter ? { startAfter } : {}) });
+      if (page.size === 0) break;
+      const stale = [...page.entries()]
+        .filter(([k, v]) => {
+          if (k.startsWith("win:")) return !(v as number[]).some((t) => now - t < 60 * 60_000);
+          // Remembered sign-ins are let go after 30 days.
+          if (k.startsWith("sess:")) return now - (v as { at: number }).at > SESSION_DAYS * 24 * 60 * 60_000;
+          return !keep.some((prefix) => k.startsWith(prefix));
+        })
+        .map(([k]) => k);
+      for (let i = 0; i < stale.length; i += 128) await this.ctx.storage.delete(stale.slice(i, i + 128));
+      startAfter = [...page.keys()].at(-1);
+      if (page.size < 512) break;
+    }
   }
 
   /**

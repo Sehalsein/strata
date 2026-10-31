@@ -18,7 +18,7 @@
   },
   // The cloud server (deploy/cloudflare's Worker), for /api/*.
   "services": [{ "binding": "SERVER", "service": "strata" }],
-  "observability": { "enabled": true, "logs": { "enabled": true }, "traces": { "enabled": true, "head_sampling_rate": 0.1 } },
+  "observability": { "enabled": true, "redact_query_string": true, "logs": { "enabled": true }, "traces": { "enabled": true, "head_sampling_rate": 0.1 } },
   "routes": [{ "pattern": "strata.sehalsein.com", "custom_domain": true }],
   "vars": { "APP_URL": "https://app.strata.sehalsein.com" }
 }

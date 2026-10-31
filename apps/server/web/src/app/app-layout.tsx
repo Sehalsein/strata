@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useState } from "react";
+import { roleLabel } from "@/features/members/household-people";
 import { ArrowLeft, ChevronsUpDown, Fingerprint, KeyRound, ShieldCheck, Lock, LogOut, SearchX, ShieldEllipsis, UserPlus, UserRound } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -185,10 +186,6 @@ function TopBar({ title }: { title: string }) {
   );
 }
 
-function roleLabel(role: string | undefined): string {
-  if (!role) return "";
-  return role.split(",").includes("owner") ? "Owner" : role.split(",").includes("admin") ? "Admin" : "Member";
-}
 
 /** The signed-in account, the other accounts saved in this browser, and signing out. */
 function AccountMenu() {

@@ -29,7 +29,7 @@ test("a failure isn't kept, so the next caller tries again", async () => {
   expect(await work.get("a", () => later(2))).toBe(2);
 });
 
-test("without remember, only work in progress is shared; past max, it starts over", async () => {
+test("without remember, only work in progress is shared; past max the oldest goes, past ttl it's redone", async () => {
   const shared = new SharedWork<string, number>({ shareInFlight: true });
   let calls = 0;
   await shared.get("a", () => (calls++, later(1)));
@@ -37,5 +37,12 @@ test("without remember, only work in progress is shared; past max, it starts ove
   expect(calls).toBe(2);
   const bounded = new SharedWork<number, number>({ remember: true, max: 2, shareInFlight: true });
   for (const k of [1, 2, 3]) await bounded.get(k, () => later(k));
-  expect(bounded.size).toBe(1);
+  expect(bounded.size).toBe(2);
+  let redone = 0;
+  await bounded.get(1, () => (redone++, later(1)));
+  expect(redone).toBe(1);
+  const expiring = new SharedWork<string, number>({ remember: true, ttlMs: 10, shareInFlight: true });
+  await expiring.get("a", () => later(1));
+  await Bun.sleep(15);
+  expect(await expiring.get("a", () => later(2))).toBe(2);
 });

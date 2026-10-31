@@ -1,5 +1,4 @@
 import { serveRange } from "./stream";
-import { SEARCHES_PER_HOUSEHOLD } from "../../throttle";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -25,7 +24,7 @@ const prepareFields = {
   candidateId: z.string().optional(),
   audioStreamIndex: z.number().int().optional(),
   preferMaxHeight: z.number().int().min(240).optional(),
-  caps: capsSchema.default({}),
+  caps: capsSchema.prefault({}),
 };
 
 /** A file the server can't read yet: the app reads its details itself, sends them, and asks again. */
@@ -97,7 +96,6 @@ export const catalogRoutes = new Hono<Env>()
     const target = { mediaType, tmdbId, season, episode };
     const items = await viewer(c).sources(target);
     if (c.req.query("discover") === "1") {
-      await c.var.services.throttle.spend(`searches:${c.var.household.organizationId}`, SEARCHES_PER_HOUSEHOLD, "This household has searched for releases a lot in the last hour.");
       items.push(...(await viewer(c).discover(target)));
     }
     return c.json({ items });
@@ -137,25 +135,19 @@ export const catalogRoutes = new Hono<Env>()
 
   // A TorBox link expired mid-play (device and direct play fetch it themselves).
   .post("/play/:sessionId/link", async (c) => {
-    const services = c.var.services;
-    const session = await services.sessions.get(c.req.param("sessionId"));
-    if (!session || session.userId !== c.var.session.user.id || session.organizationId !== c.var.household.organizationId) {
-      throw new HTTPException(404, { message: "No such session" });
-    }
-    await c.var.household.playback.refreshLink(session);
-    return c.json({ url: c.var.household.playback.handOff(session) });
+    const url = await viewer(c).refreshPlayLink(c.req.param("sessionId"));
+    if (!url) throw new HTTPException(404, { message: "No such session" });
+    return c.json({ url });
   })
 
   .delete("/play/:sessionId", async (c) => {
-    const s = c.var.services.sessions;
-    const session = await s.get(c.req.param("sessionId"));
-    if (session && session.userId === c.var.session.user.id) await s.stop(session.id);
+    await viewer(c).stopPlay(c.req.param("sessionId"));
     return c.json({ ok: true });
   })
 
   .post("/progress", async (c) => {
     const input = await body(c, target.extend({ positionMs: z.number().min(0), durationMs: z.number().min(0), sessionId: z.string().optional() }).refine(...episodeRule));
-    if (input.sessionId) await c.var.services.sessions.get(input.sessionId); // keeps the session alive
+    if (input.sessionId) await viewer(c).touchPlay(input.sessionId);
     const row = await c.var.services.progress.record(userOf(c), input, input.positionMs, input.durationMs);
     return c.json({ positionMs: row.positionMs, durationMs: row.durationMs, completed: row.completed });
   })

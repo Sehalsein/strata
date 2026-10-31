@@ -10,7 +10,7 @@ import { closeScope, drainScope, requestScope, type RequestScope } from "./runti
 import { CRON_JOBS } from "./cloudSchedule";
 import type { Services } from "./services";
 
-import type { ExecutionContext, ScheduledController } from "@cloudflare/workers-types/index";
+import type { ExecutionContext, RateLimit, ScheduledController } from "@cloudflare/workers-types/index";
 
 /**
  * The Worker's vars (deploy/cloudflare/wrangler.jsonc) and secrets. Written out here rather
@@ -40,6 +40,8 @@ interface Env {
   /** "Sign in with Google" shows only with both. */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /** Requests per client per minute, checked at the edge (wrangler.jsonc `ratelimits`). */
+  EDGE_LIMIT?: RateLimit;
 }
 
 type Booted = { services: Services; app: ReturnType<typeof createApp> };
@@ -84,6 +86,11 @@ async function inScope<T>(env: Env, ctx: ExecutionContext, fn: () => Promise<T>)
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // A cheap first filter before the request opens a database connection.
+    const client = request.headers.get("cf-connecting-ip");
+    if (env.EDGE_LIMIT && client && !(await env.EDGE_LIMIT.limit({ key: client })).success) {
+      return Response.json({ error: "Too many requests. Wait a minute and try again." }, { status: 429, headers: { "Retry-After": "60" } });
+    }
     return inScope(env, ctx, async () => {
       const { services, app } = await boot(env);
       // Another instance may have changed the server's settings.

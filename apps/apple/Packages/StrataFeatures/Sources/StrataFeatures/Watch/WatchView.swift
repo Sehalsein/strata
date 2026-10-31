@@ -124,7 +124,7 @@ struct WatchView: View {
             hideTask?.cancel()
             Task {
                 await engine.unload()
-                await services.progressChanged()
+                await services.titles.progressSaved()
             }
         }
     }

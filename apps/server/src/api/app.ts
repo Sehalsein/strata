@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { ZodError } from "zod";
 import { TmdbError } from "../catalog/tmdb";
@@ -33,6 +34,8 @@ export function createApp(services: Services) {
   });
 
   app.use("/api/*", gzipJson());
+  // Nothing the apps or dashboard send is near this; a bigger body is refused before it's read.
+  app.use("/api/*", bodyLimit({ maxSize: 1024 * 1024, onError: (c) => c.json({ error: "Request too large" }, 413) }));
 
   // Accounts, sign-in, households, members, invitations, TV codes (Better Auth).
   // Its rate limits count per client: it reads the address from a header only this

@@ -22,16 +22,14 @@ import { Kitsu } from "./catalog/anime/kitsu";
 import { AnimeIds, cachedAnimeIdStore, fileAnimeIdStore } from "./catalog/anime/ids";
 import { SecretBox } from "./secrets";
 import { serverSettingsSchema, SERVER_SECRET_KEYS, SettingsStore, type ServerSettingsStore } from "./settings";
-import { scanLocal } from "./sources/local/scanner";
-import { parseTorboxRef, syncTorbox } from "./sources/torbox/sync";
 import { SubtitleService } from "./playback/subtitles";
 import { Bonjour } from "./platform/bonjour";
-import { createUpdater, type Updater } from "./update";
+import { createUpdater, deployedUpdates, type SelfUpdate } from "./update";
 import { API_VERSION, VERSION } from "./version";
 import { Households, type Household } from "./household";
 import { runtime } from "#runtime";
 import { globalFetch } from "./net";
-import { nextScheduledRun } from "./cloudSchedule";
+import { JOB_SCHEDULE, nextScheduledRun } from "./cloudSchedule";
 
 const log = logger("server");
 const MINUTE = 60_000;
@@ -56,7 +54,7 @@ export interface Services {
   /** Stable per-install id (advertised over Bonjour, returned by /api/info). */
   serverId: string;
   bonjour: Bonjour;
-  updater: Updater;
+  updater: SelfUpdate;
   ffmpeg: () => FfmpegInfo | null;
   /** The one-time ffmpeg download, when the server had to set ffmpeg up itself. */
   ffmpegSetup: () => FfmpegSetup;
@@ -97,7 +95,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   const ffmpeg = () => ffmpegInfo;
 
   const anime = {
-    ids: new AnimeIds(profile.localState ? fileAnimeIdStore(join(paths.root, "cache")) : cachedAnimeIdStore(cache), fetchImpl),
+    ids: new AnimeIds(profile.localState ? fileAnimeIdStore(join(paths.root, "cache")) : cachedAnimeIdStore(cache), fetchImpl, profile.runtime === "bun"),
     anilist: new Anilist(cache, fetchImpl),
     kitsu: new Kitsu(cache, fetchImpl),
   };
@@ -139,46 +137,26 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
         }
       : {},
   );
-  // Local folders, the bundled database, ffmpeg and self-updates are a home server's only.
-  if (profile.localMedia) jobs.register("scanLocal", () => eachHousehold("Scanning folders", (h) => scanLocal(h.library, h.settings().mediaFolders, () => {})));
+  // Local folders, the bundled database, ffmpeg and self-updates are a home server's only:
+  // a scheduled job registers only where JOB_SCHEDULE says it can run.
+  const register = (name: string, fn: Parameters<Jobs["register"]>[1]) => {
+    const needs = JOB_SCHEDULE[name]?.needs;
+    if (!needs || profile[needs]) jobs.register(name, fn);
+  };
+  register("scanLocal", () => eachHousehold("Scanning folders", (h) => h.scanFolders()));
   // Each household with a key, at most every `torboxSyncMinutes` (the job itself runs every 15).
-  const lastSync = new Map<string, number>();
-  jobs.register("syncTorbox", () =>
-    eachHousehold("TorBox sync", async (h) => {
-      const client = h.torbox();
-      const every = h.settings().torboxSyncMinutes * MINUTE;
-      if (!client || every === 0 || Date.now() - (lastSync.get(h.organizationId) ?? 0) < every - MINUTE) return;
-      lastSync.set(h.organizationId, Date.now());
-      await syncTorbox(client, h.library, () => {});
-      await h.library.matchPending();
-    }),
-  );
-  jobs.register("matchPending", () => eachHousehold("Matching", (h) => h.library.matchPending()));
-  jobs.register("refreshAnimeIds", async () => {
-    await anime.ids.ready();
+  register("syncTorbox", () => eachHousehold("TorBox sync", (h) => h.syncTorboxIfDue()));
+  register("matchPending", () => eachHousehold("Matching", (h) => h.library.matchPending()));
+  register("refreshAnimeIds", async () => {
+    await anime.ids.refresh();
     return { entries: anime.ids.size };
   });
-  jobs.register("cleanTorbox", () =>
-    eachHousehold("TorBox cleanup", async (h) => {
-      const client = h.torbox();
-      if (!client) return;
-      // Never pull a torrent out from under something that's streaming it (checked per torrent).
-      const streaming = async (id: number) => {
-        for (const s of await sessions.list()) {
-          if (s.organizationId !== h.organizationId) continue;
-          const ref = (await h.library.get(s.fileId))?.ref;
-          if (ref?.startsWith("torrents:") && parseTorboxRef(ref).itemId === id) return true;
-        }
-        return false;
-      };
-      await h.housekeeping.clean(client, h.settings().torboxCleanupDays, streaming);
-    }),
-  );
+  register("cleanTorbox", () => eachHousehold("TorBox cleanup", (h) => h.cleanTorbox()));
   // Catalog answers (TMDB, Kitsu, AniList) a month unused are only taking space.
-  jobs.register("pruneCatalogCache", async () => ({ removed: await cache.prune() }));
+  register("pruneCatalogCache", async () => ({ removed: await cache.prune() }));
   // Plays long over, old failed-attempt counts, and sign-ins and one-time links past their
   // expiry: a device's details (address, location) go with its sign-in, as /privacy says.
-  jobs.register("pruneAuth", async () => {
+  register("pruneAuth", async () => {
     await sessions.prune();
     await throttle.prune();
     const now = new Date();
@@ -188,7 +166,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   });
   // A home server's bundled database, copied once a day into <data-dir>/backups (the last
   // week kept). Elsewhere the database's own host backs it up (Neon keeps a history).
-  if (profile.localState) jobs.register("backupDatabase", async () => {
+  register("backupDatabase", async () => {
     const file = await backupDatabase(db, paths.backups, "daily");
     return file ? { file } : { skipped: "the database isn't the bundled one" };
   });
@@ -219,8 +197,10 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
 
   const serverId = await loadServerId(db, profile.localState ? paths.root : null);
   // Only local streams run through this server; TorBox plays don't mind an update.
-  const updater = !profile.selfUpdate ? deployedUpdater(profile) : createUpdater({ dataDir: paths.root, dbPath: paths.db, backupsDir: paths.backups, db, settings, activeSessions: () => sessions.activeTranscodes(), fetch: fetchImpl });
-  if (profile.selfUpdate) jobs.register("checkUpdates", () => updater.checkAndMaybeApply());
+  const updater: SelfUpdate = !profile.selfUpdate
+    ? deployedUpdates(profile.runtime === "workers" ? "Deployed on Cloudflare: update by deploying a new version" : "A cloud server: update by deploying a new version", () => settings.get())
+    : createUpdater({ dataDir: paths.root, dbPath: paths.db, backupsDir: paths.backups, db, settings, activeSessions: () => sessions.activeTranscodes(), fetch: fetchImpl });
+  register("checkUpdates", () => updater.checkAndMaybeApply());
   // Started by main.ts once the HTTP server is listening; refreshed when the name/toggle changes.
   const bonjour = new Bonjour(() => {
     const s = settings.get();
@@ -230,15 +210,11 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
 
   // In-process timers on Bun; Cron Triggers run the same jobs on Workers (src/worker.ts).
   if (profile.scheduler === "timers" && process.env.STRATA_NO_JOBS !== "1") {
-    if (profile.localMedia) jobs.schedule("scanLocal", Math.max(1, settings.get().scanIntervalMinutes) * MINUTE, 5_000);
-    jobs.schedule("syncTorbox", 15 * MINUTE, 8_000);
-    // The cloud image is updated by deploying a new one.
-    if (profile.selfUpdate) jobs.schedule("checkUpdates", 6 * 60 * MINUTE, 60_000);
-    jobs.schedule("pruneAuth", 24 * 60 * MINUTE, 5 * MINUTE);
-    if (profile.localState) jobs.schedule("backupDatabase", 24 * 60 * MINUTE, 20 * MINUTE);
-    jobs.schedule("cleanTorbox", 24 * 60 * MINUTE, 10 * MINUTE);
-    jobs.schedule("pruneCatalogCache", 24 * 60 * MINUTE, 15 * MINUTE);
-    jobs.schedule("refreshAnimeIds", 24 * 60 * MINUTE, 30_000);
+    for (const [name, spec] of Object.entries(JOB_SCHEDULE)) {
+      if (spec.needs && !profile[spec.needs]) continue;
+      const every = typeof spec.everyMs === "function" ? spec.everyMs(settings.get()) : spec.everyMs;
+      jobs.schedule(name, every, spec.firstAfterMs);
+    }
   }
 
   const shutdown = () => {
@@ -268,17 +244,4 @@ async function loadServerId(db: Db, dataDir: string | null): Promise<string> {
   const id = file && existsSync(file) ? readFileSync(file, "utf8").trim() : randomUUID();
   await db.execute(sql`INSERT INTO strata_meta (key, value) VALUES ('server_id', ${id}) ON CONFLICT (key) DO NOTHING`);
   return id;
-}
-
-/** A server that's updated by deploying it (cloud): there's nothing to check or apply. */
-function deployedUpdater(profile: DeploymentProfile): Updater {
-  const disabledReason = profile.runtime === "workers" ? "Deployed on Cloudflare: update by deploying a new version" : "A cloud server: update by deploying a new version";
-  const status = { state: "idle", updateAvailable: false, latest: null, lastError: null, disabledReason };
-  return {
-    status: () => status,
-    check: async () => status,
-    checkAndMaybeApply: async () => {},
-    apply: async () => {},
-    onRestart: () => {},
-  } as unknown as Updater;
 }

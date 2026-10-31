@@ -8,6 +8,7 @@ import type { Settings } from "../settings";
 import { detailLabel, type Candidate } from "./resolver";
 import type { TorboxClient, TorboxItem } from "./torbox/client";
 import { ingestItem } from "./torbox/sync";
+import { SharedWork } from "../inFlight";
 import { globalFetch } from "../net";
 
 const log = logger("discovery");
@@ -52,7 +53,8 @@ export class NotReadyError extends Error {
 }
 
 export class Discovery {
-  private cache = new Map<string, { at: number; releases: Promise<Release[]> }>();
+  /** Releases found per title, for a few minutes (on Workers only finished searches are shared). */
+  private cache = new SharedWork<string, Release[]>({ remember: true, ttlMs: RELEASE_TTL_MS, max: RELEASE_CACHE_MAX });
   /** Torrents we added that weren't ready yet, by hash. */
   private pending = new Map<string, number>();
   private scraperDown = new Map<string, number>();
@@ -112,24 +114,7 @@ export class Discovery {
 
   releases(target: DiscoveryTarget): Promise<Release[]> {
     const key = `${target.mediaType}:${target.tmdbId}:${target.season ?? ""}:${target.episode ?? ""}`;
-    const hit = this.cache.get(key);
-    if (hit && Date.now() - hit.at < RELEASE_TTL_MS) return hit.releases;
-    const releases = this.search(target);
-    this.pruneCache();
-    this.cache.set(key, { at: Date.now(), releases });
-    releases.catch(() => this.cache.delete(key));
-    return releases;
-  }
-
-  /** Drops expired lookups, then the oldest beyond a cap, so browsing doesn't grow it forever. */
-  private pruneCache() {
-    const now = Date.now();
-    for (const [key, entry] of this.cache) if (now - entry.at >= RELEASE_TTL_MS) this.cache.delete(key);
-    // Map keeps insertion order, so the first keys are the oldest.
-    for (const key of this.cache.keys()) {
-      if (this.cache.size < RELEASE_CACHE_MAX) break;
-      this.cache.delete(key);
-    }
+    return this.cache.get(key, () => this.search(target));
   }
 
   /**

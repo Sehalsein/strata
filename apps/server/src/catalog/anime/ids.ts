@@ -56,16 +56,30 @@ export class AnimeIds {
   constructor(
     private readonly store: AnimeIdStore,
     private readonly fetchImpl: typeof fetch = globalFetch,
+    /**
+     * Whether a lookup may download the list itself when the stored copy is old. Not on
+     * Workers: the 10+ MB download is too much for a request, so only the daily job
+     * (`refresh`) fetches it there, and lookups use whatever copy is stored.
+     */
+    private readonly downloadOnLookup = true,
   ) {}
 
   get size() {
     return this.byAnilist.size + this.byKitsu.size;
   }
 
-  /** Loads the cached list (downloading it when missing or older than a day). */
+  /** Loads the cached list (downloading it when missing or older than a day, where allowed). */
   ready(): Promise<void> {
     if (this.loadedAt && Date.now() - this.loadedAt < MAX_AGE_MS) return Promise.resolve();
-    return this.loading.get("list", () => this.load());
+    return this.loading.get("list", () => this.load(this.downloadOnLookup));
+  }
+
+  /**
+   * The daily job: downloads the list when the stored copy (not this instance's) is a day
+   * old or missing, then loads it.
+   */
+  refresh(): Promise<void> {
+    return this.loading.get("list", () => this.load(true));
   }
 
   anilist(id: number) {
@@ -127,9 +141,9 @@ export class AnimeIds {
     this.loadedAt = Date.now();
   }
 
-  private async load() {
+  private async load(download: boolean) {
     let stored = await this.store.read().catch(() => null);
-    if (!stored || Date.now() - stored.savedAt >= MAX_AGE_MS) {
+    if (download && (!stored || Date.now() - stored.savedAt >= MAX_AGE_MS)) {
       try {
         const raw = await this.download();
         await this.store.write(raw);
@@ -143,6 +157,11 @@ export class AnimeIds {
           return;
         }
       }
+    }
+    // Nothing stored yet and not ours to download (Workers): the daily job brings it.
+    if (!stored) {
+      this.loadedAt = Date.now() - MAX_AGE_MS + RETRY_MS;
+      return;
     }
     this.index(stored.raw);
     log.info(`Anime id list: ${this.byAnilist.size} AniList / ${this.byTv.size} TMDB shows`);

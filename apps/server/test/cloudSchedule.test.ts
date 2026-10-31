@@ -11,3 +11,11 @@ test("cron: every N minutes and once a day, in UTC", () => {
   expect(nextScheduledRun("pruneAuth", at("2026-10-31T19:00:00Z"))).toBe(at("2026-11-01T04:17:00Z"));
   expect(nextScheduledRun("scanLocal")).toBeUndefined();
 });
+
+test("the Worker's Cron Triggers are exactly the crons the job table uses", async () => {
+  const { CRON_JOBS } = await import("../src/cloudSchedule");
+  const raw = await Bun.file(new URL("../../../deploy/cloudflare/wrangler.jsonc", import.meta.url)).text();
+  // JSONC: drop comments (none of its strings hold "//").
+  const config = JSON.parse(raw.replace(/^\s*\/\/.*$/gm, "").replace(/,(\s*[}\]])/g, "$1"));
+  expect([...config.triggers.crons].sort()).toEqual(Object.keys(CRON_JOBS).sort());
+});

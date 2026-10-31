@@ -33,7 +33,7 @@ export const serverSettingsSchema = z.object({
    * Advanced override for the signed update manifest (`{channel}` is replaced with the channel;
    * the signature is read from `<url>.sig`). Empty = the feed baked into the binary.
    */
-  updateManifestUrl: z.union([z.literal(""), z.string().url()]).default(""),
+  updateManifestUrl: z.union([z.literal(""), z.url()]).default(""),
 });
 
 /** A household's settings, set by its owner and admins. */
@@ -57,7 +57,7 @@ export const householdSettingsSchema = z.object({
 });
 
 /** What a household's code sees: the server's settings with its own on top. */
-export const settingsSchema = serverSettingsSchema.merge(householdSettingsSchema);
+export const settingsSchema = serverSettingsSchema.extend(householdSettingsSchema.shape);
 export type Settings = z.infer<typeof settingsSchema>;
 export type ServerSettings = z.infer<typeof serverSettingsSchema>;
 export type HouseholdSettings = z.infer<typeof householdSettingsSchema>;
@@ -84,7 +84,7 @@ type Scope = { kind: "server" } | { kind: "household"; organizationId: string };
  * go to the database first. Where other servers share the database, `reloadIfOlderThan`
  * picks up their changes.
  */
-export class SettingsStore<S extends z.ZodTypeAny> {
+export class SettingsStore<S extends z.ZodObject> {
   private cache?: z.infer<S>;
   private secrets = new Map<string, string>();
   private listeners = new Set<(s: z.infer<S>) => void>();
@@ -112,7 +112,7 @@ export class SettingsStore<S extends z.ZodTypeAny> {
         }
         continue;
       }
-      if (row.key in (this.schema as unknown as z.AnyZodObject).shape) raw[row.key] = JSON.parse(row.value);
+      if (row.key in this.schema.shape) raw[row.key] = JSON.parse(row.value);
     }
     const before = this.cache ? JSON.stringify(this.cache) : undefined;
     this.cache = this.schema.parse(raw);

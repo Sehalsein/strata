@@ -162,7 +162,7 @@ export const authRoutes = new Hono<Env>()
       z.object({
         username: usernameSchema,
         password: z.string().min(8).max(256),
-        email: z.string().trim().email().max(254).optional(),
+        email: z.string().trim().pipe(z.email().max(254)).optional(),
         householdName: z.string().trim().min(1).max(64).optional(),
         setupCode: z.string().max(32).optional(),
       }),
@@ -196,7 +196,7 @@ export const authRoutes = new Hono<Env>()
   // Home servers: devices on the home network sign in as a member they pick, without a
   // password, able to watch but not administer. Without `userId`: who can be picked.
   .post("/join", async (c) => {
-    const input = await body(c, z.object({ userId: z.string().max(64).optional() }).default({}));
+    const input = await body(c, z.object({ userId: z.string().max(64).optional() }).prefault({}));
     if (!(await canJoinLocally(c))) throw new HTTPException(403, { message: "Sign in with your account to connect from outside your home network." });
     const db = c.var.services.db;
     const [home] = await db.select({ id: organization.id, name: organization.name }).from(organization).orderBy(asc(organization.createdAt)).limit(1);
@@ -259,6 +259,23 @@ export const authRoutes = new Hono<Env>()
     // Role of the household this device is in, for what it may do (`permissions`).
     if (household) c.var.session.role = household.role;
     return c.json({ user: me, viewerOnly, mustChangePassword: c.var.session.mustChangePassword, household: household ?? null, permissions: permissions(c) });
+  })
+
+  // Whose accounts the signed-in person may manage here (reset a password, download their
+  // data, delete the account): the same rule the server enforces, so the dashboard doesn't
+  // work it out again.
+  .get("/household/manageable", requireAuth, requireHousehold, async (c) => {
+    const s = c.var.services;
+    const rows = await s.db.select({ userId: member.userId }).from(member).where(eq(member.organizationId, c.var.household.organizationId));
+    const allowed = await Promise.all(
+      rows.map(({ userId }) =>
+        assertMayManage(s.db, s.profile, (headers) => s.auth.api.getSession({ headers }), c.req.raw.headers, userId).then(
+          () => userId,
+          () => null,
+        ),
+      ),
+    );
+    return c.json({ userIds: allowed.filter((id): id is string => id !== null) });
   })
 
   // A member's sign-in QR code: a device that scans it signs in as them, in this household,

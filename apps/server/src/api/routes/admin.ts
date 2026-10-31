@@ -7,7 +7,6 @@ import { z } from "zod";
 import { recentLogs } from "../../log";
 import { dashboardUrls } from "../../platform/network";
 import { householdSettingsSchema, SECRET_KEYS, serverSettingsSchema, settingsSchema, type SecretKey } from "../../settings";
-import { TorboxClient } from "../../sources/torbox/client";
 import { toCandidate } from "../../sources/resolver";
 import { imageUrl, yearOf } from "../../catalog/tmdb";
 import { API_VERSION, VERSION } from "../../version";
@@ -16,15 +15,16 @@ import { and, desc, eq, gt } from "drizzle-orm";
 import { homeNetworkMacs, isPrivateMac } from "../deviceInfo";
 import { isLocalAddress } from "../localNetwork";
 import type { PlaybackSession } from "../../playback/sessions";
-import type { Household } from "../../household";
+import { KeyRejectedError, type Household } from "../../household";
 import type { Services } from "../../services";
-import { body, intParam, optionalInt, requireAuth, requireHousehold, requireHouseholdAdmin, requireServerAdmin, type Env } from "../context";
+import { body, intParam, optionalInt, permissions, requireAuth, requireHousehold, requireHouseholdAdmin, requireServerAdmin, type Env } from "../context";
+import { roleRank } from "../../auth/permissions";
 import type { Context } from "hono";
 import { runtime } from "#runtime";
 
 /** Server-only actions (its keys, updates, logs, folders on its disk) also need the server admin. */
 function assertServerAdmin(c: Context<Env>) {
-  if (!c.var.session.user.isServerAdmin) throw new HTTPException(403, { message: "Only the server's admin can do that" });
+  if (!permissions(c).administerServer) throw new HTTPException(403, { message: "Only the server's admin can do that" });
 }
 
 /**
@@ -71,13 +71,20 @@ export const adminRoutes = new Hono<Env>()
   })
 
   // Signs a device out of this household (it goes back to the sign-in screen).
+  // A device of someone below the caller, their own, or one that only watches (a TV, a
+  // home-network join); someone at or above them signs their own devices out.
   .delete("/devices/:id", async (c) => {
     const h = c.var.household;
-    const [row] = await c.var.services.db
-      .delete(authSession)
-      .where(and(eq(authSession.id, c.req.param("id")), eq(authSession.activeOrganizationId, h.organizationId)))
-      .returning({ id: authSession.id });
-    if (!row) throw new HTTPException(404, { message: "No such device" });
+    const db = c.var.services.db;
+    const where = and(eq(authSession.id, c.req.param("id")), eq(authSession.activeOrganizationId, h.organizationId));
+    const [device] = await db.select({ userId: authSession.userId, viewerOnly: authSession.viewerOnly }).from(authSession).where(where);
+    if (!device) throw new HTTPException(404, { message: "No such device" });
+    const me = c.var.session;
+    if (device.userId !== me.user.id && !device.viewerOnly && !me.user.isServerAdmin) {
+      const [theirs] = await db.select({ role: member.role }).from(member).where(and(eq(member.organizationId, h.organizationId), eq(member.userId, device.userId)));
+      if (roleRank(theirs?.role) >= roleRank(me.role)) throw new HTTPException(403, { message: "Only they can sign that device out." });
+    }
+    await db.delete(authSession).where(where);
     return c.json({ ok: true });
   })
 
@@ -99,7 +106,7 @@ export const adminRoutes = new Hono<Env>()
       tmdb: { configured: h.settingsStore.hasSecret("tmdbApiKey") },
       torbox: { configured: !!h.torbox() },
       jobs: await s.jobs.statusNow(),
-      sessions: await Promise.all((await householdPlays(s, h)).map(sessionDto)),
+      sessions: await Promise.all((await h.plays.list()).map(sessionDto)),
       library: await h.library.stats(),
       // Read-only: port and bind host come from the CLI/env (see README).
       network: { host: s.config.host, port: s.config.port, urls: dashboardUrls(s.config.host, s.config.port), bonjour: s.bonjour.active },
@@ -125,32 +132,23 @@ export const adminRoutes = new Hono<Env>()
       assertServerAdmin(c);
       await c.var.services.settings.update(serverPatch);
     }
-    if (Object.keys(householdPatch).length) await c.var.household.settingsStore.update(householdPatch);
-    // A new language needs the household's catalog rebuilt in it.
-    if ("language" in householdPatch) c.var.services.households.drop(c.var.household.organizationId);
+    // Folders on the server's disk are the server admin's to hand out: a household's admin
+    // could otherwise point theirs at another household's media, or anything else there.
+    if ("mediaFolders" in householdPatch && JSON.stringify(householdPatch.mediaFolders) !== JSON.stringify(c.var.household.settings().mediaFolders)) assertServerAdmin(c);
+    if (Object.keys(householdPatch).length) await c.var.services.households.updateSettings(c.var.household, householdPatch);
     return c.json({ settings: c.var.household.settings() });
   })
 
   // Keys are verified against the provider before they're stored.
   .put("/secrets/:key", async (c) => {
-    const s = c.var.services;
-    const h = c.var.household;
     const key = z.enum(SECRET_KEYS).parse(c.req.param("key")) as SecretKey;
     const { value } = await body(c, z.object({ value: z.string().trim().max(512).nullable() }));
-    if (value) {
-      if (key === "tmdbApiKey" && !(await h.tmdb.testKey(value))) throw new HTTPException(400, { message: "TMDB rejected that key" });
-      if (key === "omdbApiKey" && !(await h.omdb.testKey(value))) throw new HTTPException(400, { message: "OMDb rejected that key" });
-      if (key === "torboxApiKey") {
-        try {
-          await new TorboxClient(value).me();
-        } catch {
-          throw new HTTPException(400, { message: "TorBox rejected that key" });
-        }
-      }
+    try {
+      await c.var.household.setSecret(key, value);
+    } catch (err) {
+      if (err instanceof KeyRejectedError) throw new HTTPException(400, { message: err.message });
+      throw err;
     }
-    await h.settingsStore.setSecret(key, value);
-    if (value && key === "torboxApiKey") runtime.background(syncNow(h));
-    if (key === "tmdbApiKey") runtime.background(h.library.matchPending());
     return c.json({ ok: true });
   })
 
@@ -165,7 +163,7 @@ export const adminRoutes = new Hono<Env>()
   .post("/jobs/:name/run", (c) => {
     const name = c.req.param("name");
     const h = c.var.household;
-    if (name === "syncTorbox") runtime.background(syncNow(h));
+    if (name === "syncTorbox") runtime.background(h.syncTorbox());
     else if (name === "matchPending") runtime.background(h.library.matchPending());
     else {
       assertServerAdmin(c);
@@ -240,11 +238,10 @@ export const adminRoutes = new Hono<Env>()
 
   .get("/sessions", async (c) => {
     const dto = await sessionDtoFor(c.var.services, c.var.household);
-    return c.json({ items: await Promise.all((await householdPlays(c.var.services, c.var.household)).map(dto)) });
+    return c.json({ items: await Promise.all((await c.var.household.plays.list()).map(dto)) });
   })
   .delete("/sessions/:id", async (c) => {
-    if (!(await householdPlays(c.var.services, c.var.household)).some((p) => p.id === c.req.param("id"))) throw new HTTPException(404, { message: "No such play" });
-    await c.var.services.sessions.stop(c.req.param("id"));
+    if (!(await c.var.household.plays.stop(c.req.param("id")))) throw new HTTPException(404, { message: "No such play" });
     return c.json({ ok: true });
   });
 
@@ -274,19 +271,6 @@ export const serverAdminRoutes = new Hono<Env>()
   .get("/logs", (c) => {
     return c.json({ items: recentLogs(Math.min(optionalInt(c.req.query("limit")) ?? 200, 1000)) });
   });
-
-/** Syncs one household's TorBox now (its key was just set, or someone asked). */
-async function syncNow(h: Household) {
-  const client = h.torbox();
-  if (!client) return;
-  const { syncTorbox } = await import("../../sources/torbox/sync");
-  await syncTorbox(client, h.library, () => {});
-  await h.library.matchPending();
-}
-
-async function householdPlays(services: Services, h: Household) {
-  return (await services.sessions.list()).filter((s) => s.organizationId === h.organizationId);
-}
 
 async function sessionDtoFor(services: Services, h: Household) {
   const names = new Map((await services.db.select({ id: user.id, name: user.name }).from(user)).map((u) => [u.id, u.name]));

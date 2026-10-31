@@ -23,6 +23,14 @@ test("a cloud server runs in this process too: no setup, no updates, capabilitie
     expect((await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "x", password: "x-password" } })).status).toBe(404);
     expect((await server.request("/api/join", { method: "POST", ip: "192.168.1.5", json: {} })).status).toBe(403);
     expect(server.services.updater.status().disabledReason).toContain("deploying");
+    // Its admin asking to update gets told why not (it used to be a 500).
+    process.env.STRATA_ADMIN_EMAILS = "boss@example.com";
+    const signUp = await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "boss@example.com", password: "boss-password", name: "boss", username: "boss" } });
+    const boss = signUp.headers.get("set-auth-token")!;
+    const apply = await server.request("/api/admin/update/apply", { method: "POST", token: boss });
+    expect(apply.status).toBe(409);
+    expect((await json(apply)).error ?? "").toContain("deploying");
+    delete process.env.STRATA_ADMIN_EMAILS;
     // Cron Triggers say when each job runs next; local folders and backups aren't jobs here.
     const jobs = await server.services.jobs.statusNow();
     expect(jobs.map((j) => j.name)).not.toContain("scanLocal");
