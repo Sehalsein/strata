@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, LoaderCircle, Mail, Pencil, QrCode as QrCodeIcon, Trash, UserPlus, Users, X } from "lucide-react";
+import { Check, Copy, LoaderCircle, Mail, MoreHorizontal, Pencil, QrCode as QrCodeIcon, Trash, UserPlus, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/app/session";
 import { api } from "@/lib/api";
@@ -13,6 +13,7 @@ import { SignInCodeDialog } from "./sign-in-code-dialog";
 import { EmptyState, ErrorAlert, InlineError } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FieldGroup, FormField } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -95,68 +96,106 @@ export function MemberList({ selfId }: { selfId: string }) {
 
   return (
     <>
-      <ul className="divide-y rounded-lg border">
+      <div className="text-muted-foreground hidden grid-cols-[minmax(0,1fr)_8rem_11rem_4.5rem_4.5rem] items-center gap-4 px-4 pb-2 text-xs font-medium lg:grid">
+        <span>Person</span>
+        <span>Role</span>
+        <span>Can watch</span>
+        <span>Kids</span>
+        <span className="sr-only">Actions</span>
+      </div>
+      <ul className="divide-y overflow-hidden rounded-lg border">
         {members.map((m) => {
           const self = m.userId === selfId;
           const role = primaryRole(m.role);
           const limit = m.contentLimit ?? "none";
+          const email = placeholderEmail(m.user.email) ? null : m.user.email;
           return (
-            <li key={m.id} className="flex flex-col gap-3 p-3 lg:flex-row lg:items-center">
-              <div className="flex min-w-0 flex-1 items-center gap-3">
+            <li key={m.id} className="hover:bg-muted/30 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 px-4 py-3 transition-colors lg:grid-cols-[minmax(0,1fr)_8rem_11rem_4.5rem_4.5rem]">
+              <div className="flex min-w-0 items-center gap-3">
                 <Avatar id={m.userId} name={m.user.name} />
                 <div className="min-w-0">
-                  <p className="flex items-center gap-2 truncate font-medium">
-                    {m.user.name}
-                    <Button variant="ghost" size="icon-sm" className="text-muted-foreground size-6" onClick={() => setRenaming(m)} aria-label={`Rename ${m.user.name}`} title="Rename">
-                      <Pencil className="size-3.5" />
-                    </Button>
+                  <p className="flex min-w-0 items-center gap-2 font-medium">
+                    <span className="truncate">{m.user.name}</span>
                     {self && <Badge variant="secondary">You</Badge>}
                     {m.isKids && <Badge variant="success">Kids</Badge>}
                   </p>
-                  <p className="text-muted-foreground truncate text-xs">
-                    {placeholderEmail(m.user.email) ? "No email" : m.user.email} · joined {relativeTime(new Date(m.createdAt).getTime())}
+                  <p className="text-muted-foreground truncate text-xs" title={new Date(m.createdAt).toLocaleString()}>
+                    {email ? `${email} · ` : ""}Joined {relativeTime(new Date(m.createdAt).getTime())}
                   </p>
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-3 pl-13 lg:pl-0">
-                <Select value={role} disabled={self || (setRole.isPending && setRole.variables?.m.id === m.id)} onValueChange={(v) => setRole.mutate({ m, role: v as HouseholdRole })}>
-                  <SelectTrigger size="sm" className="w-28" aria-label={`Role of ${m.user.name}`}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(ROLE_LABELS) as HouseholdRole[]).map((r) => (
-                      <SelectItem key={r} value={r}>
-                        {ROLE_LABELS[r].label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select value={limit} onValueChange={(v) => update.mutate({ m, patch: { contentLimit: v as ContentLimit } })}>
-                  <SelectTrigger size="sm" className="w-44" aria-label={`Content limit of ${m.user.name}`}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(LIMIT_LABELS) as ContentLimit[]).map((key) => (
-                      <SelectItem key={key} value={key}>
-                        {LIMIT_LABELS[key].short}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <div className="flex items-center gap-2">
-                  <Switch id={`kids-${m.id}`} checked={!!m.isKids} onCheckedChange={(on) => update.mutate({ m, patch: { isKids: on } })} />
-                  <Label htmlFor={`kids-${m.id}`} className="font-normal">
+
+              {/* Actions sit beside the name on small screens, last on wide ones. */}
+              <div className="col-start-2 row-start-1 flex items-center justify-end gap-1 lg:col-start-5">
+                <Button variant="ghost" size="icon-sm" onClick={() => setShowingCode({ id: m.id, name: m.user.name })} aria-label={`Sign-in code for ${m.user.name}`} title="Sign-in QR code">
+                  <QrCodeIcon />
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon-sm" aria-label={`More for ${m.user.name}`}>
+                      <MoreHorizontal />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem onSelect={() => setRenaming(m)}>
+                      <Pencil /> Rename
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setShowingCode({ id: m.id, name: m.user.name })}>
+                      <QrCodeIcon /> Sign-in code
+                    </DropdownMenuItem>
+                    {!self && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem variant="destructive" onSelect={() => setRemoving(m)}>
+                          <Trash /> Remove from household
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+
+              <div className="col-span-2 flex flex-wrap items-center gap-3 pl-13 lg:contents">
+                <div className="lg:col-start-2 lg:row-start-1">
+                  {self ? (
+                    <span className="text-muted-foreground text-sm" title="You can't change your own role">
+                      {ROLE_LABELS[role].label}
+                    </span>
+                  ) : (
+                    <Select value={role} disabled={setRole.isPending && setRole.variables?.m.id === m.id} onValueChange={(v) => setRole.mutate({ m, role: v as HouseholdRole })}>
+                      <SelectTrigger size="sm" className="w-32" aria-label={`Role of ${m.user.name}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(Object.keys(ROLE_LABELS) as HouseholdRole[]).map((r) => (
+                          <SelectItem key={r} value={r}>
+                            {ROLE_LABELS[r].label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+                <div className="lg:col-start-3 lg:row-start-1">
+                  <Select value={limit} onValueChange={(v) => update.mutate({ m, patch: { contentLimit: v as ContentLimit } })}>
+                    <SelectTrigger size="sm" className="w-44" aria-label={`What ${m.user.name} can watch`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(LIMIT_LABELS) as ContentLimit[]).map((key) => (
+                        <SelectItem key={key} value={key}>
+                          {LIMIT_LABELS[key].short}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2 lg:col-start-4 lg:row-start-1">
+                  <Switch id={`kids-${m.id}`} checked={!!m.isKids} onCheckedChange={(on) => update.mutate({ m, patch: { isKids: on } })} aria-label={`${m.user.name} is a kid`} />
+                  <Label htmlFor={`kids-${m.id}`} className="font-normal lg:sr-only">
                     Kids
                   </Label>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => setShowingCode({ id: m.id, name: m.user.name })} title={`A QR code that signs a phone or iPad in as ${m.user.name}`}>
-                  <QrCodeIcon /> Sign-in code
-                </Button>
-                {!self && (
-                  <Button variant="ghost" size="icon-sm" className="text-destructive" onClick={() => setRemoving(m)} aria-label={`Remove ${m.user.name}`}>
-                    <Trash />
-                  </Button>
-                )}
               </div>
             </li>
           );
@@ -197,7 +236,11 @@ export function InvitationList({ compact }: { compact?: boolean }) {
   const pending = (household.data?.invitations ?? []).filter((i) => i.status === "pending" && new Date(i.expiresAt).getTime() > Date.now());
   if (!household.data) return null;
   if (pending.length === 0) {
-    return compact ? null : <EmptyState icon={Mail} title="No pending invitations" description="Invite someone and pass them the link; it works for a week." className="py-8" />;
+    return compact ? null : (
+      <p className="text-muted-foreground flex items-center gap-2 rounded-lg border border-dashed px-4 py-3 text-sm">
+        <Mail className="size-4" /> None waiting. Invite someone and pass them the link; it works for a week.
+      </p>
+    );
   }
   return (
     <ul className="divide-y rounded-lg border">

@@ -3,7 +3,6 @@ import { UserPlus } from "lucide-react";
 import { useSession } from "@/app/session";
 import { Page, PageHeader } from "@/components/page";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { InvitationList, InviteDialog, MemberList, primaryRole } from "./household-people";
 
 export default function MembersPage() {
@@ -20,20 +19,16 @@ export default function MembersPage() {
           </Button>
         }
       />
-      <Card>
-        <CardContent>
-          <MemberList selfId={me.user.id} />
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Pending invitations</CardTitle>
-          <CardDescription>Links you've made that haven't been used yet.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <InvitationList />
-        </CardContent>
-      </Card>
+      <section>
+        <MemberList selfId={me.user.id} />
+      </section>
+      <section className="flex flex-col gap-3">
+        <div>
+          <h2 className="font-semibold">Pending invitations</h2>
+          <p className="text-muted-foreground text-sm">Links you've made that haven't been used yet.</p>
+        </div>
+        <InvitationList />
+      </section>
       <InviteDialog open={inviting} onOpenChange={setInviting} allowOwner={primaryRole(me.household?.role ?? "") === "owner"} />
     </Page>
   );
