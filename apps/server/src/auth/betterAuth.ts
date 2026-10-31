@@ -37,7 +37,12 @@ const issuedCodes = new Map<string, string>();
 /** Takes the code `issueSignInCode`'s call to the plugin produced. */
 /** Marks the server's own call for a code (a random secret, made per process). */
 export const SIGN_IN_CODE_HEADER = "x-strata-sign-in-code";
-export const signInCodeSecret = crypto.randomUUID();
+let codeSecret: string | undefined;
+/** Made on first use: Workers don't allow random values while a module loads. */
+export function signInCodeSecret(): string {
+  codeSecret ??= crypto.randomUUID();
+  return codeSecret;
+}
 
 export function takeIssuedCode(captureId: string): string | undefined {
   const token = issuedCodes.get(captureId);
@@ -146,7 +151,7 @@ export function createAuth(options: AuthOptions) {
         }
         // Sign-in codes are only made by the server (api/routes/auth.ts, for a household's
         // admins or the member themself), never asked for from outside.
-        if (ctx.path === "/sign-in/magic-link" && ctx.headers?.get(SIGN_IN_CODE_HEADER) !== signInCodeSecret) {
+        if (ctx.path === "/sign-in/magic-link" && ctx.headers?.get(SIGN_IN_CODE_HEADER) !== signInCodeSecret()) {
           throw new APIError("NOT_FOUND", { message: "Not found" });
         }
         // Password reset is by email: without email set up there's nothing to send.

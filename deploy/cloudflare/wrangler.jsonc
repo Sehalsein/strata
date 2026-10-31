@@ -12,6 +12,9 @@
   "compatibility_date": "2026-10-01",
   // node:crypto, node:async_hooks and process.env, which the server uses.
   "compatibility_flags": ["nodejs_compat"],
+  // Cloud mode, fixed at build time: src/mode.ts reads it as modules load, before the
+  // Worker's fetch handler could set STRATA_MODE.
+  "define": { "STRATA_BUILD_MODE": "\"cloud\"" },
   // The dashboard, built by `bun run build` in apps/server/web; only /api/* runs the Worker.
   "assets": {
     "directory": "../../apps/server/web/dist",
@@ -26,8 +29,9 @@
   // sehalsein.com must be a zone in the same Cloudflare account).
   "routes": [{ "pattern": "strata.sehalsein.com", "custom_domain": true }],
   "vars": {
+    // Password-reset email, through Resend (RESEND_API_KEY is a secret).
+    "STRATA_EMAIL_FROM": "Strata <no-reply@sehalsein.com>",
     // Also, when you're ready (see README.md):
-    //   "STRATA_EMAIL_FROM": "Strata <no-reply@sehalsein.com>",
     //   "STRATA_OPERATOR": "Sehal Sein",
     //   "STRATA_PRIVACY_CONTACT": "privacy@sehalsein.com",
     // Passkeys, Google's callback, email links and the apps' QR codes all use this address.

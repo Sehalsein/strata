@@ -280,7 +280,7 @@ export const authRoutes = new Hono<Env>()
     await s.auth.handler(
       new Request(`${origin}/api/auth/sign-in/magic-link`, {
         method: "POST",
-        headers: { "content-type": "application/json", origin, [SIGN_IN_CODE_HEADER]: signInCodeSecret },
+        headers: { "content-type": "application/json", origin, [SIGN_IN_CODE_HEADER]: signInCodeSecret() },
         body: JSON.stringify({ email: row.email, metadata: { captureId, organizationId: householdId } }),
       }),
     );
