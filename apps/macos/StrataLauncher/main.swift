@@ -20,11 +20,13 @@ private let installDir = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Application Support/Strata/app")
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var stateItem: NSMenuItem!
     private var openItem: NSMenuItem!
     private var restartItem: NSMenuItem!
+    private var updatesItem: NSMenuItem!
+    private var versionItem: NSMenuItem!
     private var loginItem: NSMenuItem!
     /// The server this app started. The app only ever opens the dashboard of this one.
     private var server: Process?
@@ -93,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         setState("Running on port \(port)", running: true)
+        await refreshServerVersion()
         if openDashboard {
             UserDefaults.standard.set(true, forKey: "openedOnce")
             self.openDashboard()
@@ -198,6 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.toolTip = "Strata"
 
         let menu = NSMenu()
+        menu.delegate = self
         menu.autoenablesItems = false // we decide what's enabled (Open Dashboard only when ours runs)
         stateItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
         stateItem.isEnabled = false
@@ -211,8 +215,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loginItem = item("Start at Login", #selector(toggleLoginItem), "")
         menu.addItem(loginItem)
         menu.addItem(.separator())
+        versionItem = NSMenuItem(title: "Server version unavailable", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
+        updatesItem = item("Check for Updates…", #selector(checkForUpdates), "")
+        menu.addItem(updatesItem)
+        menu.addItem(.separator())
         menu.addItem(item("Quit Strata", #selector(NSApplication.terminate(_:)), "q"))
         statusItem.menu = menu
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        Task { await refreshServerVersion() }
+    }
+
+    /// Read the running binary's version; it can self-update independently of this app.
+    private func refreshServerVersion() async {
+        guard await isOurs() else {
+            versionItem.title = "Server version unavailable"
+            return
+        }
+        var request = URLRequest(url: dashboardURL.appendingPathComponent("api/info"))
+        request.timeoutInterval = 2
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let version = json["version"] as? String, !version.isEmpty, version.count < 80
+        else {
+            versionItem.title = "Server version unavailable"
+            return
+        }
+        versionItem.title = "Server v\(version)"
     }
 
     private func item(_ title: String, _ action: Selector, _ key: String) -> NSMenuItem {
@@ -225,6 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("Strata: %@", text) // visible in Console.app
         stateItem.title = "Strata: \(text)"
         openItem.isEnabled = running
+        updatesItem.isEnabled = running
         statusItem.button?.appearsDisabled = !running
     }
 
@@ -236,6 +270,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             NSWorkspace.shared.open(dashboardURL)
+        }
+    }
+
+    /// Keep update checks in the authenticated dashboard, using its signed update feed.
+    @objc private func checkForUpdates() {
+        Task {
+            guard await isOurs() else {
+                setState("Couldn't verify the server on port \(port). Choose Restart Server.", running: false)
+                return
+            }
+            NSWorkspace.shared.open(URL(string: "settings?checkUpdate=1#updates", relativeTo: dashboardURL)!.absoluteURL)
         }
     }
 
