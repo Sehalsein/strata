@@ -15,13 +15,15 @@ beforeAll(async () => {
 afterAll(() => server.services.shutdown());
 
 describe("setup and auth", () => {
+  // Each from its own address: sign-ins are rate-limited per client.
+  let signIns = 0;
   const signIn = async (username: string, password: string) => {
-    const res = await server.request("/api/auth/sign-in/username", { method: "POST", json: { username, password } });
+    const res = await server.request("/api/auth/sign-in/username", { method: "POST", json: { username, password }, ip: `198.51.100.${++signIns}` });
     return { status: res.status, token: res.headers.get("set-auth-token") };
   };
 
   test("a server without Google keys or an HTTPS address offers only passwords", async () => {
-    expect((await json(await server.request("/api/info"))).signIn).toEqual({ google: false, passkey: false });
+    expect((await json(await server.request("/api/info"))).signIn).toEqual({ google: false, passkey: false, passwordReset: false });
     expect((await server.request("/api/auth/sign-in/social", { method: "POST", json: { provider: "google" } })).status).not.toBe(200);
     expect((await server.request("/api/auth/passkey/generate-authenticate-options")).status).toBe(404);
   });
@@ -117,6 +119,69 @@ describe("setup and auth", () => {
     expect(h.settingsStore.getSecret("tmdbApiKey")).toBe("test-key");
     expect((await json(await server.request("/api/admin/settings", { token }))).secrets).toEqual({ tmdbApiKey: true, omdbApiKey: false, torboxApiKey: false });
     delete process.env.TMDB_API_KEY;
+  });
+
+  test("forgot password: an emailed link (Resend) sets a new one, only when email is set up", async () => {
+    const ask = () => server.request("/api/auth/request-password-reset", { method: "POST", json: { email: "bob@example.com", redirectTo: "/reset-password" } });
+    expect((await ask()).status).toBe(404);
+    expect((await json(await server.request("/api/info"))).signIn.passwordReset).toBe(false);
+
+    process.env.RESEND_API_KEY = "re_test";
+    process.env.STRATA_EMAIL_FROM = "Strata <no-reply@example.com>";
+    const realFetch = globalThis.fetch;
+    const sent: any[] = [];
+    globalThis.fetch = (async (input: any, init?: any) => {
+      if (String(input).startsWith("https://api.resend.com/")) {
+        sent.push(JSON.parse(init.body));
+        return new Response(JSON.stringify({ id: "email-1" }), { status: 200 });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+    try {
+      expect((await json(await server.request("/api/info"))).signIn.passwordReset).toBe(true);
+      expect((await ask()).status).toBe(200);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({ to: ["bob@example.com"], subject: "Reset your Strata password" });
+      const link = /https?:\/\/\S+reset-password\/(\w+)/.exec(sent[0].text)!;
+      const reset = await server.request("/api/auth/reset-password", { method: "POST", json: { newPassword: "bobs-new-password", token: link[1] } });
+      expect(reset.status).toBe(200);
+      expect((await signIn("bob", "bobs-password")).status).toBe(401);
+      expect((await signIn("bob", "bobs-new-password")).status).toBe(200);
+      // Accounts without a real address get nothing (and nobody learns which exist).
+      await server.request("/api/auth/request-password-reset", { method: "POST", json: { email: "nobody@users.strata", redirectTo: "/reset-password" } });
+      expect(sent).toHaveLength(1);
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.RESEND_API_KEY;
+      delete process.env.STRATA_EMAIL_FROM;
+    }
+    // Put Bob's password back for the tests after this one.
+    const bobsToken = (await signIn("bob", "bobs-new-password")).token!;
+    await server.request("/api/auth/change-password", { method: "POST", token: bobsToken, json: { currentPassword: "bobs-new-password", newPassword: "bobs-password" } });
+  });
+
+  test("people can download everything kept about them, and delete their account", async () => {
+    const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "dora@example.com", role: "member" } }));
+    await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "dora@example.com", password: "doras-password", name: "dora", username: "dora", invitationId: invite.id } });
+    const dora = (await signIn("dora", "doras-password")).token!;
+    await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: dora, json: { invitationId: invite.id } });
+    await server.request("/api/watchlist", { method: "PUT", token: dora, json: { type: "movie", tmdbId: 10378, on: true } });
+
+    const exported = await server.request("/api/me/export", { token: dora });
+    expect(exported.headers.get("content-disposition")).toContain("strata-dora-data.json");
+    const file = (await exported.json()) as any;
+    expect(file.account).toMatchObject({ username: "dora", email: "dora@example.com" });
+    expect(file.myList).toEqual([expect.objectContaining({ tmdbId: 10378 })]);
+    expect(file.devices.length).toBeGreaterThan(0);
+    expect(JSON.stringify(file)).not.toContain(dora);
+
+    expect((await server.request("/api/auth/delete-user", { method: "POST", token: dora, json: { password: "wrong-password" } })).status).not.toBe(200);
+    expect((await server.request("/api/auth/delete-user", { method: "POST", token: dora, json: { password: "doras-password" } })).status).toBe(200);
+    expect((await server.request("/api/me", { token: dora })).status).toBe(401);
+    expect((await signIn("dora", "doras-password")).status).toBe(401);
+    // The server's only admin, who also owns a household with others in it, can't.
+    const refused = await server.request("/api/auth/delete-user", { method: "POST", token, json: { password: "test-password" } });
+    expect(refused.status).toBe(400);
   });
 
   test("households don't see each other's library", async () => {
