@@ -161,6 +161,7 @@ export interface AuthOptions {
 export function createAuth(options: AuthOptions) {
   const db = options.db;
   const methods = signInMethods();
+  const confirmEmail = isCloud && emailConfigured();
   // Hooks below ask Better Auth's own API (getSession) of the instance they belong to.
   const auth = betterAuth({
     appName: "Strata",
@@ -220,18 +221,22 @@ export function createAuth(options: AuthOptions) {
         // Cloud: a new account without an invitation owns a new household, named after them
         // (onboarding lets them rename it), and the sign-in opens in it. By password, or by
         // Google: its first sign-in (an account in no household yet, just made).
+        // An account that must confirm its email first gets no sign-in yet: the household is
+        // made now, and its first sign-in opens in it (databaseHooks.session).
         if (ctx.path === "/sign-up/email" || ctx.path === "/callback/:id") {
           const created = ctx.context.newSession;
-          if (!isCloud || !created || (ctx.body as { invitationId?: unknown } | undefined)?.invitationId) return;
+          const returned = ctx.context.returned as { user?: { id: string; name: string; createdAt: Date | string } } | undefined;
+          const user = created?.user ?? (ctx.path === "/sign-up/email" && returned && !(returned instanceof Error) ? returned.user : undefined);
+          if (!isCloud || !user || (ctx.body as { invitationId?: unknown } | undefined)?.invitationId) return;
           if (ctx.path === "/callback/:id") {
-            const isNew = Date.now() - new Date(created.user.createdAt).getTime() < 10 * 60_000;
-            const [inOne] = await db.select({ id: schema.member.id }).from(schema.member).where(eq(schema.member.userId, created.user.id)).limit(1);
+            const isNew = Date.now() - new Date(user.createdAt).getTime() < 10 * 60_000;
+            const [inOne] = await db.select({ id: schema.member.id }).from(schema.member).where(eq(schema.member.userId, user.id)).limit(1);
             if (!isNew || inOne) return;
           }
           const household = await auth.api.createOrganization({
-            body: { name: `${created.user.name}'s home`, slug: `home-${crypto.randomUUID().slice(0, 8)}`, userId: created.user.id },
+            body: { name: `${user.name}'s home`, slug: `home-${crypto.randomUUID().slice(0, 8)}`, userId: user.id },
           });
-          if (household) await adapter.updateSession(created.session.token, { activeOrganizationId: household.id });
+          if (household && created) await adapter.updateSession(created.session.token, { activeOrganizationId: household.id });
           return;
         }
         // The TV joins the household the approving phone is in: noted at approval…
@@ -295,9 +300,12 @@ export function createAuth(options: AuthOptions) {
         create: {
           // Cloud: the server's admins are named by email (STRATA_ADMIN_EMAILS). A picture
           // from elsewhere (Google's) isn't kept: profile pictures are the server's own.
-          before: async (user) => {
+          // Someone signing up from an invitation counts as confirmed: the household's admin
+          // sent the link to that address (the sign-up hook checked the invitation).
+          before: async (user, ctx) => {
             const image = user.image != null && !isAvatarImage(user.image) ? null : user.image;
-            return { data: { ...user, image, ...(isAdminEmail(user.email) ? { role: "admin" } : {}) } };
+            const invited = ctx?.path === "/sign-up/email" && !!(ctx.body as { invitationId?: unknown } | undefined)?.invitationId;
+            return { data: { ...user, image, ...(invited ? { emailVerified: true } : {}), ...(isAdminEmail(user.email) ? { role: "admin" } : {}) } };
           },
         },
         delete: {
@@ -377,6 +385,8 @@ export function createAuth(options: AuthOptions) {
     },
     emailAndPassword: {
       enabled: true,
+      // Cloud (with email set up): a new account confirms its address before it can sign in.
+      requireEmailVerification: confirmEmail,
       // Home servers: open only to someone with a pending invitation (see `hooks`); the
       // first account comes from setup (routes/auth.ts). Cloud: open to anyone.
       disableSignUp: false,
@@ -403,6 +413,27 @@ export function createAuth(options: AuthOptions) {
             lines: ["Someone asked to reset the password for your Strata account. If it was you, choose a new one with the button below. The link works for an hour."],
             button: { label: "Choose a new password", url },
             footer: "If you didn't ask, ignore this email: your password stays as it is.",
+          }),
+        });
+      },
+    },
+    // The link in the confirmation email signs them in and opens onboarding; signing in
+    // before confirming sends a fresh link.
+    emailVerification: {
+      sendOnSignUp: confirmEmail,
+      sendOnSignIn: confirmEmail,
+      autoSignInAfterVerification: true,
+      expiresIn: DAY_S,
+      sendVerificationEmail: async ({ user, url }) => {
+        if (user.emailVerified) return; // invited: nothing to confirm
+        await sendEmail({
+          to: user.email,
+          subject: "Confirm your email for Strata",
+          ...simpleEmail({
+            greeting: `Hi ${user.name},`,
+            lines: ["Welcome to Strata. Confirm this is your email address to finish making your account. The link works for a day."],
+            button: { label: "Confirm my email", url },
+            footer: "If you didn't make a Strata account, ignore this email: nothing happens without the link.",
           }),
         });
       },

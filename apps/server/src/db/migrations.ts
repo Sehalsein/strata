@@ -235,4 +235,7 @@ export const migrations: string[] = [
   /* 4: a temporary password from an admin, to be replaced at the next sign-in */ `
   ALTER TABLE "user" ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
   `,
+  /* 5: the cloud confirms new accounts' email; accounts from before count as confirmed */ `
+  UPDATE "user" SET email_verified = TRUE WHERE email_verified = FALSE;
+  `,
 ];

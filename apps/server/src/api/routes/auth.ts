@@ -133,7 +133,7 @@ export const authRoutes = new Hono<Env>()
       /** True when this client may join without a password (see /join). */
       localJoin: await canJoinLocally(c),
       /** Ways in besides a password that this server is set up for (the sign-in page's buttons). */
-      signIn: (({ google, passkeys }) => ({ google: !!google, passkey: !!passkeys, passwordReset: emailConfigured(), signUp: isCloud }))(signInMethods()),
+      signIn: (({ google, passkeys }) => ({ google: !!google, passkey: !!passkeys, passwordReset: emailConfigured(), signUp: isCloud, confirmEmail: isCloud && emailConfigured() }))(signInMethods()),
     });
   })
 

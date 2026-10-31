@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { KeyRound, LoaderCircle } from "lucide-react";
+import { KeyRound, LoaderCircle, MailCheck } from "lucide-react";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
 import type { ServerInfo } from "@/lib/types";
-import { authClient } from "@/lib/auth-client";
+import { AuthError, authClient } from "@/lib/auth-client";
 import { BrandMark } from "@/components/brand-mark";
 import { PosterWall } from "@/components/poster-wall";
 import { ModeToggle } from "@/components/mode-toggle";
@@ -159,7 +159,11 @@ export function SignInForm({ onSignedIn, onCancel, submitLabel = "Sign in" }: { 
       await authClient.signIn({ username: username.trim(), password });
       await onSignedIn();
     } catch (err) {
-      setError({ message: errorMessage(err), rateLimited: err instanceof ApiError && err.status === 429 });
+      const unconfirmed = err instanceof AuthError && err.code === "EMAIL_NOT_VERIFIED";
+      setError({
+        message: unconfirmed ? "Confirm your email first: we've just sent a new link to your inbox. Open it to finish signing in." : errorMessage(err),
+        rateLimited: err instanceof ApiError && err.status === 429,
+      });
       setPending(false);
     }
   };
@@ -234,6 +238,8 @@ function CreateAccountForm({ onCreated }: { onCreated: () => void }) {
   const passwordError = touched && password.length < 8 ? "Use at least 8 characters." : null;
   const info = useQuery({ queryKey: queryKeys.info, queryFn: api.info, staleTime: 60_000 });
   const [google, setGoogle] = useState(false);
+  // Made, and waiting for the email's link (which signs in and opens onboarding).
+  const [sentTo, setSentTo] = useState<string | null>(null);
 
   const withGoogle = async () => {
     setGoogle(true);
@@ -254,12 +260,32 @@ function CreateAccountForm({ onCreated }: { onCreated: () => void }) {
     setError(null);
     try {
       await authClient.createAccount({ name: name.trim(), email: email.trim().toLowerCase(), username: username.trim(), password });
-      onCreated();
+      if (info.data?.signIn?.confirmEmail) {
+        setSentTo(email.trim().toLowerCase());
+        setPending(false);
+      } else onCreated();
     } catch (err) {
       setError({ message: errorMessage(err), rateLimited: err instanceof ApiError && err.status === 429 });
       setPending(false);
     }
   };
+
+  if (sentTo) {
+    return (
+      <div className="flex flex-col items-center gap-4 rounded-2xl border p-6 text-center">
+        <div className="bg-primary/12 text-brand-text flex size-12 items-center justify-center rounded-full">
+          <MailCheck className="size-6" />
+        </div>
+        <div className="space-y-1.5">
+          <p className="text-lg font-semibold">Check your email</p>
+          <p className="text-muted-foreground text-sm">
+            We sent a link to <span className="text-foreground font-medium">{sentTo}</span>. Open it to confirm your address, and you'll go straight to setting up your household.
+          </p>
+        </div>
+        <p className="text-muted-foreground text-xs">No email? Check spam, or sign in with your password to get a new link.</p>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={submit} noValidate>

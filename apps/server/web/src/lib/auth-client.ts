@@ -177,12 +177,16 @@ export const authClient = {
 
   /** Cloud: a new account, which the server gives a household of its own (signed in, in it). */
   async createAccount(input: { email: string; username: string; name: string; password: string }) {
-    await call(ba.$fetch<unknown>("/sign-up/email", { method: "POST", body: input }) as Promise<BaResult<unknown>>);
+    // Where the email must be confirmed first, its link signs in and opens onboarding.
+    await call(ba.$fetch<unknown>("/sign-up/email", { method: "POST", body: { ...input, callbackURL: "/?welcome=1" } }) as Promise<BaResult<unknown>>);
   },
 
   /** Joins by invitation: a new account, the invitation accepted, its household opened. */
   async signUp(input: { email: string; username: string; name: string; password: string; invitationId: string }) {
-    await call(ba.$fetch<unknown>("/sign-up/email", { method: "POST", body: input }) as Promise<BaResult<unknown>>);
+    const r = await call(ba.$fetch<{ token?: string | null }>("/sign-up/email", { method: "POST", body: input }) as Promise<BaResult<{ token?: string | null }>>);
+    // Where new accounts confirm their email (the cloud), signing up doesn't sign in, even for
+    // someone invited (whose address counts as confirmed): sign in now.
+    if (!r?.token) await authClient.signIn({ username: input.username, password: input.password });
     await authClient.acceptInvitation(input.invitationId);
   },
 
