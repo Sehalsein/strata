@@ -361,19 +361,6 @@ public final class ServerStore {
         forget(id)
     }
 
-    /// Deletes the active account on its server (asks for its password) and forgets it here.
-    public func deleteAccount(password: String) async throws {
-        guard let client, let signIn = active else { throw Self.signedOut }
-        try await client.deleteAccount(password: password)
-        forget(signIn.id)
-    }
-
-    /// Everything the active account's server keeps about it, as a JSON file.
-    public func exportMyData() async throws -> Data {
-        guard let client else { throw Self.signedOut }
-        return try await client.exportMyData()
-    }
-
     /// Names a saved server on this device.
     public func renameServer(_ id: String, to name: String) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)

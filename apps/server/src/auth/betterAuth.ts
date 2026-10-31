@@ -70,12 +70,12 @@ const accessControl = createAccessControl(defaultStatements);
 const rank = (role: string | null | undefined) => ((role ?? "").split(",").includes("owner") ? 2 : (role ?? "").split(",").includes("admin") ? 1 : 0);
 
 /**
- * May the signed-in caller reset `userId`'s password? The server's admin may reset anyone
- * else's; a household's owner or admin, someone below them in their active household,
- * but never the server's admin. Never your own (that's Change password), and never from a
- * device that joined without a password.
+ * May the signed-in caller manage `userId`'s account (reset its password, delete it)? The
+ * server's admin may manage anyone else's; a household's owner or admin, someone below
+ * them in their active household, but never the server's admin. Never your own, and never
+ * from a device that joined without a password.
  */
-async function assertMayResetPassword(db: Db, getSession: (headers: Headers) => Promise<{ user: { id: string }; session: unknown } | null>, headers: Headers | undefined, userId: string) {
+export async function assertMayManage(db: Db, getSession: (headers: Headers) => Promise<{ user: { id: string }; session: unknown } | null>, headers: Headers | undefined, userId: string) {
   // Asked through Better Auth's own getSession: a hook runs before the bearer plugin has
   // turned the apps' token into a session.
   const caller = headers ? await getSession(headers) : null;
@@ -84,11 +84,11 @@ async function assertMayResetPassword(db: Db, getSession: (headers: Headers) => 
     throw new APIError("FORBIDDEN", { message });
   };
   if (!caller || session?.viewerOnly) refuse("Sign in with your password to do that.");
-  if (caller!.user.id === userId) refuse("Change your own password from your account menu.");
+  if (caller!.user.id === userId) refuse("That's your own account: use your account menu.");
   const [target] = await db.select({ role: schema.user.role, name: schema.user.name }).from(schema.user).where(eq(schema.user.id, userId));
   if (!target) refuse("No such account.");
   if ((caller!.user as { role?: string | null }).role === "admin") return;
-  if (target!.role === "admin") refuse("Only the server's admin can reset that account's password.");
+  if (target!.role === "admin") refuse("Only the server's admin can manage that account.");
   const household = session?.activeOrganizationId;
   if (!household) refuse("Choose a household first.");
   const roles = await db
@@ -97,9 +97,9 @@ async function assertMayResetPassword(db: Db, getSession: (headers: Headers) => 
     .where(and(eq(schema.member.organizationId, household!), or(eq(schema.member.userId, caller!.user.id), eq(schema.member.userId, userId))));
   const mine = roles.find((r) => r.userId === caller!.user.id);
   const theirs = roles.find((r) => r.userId === userId);
-  if (!mine || rank(mine.role) < 1) refuse("Only the household's owner or admins can reset passwords.");
+  if (!mine || rank(mine.role) < 1) refuse("Only the household's owner or admins can do that.");
   if (!theirs) refuse(`${target!.name} isn't in this household.`);
-  if (rank(theirs!.role) >= rank(mine!.role)) refuse(`Only someone above ${target!.name} in the household can reset their password.`);
+  if (rank(theirs!.role) >= rank(mine!.role)) refuse(`Only someone above ${target!.name} in the household can do that.`);
 }
 
 export interface AuthOptions {
@@ -152,10 +152,11 @@ export function createAuth(options: AuthOptions) {
         if ((ctx.path === "/request-password-reset" || ctx.path === "/forget-password") && !emailConfigured()) {
           throw new APIError("NOT_FOUND", { message: "This server can't send email. Ask your household's admin to help." });
         }
-        // Resetting someone's password (the admin plugin's set-user-password): the server's
-        // admin, or a household's owner or admin for someone below them in it.
-        if (ctx.path === "/admin/set-user-password") {
-          await assertMayResetPassword(db, (headers) => auth.api.getSession({ headers }), ctx.headers, String((ctx.body as { userId?: unknown } | undefined)?.userId ?? ""));
+        // Resetting someone's password or deleting their account (the admin plugin's
+        // set-user-password and remove-user): the server's admin, or a household's owner or
+        // admin for someone below them in it.
+        if (ctx.path === "/admin/set-user-password" || ctx.path === "/admin/remove-user") {
+          await assertMayManage(db, (headers) => auth.api.getSession({ headers }), ctx.headers, String((ctx.body as { userId?: unknown } | undefined)?.userId ?? ""));
           return;
         }
         if (ctx.path !== "/sign-up/email") return;
@@ -236,6 +237,38 @@ export function createAuth(options: AuthOptions) {
       }),
     },
     databaseHooks: {
+      user: {
+        delete: {
+          // Whoever deletes it: an owner hands their household on first (unless nobody
+          // else is in it), and the server's only admin stays.
+          before: async (user) => {
+            if ((user as { role?: string | null }).role === "admin") {
+              const admins = await db.select({ id: schema.user.id }).from(schema.user).where(eq(schema.user.role, "admin")).limit(2);
+              if (admins.length < 2) throw new APIError("BAD_REQUEST", { message: "That's this server's only admin, so the account can't be deleted." });
+            }
+            const owned = await db
+              .select({ organizationId: schema.member.organizationId })
+              .from(schema.member)
+              .where(and(eq(schema.member.userId, user.id), like(schema.member.role, "%owner%")));
+            for (const { organizationId } of owned) {
+              const people = await db.select({ userId: schema.member.userId, role: schema.member.role }).from(schema.member).where(eq(schema.member.organizationId, organizationId));
+              const otherOwner = people.some((p) => p.userId !== user.id && p.role.split(",").includes("owner"));
+              if (people.length > 1 && !otherOwner) {
+                throw new APIError("BAD_REQUEST", { message: `${user.name} owns a household with other people in it. Make one of them its owner first (Members).` });
+              }
+            }
+          },
+          // Their progress, lists and sign-ins go with them (the database cascades); a
+          // household nobody's in any more goes too, with its library, settings and keys.
+          after: async () => {
+            const orphans = await db
+              .select({ id: schema.organization.id })
+              .from(schema.organization)
+              .where(sql`not exists (select 1 from ${schema.member} where ${schema.member.organizationId} = ${schema.organization.id})`);
+            for (const o of orphans) await db.delete(schema.organization).where(eq(schema.organization.id, o.id));
+          },
+        },
+      },
       session: {
         create: {
           // A new sign-in opens in the account's household when it has just one.
@@ -322,39 +355,9 @@ export function createAuth(options: AuthOptions) {
         mustChangePassword: { type: "boolean", required: false, defaultValue: false, input: false },
       },
       changeEmail: { enabled: false },
-      // People delete their own account from the dashboard (with their password). Their
-      // progress, lists, sign-ins and devices go with it; a household left with nobody is
-      // deleted too. An owner hands the household to someone first, and the server's only
-      // admin can't leave it without one.
-      deleteUser: {
-        enabled: true,
-        beforeDelete: async (user) => {
-          if ((user as { role?: string | null }).role === "admin") {
-            const admins = await db.select({ id: schema.user.id }).from(schema.user).where(eq(schema.user.role, "admin")).limit(2);
-            if (admins.length < 2) throw new APIError("BAD_REQUEST", { message: "You're this server's only admin, so this account can't be deleted." });
-          }
-          const owned = await db
-            .select({ organizationId: schema.member.organizationId })
-            .from(schema.member)
-            .where(and(eq(schema.member.userId, user.id), like(schema.member.role, "%owner%")));
-          for (const { organizationId } of owned) {
-            const people = await db.select({ userId: schema.member.userId, role: schema.member.role }).from(schema.member).where(eq(schema.member.organizationId, organizationId));
-            const otherOwner = people.some((p) => p.userId !== user.id && p.role.split(",").includes("owner"));
-            if (people.length > 1 && !otherOwner) {
-              throw new APIError("BAD_REQUEST", { message: "You own a household that has other people in it. Make one of them its owner first (Members), then delete your account." });
-            }
-          }
-        },
-        afterDelete: async (user) => {
-          // Households nobody's in any more go too (their library, settings and keys with them).
-          const orphans = await db
-            .select({ id: schema.organization.id })
-            .from(schema.organization)
-            .where(sql`not exists (select 1 from ${schema.member} where ${schema.member.organizationId} = ${schema.organization.id})`);
-          for (const o of orphans) await db.delete(schema.organization).where(eq(schema.organization.id, o.id));
-          void user;
-        },
-      },
+      // Accounts are deleted by a household's admins (Members, Better Auth's admin
+      // remove-user) or by the person themself; the rules are in databaseHooks.user.delete.
+      deleteUser: { enabled: true },
     },
     rateLimit: {
       enabled: true,
@@ -380,10 +383,11 @@ export function createAuth(options: AuthOptions) {
       admin({
         defaultRole: "user",
         adminRoles: ["admin"],
-        // Everyone may ask to set another account's password; the `before` hook allows it
-        // only for a household's owner or admin over someone below them (or the server admin).
+        // Everyone may ask to set another account's password or delete it; the `before`
+        // hook allows it only for a household's owner or admin over someone below them (or
+        // the server's admin).
         ac: accessControl,
-        roles: { admin: accessControl.newRole(adminAc.statements), user: accessControl.newRole({ user: ["set-password"], session: [] }) },
+        roles: { admin: accessControl.newRole(adminAc.statements), user: accessControl.newRole({ user: ["set-password", "delete"], session: [] }) },
       }),
       organization({
         // Invitations last a week; the dashboard shows their link (no mail is sent), and

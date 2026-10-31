@@ -15,7 +15,7 @@ import { isCloud } from "../../mode";
 import { launchSecret } from "../../platform/launcher";
 import { dashboardUrls } from "../../platform/network";
 import { describeDevice } from "../deviceInfo";
-import { SIGN_IN_CODE_HEADER, SIGN_IN_CODE_SECONDS, signInCodeSecret, signInMethods, takeIssuedCode } from "../../auth/betterAuth";
+import { assertMayManage, SIGN_IN_CODE_HEADER, SIGN_IN_CODE_SECONDS, signInCodeSecret, signInMethods, takeIssuedCode } from "../../auth/betterAuth";
 
 /**
  * Strata's own account routes, around Better Auth (mounted at /api/auth/*, which does
@@ -60,6 +60,59 @@ function addressForDevices(c: Context<Env>): string {
   if (host !== "localhost" && host !== "::1" && !host.startsWith("127.")) return url.origin;
   const { host: bind, port } = c.var.services.config;
   return dashboardUrls(bind, port).find((u) => !/\/\/(localhost|127\.|\[::1\])/.test(u)) ?? url.origin;
+}
+
+/**
+ * Everything this server keeps about one person, as one JSON file (GDPR access and
+ * portability): for the person themself, or for their household's admins answering a
+ * request. Tokens and password hashes are never included.
+ */
+async function exportFor(c: Context<Env>, id: string): Promise<Response> {
+  const db = c.var.services.db;
+    const [person] = await db
+    .select({ id: user.id, name: user.name, username: user.username, email: user.email, createdAt: user.createdAt, updatedAt: user.updatedAt, role: user.role })
+    .from(user)
+    .where(eq(user.id, id));
+  const memberships = await db
+    .select({ household: organization.name, role: member.role, contentLimit: member.contentLimit, isKids: member.isKids, joinedAt: member.createdAt })
+    .from(member)
+    .innerJoin(organization, eq(organization.id, member.organizationId))
+    .where(eq(member.userId, id));
+  const devices = await db
+    .select({
+      device: session.deviceName,
+      model: session.deviceModel,
+      userAgent: session.userAgent,
+      ipAddress: session.ipAddress,
+      location: session.location,
+      signedInAt: session.createdAt,
+      lastActiveAt: session.updatedAt,
+      expiresAt: session.expiresAt,
+      watchOnly: session.viewerOnly,
+    })
+    .from(session)
+    .where(eq(session.userId, id));
+  const signInMethods = await db.select({ provider: account.providerId, connectedAt: account.createdAt }).from(account).where(eq(account.userId, id));
+  const savedPasskeys = await db.select({ name: passkey.name, createdAt: passkey.createdAt }).from(passkey).where(eq(passkey.userId, id));
+  const watchProgress = await db.select().from(progress).where(eq(progress.userId, id));
+  const myList = await db.select().from(watchlist).where(eq(watchlist.userId, id));
+  const hiddenFromContinueWatching = await db.select().from(continueHidden).where(eq(continueHidden.userId, id));
+  const strip = <T extends { userId?: unknown }>(rows: T[]) => rows.map(({ userId: _, ...r }) => r);
+  const file = {
+    exportedAt: new Date().toISOString(),
+    server: c.var.services.settings.get().serverName,
+    account: person,
+    households: memberships,
+    devices,
+    signInMethods: signInMethods.map((m) => ({ ...m, provider: m.provider === "credential" ? "password" : m.provider })),
+    passkeys: savedPasskeys,
+    watchProgress: strip(watchProgress),
+    myList: strip(myList),
+    hiddenFromContinueWatching: strip(hiddenFromContinueWatching),
+  };
+  return new Response(JSON.stringify(file, null, 2), {
+    headers: { "Content-Type": "application/json", "Content-Disposition": `attachment; filename="strata-${person?.username ?? "account"}-data.json"` },
+  });
 }
 
 export const authRoutes = new Hono<Env>()
@@ -154,55 +207,22 @@ export const authRoutes = new Hono<Env>()
     return c.json({ token: await sessionFor(c, input.userId, home.id, true) });
   })
 
-  // Everything this server keeps about the signed-in person, as one JSON file (GDPR access
-  // and portability). Tokens and password hashes are never included.
-  .get("/me/export", requireAuth, async (c) => {
-    const db = c.var.services.db;
-    const id = c.var.session.user.id;
-    const [person] = await db
-      .select({ id: user.id, name: user.name, username: user.username, email: user.email, createdAt: user.createdAt, updatedAt: user.updatedAt, role: user.role })
-      .from(user)
-      .where(eq(user.id, id));
-    const memberships = await db
-      .select({ household: organization.name, role: member.role, contentLimit: member.contentLimit, isKids: member.isKids, joinedAt: member.createdAt })
+  // Everything kept about the signed-in person (the dashboard's Your data).
+  .get("/me/export", requireAuth, (c) => exportFor(c, c.var.session.user.id))
+
+  // Everything kept about a member, for their household's owner or admins (someone below
+  // them, the same rule as resetting a password or deleting the account).
+  .get("/household/members/:memberId/export", requireAuth, requireHousehold, requireHouseholdAdmin, async (c) => {
+    const [row] = await c.var.services.db
+      .select({ userId: member.userId })
       .from(member)
-      .innerJoin(organization, eq(organization.id, member.organizationId))
-      .where(eq(member.userId, id));
-    const devices = await db
-      .select({
-        device: session.deviceName,
-        model: session.deviceModel,
-        userAgent: session.userAgent,
-        ipAddress: session.ipAddress,
-        location: session.location,
-        signedInAt: session.createdAt,
-        lastActiveAt: session.updatedAt,
-        expiresAt: session.expiresAt,
-        watchOnly: session.viewerOnly,
-      })
-      .from(session)
-      .where(eq(session.userId, id));
-    const signInMethods = await db.select({ provider: account.providerId, connectedAt: account.createdAt }).from(account).where(eq(account.userId, id));
-    const savedPasskeys = await db.select({ name: passkey.name, createdAt: passkey.createdAt }).from(passkey).where(eq(passkey.userId, id));
-    const watchProgress = await db.select().from(progress).where(eq(progress.userId, id));
-    const myList = await db.select().from(watchlist).where(eq(watchlist.userId, id));
-    const hiddenFromContinueWatching = await db.select().from(continueHidden).where(eq(continueHidden.userId, id));
-    const strip = <T extends { userId?: unknown }>(rows: T[]) => rows.map(({ userId: _, ...r }) => r);
-    const file = {
-      exportedAt: new Date().toISOString(),
-      server: c.var.services.settings.get().serverName,
-      account: person,
-      households: memberships,
-      devices,
-      signInMethods: signInMethods.map((m) => ({ ...m, provider: m.provider === "credential" ? "password" : m.provider })),
-      passkeys: savedPasskeys,
-      watchProgress: strip(watchProgress),
-      myList: strip(myList),
-      hiddenFromContinueWatching: strip(hiddenFromContinueWatching),
-    };
-    return new Response(JSON.stringify(file, null, 2), {
-      headers: { "Content-Type": "application/json", "Content-Disposition": `attachment; filename="strata-${person?.username ?? "account"}-data.json"` },
+      .where(and(eq(member.id, c.req.param("memberId")), eq(member.organizationId, c.var.household.organizationId)));
+    if (!row) throw new HTTPException(404, { message: "No such member" });
+    const auth = c.var.services.auth;
+    await assertMayManage(c.var.services.db, (headers) => auth.api.getSession({ headers }), c.req.raw.headers, row.userId).catch((err: unknown) => {
+      throw new HTTPException(403, { message: err instanceof Error ? err.message : "Not allowed" });
     });
+    return exportFor(c, row.userId);
   })
 
   // What the privacy page shows about this server: who runs it and what's switched on.

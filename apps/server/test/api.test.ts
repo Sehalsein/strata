@@ -185,6 +185,28 @@ describe("setup and auth", () => {
     expect((await server.request("/api/home", { token: fresh })).status).toBe(200);
   });
 
+  test("a household's owner downloads a member's data and deletes their account; a member can't", async () => {
+    const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "eve@example.com", role: "member" } }));
+    await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "eve@example.com", password: "eves-password", name: "eve", username: "eve", invitationId: invite.id } });
+    const eve = (await signIn("eve", "eves-password")).token!;
+    await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: eve, json: { invitationId: invite.id } });
+    const full = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const eveMember = full.members.find((m: any) => m.user.email === "eve@example.com");
+    const owner = full.members.find((m: any) => m.role.includes("owner"));
+
+    // Eve can't touch the owner's account.
+    expect((await server.request(`/api/household/members/${owner.id}/export`, { token: eve })).status).toBe(403);
+    expect((await server.request("/api/auth/admin/remove-user", { method: "POST", token: eve, json: { userId: owner.userId } })).status).toBe(403);
+
+    const exported = await server.request(`/api/household/members/${eveMember.id}/export`, { token });
+    expect(exported.status).toBe(200);
+    expect(((await exported.json()) as any).account).toMatchObject({ username: "eve" });
+
+    expect((await server.request("/api/auth/admin/remove-user", { method: "POST", token, json: { userId: eveMember.userId } })).status).toBe(200);
+    expect((await server.request("/api/me", { token: eve })).status).toBe(401);
+    expect((await signIn("eve", "eves-password")).status).toBe(401);
+  });
+
   test("people can download everything kept about them, and delete their account", async () => {
     const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "dora@example.com", role: "member" } }));
     await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "dora@example.com", password: "doras-password", name: "dora", username: "dora", invitationId: invite.id } });

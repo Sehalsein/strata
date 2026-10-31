@@ -225,6 +225,14 @@ export const authClient = {
     await call(ba.admin.setUserPassword({ userId, newPassword }) as Promise<BaResult<unknown>>);
   },
 
+  /**
+   * Deletes someone's account and everything kept about them (Better Auth's admin
+   * remove-user; the server allows it only over someone below you in the household).
+   */
+  async deleteMemberAccount(userId: string) {
+    await call(ba.admin.removeUser({ userId }) as Promise<BaResult<unknown>>);
+  },
+
   /** Every sign-in of the current account (apps, TVs, browsers). */
   async listSessions(): Promise<AuthSession[]> {
     return call(ba.listSessions() as Promise<BaResult<AuthSession[]>>);

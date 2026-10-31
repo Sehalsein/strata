@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, LoaderCircle, Mail, MoreHorizontal, Pencil, QrCode as QrCodeIcon, Trash, UserPlus, Users, X } from "lucide-react";
+import { Check, Copy, Download, KeyRound, LoaderCircle, Mail, MoreHorizontal, Pencil, QrCode as QrCodeIcon, Trash, UserMinus, UserPlus, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/app/session";
-import { api } from "@/lib/api";
+import { api, errorMessage } from "@/lib/api";
 import { authClient, invitationLink } from "@/lib/auth-client";
 import { relativeTime } from "@/lib/format";
 import { queryKeys, useApiMutation } from "@/lib/query";
@@ -72,8 +72,28 @@ const rank = (role: string | undefined) => ((role ?? "").split(",").includes("ow
 export function MemberList({ selfId }: { selfId: string }) {
   const { authChanged, me, isServerAdmin } = useSession();
   const [resetting, setResetting] = useState<{ userId: string; name: string } | null>(null);
-  // Who you may reset: someone below you here (the server's admin: anyone else).
-  const canReset = (m: Member) => m.userId !== selfId && (isServerAdmin || rank(m.role) < rank(me.household?.role));
+  const [deletingAccount, setDeletingAccount] = useState<Member | null>(null);
+  // Whose account you may manage (reset, data, delete): someone below you here (the
+  // server's admin: anyone else).
+  const canManage = (m: Member) => m.userId !== selfId && (isServerAdmin || rank(m.role) < rank(me.household?.role));
+  const deleteAccount = useApiMutation((m: Member) => authClient.deleteMemberAccount(m.userId), {
+    success: (_, m) => `Deleted ${m.user.name}'s account`,
+    invalidate: [queryKeys.household],
+  });
+  const downloadData = async (m: Member) => {
+    try {
+      const res = await fetch(`/api/household/members/${encodeURIComponent(m.id)}/export`, { credentials: "same-origin" });
+      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? `Couldn't make the file (${res.status})`);
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "strata-data.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
   const household = useHousehold();
   const [removing, setRemoving] = useState<Member | null>(null);
   const [showingCode, setShowingCode] = useState<{ id: string; name: string } | null>(null);
@@ -150,17 +170,27 @@ export function MemberList({ selfId }: { selfId: string }) {
                     <DropdownMenuItem onSelect={() => setShowingCode({ id: m.id, name: m.user.name })}>
                       <QrCodeIcon /> Sign-in code
                     </DropdownMenuItem>
-                    {canReset(m) && (
-                      <DropdownMenuItem onSelect={() => setResetting({ userId: m.userId, name: m.user.name })}>
-                        <KeyRound /> Reset password…
-                      </DropdownMenuItem>
+                    {canManage(m) && (
+                      <>
+                        <DropdownMenuItem onSelect={() => setResetting({ userId: m.userId, name: m.user.name })}>
+                          <KeyRound /> Reset password…
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => void downloadData(m)}>
+                          <Download /> Download their data
+                        </DropdownMenuItem>
+                      </>
                     )}
                     {!self && (
                       <>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem variant="destructive" onSelect={() => setRemoving(m)}>
-                          <Trash /> Remove from household
+                          <UserMinus /> Remove from household
                         </DropdownMenuItem>
+                        {canManage(m) && (
+                          <DropdownMenuItem variant="destructive" onSelect={() => setDeletingAccount(m)}>
+                            <Trash /> Delete account…
+                          </DropdownMenuItem>
+                        )}
                       </>
                     )}
                   </DropdownMenuContent>
@@ -215,6 +245,14 @@ export function MemberList({ selfId }: { selfId: string }) {
       </ul>
       <SignInCodeDialog member={showingCode} onOpenChange={(o) => !o && setShowingCode(null)} />
       <ResetPasswordDialog member={resetting} onOpenChange={(o) => !o && setResetting(null)} />
+      <ConfirmDialog
+        open={!!deletingAccount}
+        onOpenChange={(o) => !o && setDeletingAccount(null)}
+        title={deletingAccount ? `Delete ${deletingAccount.user.name}'s account?` : "Delete account?"}
+        description="Their account, watch history, My List and sign-ins are deleted for good, on every device and in every household they're in. Removing them from the household instead keeps their account."
+        confirmLabel="Delete account"
+        onConfirm={() => (deletingAccount ? deleteAccount.mutateAsync(deletingAccount) : undefined)}
+      />
       <RenameMemberDialog
         key={renaming?.id}
         member={renaming}

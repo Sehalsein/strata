@@ -126,10 +126,6 @@ struct SettingsView: View {
                 // Cellular quality and downloads (iPhone and iPad).
                 PlaybackSettingsSection()
 
-                #if os(iOS)
-                if store.active != nil { YourDataSection() }
-                #endif
-
                 Section {
                     if let server = store.activeServer {
                         // The name is this device's own; the server keeps its name for everyone else.
