@@ -6,73 +6,92 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { recentLogs } from "../../log";
 import { dashboardUrls } from "../../platform/network";
-import { settingsSchema, SECRET_KEYS, type SecretKey } from "../../settings";
+import { householdSettingsSchema, HOUSEHOLD_SECRET_KEYS, SECRET_KEYS, serverSettingsSchema, SERVER_SECRET_KEYS, settingsSchema, type SecretKey } from "../../settings";
 import { TorboxClient } from "../../sources/torbox/client";
 import { toCandidate } from "../../sources/resolver";
 import { imageUrl, yearOf } from "../../catalog/tmdb";
 import { API_VERSION, VERSION } from "../../version";
-import { profiles } from "../../db/schema";
+import { organization, user } from "../../db/schema";
+import { isCloud } from "../../mode";
 import type { PlaybackSession } from "../../playback/sessions";
+import type { Household } from "../../household";
 import type { Services } from "../../services";
-import { body, intParam, optionalInt, requireAdmin, requireAuth, type Env } from "../context";
+import { body, intParam, optionalInt, requireAuth, requireHousehold, requireHouseholdAdmin, requireServerAdmin, type Env } from "../context";
+import type { Context } from "hono";
 
+/** Server-only actions (its keys, updates, logs, folders on its disk) also need the server admin. */
+function assertServerAdmin(c: Context<Env>) {
+  if (!c.var.session.user.isServerAdmin) throw new HTTPException(403, { message: "Only the server's admin can do that" });
+}
+
+/**
+ * Running a household (its library, settings, TorBox key, plays), for its owner and
+ * admins; the server's own settings and keys for the server admin. Devices, members and
+ * invitations are Better Auth's (/api/auth/*).
+ */
 export const adminRoutes = new Hono<Env>()
-  .use(requireAuth, requireAdmin)
-
-  .get("/devices", async (c) => {
-    const current = c.var.session.tokenHash;
-    return c.json({ items: (await c.var.services.auth.devices()).map((d) => ({ ...d, isCurrent: d.id === current })) });
-  })
-
-  // Signs a device out: its token stops working and the app returns to Connect.
-  .delete("/devices/:id", async (c) => {
-    const id = c.req.param("id");
-    if (id === c.var.session.tokenHash) throw new HTTPException(409, { message: "That's this browser. Use Sign out instead." });
-    if (!/^[0-9a-f]{64}$/.test(id)) throw new HTTPException(404, { message: "No such device" });
-    await c.var.services.auth.logout(id);
-    return c.json({ ok: true });
-  })
+  .use(requireAuth, requireHousehold, requireHouseholdAdmin)
 
   .get("/status", async (c) => {
     const s = c.var.services;
-    const sessionDto = await sessionDtoFor(s);
+    const h = c.var.household;
+    const sessionDto = await sessionDtoFor(s, h);
     const ff = s.ffmpeg();
     return c.json({
       version: VERSION,
       apiVersion: API_VERSION,
       platform: `${platform()}-${process.arch}`,
-      dataDir: s.paths.root,
+      mode: isCloud ? "cloud" : "home",
+      isServerAdmin: c.var.session.user.isServerAdmin,
+      dataDir: isCloud ? null : s.paths.root,
       uptimeMs: Date.now() - s.startedAt,
       ffmpeg: ff ? { version: ff.version, path: ff.ffmpeg, hwEncoder: ff.hwEncoder ?? null } : null,
       ffmpegSetup: s.ffmpegSetup(),
-      tmdb: { configured: s.tmdb.configured },
-      torbox: { configured: !!s.torbox() },
+      tmdb: { configured: s.settings.hasSecret("tmdbApiKey") },
+      torbox: { configured: !!h.torbox() },
       jobs: s.jobs.status(),
-      sessions: await Promise.all((await s.sessions.list()).map(sessionDto)),
-      library: await s.library.stats(),
+      sessions: await Promise.all((await householdPlays(s, h)).map(sessionDto)),
+      library: await h.library.stats(),
       // Read-only: port and bind host come from the CLI/env (see README).
       network: { host: s.config.host, port: s.config.port, urls: dashboardUrls(s.config.host, s.config.port), bonjour: s.bonjour.active },
       update: (({ state, updateAvailable, latest, lastError }) => ({ state, updateAvailable, latestVersion: latest?.version ?? null, lastError }))(s.updater.status()),
     });
   })
 
+  // The server's settings with the household's; secrets only say whether they're set.
   .get("/settings", (c) => {
-    const s = c.var.services.settings;
-    return c.json({ settings: s.get(), secrets: Object.fromEntries(SECRET_KEYS.map((k) => [k, s.hasSecret(k)])) });
+    const server = c.var.services.settings;
+    const household = c.var.household.settingsStore;
+    const secrets = Object.fromEntries(SECRET_KEYS.map((k) => [k, (SERVER_SECRET_KEYS as readonly string[]).includes(k) ? server.hasSecret(k) : household.hasSecret(k)]));
+    return c.json({ settings: c.var.household.settings(), secrets });
   })
 
+  // Household settings for its admins; server settings for the server admin.
   .patch("/settings", async (c) => {
     const patch = await body(c, settingsSchema.partial());
-    return c.json({ settings: await c.var.services.settings.update(patch) });
+    const pick = (keys: string[]) => Object.fromEntries(Object.entries(patch).filter(([k]) => keys.includes(k)));
+    const serverPatch = pick(Object.keys(serverSettingsSchema.shape));
+    const householdPatch = pick(Object.keys(householdSettingsSchema.shape));
+    if (Object.keys(serverPatch).length) {
+      assertServerAdmin(c);
+      await c.var.services.settings.update(serverPatch);
+    }
+    if (Object.keys(householdPatch).length) await c.var.household.settingsStore.update(householdPatch);
+    // A new language needs the household's catalog rebuilt in it.
+    if ("language" in householdPatch) c.var.services.households.drop(c.var.household.organizationId);
+    return c.json({ settings: c.var.household.settings() });
   })
 
   // Keys are verified against the provider before they're stored.
   .put("/secrets/:key", async (c) => {
     const s = c.var.services;
+    const h = c.var.household;
     const key = z.enum(SECRET_KEYS).parse(c.req.param("key")) as SecretKey;
+    const forHousehold = (HOUSEHOLD_SECRET_KEYS as readonly string[]).includes(key);
+    if (!forHousehold) assertServerAdmin(c);
     const { value } = await body(c, z.object({ value: z.string().trim().max(512).nullable() }));
     if (value) {
-      if (key === "tmdbApiKey" && !(await s.tmdb.testKey(value))) throw new HTTPException(400, { message: "TMDB rejected that key" });
+      if (key === "tmdbApiKey" && !(await s.tmdb("en-US").testKey(value))) throw new HTTPException(400, { message: "TMDB rejected that key" });
       if (key === "omdbApiKey" && !(await s.omdb.testKey(value))) throw new HTTPException(400, { message: "OMDb rejected that key" });
       if (key === "torboxApiKey") {
         try {
@@ -82,14 +101,14 @@ export const adminRoutes = new Hono<Env>()
         }
       }
     }
-    await s.settings.setSecret(key, value);
-    if (value && key === "torboxApiKey") void s.jobs.run("syncTorbox");
+    await (forHousehold ? h.settingsStore : s.settings).setSecret(key, value);
+    if (value && key === "torboxApiKey") void syncNow(h);
     if (value && key === "tmdbApiKey") void s.jobs.run("matchPending");
     return c.json({ ok: true });
   })
 
   .get("/torbox/account", async (c) => {
-    const client = c.var.services.torbox();
+    const client = c.var.household.torbox();
     if (!client) throw new HTTPException(404, { message: "TorBox is not configured" });
     const me = await client.me();
     return c.json({ email: me.email ?? null, plan: me.plan ?? null, premiumExpiresAt: me.premium_expires_at ?? null });
@@ -97,6 +116,8 @@ export const adminRoutes = new Hono<Env>()
 
   // Folder picker for the setup wizard. Admin-only; lists directories, never files.
   .get("/fs", async (c) => {
+    assertServerAdmin(c);
+    if (isCloud) throw new HTTPException(404, { message: "The cloud server has no folders" });
     const path = resolve(c.req.query("path") || homedir());
     let entries;
     try {
@@ -114,11 +135,25 @@ export const adminRoutes = new Hono<Env>()
     return c.json({ path, parent: dirname(path) === path ? null : dirname(path), dirs, shortcuts });
   })
 
+  // This household's sync and matching; anything else runs server-wide (server admin).
   .post("/jobs/:name/run", (c) => {
     const name = c.req.param("name");
-    if (!c.var.services.jobs.status().some((j) => j.name === name)) throw new HTTPException(404, { message: "No such job" });
-    void c.var.services.jobs.run(name);
+    const h = c.var.household;
+    if (name === "syncTorbox") void syncNow(h);
+    else if (name === "matchPending") void h.library.matchPending();
+    else {
+      assertServerAdmin(c);
+      if (!c.var.services.jobs.status().some((j) => j.name === name)) throw new HTTPException(404, { message: "No such job" });
+      void c.var.services.jobs.run(name);
+    }
     return c.json({ ok: true }, 202);
+  })
+
+  // Households on this server (server admin): the dashboard's household list.
+  .get("/households", async (c) => {
+    assertServerAdmin(c);
+    const rows = await c.var.services.db.select({ id: organization.id, name: organization.name, slug: organization.slug, createdAt: organization.createdAt }).from(organization);
+    return c.json({ items: rows });
   })
 
   .get("/files", async (c) => {
@@ -134,7 +169,7 @@ export const adminRoutes = new Hono<Env>()
       sort: z.enum(["lastAccessed", "added", "title", "name", "size", "year"]).optional(),
       direction: z.enum(["asc", "desc"]).optional(),
     }).parse(c.req.query());
-    const { rows, total } = await c.var.services.library.list({ status, provider, limit, offset, ...filters });
+    const { rows, total } = await c.var.household.library.list({ status, provider, limit, offset, ...filters });
     return c.json({
       total,
       items: rows.map(({ file: f, title, year, lastAccessedAt, addedAt }) => ({
@@ -157,19 +192,19 @@ export const adminRoutes = new Hono<Env>()
   .post("/files/:id/match", async (c) => {
     const input = await body(c, z.object({ type: z.enum(["movie", "show"]), tmdbId: z.number().int(), season: z.number().int().optional(), episode: z.number().int().optional() }));
     const id = intParam(c, "id");
-    if (!await c.var.services.library.get(id)) throw new HTTPException(404, { message: "No such file" });
-    await c.var.services.library.setManualMatch(id, input.type, input.tmdbId, input.season, input.episode);
+    if (!await c.var.household.library.get(id)) throw new HTTPException(404, { message: "No such file" });
+    await c.var.household.library.setManualMatch(id, input.type, input.tmdbId, input.season, input.episode);
     return c.json({ ok: true });
   })
 
   .post("/files/:id/ignore", async (c) => {
-    await c.var.services.library.ignore(intParam(c, "id"));
+    await c.var.household.library.ignore(intParam(c, "id"));
     return c.json({ ok: true });
   })
 
   .post("/files/:id/unignore", async (c) => {
-    await c.var.services.library.unignore(intParam(c, "id"));
-    void c.var.services.jobs.run("matchPending");
+    await c.var.household.library.unignore(intParam(c, "id"));
+    void c.var.household.library.matchPending();
     return c.json({ ok: true });
   })
 
@@ -177,7 +212,7 @@ export const adminRoutes = new Hono<Env>()
     const q = c.req.query("q")?.trim();
     const type = z.enum(["movie", "show"]).parse(c.req.query("type"));
     if (!q) return c.json({ items: [] });
-    const tmdb = c.var.services.tmdb;
+    const tmdb = c.var.household.tmdb;
     const page = type === "movie" ? await tmdb.searchMovie(q) : await tmdb.searchShow(q);
     return c.json({
       items: page.results.slice(0, 20).map((r) => ({ tmdbId: r.id, title: r.title ?? r.name ?? "", year: yearOf(r.release_date ?? r.first_air_date), posterUrl: imageUrl(r.poster_path, "w185") })),
@@ -185,24 +220,41 @@ export const adminRoutes = new Hono<Env>()
   })
 
   .get("/sessions", async (c) => {
-    const dto = await sessionDtoFor(c.var.services);
-    return c.json({ items: await Promise.all((await c.var.services.sessions.list()).map(dto)) });
+    const dto = await sessionDtoFor(c.var.services, c.var.household);
+    return c.json({ items: await Promise.all((await householdPlays(c.var.services, c.var.household)).map(dto)) });
   })
   .delete("/sessions/:id", async (c) => {
+    if (!(await householdPlays(c.var.services, c.var.household)).some((p) => p.id === c.req.param("id"))) throw new HTTPException(404, { message: "No such play" });
     await c.var.services.sessions.stop(c.req.param("id"));
     return c.json({ ok: true });
   })
 
-  .get("/logs", (c) => c.json({ items: recentLogs(Math.min(optionalInt(c.req.query("limit")) ?? 200, 1000)) }));
+  .get("/logs", (c) => {
+    assertServerAdmin(c);
+    return c.json({ items: recentLogs(Math.min(optionalInt(c.req.query("limit")) ?? 200, 1000)) });
+  });
 
-async function sessionDtoFor(services: Services) {
-  const profileNames = new Map((await services.db.select({ id: profiles.id, name: profiles.name }).from(profiles)).map((p) => [p.id, p.name]));
+/** Syncs one household's TorBox now (its key was just set, or someone asked). */
+async function syncNow(h: Household) {
+  const client = h.torbox();
+  if (!client) return;
+  const { syncTorbox } = await import("../../sources/torbox/sync");
+  await syncTorbox(client, h.library, () => {});
+  await h.library.matchPending();
+}
+
+async function householdPlays(services: Services, h: Household) {
+  return (await services.sessions.list()).filter((s) => s.organizationId === h.organizationId);
+}
+
+async function sessionDtoFor(services: Services, h: Household) {
+  const names = new Map((await services.db.select({ id: user.id, name: user.name }).from(user)).map((u) => [u.id, u.name]));
   return async (s: PlaybackSession) => ({
     id: s.id,
-    profileId: s.profileId,
-    profileName: profileNames.get(s.profileId) ?? null,
+    userId: s.userId,
+    userName: names.get(s.userId) ?? null,
     fileId: s.fileId,
-    title: await services.library.titleOf(s.target.mediaType === "movie" ? "movie" : "show", s.target.tmdbId),
+    title: await h.library.titleOf(s.target.mediaType === "movie" ? "movie" : "show", s.target.tmdbId),
     target: s.target,
     mode: s.plan.mode,
     reasons: s.plan.reasons,

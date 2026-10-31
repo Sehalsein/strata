@@ -86,7 +86,7 @@ async function serve(argv: string[]) {
 
   log.info(`Strata ${VERSION} — data in ${services.paths.root}`);
   for (const url of dashboardUrls(config.host, server.port ?? config.port)) log.info(`Dashboard: ${url}`);
-  if (!services.auth.hasAnyUser()) log.info("First run — open the dashboard to finish setup");
+  if (!(await services.hasAccounts())) log.info("First run — open the dashboard to finish setup");
   services.bonjour.start();
 
   if (boot === "trial") {

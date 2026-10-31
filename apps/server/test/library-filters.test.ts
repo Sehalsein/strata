@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { files, mediaItems, profiles, progress } from "../src/db/schema";
+import { files, mediaItems, member, progress, user } from "../src/db/schema";
 import { startTestServer, type TestServer } from "./helpers";
 
 let server: TestServer;
@@ -9,22 +9,28 @@ beforeAll(async () => {
   const setup = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "admin", password: "test-password" } });
   token = (await setup.json() as { token: string }).token;
   const db = server.services.db;
-  await db.insert(profiles).values({ id: 2, name: "Second" });
+  const household = await server.household();
+  const org = household.organizationId;
+  const [admin] = await db.select({ id: user.id }).from(user);
+  // A second member, whose plays count too.
+  const now = new Date();
+  await db.insert(user).values({ id: "second", name: "Second", email: "second@users.strata", createdAt: now, updatedAt: now });
+  await db.insert(member).values({ id: "m2", organizationId: org, userId: "second", role: "member", createdAt: now });
   await db.insert(mediaItems).values([
-    { type: "movie", tmdbId: 1, title: "A Different Title", year: 2020 },
-    { type: "show", tmdbId: 2, title: "Sample Show", year: 2024 },
+    { organizationId: org, type: "movie", tmdbId: 1, title: "A Different Title", year: 2020 },
+    { organizationId: org, type: "show", tmdbId: 2, title: "Sample Show", year: 2024 },
   ]);
   await db.insert(files).values([
-    { id: 1, provider: "local", ref: "/movies/Zebra_100%.mkv", name: "Zebra_100%.mkv", size: 10, mediaType: "movie", tmdbId: 1, matchStatus: "matched", addedAt: 100 },
-    { id: 2, provider: "torbox", ref: "torrents:1:1", name: "alpha.S01E01.mkv", size: 30, mediaType: "episode", tmdbId: 2, season: 1, episode: 1, matchStatus: "matched", addedAt: 300, mtime: 50 },
-    { id: 3, provider: "local", ref: "/shows/beta.mkv", name: "beta.S01E02.mkv", size: 20, mediaType: "episode", tmdbId: 2, season: 1, episode: 2, matchStatus: "manual", addedAt: 200 },
-    { id: 4, provider: "local", ref: "/new/unknown.mkv", name: "unknown.mkv", size: 20, parsedJson: JSON.stringify({ kind: "movie", title: "Unmatched Film" }), addedAt: 400 },
-    { id: 5, provider: "local", ref: "/missing.mkv", name: "missing.mkv", size: 99, missing: true },
+    { id: 1, organizationId: org, provider: "local", ref: "/movies/Zebra_100%.mkv", name: "Zebra_100%.mkv", size: 10, mediaType: "movie", tmdbId: 1, matchStatus: "matched", addedAt: 100 },
+    { id: 2, organizationId: org, provider: "torbox", ref: "torrents:1:1", name: "alpha.S01E01.mkv", size: 30, mediaType: "episode", tmdbId: 2, season: 1, episode: 1, matchStatus: "matched", addedAt: 300, mtime: 50 },
+    { id: 3, organizationId: org, provider: "local", ref: "/shows/beta.mkv", name: "beta.S01E02.mkv", size: 20, mediaType: "episode", tmdbId: 2, season: 1, episode: 2, matchStatus: "manual", addedAt: 200 },
+    { id: 4, organizationId: org, provider: "local", ref: "/new/unknown.mkv", name: "unknown.mkv", size: 20, parsedJson: JSON.stringify({ kind: "movie", title: "Unmatched Film" }), addedAt: 400 },
+    { id: 5, organizationId: org, provider: "local", ref: "/missing.mkv", name: "missing.mkv", size: 99, missing: true },
   ]);
   await db.insert(progress).values([
-    { profileId: 1, mediaType: "movie", tmdbId: 1, positionMs: 10, durationMs: 100, updatedAt: 1000 },
-    { profileId: 2, mediaType: "movie", tmdbId: 1, positionMs: 20, durationMs: 100, updatedAt: 3000 },
-    { profileId: 1, mediaType: "episode", tmdbId: 2, season: 1, episode: 1, positionMs: 10, durationMs: 100, updatedAt: 2000 },
+    { userId: admin!.id, mediaType: "movie", tmdbId: 1, positionMs: 10, durationMs: 100, updatedAt: 1000 },
+    { userId: "second", mediaType: "movie", tmdbId: 1, positionMs: 20, durationMs: 100, updatedAt: 3000 },
+    { userId: admin!.id, mediaType: "episode", tmdbId: 2, season: 1, episode: 1, positionMs: 10, durationMs: 100, updatedAt: 2000 },
   ]);
 });
 afterAll(() => server.services.shutdown());

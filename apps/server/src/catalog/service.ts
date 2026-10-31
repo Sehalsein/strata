@@ -126,7 +126,7 @@ export class CatalogService {
     };
   }
 
-  async home(profileId: number): Promise<Shelf[]> {
+  async home(userId: string): Promise<Shelf[]> {
     const shelves: Shelf[] = [];
     const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
       try {
@@ -145,9 +145,9 @@ export class CatalogService {
     const isAnimeShow = (i: TmdbListItem) => this.isAnimeItem("show", i);
     const isAnimeFilm = (i: TmdbListItem) => this.isAnimeItem("movie", i);
     const [cont, nextUp, watchlist, trendingMovieList, trendingShows, trendingAnimeShows] = await Promise.all([
-      safe("continue", () => this.continueWatching(profileId)),
-      safe("nextUp", () => this.nextUp(profileId)),
-      safe("watchlist", () => this.watchlist(profileId)),
+      safe("continue", () => this.continueWatching(userId)),
+      safe("nextUp", () => this.nextUp(userId)),
+      safe("watchlist", () => this.watchlist(userId)),
       safe("trendingMovies", async () => (await this.tmdb.trending("movie")).results),
       safe("trendingShows", async () => await this.cards((await this.tmdb.trending("tv")).results.filter((i) => !isAnimeShow(i)), "show")),
       safe("trendingAnime", () => this.trendingThisWeek("show", isAnimeShow, ANIME_DISCOVER)),
@@ -529,7 +529,7 @@ export class CatalogService {
     return page.results.flatMap((r) => (r.media_type === "movie" ? movieCards.filter((c) => c.tmdbId === r.id) : r.media_type === "tv" ? showCards.filter((c) => c.tmdbId === r.id) : []));
   }
 
-  async movie(profileId: number, id: number) {
+  async movie(userId: string, id: number) {
     const m = await this.tmdb.movie(id);
     const imdbId = m.imdb_id ?? m.external_ids?.imdb_id ?? null;
     const [anime, ratings] = await Promise.all([this.animeInfo("movie", id).catch(() => null), this.ratings(imdbId)]);
@@ -562,15 +562,15 @@ export class CatalogService {
       recommendations: await this.cards(m.recommendations?.results ?? [], "movie"),
       available: [...new Set(sources.map((s) => s.provider))],
       sources,
-      progress: progressDto(await this.progress.get(profileId, { mediaType: "movie", tmdbId: id })),
-      inWatchlist: await this.progress.inWatchlist(profileId, "movie", id),
+      progress: progressDto(await this.progress.get(userId, { mediaType: "movie", tmdbId: id })),
+      inWatchlist: await this.progress.inWatchlist(userId, "movie", id),
       anime,
     };
   }
 
-  async show(profileId: number, id: number) {
+  async show(userId: string, id: number) {
     const s = await this.tmdb.show(id);
-    const watched = await this.progress.forShow(profileId, id);
+    const watched = await this.progress.forShow(userId, id);
     const available = await this.library.filesFor("episode", id);
     const region = this.settings().region;
     const imdbId = s.external_ids?.imdb_id ?? null;
@@ -608,15 +608,15 @@ export class CatalogService {
       available: [...new Set(available.map((f) => f.provider))],
       /** Where the Play button should go: an in-progress episode, else the next unwatched one. */
       upNext,
-      inWatchlist: await this.progress.inWatchlist(profileId, "show", id),
+      inWatchlist: await this.progress.inWatchlist(userId, "show", id),
       anime,
     };
   }
 
-  async season(profileId: number, showId: number, seasonNumber: number) {
+  async season(userId: string, showId: number, seasonNumber: number) {
     const [season, imdbRatings] = await Promise.all([this.tmdb.season(showId, seasonNumber), this.episodeRatings(showId, seasonNumber)]);
     const files = await this.library.filesFor("episode", showId, seasonNumber);
-    const watched = new Map((await this.progress.forShow(profileId, showId)).filter((p) => p.season === seasonNumber).map((p) => [p.episode, p]));
+    const watched = new Map((await this.progress.forShow(userId, showId)).filter((p) => p.season === seasonNumber).map((p) => [p.episode, p]));
     return {
       season: season.season_number,
       name: season.name,
@@ -643,9 +643,9 @@ export class CatalogService {
     return findCandidates(this.library, this.settings(), type, tmdbId, season, episode);
   }
 
-  private async continueWatching(profileId: number): Promise<ContinueCard[]> {
-    const hidden = await this.progress.hiddenFilter(profileId);
-    const rows = (await this.progress.inProgress(profileId)).filter((r) => !hidden(r));
+  private async continueWatching(userId: string): Promise<ContinueCard[]> {
+    const hidden = await this.progress.hiddenFilter(userId);
+    const rows = (await this.progress.inProgress(userId)).filter((r) => !hidden(r));
     const cards = await Promise.all(rows.map((row) => this.continueCard(row).catch(() => null)));
     return cards.filter((c): c is ContinueCard => c !== null);
   }
@@ -666,17 +666,17 @@ export class CatalogService {
     };
   }
 
-  private async nextUp(profileId: number): Promise<ContinueCard[]> {
-    const inProgressShows = new Set((await this.progress.inProgress(profileId, 100)).filter((r) => r.mediaType === "episode").map((r) => r.tmdbId));
-    const hidden = await this.progress.hiddenFilter(profileId);
-    const latest = (await this.progress.recentlyCompletedEpisodes(profileId)).filter((r) => !inProgressShows.has(r.tmdbId) && !hidden(r));
+  private async nextUp(userId: string): Promise<ContinueCard[]> {
+    const inProgressShows = new Set((await this.progress.inProgress(userId, 100)).filter((r) => r.mediaType === "episode").map((r) => r.tmdbId));
+    const hidden = await this.progress.hiddenFilter(userId);
+    const latest = (await this.progress.recentlyCompletedEpisodes(userId)).filter((r) => !inProgressShows.has(r.tmdbId) && !hidden(r));
     const cards = await Promise.all(
       latest.map(async (row) => {
         try {
           const show = await this.tmdb.show(row.tmdbId);
           const next = await this.episodeAfter(show, row.season, row.episode);
           if (!next) return null;
-          const done = await this.progress.get(profileId, { mediaType: "episode", tmdbId: row.tmdbId, season: next.season, episode: next.episode });
+          const done = await this.progress.get(userId, { mediaType: "episode", tmdbId: row.tmdbId, season: next.season, episode: next.episode });
           if (done?.completed) return null;
           return { ...(await this.showCard(show)), episode: next, positionMs: 0, durationMs: 0 } satisfies ContinueCard;
         } catch {
@@ -724,8 +724,8 @@ export class CatalogService {
     return first ? at(first.season_number, 1) : null;
   }
 
-  private async watchlist(profileId: number): Promise<TitleCard[]> {
-    const rows = await this.progress.watchlist(profileId);
+  private async watchlist(userId: string): Promise<TitleCard[]> {
+    const rows = await this.progress.watchlist(userId);
     const cards = await Promise.all(
       rows.map(async (r) => {
         try {

@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
-import { startTestServer } from "./helpers";
+import { setUp, startTestServer } from "./helpers";
 import { ingestItem } from "../src/sources/torbox/sync";
 
 test("Recently Added follows when files were added to TorBox, not when Strata matched them", async () => {
   const server = await startTestServer();
-  const { library } = server.services;
+  const { library } = (await setUp(server)).household;
   const item = (id: number, name: string, created_at?: string) => ({ id, hash: String(id).padStart(40, "0"), name, size: 1, files: [{ id: 0, name: `${name}.mkv`, size: 1 }], created_at });
 
   // Synced before TorBox dates were kept: no time yet.

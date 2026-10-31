@@ -110,7 +110,7 @@ export class PlaybackService {
     private readonly onPlayedTorrent: (torrentId: number) => void = () => {},
   ) {}
 
-  async play(user: { userId: number; profileId: number }, req: PlayRequest): Promise<PlayResponse> {
+  async play(user: { userId: string }, req: PlayRequest): Promise<PlayResponse> {
     // Started now so the (possibly uncached) season lookup overlaps the probe and link.
     const nextLookup = req.mediaType === "episode" ? this.findNextEpisode(req.tmdbId, req.season!, req.episode!).catch(() => null) : Promise.resolve(null);
     const file = await this.chooseFile(req);
@@ -124,7 +124,7 @@ export class PlaybackService {
 
     let startMs = req.startMs;
     if (startMs === undefined) {
-      const saved = await this.progress.get(user.profileId, req);
+      const saved = await this.progress.get(user.userId, req);
       startMs = saved && !saved.completed ? saved.positionMs : 0;
     }
     startMs = Math.max(0, Math.min(startMs, Math.max(0, info.durationMs - 10_000)));
@@ -140,7 +140,7 @@ export class PlaybackService {
     let session: PlaybackSession;
     try {
       session = await this.sessions.create({
-        profileId: user.profileId,
+        organizationId: this.library.organizationId,
         userId: user.userId,
         fileId: file.id,
         target: { mediaType: req.mediaType, tmdbId: req.tmdbId, season: req.season, episode: req.episode },

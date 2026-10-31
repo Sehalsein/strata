@@ -16,16 +16,21 @@ const DAY = 24 * 60 * 60_000;
 export class TorboxHousekeeping {
   constructor(
     private readonly db: Db,
+    private readonly organizationId: string,
     private readonly library: Library,
     private readonly now: () => number = Date.now,
   ) {}
 
+  private mine() {
+    return eq(torboxAdded.organizationId, this.organizationId);
+  }
+
   async recordAdded(torrentId: number, hash: string, name?: string) {
-    await this.db.insert(torboxAdded).values({ torrentId, hash: hash.toLowerCase(), name: name ?? null, addedAt: this.now() }).onConflictDoNothing();
+    await this.db.insert(torboxAdded).values({ organizationId: this.organizationId, torrentId, hash: hash.toLowerCase(), name: name ?? null, addedAt: this.now() }).onConflictDoNothing();
   }
 
   async recordPlayed(torrentId: number) {
-    await this.db.update(torboxAdded).set({ lastPlayedAt: this.now() }).where(eq(torboxAdded.torrentId, torrentId));
+    await this.db.update(torboxAdded).set({ lastPlayedAt: this.now() }).where(and(this.mine(), eq(torboxAdded.torrentId, torrentId)));
   }
 
   /** Torrents Strata added and nobody has played for `days` days. */
@@ -34,11 +39,11 @@ export class TorboxHousekeeping {
     return this.db
       .select()
       .from(torboxAdded)
-      .where(and(lt(torboxAdded.addedAt, cutoff), or(isNull(torboxAdded.lastPlayedAt), lt(torboxAdded.lastPlayedAt, cutoff))));
+      .where(and(this.mine(), lt(torboxAdded.addedAt, cutoff), or(isNull(torboxAdded.lastPlayedAt), lt(torboxAdded.lastPlayedAt, cutoff))));
   }
 
   async count() {
-    return (await this.db.select({ n: count() }).from(torboxAdded))[0]?.n ?? 0;
+    return (await this.db.select({ n: count() }).from(torboxAdded).where(this.mine()))[0]?.n ?? 0;
   }
 
   /**
@@ -79,7 +84,7 @@ export class TorboxHousekeeping {
         // Gone, or the id now belongs to something else (e.g. another account's key): forget it.
         log.info(`Forgetting TorBox #${row.torrentId}: no longer the release Strata added`);
       }
-      await this.db.delete(torboxAdded).where(eq(torboxAdded.torrentId, row.torrentId));
+      await this.db.delete(torboxAdded).where(and(this.mine(), eq(torboxAdded.torrentId, row.torrentId)));
     }
     return { removed };
   }

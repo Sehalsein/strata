@@ -4,7 +4,7 @@ import { openDatabase } from "../src/db";
 import { apiCache as tmdbCache } from "../src/db/schema";
 import { ApiCache } from "../src/catalog/apiCache";
 import { Omdb } from "../src/catalog/omdb";
-import { fakeTmdb, startTestServer, type TestServer } from "./helpers";
+import { fakeTmdb, setUp, startTestServer, type TestServer } from "./helpers";
 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 
@@ -68,9 +68,7 @@ let server: TestServer;
 let token: string;
 beforeAll(async () => {
   server = await startTestServer(fetchBoth);
-  await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "admin", password: "correct-horse" } });
-  const res = await server.request("/api/auth/login", { method: "POST", json: { username: "admin", password: "correct-horse" } });
-  token = ((await res.json()) as { token: string }).token;
+  token = (await setUp(server, "admin", "correct-horse")).token;
 });
 afterAll(() => {
   server.services.shutdown();

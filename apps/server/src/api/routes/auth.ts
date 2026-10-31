@@ -1,54 +1,33 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { profiles } from "../../db/schema";
+import { member, organization, user } from "../../db/schema";
 import { API_VERSION, VERSION } from "../../version";
-import { body, intParam, requireAdmin, requireAuth, type Env } from "../context";
+import { body, requireAuth, requireHousehold, requireHouseholdAdmin, type Env } from "../context";
 import { CONTENT_LIMITS } from "../../catalog/contentRating";
 import { clientAddress, isLocalRequest, isLoopbackRequest } from "../localNetwork";
-import { AuthError } from "../../auth";
 import { checkSetupCode, clearSetupCode } from "../../setupCode";
 import { retryMessage, SETUP_PER_ADDRESS, STARTS_PER_ADDRESS } from "../../throttle";
 import { isCloud } from "../../mode";
-import { runtime } from "#runtime";
 import { launchSecret } from "../../platform/launcher";
 
-const credentials = z.object({
-  username: z.string().trim().min(1).max(64),
-  password: z.string().min(1).max(256),
-  deviceName: z.string().max(128).optional(),
-});
+/**
+ * Strata's own account routes, around Better Auth (mounted at /api/auth/*, which does
+ * sign-in, households, members, invitations, TV codes and switching between saved
+ * sign-ins): server info, first-run setup, the home server's password-less join, "me",
+ * and the household's settings for each member (kids, content limit).
+ */
 
-const profileInput = z.object({
-  name: z.string().trim().min(1).max(40),
-  avatar: z.string().max(64).nullish(),
-  /** 4–8 digits; null removes the PIN. */
-  pin: z.string().regex(/^\d{4,8}$/).nullish(),
-  /** Kids profiles start with the "kids" content limit. */
-  isKids: z.boolean().optional(),
-  contentLimit: z.enum(CONTENT_LIMITS).optional(),
-});
-
-const profileDto = (p: typeof profiles.$inferSelect) => ({
-  id: p.id,
-  name: p.name,
-  avatar: p.avatar,
-  hasPin: !!p.pinHash,
-  isKids: p.isKids,
-  contentLimit: p.contentLimit,
-});
-
-/** Shown on other devices (approval sheets, the dashboard), so plain words only. */
-const deviceNameSchema = z.string().trim().regex(/^[\p{L}\p{N} .'’()-]{1,48}$/u, "Device names can only use letters, numbers and simple punctuation");
+const usernameSchema = z.string().trim().min(2).max(64).regex(/^[a-zA-Z0-9_.-]+$/, "Usernames can use letters, numbers, dots, dashes and underscores");
 
 async function canJoinLocally(c: Context<Env>): Promise<boolean> {
   const s = c.var.services;
-  return !isCloud && s.settings.get().localJoin && isLocalRequest(c) && (await s.auth.hasAnyUser());
+  return !isCloud && s.settings.get().localJoin && isLocalRequest(c) && (await s.hasAccounts());
 }
 
-/** Counts a password-less start (join, TV code) from this address; 429 past the limit. */
+/** Counts a password-less start (a home join) from this address; 429 past the limit. */
 async function countStart(c: Context<Env>, what: string) {
   const key = `${what}:${clientAddress(c)}`;
   const throttle = c.var.services.throttle;
@@ -57,9 +36,12 @@ async function countStart(c: Context<Env>, what: string) {
   await throttle.fail(key, STARTS_PER_ADDRESS);
 }
 
-function authFailure(err: unknown): never {
-  if (err instanceof AuthError) throw new HTTPException(err.status, { message: err.message });
-  throw err;
+/** A session for `userId` in `organizationId`, made by the server (home join). */
+async function sessionFor(c: Context<Env>, userId: string, organizationId: string, viewerOnly: boolean): Promise<string> {
+  const ctx = await c.var.services.auth.$context;
+  const created = await ctx.internalAdapter.createSession(userId, false);
+  await ctx.internalAdapter.updateSession(created.token, { activeOrganizationId: organizationId, viewerOnly });
+  return created.token;
 }
 
 export const authRoutes = new Hono<Env>()
@@ -71,10 +53,12 @@ export const authRoutes = new Hono<Env>()
       id: s.serverId,
       version: VERSION,
       apiVersion: API_VERSION,
-      setupRequired: !(await s.auth.hasAnyUser()),
+      /** "home" or "cloud" (stateless; no local folders or home-network join). */
+      mode: isCloud ? "cloud" : "home",
+      setupRequired: !(await s.hasAccounts()),
       /** Setup asks for the code from the server's log (not from the server's own machine). */
       setupCodeRequired: !isLoopbackRequest(c),
-      /** True when this client may join without a password (see /auth/join). */
+      /** True when this client may join without a password (see /join). */
       localJoin: await canJoinLocally(c),
     });
   })
@@ -90,22 +74,21 @@ export const authRoutes = new Hono<Env>()
     return c.json({ proof: createHmac("sha256", secret).update(`${challenge}|${port}`).digest("hex") });
   })
 
-  // Home-network devices skip the password and go straight to "Who's watching?";
-  // profile PINs still apply. The session can watch but never administer.
-  .post("/auth/join", async (c) => {
-    const { deviceName } = await body(c, z.object({ deviceName: deviceNameSchema.optional() }).default({}));
-    const s = c.var.services;
-    const userId = (await canJoinLocally(c)) ? await s.auth.householdUserId() : undefined;
-    if (!userId) throw new HTTPException(403, { message: "Sign in with your account to connect from outside your home network." });
-    await countStart(c, "join");
-    return c.json({ token: await s.auth.issue(userId, deviceName ?? "Device", { viewerOnly: true }) });
-  })
-
-  // First-run: creates the admin and a first profile. Locked once any user exists.
+  // First run: the server admin's account and their household. Needs the code the
+  // server prints in its log, unless asked from the server's own machine.
   .post("/setup/admin", async (c) => {
     const s = c.var.services;
-    const input = await body(c, credentials.extend({ password: z.string().min(8).max(256), setupCode: z.string().max(32).optional() }));
-    if (await s.auth.hasAnyUser()) throw new HTTPException(409, { message: "Setup already completed" });
+    const input = await body(
+      c,
+      z.object({
+        username: usernameSchema,
+        password: z.string().min(8).max(256),
+        email: z.string().trim().email().max(254).optional(),
+        householdName: z.string().trim().min(1).max(64).optional(),
+        setupCode: z.string().max(32).optional(),
+      }),
+    );
+    if (await s.hasAccounts()) throw new HTTPException(409, { message: "Setup already completed" });
     if (!isLoopbackRequest(c)) {
       const key = `setup:${clientAddress(c)}`;
       const wait = await s.throttle.retryAfter(key);
@@ -115,110 +98,70 @@ export const authRoutes = new Hono<Env>()
         throw new HTTPException(403, { message: "That setup code isn't right. It's in the server's log, shown when it starts." });
       }
     }
-    const user = await s.auth.createFirstAdmin(input.username, input.password);
-    if (!user) throw new HTTPException(409, { message: "Setup already completed" });
+    const api = s.auth.api;
+    const email = (input.email ?? `${input.username.toLowerCase()}@users.strata`).toLowerCase();
+    await api.createUser({ body: { email, password: input.password, name: input.username, role: "admin", data: { username: input.username } } });
     await clearSetupCode(s.db);
-    await s.db.insert(profiles).values({ name: input.username });
-    return c.json({ token: await s.auth.issue(user.id, input.deviceName ?? "Dashboard") });
+    const signIn = await api.signInUsername({ body: { username: input.username, password: input.password }, asResponse: true });
+    const token = signIn.headers.get("set-auth-token");
+    if (!token) throw new HTTPException(500, { message: "Couldn't sign in after setup" });
+    const headers = new Headers({ authorization: `Bearer ${token}` });
+    const household = await api.createOrganization({
+      headers,
+      body: { name: input.householdName ?? `${input.username}'s home`, slug: `home-${randomBytes(4).toString("hex")}` },
+    });
+    await api.setActiveOrganization({ headers, body: { organizationId: household!.id } });
+    return c.json({ token, householdId: household!.id });
   })
 
-  .post("/auth/login", async (c) => {
-    const input = await body(c, credentials);
-    const token = await c.var.services.auth.login(input.username, input.password, clientAddress(c), input.deviceName).catch(authFailure);
-    return c.json({ token });
-  })
-
-  // Signs out the account's other devices too.
-  .post("/auth/password", requireAuth, async (c) => {
-    const input = await body(c, z.object({ currentPassword: z.string().min(1).max(256), newPassword: z.string().min(8).max(256) }));
-    const { session } = c.var;
-    if (c.var.session.user.isAdmin === false && (await c.var.services.auth.isViewerOnly(session.tokenHash))) {
-      throw new HTTPException(403, { message: "Sign in with your password to change it." });
-    }
-    const ok = await c.var.services.auth.changePassword(session.user.id, input.currentPassword, input.newPassword, session.tokenHash);
-    if (!ok) throw new HTTPException(403, { message: "Your current password isn't right." });
-    return c.json({ ok: true });
-  })
-
-  // Sign-in by code (QR on a TV). Start and poll are public: the TV isn't signed in yet.
-  .post("/auth/device", async (c) => {
-    const { deviceName } = await body(c, z.object({ deviceName: deviceNameSchema.optional() }).default({}));
-    await countStart(c, "tvcode");
-    const link = await c.var.services.deviceLinks.start(deviceName ?? "TV");
-    if (!link) throw new HTTPException(429, { message: "Too many sign-in codes waiting. Try again in a few minutes." });
-    return c.json({ ...link, pollIntervalMs: 2000 });
-  })
-
-  // POST so the poll token stays out of URLs and access logs.
-  .post("/auth/device/poll", async (c) => {
-    const { pollToken } = await body(c, z.object({ pollToken: z.string().min(1).max(128) }));
-    return c.json(await c.var.services.deviceLinks.poll(pollToken));
-  })
-
-  // The approving phone shows which device it's about to sign in before confirming.
-  .get("/auth/device/:code", requireAuth, async (c) => {
-    const pending = await c.var.services.deviceLinks.pending(c.req.param("code"));
-    if (!pending) throw new HTTPException(404, { message: "That code has expired or was already used. Show a new one on the TV." });
-    return c.json(pending);
-  })
-
-  .post("/auth/device/:code/approve", requireAuth, async (c) => {
-    const s = c.var.services;
-    const userId = c.var.session.user.id;
-    // The TV can watch but not administer, whoever approved it.
-    const ok = await s.deviceLinks.approve(c.req.param("code"), (deviceName) => s.auth.issue(userId, deviceName, { viewerOnly: true }));
-    if (!ok) throw new HTTPException(404, { message: "That code has expired or was already used. Show a new one on the TV." });
-    return c.json({ ok: true });
-  })
-
-  .post("/auth/logout", requireAuth, async (c) => {
-    await c.var.services.auth.logout(c.var.session.tokenHash);
-    return c.json({ ok: true });
+  // Home servers: devices on the home network sign in as a member they pick, without a
+  // password, able to watch but not administer. Without `userId`: who can be picked.
+  .post("/join", async (c) => {
+    const input = await body(c, z.object({ userId: z.string().max(64).optional() }).default({}));
+    if (!(await canJoinLocally(c))) throw new HTTPException(403, { message: "Sign in with your account to connect from outside your home network." });
+    const db = c.var.services.db;
+    const [home] = await db.select({ id: organization.id, name: organization.name }).from(organization).orderBy(asc(organization.createdAt)).limit(1);
+    if (!home) throw new HTTPException(409, { message: "This server has no household yet." });
+    const people = await db
+      .select({ id: user.id, name: user.name, isKids: member.isKids })
+      .from(member)
+      .innerJoin(user, eq(user.id, member.userId))
+      .where(eq(member.organizationId, home.id))
+      .orderBy(asc(member.createdAt));
+    if (!input.userId) return c.json({ household: home, members: people });
+    if (!people.some((p) => p.id === input.userId)) throw new HTTPException(404, { message: "No such member" });
+    await countStart(c, "join");
+    return c.json({ token: await sessionFor(c, input.userId, home.id, true) });
   })
 
   .get("/me", requireAuth, async (c) => {
-    const { user, profileId } = c.var.session;
-    const profile = profileId ? (await c.var.services.db.select().from(profiles).where(eq(profiles.id, profileId)))[0] : undefined;
-    return c.json({ user, profile: profile ? { id: profile.id, name: profile.name, avatar: profile.avatar, isKids: profile.isKids, contentLimit: profile.contentLimit } : null });
-  })
-
-  .get("/profiles", requireAuth, async (c) => {
-    const rows = await c.var.services.db.select().from(profiles).orderBy(asc(profiles.id));
-    return c.json(rows.map(profileDto));
-  })
-
-  .post("/profiles/:id/select", requireAuth, async (c) => {
-    const { pin } = await body(c, z.object({ pin: z.string().optional() }).default({}));
-    const ok = await c.var.services.auth.selectProfile(c.var.session.tokenHash, intParam(c, "id"), pin).catch(authFailure);
-    if (!ok) throw new HTTPException(404, { message: "No such profile" });
-    return c.json({ ok: true });
-  })
-
-  .post("/profiles", requireAuth, requireAdmin, async (c) => {
-    const input = await body(c, profileInput);
-    const pinHash = input.pin ? await runtime.hashPassword(input.pin) : null;
-    const isKids = input.isKids ?? false;
-    const contentLimit = input.contentLimit ?? (isKids ? "kids" : "none");
-    const [row] = await c.var.services.db.insert(profiles).values({ name: input.name, avatar: input.avatar ?? null, pinHash, isKids, contentLimit }).returning();
-    return c.json(profileDto(row!), 201);
-  })
-
-  .patch("/profiles/:id", requireAuth, requireAdmin, async (c) => {
-    const input = await body(c, profileInput.partial());
-    const patch: Partial<typeof profiles.$inferInsert> = {};
-    if (input.name !== undefined) patch.name = input.name;
-    if (input.avatar !== undefined) patch.avatar = input.avatar;
-    if (input.pin !== undefined) patch.pinHash = input.pin ? await runtime.hashPassword(input.pin) : null;
-    if (input.isKids !== undefined) patch.isKids = input.isKids;
-    if (input.contentLimit !== undefined) patch.contentLimit = input.contentLimit;
-    const [row] = await c.var.services.db.update(profiles).set(patch).where(eq(profiles.id, intParam(c, "id"))).returning();
-    if (!row) throw new HTTPException(404, { message: "No such profile" });
-    return c.json(profileDto(row));
-  })
-
-  .delete("/profiles/:id", requireAuth, requireAdmin, async (c) => {
+    const { user: me, organizationId, viewerOnly } = c.var.session;
     const db = c.var.services.db;
-    if ((await db.select({ id: profiles.id }).from(profiles)).length <= 1) throw new HTTPException(409, { message: "Can't delete the last profile" });
-    await db.delete(profiles).where(eq(profiles.id, intParam(c, "id")));
-    return c.json({ ok: true });
+    const [household] = organizationId
+      ? await db
+          .select({ id: organization.id, name: organization.name, role: member.role, contentLimit: member.contentLimit, isKids: member.isKids })
+          .from(member)
+          .innerJoin(organization, eq(organization.id, member.organizationId))
+          .where(and(eq(member.organizationId, organizationId), eq(member.userId, me.id)))
+      : [];
+    return c.json({ user: me, viewerOnly, household: household ?? null });
+  })
+
+  // A member's settings in this household (Better Auth keeps the member; these are Strata's).
+  .patch("/household/members/:memberId", requireAuth, requireHousehold, requireHouseholdAdmin, async (c) => {
+    const input = await body(c, z.object({ contentLimit: z.enum(CONTENT_LIMITS).optional(), isKids: z.boolean().optional() }));
+    const patch: { contentLimit?: string; isKids?: boolean } = {};
+    if (input.isKids !== undefined) {
+      patch.isKids = input.isKids;
+      // Kids accounts start with the kids' limit unless one is given.
+      if (input.isKids && input.contentLimit === undefined) patch.contentLimit = "kids";
+    }
+    if (input.contentLimit !== undefined) patch.contentLimit = input.contentLimit;
+    const [row] = await c.var.services.db
+      .update(member)
+      .set(patch)
+      .where(and(eq(member.id, c.req.param("memberId")), eq(member.organizationId, c.var.household.organizationId)))
+      .returning({ id: member.id, contentLimit: member.contentLimit, isKids: member.isKids });
+    if (!row) throw new HTTPException(404, { message: "No such member" });
+    return c.json(row);
   });

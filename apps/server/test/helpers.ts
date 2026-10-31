@@ -86,6 +86,8 @@ export const fakeTmdb: typeof fetch = (async (input: string | URL | Request) => 
 
 export interface TestServer {
   services: Services;
+  /** The first household (made at setup). */
+  household: () => Promise<import("../src/household").Household>;
   request: (path: string, init?: RequestInit & { json?: unknown; token?: string; ip?: string }) => Promise<Response>;
   dataDir: string;
 }
@@ -108,7 +110,8 @@ export async function startTestServer(fetchImpl: typeof fetch = fakeTmdb, overri
     const env = init.ip ? { requestIP: () => ({ address: init.ip! }) } : {};
     return app.fetch(new Request(`http://test${path}`, { ...init, headers, body: bodyInit }), env);
   };
-  return { services, request, dataDir };
+  const household = async () => services.households.get((await services.householdIds())[0]!);
+  return { services, household, request, dataDir };
 }
 
 /** Generates small real media files with ffmpeg (cached between runs). */
@@ -138,4 +141,11 @@ export async function makeFixtures(): Promise<string> {
   const sidecar = join(root, "Movies/Big Buck Bunny (2008)/Big.Buck.Bunny.2008.1080p.BluRay.x264.en.forced.srt");
   if (!existsSync(sidecar)) await Bun.write(sidecar, "1\n00:00:02,000 --> 00:00:03,000\nForced sidecar\n");
   return root;
+}
+
+/** Runs first-run setup (as the server's own machine): the admin's token and their household. */
+export async function setUp(server: TestServer, username = "admin", password = "test-password") {
+  const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username, password } });
+  const { token } = (await res.json()) as { token: string };
+  return { token, household: await server.household() };
 }

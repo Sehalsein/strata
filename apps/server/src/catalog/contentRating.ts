@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import type { Db } from "../db";
-import { profiles } from "../db/schema";
+import { member } from "../db/schema";
 import { logger } from "../log";
 import type { Settings } from "../settings";
 import type { TitleType } from "./service";
@@ -82,32 +82,37 @@ export class ContentFilter {
 
   constructor(
     private readonly db: Db,
+    /** The household whose members' limits apply. */
+    private readonly organizationId: string,
     private readonly tmdb: Tmdb,
     private readonly settings: () => Settings,
   ) {}
 
   /** Max age for a profile, or null when it has no limit. */
-  async maxAge(profileId: number): Promise<number | null> {
-    const [row] = await this.db.select({ limit: profiles.contentLimit }).from(profiles).where(eq(profiles.id, profileId));
+  async maxAge(userId: string): Promise<number | null> {
+    const [row] = await this.db
+      .select({ limit: member.contentLimit })
+      .from(member)
+      .where(and(eq(member.userId, userId), eq(member.organizationId, this.organizationId)));
     const limit = row?.limit ?? "none";
     // A value we don't know (shouldn't happen: writes are validated) means the strictest limit.
     return limit in MAX_AGE ? MAX_AGE[limit as ContentLimit] : MAX_AGE.little;
   }
 
-  async allowed(profileId: number, type: TitleType, tmdbId: number): Promise<boolean> {
-    const maxAge = await this.maxAge(profileId);
+  async allowed(userId: string, type: TitleType, tmdbId: number): Promise<boolean> {
+    const maxAge = await this.maxAge(userId);
     if (maxAge === null) return true;
     return this.fits(maxAge, type, tmdbId);
   }
 
   /** Throws 403 for a title the profile can't see (opened by link or id). */
-  async assertAllowed(profileId: number, type: TitleType, tmdbId: number) {
-    if (!(await this.allowed(profileId, type, tmdbId))) throw new HTTPException(403, { message: "This title isn't available on this profile." });
+  async assertAllowed(userId: string, type: TitleType, tmdbId: number) {
+    if (!(await this.allowed(userId, type, tmdbId))) throw new HTTPException(403, { message: "This title isn't available to this account." });
   }
 
   /** Keeps only cards the profile may see. Lookups are cached, a few at a time. */
-  async filter<T extends { type: TitleType; tmdbId: number }>(profileId: number, cards: T[]): Promise<T[]> {
-    const maxAge = await this.maxAge(profileId);
+  async filter<T extends { type: TitleType; tmdbId: number }>(userId: string, cards: T[]): Promise<T[]> {
+    const maxAge = await this.maxAge(userId);
     if (maxAge === null || cards.length === 0) return cards;
     const keep = new Array<boolean>(cards.length).fill(false);
     let next = 0;

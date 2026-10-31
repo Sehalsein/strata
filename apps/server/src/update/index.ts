@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { backupDatabase, type Db } from "../db";
-import type { SettingsStore } from "../settings";
+import type { ServerSettingsStore } from "../settings";
 import { compiledBinaryPath, inDocker } from "../platform/runtime";
 import { UPDATE_BASE_URL, VERSION } from "../version";
 import { currentPlatformKey } from "./manifest";
@@ -14,7 +14,7 @@ export function createUpdater(opts: {
   dbPath: string;
   backupsDir: string;
   db: Db;
-  settings: SettingsStore;
+  settings: ServerSettingsStore;
   activeSessions: () => number;
   fetch?: typeof fetch;
 }): Updater {

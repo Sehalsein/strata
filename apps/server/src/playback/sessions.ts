@@ -36,8 +36,9 @@ export interface SessionTarget {
 
 export interface PlaybackSession {
   id: string;
-  profileId: number;
-  userId: number;
+  /** The household it plays in, and whose account. */
+  organizationId: string;
+  userId: string;
   fileId: number;
   target: SessionTarget;
   plan: PlaybackPlan;
@@ -114,8 +115,8 @@ export class SessionManager {
     if (init.inputKind === "url" && !isHls(init.plan.mode)) {
       await this.db.insert(playSessions).values({
         id: session.id,
+        organizationId: init.organizationId,
         userId: init.userId,
-        profileId: init.profileId,
         fileId: init.fileId,
         targetJson: JSON.stringify(init.target),
         planJson: JSON.stringify(init.plan),
@@ -190,7 +191,7 @@ export class SessionManager {
   }
 
   /** Stops the user's other sessions for the same title (e.g. a restart at a new offset). */
-  async stopForTarget(userId: number, target: SessionTarget) {
+  async stopForTarget(userId: string, target: SessionTarget) {
     const same = (s: PlaybackSession) =>
       s.userId === userId && s.target.mediaType === target.mediaType && s.target.tmdbId === target.tmdbId && s.target.season === target.season && s.target.episode === target.episode;
     for (const s of await this.list()) if (same(s)) await this.stop(s.id);
@@ -306,8 +307,8 @@ export class SessionManager {
 function fromRow(row: typeof playSessions.$inferSelect): PlaybackSession {
   return {
     id: row.id,
+    organizationId: row.organizationId,
     userId: row.userId,
-    profileId: row.profileId,
     fileId: row.fileId,
     target: JSON.parse(row.targetJson) as SessionTarget,
     plan: JSON.parse(row.planJson) as PlaybackPlan,

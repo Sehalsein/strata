@@ -9,17 +9,17 @@
 // --public (the hosted demo): sign in as "demo" / "strata-demo", a viewer-only account;
 // the admin's password is random and never shown, admin routes are refused for everyone,
 // and nothing reaches out (no TorBox, release search, updates or home-network join).
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../../src/api/app";
-import { profiles, sessions, users } from "../../src/db/schema";
 import type { Shelf, TitleCard } from "../../src/catalog/service";
 import { imageUrl, type TmdbListItem } from "../../src/catalog/tmdb";
 import { createServices, type Services } from "../../src/services";
-import { SESSION_TTL_MS } from "../../src/auth";
+import type { Household } from "../../src/household";
+import { member, user } from "../../src/db/schema";
 
 const arg = (name: string, fallback: string) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -34,12 +34,13 @@ process.env.STRATA_DOCKER = "1"; // no self-update
 if (publicDemo) process.env.STRATA_DEMO = "1"; // admin routes refused (api/context.ts)
 
 let services: Services | undefined;
+let home: Household | undefined;
 
 /** The library's titles as TMDB list items (from cached details). */
 async function libraryItems(type: "movie" | "tv"): Promise<unknown[]> {
-  if (!services) return [];
-  const rows = await services.library.recentlyAdded(type === "movie" ? "movie" : "show", 50);
-  const details = await Promise.all(rows.map((r) => (type === "movie" ? services!.tmdb.movie(r.tmdbId) : services!.tmdb.show(r.tmdbId)).catch(() => null)));
+  if (!home) return [];
+  const rows = await home.library.recentlyAdded(type === "movie" ? "movie" : "show", 50);
+  const details = await Promise.all(rows.map((r) => (type === "movie" ? home!.tmdb.movie(r.tmdbId) : home!.tmdb.show(r.tmdbId)).catch(() => null)));
   return details
     .filter((d): d is NonNullable<typeof d> => d !== null)
     .map((d) => ({ ...d, media_type: type, genre_ids: d.genres.map((g) => g.id) }));
@@ -75,7 +76,7 @@ const demoFetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit
       const body = (await res.json()) as { recommendations?: { results: { id: number }[] } };
       if (body.recommendations && services) {
         const type = url.pathname.includes("/tv/") ? "show" : "movie";
-        const ids = new Set((await services.library.recentlyAdded(type, 100)).map((r) => r.tmdbId));
+        const ids = new Set((await home!.library.recentlyAdded(type, 100)).map((r) => r.tmdbId));
         body.recommendations.results = body.recommendations.results.filter((r) => ids.has(r.id));
       }
       return Response.json(body);
@@ -89,53 +90,67 @@ const demoFetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit
 const dataDir = mkdtempSync(join(tmpdir(), "strata-demo-"));
 services = await createServices({ dataDir, port, host: "0.0.0.0" }, { fetch: demoFetch });
 
-// Accounts and profiles, straight through the services (the demo refuses admin routes).
+// Accounts, as setup makes them: the admin (Alex, or an unguessable one for the public
+// demo) and their household, then its other members (the demo refuses admin routes).
 const admin = publicDemo ? { username: `admin-${randomBytes(4).toString("hex")}`, password: randomBytes(24).toString("base64url") } : { username: "Alex", password: "demo-password" };
-await services.auth.createFirstAdmin(admin.username, admin.password);
-if (publicDemo) await services.auth.createUser("demo", "strata-demo", false);
-const [alex, , kids] = await Promise.all(
-  ["Alex", "Sam", "Kids"].map(async (name) =>
-    (await services!.db.insert(profiles).values({ name, isKids: name === "Kids", contentLimit: name === "Kids" ? "kids" : "none" }).returning())[0],
-  ),
+const setupApp = createApp(services);
+const setup = await setupApp.fetch(
+  new Request("http://demo/api/setup/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...admin, householdName: "The Demo House" }) }),
+  { requestIP: () => ({ address: "127.0.0.1" }) },
 );
-void kids;
+const { householdId } = (await setup.json()) as { householdId: string };
+home = await services.households.get(householdId);
+const alex = (await services.db.select({ id: user.id }).from(user).where(eq(user.username, admin.username)))[0]!;
+const people = [
+  { username: "Sam", password: "demo-password", isKids: false },
+  { username: "Kids", password: "demo-password", isKids: true },
+  ...(publicDemo ? [{ username: "demo", password: "strata-demo", isKids: false }] : []),
+];
+for (const p of people) {
+  const made = await services.auth.api.createUser({ body: { email: `${p.username.toLowerCase()}@users.strata`, password: p.password, name: p.username, role: "user", data: { username: p.username } } });
+  await services.auth.api.addMember({ body: { userId: made.user.id, organizationId: householdId, role: "member" } });
+  if (p.isKids) await services.db.update(member).set({ isKids: true, contentLimit: "kids" }).where(eq(member.userId, made.user.id));
+}
 await services.settings.update({
   serverName: publicDemo ? "Strata Demo" : "Strata",
-  mediaFolders: [{ path: join(media, "Movies"), kind: "movies" }, { path: join(media, "Shows"), kind: "shows" }],
-  // Nothing that reaches out or costs: no release search, no join without a password.
-  discoveryEnabled: false,
+  // Nothing that reaches out or costs: no join without a password, no Bonjour.
   torrentioUrl: "",
-  useTorboxSearch: false,
   localJoin: false,
   bonjourEnabled: false,
   hardwareAcceleration: false,
   maxTranscodes: 1,
 });
+await home.settingsStore.update({
+  mediaFolders: [{ path: join(media, "Movies"), kind: "movies" }, { path: join(media, "Shows"), kind: "shows" }],
+  // No release search.
+  discoveryEnabled: false,
+  useTorboxSearch: false,
+});
 await services.jobs.run("scanLocal");
-await services.library.matchPending();
+await home.library.matchPending();
 
-// Something to continue, something next up, and a few saved for later (Alex's profile).
+// Something to continue, something next up, and a few saved for later (Alex's account).
 // The anime keeps to its own rails, so these stay the same as the screenshots show.
 const anime = new Set(((await libraryItems("movie")) as TmdbListItem[]).filter(isJapanese).map((f) => f.id));
-const movies = (await services.library.recentlyAdded("movie", 20)).map((m) => m.tmdbId).filter((id) => !anime.has(id));
-const shows = (await services.library.recentlyAdded("show", 20)).map((s) => s.tmdbId);
+const movies = (await home.library.recentlyAdded("movie", 20)).map((m) => m.tmdbId).filter((id) => !anime.has(id));
+const shows = (await home.library.recentlyAdded("show", 20)).map((s) => s.tmdbId);
 const minutes = (n: number) => n * 60_000;
 // Positions inside the clips, which are 3 minutes long (fetch-media.ts), so resuming plays.
 if (movies[0]) await services.progress.record(alex!.id, { mediaType: "movie", tmdbId: movies[0] }, minutes(1.3), minutes(3));
 if (movies[2]) await services.progress.record(alex!.id, { mediaType: "movie", tmdbId: movies[2] }, minutes(0.6), minutes(3));
 // An episode the library actually has (the demo carries a few per show, not whole seasons).
-const episode = shows[0] ? (await services.library.filesFor("episode", shows[0])).sort((a, b) => (a.season! - b.season!) || (a.episode! - b.episode!))[0] : undefined;
+const episode = shows[0] ? (await home.library.filesFor("episode", shows[0])).sort((a, b) => (a.season! - b.season!) || (a.episode! - b.episode!))[0] : undefined;
 if (episode) await services.progress.record(alex!.id, { mediaType: "episode", tmdbId: shows[0]!, season: episode.season!, episode: episode.episode! }, minutes(1), minutes(3));
 for (const id of movies.slice(3, 6)) await services.progress.setWatchlist(alex!.id, "movie", id, true);
 if (shows[1]) await services.progress.setWatchlist(alex!.id, "show", shows[1], true);
 
 // The Anime tab ranks titles with Kitsu, which the demo can't reach: here it's the
 // library's Japanese animation, with no categories to filter by.
-services.catalog.animeCategories = () => [];
-services.catalog.animePage = async (category?: string): Promise<Shelf[]> => {
+home.catalog.animeCategories = () => [];
+home.catalog.animePage = async (category?: string): Promise<Shelf[]> => {
   if (category) return [];
   const films = ((await libraryItems("movie")) as TmdbListItem[]).filter(isJapanese);
-  const available = await services!.library.availability("movie", films.map((f) => f.id));
+  const available = await home!.library.availability("movie", films.map((f) => f.id));
   const items: TitleCard[] = films.map((f) => ({
     type: "movie",
     tmdbId: f.id,
@@ -151,32 +166,13 @@ services.catalog.animePage = async (category?: string): Promise<Shelf[]> => {
 };
 
 const app = createApp(services);
-const demoUser = publicDemo ? (await services.db.select({ id: users.id }).from(users).where(eq(users.username, "demo")))[0] : undefined;
-const restoreKey = process.env.DEMO_RESTORE_KEY ?? "";
-
-/**
- * The hosted demo starts from scratch whenever its container wakes, which would sign
- * everyone out. Its Worker remembers sign-ins (by token hash) and puts them back here.
- * Only the Worker can reach this: it never forwards paths outside /api, and the key is
- * a secret the two share.
- */
-async function restoreSession(req: Request): Promise<Response> {
-  const key = Buffer.from(req.headers.get("X-Demo-Key") ?? "");
-  if (!demoUser || restoreKey.length < 32 || key.length !== restoreKey.length || !timingSafeEqual(key, Buffer.from(restoreKey))) {
-    return new Response("not found", { status: 404 });
-  }
-  const { tokenHash, profileId } = (await req.json()) as { tokenHash?: unknown; profileId?: unknown };
-  if (typeof tokenHash !== "string" || !/^[a-f0-9]{64}$/.test(tokenHash)) return new Response("bad request", { status: 400 });
-  const profile = typeof profileId === "number" ? (await services!.db.select({ id: profiles.id }).from(profiles).where(eq(profiles.id, profileId)))[0] : undefined;
-  await services!.db.insert(sessions).values({ tokenHash, userId: demoUser.id, profileId: profile?.id ?? null, deviceName: "Restored", expiresAt: Date.now() + SESSION_TTL_MS }).onConflictDoNothing();
-  return Response.json({ ok: true });
-}
-
 Bun.serve({
   hostname: "0.0.0.0",
   port,
   idleTimeout: 120,
-  fetch: (req, server) => (new URL(req.url).pathname === "/__demo/restore-session" && req.method === "POST" ? restoreSession(req) : app.fetch(req, server)),
+  // The hosted demo starts from scratch whenever its container wakes; its visitors sign in
+  // again (Better Auth keeps sign-ins in the database, which starts empty here).
+  fetch: (req, server) => app.fetch(req, server),
 });
 const matched = movies.length + shows.length;
 const signIn = publicDemo ? "demo / strata-demo (viewer only)" : "Alex / demo-password";

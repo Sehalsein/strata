@@ -15,9 +15,14 @@ beforeAll(async () => {
 afterAll(() => server.services.shutdown());
 
 describe("setup and auth", () => {
+  const signIn = async (username: string, password: string) => {
+    const res = await server.request("/api/auth/sign-in/username", { method: "POST", json: { username, password } });
+    return { status: res.status, token: res.headers.get("set-auth-token") };
+  };
+
   test("info reports setup required", async () => {
     const info = await json(await server.request("/api/info"));
-    expect(info).toMatchObject({ name: "strata", setupRequired: true, apiVersion: 1 });
+    expect(info).toMatchObject({ name: "strata", setupRequired: true, apiVersion: 1, mode: "home" });
   });
 
   test("protected routes need a token", async () => {
@@ -25,74 +30,93 @@ describe("setup and auth", () => {
     expect((await server.request("/api/admin/status")).status).toBe(401);
   });
 
-  test("first admin is created once", async () => {
+  test("first admin is created once, with their household", async () => {
     const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "sehal", password: "correct-horse" } });
     expect(res.status).toBe(200);
     token = (await json(res)).token;
-    const again = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "x", password: "another-pass" } });
+    const again = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "other", password: "another-pass" } });
     expect(again.status).toBe(409);
   });
 
-  test("login, and the single profile is auto-selected", async () => {
-    expect((await server.request("/api/auth/login", { method: "POST", json: { username: "sehal", password: "nope" } })).status).toBe(401);
-    const res = await server.request("/api/auth/login", { method: "POST", json: { username: "sehal", password: "correct-horse" } });
-    token = (await json(res)).token;
+  test("sign in by username; the account's only household opens by itself", async () => {
+    expect((await signIn("sehal", "nope")).status).toBe(401);
+    const ok = await signIn("sehal", "correct-horse");
+    expect(ok.status).toBe(200);
+    token = ok.token!;
     const me = await json(await server.request("/api/me", { token }));
-    expect(me.user).toMatchObject({ username: "sehal", isAdmin: true });
-    expect(me.profile.name).toBe("sehal");
+    expect(me.user).toMatchObject({ username: "sehal", isServerAdmin: true });
+    expect(me.household).toMatchObject({ name: "sehal's home", role: "owner" });
   });
 
-  test("a TV signs in by code once a signed-in phone approves it", async () => {
-    const start = await json(await server.request("/api/auth/device", { method: "POST", json: { deviceName: "Living Room Apple TV" } }));
-    expect(start.code).toMatch(/^[A-Z2-9]{8}$/);
-    const poll = () => server.request("/api/auth/device/poll", { method: "POST", json: { pollToken: start.pollToken } }).then(json);
-    expect(await poll()).toEqual({ status: "pending" });
-
-    // Looking up and approving need a signed-in phone; lower-case and dashes are fine.
-    const typed = `${start.code.slice(0, 4)}-${start.code.slice(4)}`.toLowerCase();
-    expect((await server.request(`/api/auth/device/${typed}`)).status).toBe(401);
-    expect(await json(await server.request(`/api/auth/device/${typed}`, { token }))).toMatchObject({ deviceName: "Living Room Apple TV" });
-    expect((await server.request(`/api/auth/device/${typed}/approve`, { method: "POST", token })).status).toBe(200);
-
-    const approved = await poll();
-    expect(approved.status).toBe("approved");
-    expect((await server.request("/api/me", { token: approved.token })).status).toBe(200);
-
-    // Single use: the token is handed over once and the code is gone.
-    expect(await poll()).toEqual({ status: "expired" });
-    expect((await server.request(`/api/auth/device/${start.code}/approve`, { method: "POST", token })).status).toBe(404);
+  test("people join a household by invitation only", async () => {
+    // Nobody signs up without an invitation.
+    const signUp = (email: string, username: string, invitationId?: string) =>
+      server.request("/api/auth/sign-up/email", { method: "POST", json: { email, password: "bobs-password", name: username, username, invitationId } });
+    expect((await signUp("bob@example.com", "bob")).status).toBe(403);
+    const invited = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "bob@example.com", role: "member" } }));
+    expect(invited.id).toBeTruthy();
+    // Knowing the email isn't enough: the invitation's id (from its link) is.
+    expect((await signUp("bob@example.com", "bob")).status).toBe(403);
+    expect((await signUp("bob@example.com", "bob", invited.id)).status).toBe(200);
+    const bob = (await signIn("bob", "bobs-password")).token!;
+    expect((await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: bob, json: { invitationId: invited.id } })).status).toBe(200);
+    const me = await json(await server.request("/api/me", { token: bob }));
+    expect(me.household).toMatchObject({ role: "member" });
+    // Members watch; they don't run the household.
+    expect((await server.request("/api/home", { token: bob })).status).toBe(200);
+    expect((await server.request("/api/admin/settings", { token: bob })).status).toBe(403);
   });
 
-  test("admin lists devices and signs one out", async () => {
-    const other = (await json(await server.request("/api/auth/join", { method: "POST", ip: "192.168.2.50", json: { deviceName: "Bedroom TV" } }))).token;
-    const { items } = await json(await server.request("/api/admin/devices", { token }));
-    const tv = items.find((d: any) => d.deviceName === "Bedroom TV");
-    expect(tv).toMatchObject({ viewerOnly: true, isCurrent: false });
-    expect(items.find((d: any) => d.isCurrent)).toBeTruthy();
-    // Viewers can't see or manage devices.
-    expect((await server.request("/api/admin/devices", { token: other })).status).toBe(403);
-    // The admin can't sign out its own browser here, but can sign out the TV.
-    const self = items.find((d: any) => d.isCurrent);
-    expect((await server.request(`/api/admin/devices/${self.id}`, { method: "DELETE", token })).status).toBe(409);
-    expect((await server.request(`/api/admin/devices/${tv.id}`, { method: "DELETE", token })).status).toBe(200);
-    expect((await server.request("/api/me", { token: other })).status).toBe(401);
+  test("households don't see each other's library", async () => {
+    const mine = await server.services.households.get((await json(await server.request("/api/me", { token }))).household.id);
+    await mine.library.upsert({ provider: "local", ref: "/m/Only.Mine.2020.mkv", name: "Only.Mine.2020.mkv", size: 1, parsed: { title: "Only Mine", kind: "movie" } as never });
+    // The server admin opens a second household and invites its owner.
+    const other = await json(await server.request("/api/auth/organization/create", { method: "POST", token, json: { name: "The Neighbours", slug: "neighbours" } }));
+    await server.request("/api/auth/organization/set-active", { method: "POST", token, json: { organizationId: other.id } });
+    const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "carol@example.com", role: "owner", organizationId: other.id } }));
+    await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "carol@example.com", password: "carols-password", name: "carol", username: "carol", invitationId: invite.id } });
+    const carol = (await signIn("carol", "carols-password")).token!;
+    await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: carol, json: { invitationId: invite.id } });
+    await server.request("/api/auth/organization/set-active", { method: "POST", token: carol, json: { organizationId: other.id } });
+    const files = async (t: string) => (await json(await server.request("/api/admin/files", { token: t }))).items.map((f: any) => f.name);
+    expect(await files(carol)).toEqual([]);
+    // Back to the first household for the rest of the suite.
+    await server.request("/api/auth/organization/set-active", { method: "POST", token, json: { organizationId: mine.organizationId } });
+    expect(await files(token)).toContain("Only.Mine.2020.mkv");
+    await mine.library.markMissing("local", []);
   });
 
-  test("a Kids profile hides and refuses titles above its limit", async () => {
-    const kids = await json(await server.request("/api/profiles", { method: "POST", token, json: { name: "Little Ones", isKids: true } }));
-    expect(kids).toMatchObject({ isKids: true, contentLimit: "kids" });
-    // A separate device on the Kids profile.
-    const kidToken = (await json(await server.request("/api/auth/login", { method: "POST", json: { username: "sehal", password: "correct-horse" } }))).token;
-    await server.request(`/api/profiles/${kids.id}/select`, { method: "POST", token: kidToken, json: {} });
+  test("a TV signs in by code once a signed-in phone approves it, and can only watch", async () => {
+    const code = await json(await server.request("/api/auth/device/code", { method: "POST", json: { client_id: "strata-apple-tv" } }));
+    expect(code.user_code).toBeTruthy();
+    const poll = () => server.request("/api/auth/device/token", { method: "POST", json: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: code.device_code, client_id: "strata-apple-tv" } });
+    expect((await json(await poll())).error).toBe("authorization_pending");
+    // Only known apps may ask for a code.
+    expect((await server.request("/api/auth/device/code", { method: "POST", json: { client_id: "someone-else" } })).status).toBe(400);
+    // The phone opens the code (signed in), then approves it.
+    expect((await server.request(`/api/auth/device?user_code=${code.user_code}`, { token })).status).toBe(200);
+    expect((await server.request("/api/auth/device/approve", { method: "POST", token, json: { userCode: code.user_code } })).status).toBe(200);
+    await Bun.sleep(2_100); // the poll interval
+    const tv = (await json(await poll())).access_token;
+    expect(tv).toBeTruthy();
+    const me = await json(await server.request("/api/me", { token: tv }));
+    expect(me).toMatchObject({ viewerOnly: true, household: { role: "owner" } });
+    expect((await server.request("/api/home", { token: tv })).status).toBe(200);
+    expect((await server.request("/api/admin/settings", { token: tv })).status).toBe(403);
+  });
 
+  test("a kids' account hides and refuses titles above its limit", async () => {
+    const { members } = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const bobMember = members.find((m: any) => m.user.name === "bob");
+    expect((await json(await server.request(`/api/household/members/${bobMember.id}`, { method: "PATCH", token, json: { isKids: true } })))).toMatchObject({ isKids: true, contentLimit: "kids" });
+    const bob = (await signIn("bob", "bobs-password")).token!;
     const titles = async (t: string) => (await json(await server.request("/api/search?q=night", { token: t }))).items.map((i: any) => i.tmdbId);
-    expect(await titles(kidToken)).toEqual([10378]); // R-rated horror is gone; unrated family animation stays
-    expect((await server.request("/api/titles/movie/666", { token: kidToken })).status).toBe(403);
-    expect((await server.request("/api/play", { method: "POST", token: kidToken, json: { mediaType: "movie", tmdbId: 666 } })).status).toBe(403);
-    expect((await server.request("/api/titles/movie/10378", { token: kidToken })).status).toBe(200);
-    // Other profiles are unaffected.
+    expect(await titles(bob)).toEqual([10378]); // R-rated horror is gone; unrated family animation stays
+    expect((await server.request("/api/titles/movie/666", { token: bob })).status).toBe(403);
+    expect((await server.request("/api/play", { method: "POST", token: bob, json: { mediaType: "movie", tmdbId: 666 } })).status).toBe(403);
+    expect((await server.request("/api/titles/movie/10378", { token: bob })).status).toBe(200);
+    // Other accounts are unaffected.
     expect(await titles(token)).toEqual([666, 10378]);
-    await server.request(`/api/profiles/${kids.id}`, { method: "DELETE", token });
   });
 
   test("launcher proof: only with the launch secret, only from loopback", async () => {
@@ -104,18 +128,7 @@ describe("setup and auth", () => {
     expect((await ask("192.168.2.40")).status).toBe(404);
   });
 
-  test("PIN-protected profile", async () => {
-    const created = await json(await server.request("/api/profiles", { method: "POST", token, json: { name: "Kids", pin: "1234" } }));
-    expect(created.hasPin).toBe(true);
-    const wrong = await server.request(`/api/profiles/${created.id}/select`, { method: "POST", token, json: { pin: "0000" } });
-    expect(wrong.status).toBe(403);
-    const right = await server.request(`/api/profiles/${created.id}/select`, { method: "POST", token, json: { pin: "1234" } });
-    expect(right.status).toBe(200);
-    // Back to the main profile for the rest of the suite.
-    await server.request(`/api/profiles/1/select`, { method: "POST", token, json: {} });
-  });
-
-  test("home-network devices join without a password, as viewers", async () => {
+  test("home-network devices join without a password, as a member they pick, to watch", async () => {
     const info = async (init: { ip?: string; headers?: Record<string, string> }) => (await json(await server.request("/api/info", init))).localJoin;
     expect(await info({ ip: "192.168.2.40" })).toBe(true);
     expect(await info({ ip: "::ffff:10.0.0.7" })).toBe(true);
@@ -128,31 +141,16 @@ describe("setup and auth", () => {
     expect(await info({ ip: "192.168.2.40", headers: { Host: "rebind.evil.example:8420" } })).toBe(false);
     expect(await info({ ip: "192.168.2.40", headers: { Host: "strata.local:8420" } })).toBe(true);
 
-    expect((await server.request("/api/auth/join", { method: "POST", ip: "203.0.113.9", json: {} })).status).toBe(403);
-    const joined = await server.request("/api/auth/join", { method: "POST", ip: "192.168.2.40", json: { deviceName: "Living Room" } });
-    expect(joined.status).toBe(200);
-    const viewer = (await json(joined)).token;
-
-    // Two profiles now, one with a PIN: the device picks, and the PIN still applies.
-    expect((await json(await server.request("/api/me", { token: viewer }))).profile).toBeNull();
-    const kids = (await json(await server.request("/api/profiles", { token: viewer }))).find((p: any) => p.name === "Kids");
-    expect((await server.request(`/api/profiles/${kids.id}/select`, { method: "POST", token: viewer, json: {} })).status).toBe(403);
-    expect((await server.request(`/api/profiles/${kids.id}/select`, { method: "POST", token: viewer, json: { pin: "1234" } })).status).toBe(200);
-
-    // Watching yes, administering no.
-    expect((await server.request("/api/home", { token: viewer })).status).toBe(200);
-    expect((await server.request("/api/admin/settings", { token: viewer })).status).toBe(403);
-    expect((await json(await server.request("/api/me", { token: viewer }))).user.isAdmin).toBe(false);
-
-    // Rate limited per address.
-    let last = 200;
-    for (let i = 0; i < 12; i++) last = (await server.request("/api/auth/join", { method: "POST", ip: "192.168.2.77", json: {} })).status;
-    expect(last).toBe(429);
-
-    // The admin can switch it off.
-    await server.request("/api/admin/settings", { method: "PATCH", token, json: { localJoin: false } });
-    expect((await server.request("/api/auth/join", { method: "POST", ip: "192.168.2.40", json: {} })).status).toBe(403);
-    await server.request("/api/admin/settings", { method: "PATCH", token, json: { localJoin: true } });
+    expect((await server.request("/api/join", { method: "POST", ip: "203.0.113.9", json: {} })).status).toBe(403);
+    const choices = await json(await server.request("/api/join", { method: "POST", ip: "192.168.2.40", json: {} }));
+    expect(choices.members.map((m: any) => m.name)).toEqual(["sehal", "bob"]);
+    const bobId = choices.members.find((m: any) => m.name === "bob").id;
+    const joined = await json(await server.request("/api/join", { method: "POST", ip: "192.168.2.40", json: { userId: bobId } }));
+    const me = await json(await server.request("/api/me", { token: joined.token }));
+    expect(me).toMatchObject({ viewerOnly: true, user: { username: "bob" } });
+    expect((await server.request("/api/home", { token: joined.token })).status).toBe(200);
+    // Someone outside the household can't be picked.
+    expect((await server.request("/api/join", { method: "POST", ip: "192.168.2.40", json: { userId: "not-a-member" } })).status).toBe(404);
   });
 });
 
@@ -230,8 +228,8 @@ describe("playback", () => {
     const nextFile = (await json(await server.request("/api/sources?mediaType=episode&tmdbId=9001&season=1&episode=2", { token }))).items[0];
     // Sources carry the labels the apps show as they are.
     expect(nextFile).toMatchObject({ availability: "ready", originLabel: "Library", label: expect.any(String) });
-    for (let i = 0; i < 50 && !(await server.services.library.get(nextFile.fileId))?.probeJson; i++) await Bun.sleep(100);
-    expect((await server.services.library.get(nextFile.fileId))?.probeJson).toBeTruthy();
+    for (let i = 0; i < 50 && !(await (await server.household()).library.get(nextFile.fileId))?.probeJson; i++) await Bun.sleep(100);
+    expect((await (await server.household()).library.get(nextFile.fileId))?.probeJson).toBeTruthy();
     const res = await server.request(play.url, { headers: { Range: "bytes=0-99" } });
     expect(res.status).toBe(206);
     expect(res.headers.get("content-range")).toMatch(/^bytes 0-99\//);

@@ -30,6 +30,9 @@ export function createApp(services: Services) {
 
   app.use("/api/*", gzipJson());
 
+  // Accounts, sign-in, households, members, invitations, TV codes (Better Auth).
+  app.on(["GET", "POST"], "/api/auth/*", (c) => services.auth.handler(c.req.raw));
+
   // Order matters: catalogRoutes applies requireAuth to everything it sees under /api,
   // so the public and stream routes must be registered first.
   app.route("/api", authRoutes);

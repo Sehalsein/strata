@@ -2,10 +2,12 @@ import { randomInt } from "node:crypto";
 import { sql } from "drizzle-orm";
 import type { Db } from "./db";
 import { rowsOf } from "./db";
-import { hashToken, safeEqual } from "./auth";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { logger } from "./log";
 
 const log = logger("setup");
+const hashToken = (value: string) => createHash("sha256").update(value).digest("hex");
+const safeEqual = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
 /**

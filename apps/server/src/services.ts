@@ -2,44 +2,35 @@ import { sql } from "drizzle-orm";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { Auth } from "./auth";
-import { CatalogService } from "./catalog/service";
-import { CalendarService } from "./catalog/calendar";
-import { Matcher } from "./catalog/matcher";
+import { createAuth, type Auth } from "./auth/betterAuth";
 import { Tmdb } from "./catalog/tmdb";
 import { Omdb } from "./catalog/omdb";
 import { dataPaths, type DataPaths, type RuntimeConfig } from "./config";
 import { closeDatabase, openDatabase, rowsOf, type Db } from "./db";
+import { organization, user } from "./db/schema";
 import { ApiCache } from "./catalog/apiCache";
 import { Throttle } from "./throttle";
 import { announceSetupCode } from "./setupCode";
 import { isCloud, MODE } from "./mode";
 import { Jobs } from "./jobs";
-import { Library } from "./library";
 import { logger, setLogDir } from "./log";
-import { PlaybackService } from "./playback/service";
 import { SessionManager } from "./playback/sessions";
 import { detectFfmpeg, type FfmpegInfo } from "./platform/ffmpeg";
 import { installFfmpeg, type FfmpegSetup } from "./platform/ffmpegInstall";
 import { KeepAwake } from "./platform/keepAwake";
 import { ProgressStore } from "./progress";
-import { ContentFilter } from "./catalog/contentRating";
 import { Anilist } from "./catalog/anime/anilist";
 import { Kitsu } from "./catalog/anime/kitsu";
 import { AnimeIds, cachedAnimeIdStore, fileAnimeIdStore } from "./catalog/anime/ids";
-import { AnimeMatcher } from "./catalog/anime/match";
-import { TorboxHousekeeping } from "./sources/torbox/cleanup";
-import { DeviceLinks } from "./deviceLink";
 import { SecretBox } from "./secrets";
-import { SettingsStore } from "./settings";
+import { serverSettingsSchema, SERVER_SECRET_KEYS, SettingsStore, type ServerSettingsStore } from "./settings";
 import { scanLocal } from "./sources/local/scanner";
-import { TorboxClient } from "./sources/torbox/client";
 import { parseTorboxRef, syncTorbox } from "./sources/torbox/sync";
-import { Discovery } from "./sources/discovery";
 import { SubtitleService } from "./playback/subtitles";
 import { Bonjour } from "./platform/bonjour";
 import { createUpdater, type Updater } from "./update";
 import { API_VERSION, VERSION } from "./version";
+import { Households, type Household } from "./household";
 
 const log = logger("server");
 const MINUTE = 60_000;
@@ -48,21 +39,17 @@ export interface Services {
   config: RuntimeConfig;
   paths: DataPaths;
   db: Db;
-  settings: SettingsStore;
+  /** The server's own settings and the TMDB/OMDb keys (households have their own). */
+  settings: ServerSettingsStore;
+  /** Accounts, sign-in and households (Better Auth). */
   auth: Auth;
+  households: Households;
   throttle: Throttle;
   cache: ApiCache;
-  deviceLinks: DeviceLinks;
-  tmdb: Tmdb;
+  tmdb: (language: string) => Tmdb;
   omdb: Omdb;
-  library: Library;
   progress: ProgressStore;
-  catalog: CatalogService;
-  calendar: CalendarService;
-  content: ContentFilter;
   sessions: SessionManager;
-  playback: PlaybackService;
-  discovery: Discovery;
   subtitles: SubtitleService;
   jobs: Jobs;
   /** Stable per-install id (advertised over Bonjour, returned by /api/info). */
@@ -72,7 +59,10 @@ export interface Services {
   ffmpeg: () => FfmpegInfo | null;
   /** The one-time ffmpeg download, when the server had to set ffmpeg up itself. */
   ffmpegSetup: () => FfmpegSetup;
-  torbox: () => TorboxClient | null;
+  /** Whether any account exists (setup has run). */
+  hasAccounts: () => Promise<boolean>;
+  /** Every household's id. */
+  householdIds: () => Promise<string[]>;
   startedAt: number;
   shutdown: () => void;
 }
@@ -87,76 +77,93 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   setLogDir(paths.logs);
   const db = await openDatabase(config.databaseUrl ?? paths.db);
   const box = SecretBox.load(isCloud ? null : paths.secretKey);
-  const settings = new SettingsStore(db, box);
+  const settings = new SettingsStore(db, box, serverSettingsSchema, SERVER_SECRET_KEYS);
   await settings.load();
-  // Other servers on the same database may change settings (the cloud runs any number).
-  if (isCloud) settings.watch();
   const fetchImpl = overrides.fetch ?? fetch;
   const cache = new ApiCache(db);
   const throttle = new Throttle(db);
-  const auth = new Auth(db, throttle);
-  if (!(await auth.hasAnyUser())) await announceSetupCode(db);
+  const auth = createAuth({ db, secretKey: box.signingKey(), baseURL: process.env.STRATA_PUBLIC_URL || undefined });
+  const hasAccounts = async () => (await db.select({ id: user.id }).from(user).limit(1)).length > 0;
+  const householdIds = async () => (await db.select({ id: organization.id }).from(organization)).map((o) => o.id);
+  if (!(await hasAccounts())) await announceSetupCode(db);
 
-  let ffmpegInfo = overrides.ffmpeg !== undefined ? overrides.ffmpeg : await detectFfmpeg(paths.root);
+  let ffmpegInfo = overrides.ffmpeg !== undefined ? overrides.ffmpeg : isCloud ? null : await detectFfmpeg(paths.root);
   const ffmpeg = () => ffmpegInfo;
 
-  let torboxClient: { key: string; client: TorboxClient } | undefined;
-  const torbox = () => {
-    const key = settings.getSecret("torboxApiKey");
-    if (!key) return null;
-    if (torboxClient?.key !== key) torboxClient = { key, client: new TorboxClient(key, fetchImpl) };
-    return torboxClient.client;
+  // TMDB answers are cached for every household; each language gets its own client.
+  const tmdbByLanguage = new Map<string, Tmdb>();
+  const tmdb = (language: string) => {
+    let client = tmdbByLanguage.get(language);
+    if (!client) tmdbByLanguage.set(language, (client = new Tmdb(cache, () => settings.getSecret("tmdbApiKey"), () => language, fetchImpl)));
+    return client;
   };
-
-  const tmdb = new Tmdb(cache, () => settings.getSecret("tmdbApiKey"), () => settings.get().language, fetchImpl);
   const omdb = new Omdb(cache, () => settings.getSecret("omdbApiKey"), fetchImpl);
-  const animeIds = new AnimeIds(isCloud ? cachedAnimeIdStore(cache) : fileAnimeIdStore(join(paths.root, "cache")), fetchImpl);
-  const anilist = new Anilist(cache, fetchImpl);
-  const kitsu = new Kitsu(cache, fetchImpl);
-  const library = new Library(db, tmdb, new Matcher(tmdb, new AnimeMatcher(anilist, animeIds, tmdb, kitsu)));
+  const anime = {
+    ids: new AnimeIds(isCloud ? cachedAnimeIdStore(cache) : fileAnimeIdStore(join(paths.root, "cache")), fetchImpl),
+    anilist: new Anilist(cache, fetchImpl),
+    kitsu: new Kitsu(cache, fetchImpl),
+  };
   const progress = new ProgressStore(db);
-  const catalog = new CatalogService(tmdb, library, progress, () => settings.get(), { ids: animeIds, anilist, kitsu }, omdb);
-  const content = new ContentFilter(db, tmdb, () => settings.get());
-  const calendar = new CalendarService(tmdb, library, progress, { ids: animeIds, anilist }, (profileId, id) => content.allowed(profileId, "show", id));
   const sessions = new SessionManager(
     db,
     isCloud ? null : { transcodeDir: paths.transcode, getFfmpeg: ffmpeg, keepAwake: new KeepAwake(), maxTranscodes: () => settings.get().maxTranscodes, hwAllowed: () => settings.get().hardwareAcceleration },
   );
   const subtitles = new SubtitleService(join(paths.root, "cache", "subtitles"), ffmpeg);
-  const housekeeping = new TorboxHousekeeping(db, library);
-  const discovery = new Discovery(tmdb, library, () => settings.get(), torbox, fetchImpl, (id, hash, name) => housekeeping.recordAdded(id, hash, name), animeIds);
-  const playback = new PlaybackService(library, sessions, progress, () => settings.get(), ffmpeg, torbox, discovery, (id, s, e) => catalog.nextEpisode(id, s, e), (id) => housekeeping.recordPlayed(id));
+  const households = new Households({ db, box, serverSettings: settings, tmdb, omdb, anime, progress, sessions, ffmpeg, fetch: fetchImpl });
+
+  /** Runs `fn` for every household, one after another; a failing one doesn't stop the rest. */
+  const eachHousehold = async (what: string, fn: (h: Household) => Promise<unknown>) => {
+    let done = 0;
+    for (const id of await householdIds()) {
+      try {
+        await fn(await households.get(id));
+        done++;
+      } catch (err) {
+        log.warn(`${what} failed for household ${id.slice(0, 8)}`, err);
+      }
+    }
+    return { households: done };
+  };
 
   const jobs = new Jobs();
-  jobs.register("scanLocal", (report) => scanLocal(library, settings.get().mediaFolders, report));
-  jobs.register("syncTorbox", async (report) => {
-    const client = torbox();
-    if (!client) return { skipped: "TorBox not configured" };
-    return syncTorbox(client, library, report);
-  });
-  jobs.register("matchPending", (report) => library.matchPending((d, t) => report(d, t, "Matching titles")));
+  jobs.register("scanLocal", () => eachHousehold("Scanning folders", (h) => scanLocal(h.library, h.settings().mediaFolders, () => {})));
+  // Each household with a key, at most every `torboxSyncMinutes` (the job itself runs every 15).
+  const lastSync = new Map<string, number>();
+  jobs.register("syncTorbox", () =>
+    eachHousehold("TorBox sync", async (h) => {
+      const client = h.torbox();
+      const every = h.settings().torboxSyncMinutes * MINUTE;
+      if (!client || every === 0 || Date.now() - (lastSync.get(h.organizationId) ?? 0) < every - MINUTE) return;
+      lastSync.set(h.organizationId, Date.now());
+      await syncTorbox(client, h.library, () => {});
+      await h.library.matchPending();
+    }),
+  );
+  jobs.register("matchPending", () => eachHousehold("Matching", (h) => h.library.matchPending()));
   jobs.register("refreshAnimeIds", async () => {
-    await animeIds.ready();
-    return { entries: animeIds.size };
+    await anime.ids.ready();
+    return { entries: anime.ids.size };
   });
-  jobs.register("cleanTorbox", async () => {
-    const client = torbox();
-    if (!client) return { skipped: "TorBox not configured" };
-    // Never pull a torrent out from under something that's streaming it (checked per torrent).
-    const streaming = async (id: number) => {
-      for (const s of await sessions.list()) {
-        const ref = (await library.get(s.fileId))?.ref;
-        if (ref?.startsWith("torrents:") && parseTorboxRef(ref).itemId === id) return true;
-      }
-      return false;
-    };
-    return housekeeping.clean(client, settings.get().torboxCleanupDays, streaming);
-  });
+  jobs.register("cleanTorbox", () =>
+    eachHousehold("TorBox cleanup", async (h) => {
+      const client = h.torbox();
+      if (!client) return;
+      // Never pull a torrent out from under something that's streaming it (checked per torrent).
+      const streaming = async (id: number) => {
+        for (const s of await sessions.list()) {
+          if (s.organizationId !== h.organizationId) continue;
+          const ref = (await h.library.get(s.fileId))?.ref;
+          if (ref?.startsWith("torrents:") && parseTorboxRef(ref).itemId === id) return true;
+        }
+        return false;
+      };
+      await h.housekeeping.clean(client, h.settings().torboxCleanupDays, streaming);
+    }),
+  );
   // Catalog answers (TMDB, Kitsu, AniList) a month unused are only taking space.
   jobs.register("pruneCatalogCache", async () => ({ removed: await cache.prune() }));
-  // Expired sign-ins and old failed-attempt counts.
+  // Plays long over and old failed-attempt counts (Better Auth expires its own sessions).
   jobs.register("pruneAuth", async () => {
-    await auth.prune();
     await sessions.prune();
     await throttle.prune();
     return {};
@@ -197,25 +204,10 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   });
   settings.onChange(() => bonjour.refresh());
 
-  const applySchedule = () => {
-    const s = settings.get();
-    if (!isCloud) jobs.schedule("scanLocal", s.scanIntervalMinutes * MINUTE, 5_000);
-    jobs.schedule("syncTorbox", s.torboxSyncMinutes * MINUTE, 8_000);
-  };
-  let scheduled = { scan: -1, sync: -1, folders: "" };
-  settings.onChange((s) => {
-    const folders = JSON.stringify(s.mediaFolders);
-    // Only reschedule (and kick a run) when something relevant changed.
-    if (scheduled.scan !== s.scanIntervalMinutes || scheduled.sync !== s.torboxSyncMinutes || scheduled.folders !== folders) {
-      if (scheduled.folders !== folders && scheduled.folders !== "") void jobs.run("scanLocal");
-      scheduled = { scan: s.scanIntervalMinutes, sync: s.torboxSyncMinutes, folders };
-      applySchedule();
-    }
-  });
-  const initial = settings.get();
-  scheduled = { scan: initial.scanIntervalMinutes, sync: initial.torboxSyncMinutes, folders: JSON.stringify(initial.mediaFolders) };
+  // In-process timers on Bun; Cron Triggers run the same jobs on Workers (src/worker.ts).
   if (process.env.STRATA_NO_JOBS !== "1") {
-    applySchedule();
+    if (!isCloud) jobs.schedule("scanLocal", Math.max(1, settings.get().scanIntervalMinutes) * MINUTE, 5_000);
+    jobs.schedule("syncTorbox", 15 * MINUTE, 8_000);
     // The cloud image is updated by deploying a new one.
     if (!isCloud) jobs.schedule("checkUpdates", 6 * 60 * MINUTE, 60_000);
     jobs.schedule("pruneAuth", 24 * 60 * MINUTE, 5 * MINUTE);
@@ -233,7 +225,10 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   };
   log.info(`Running as a ${MODE} server`);
 
-  return { config, paths, db, settings, auth, throttle, cache, deviceLinks: new DeviceLinks(db, box), tmdb, omdb, library, progress, catalog, calendar, content, sessions, playback, discovery, subtitles, jobs, serverId, bonjour, updater, ffmpeg, ffmpegSetup: () => ffmpegSetup, torbox, startedAt: Date.now(), shutdown };
+  return {
+    config, paths, db, settings, auth, households, throttle, cache, tmdb, omdb, progress, sessions, subtitles, jobs, serverId, bonjour, updater, ffmpeg,
+    ffmpegSetup: () => ffmpegSetup, hasAccounts, householdIds, startedAt: Date.now(), shutdown,
+  };
 }
 
 /**

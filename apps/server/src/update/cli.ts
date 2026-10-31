@@ -3,7 +3,7 @@ import { closeDatabase, openDatabase } from "../db";
 import { compiledBinaryPath } from "../platform/runtime";
 import { restartService } from "../platform/service";
 import { SecretBox } from "../secrets";
-import { SettingsStore } from "../settings";
+import { serverSettingsSchema, SERVER_SECRET_KEYS, SettingsStore } from "../settings";
 import { createUpdater } from "./index";
 
 /**
@@ -17,7 +17,7 @@ export async function updateCli(argv: string[]): Promise<number> {
   const paths = dataPaths(config.dataDir);
   const db = await openDatabase(config.databaseUrl ?? paths.db);
   try {
-    const settings = new SettingsStore(db, SecretBox.load(paths.secretKey));
+    const settings = new SettingsStore(db, SecretBox.load(paths.secretKey), serverSettingsSchema, SERVER_SECRET_KEYS);
     await settings.load();
     const updater = createUpdater({ dataDir: paths.root, dbPath: paths.db, backupsDir: paths.backups, db, settings, activeSessions: () => 0 });
     let status;

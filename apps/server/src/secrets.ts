@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 /**
@@ -25,6 +25,11 @@ export class SecretBox {
     const key = Buffer.from(value.trim(), "base64");
     if (key.length !== 32) throw new Error(`The secret key in ${source} must be 32 bytes, base64-encoded.`);
     return new SecretBox(key);
+  }
+
+  /** A separate key for signing (Better Auth's secret), derived so the sealing key never leaves here. */
+  signingKey(): Buffer {
+    return createHmac("sha256", this.key).update("strata/signing").digest();
   }
 
   /** Seals `plain`, bound to `context` (the setting's name). */

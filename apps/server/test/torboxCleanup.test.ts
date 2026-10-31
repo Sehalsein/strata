@@ -1,20 +1,23 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { TorboxHousekeeping } from "../src/sources/torbox/cleanup";
 import { TorboxError, type TorboxClient } from "../src/sources/torbox/client";
-import { startTestServer, type TestServer } from "./helpers";
+import { setUp, startTestServer, type TestServer } from "./helpers";
+import type { Household } from "../src/household";
 
 const DAY = 24 * 60 * 60_000;
 let server: TestServer;
+let household: Household;
 
 beforeAll(async () => {
   server = await startTestServer();
+  household = (await setUp(server)).household;
 });
 afterAll(() => server.services.shutdown());
 
 describe("TorBox housekeeping", () => {
   test("removes only releases Strata added that nobody played for the configured days", async () => {
     let now = 100 * DAY;
-    const hk = new TorboxHousekeeping(server.services.db, server.services.library, () => now);
+    const hk = new TorboxHousekeeping(server.services.db, household.organizationId, household.library, () => now);
     const at = (daysAgo: number) => (now = 100 * DAY - daysAgo * DAY);
 
     at(20); await hk.recordAdded(1, "a".repeat(40), "Stale");
@@ -48,7 +51,7 @@ describe("TorBox housekeeping", () => {
   });
 
   test("0 days keeps everything", async () => {
-    const hk = new TorboxHousekeeping(server.services.db, server.services.library, () => 1_000 * DAY);
+    const hk = new TorboxHousekeeping(server.services.db, household.organizationId, household.library, () => 1_000 * DAY);
     const client = { deleteTorrent: async () => { throw new Error("should not be called"); } } as unknown as TorboxClient;
     expect(await hk.clean(client, 0, () => false)).toEqual({ removed: 0, skipped: "cleanup is off" });
   });
