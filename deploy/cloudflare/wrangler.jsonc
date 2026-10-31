@@ -3,6 +3,8 @@
 //   npx wrangler secret put DATABASE_URL        # Neon's connection string
 //   npx wrangler secret put STRATA_SECRET_KEY   # openssl rand -base64 32 (keep it safe)
 //   npx wrangler deploy
+// Optional secrets: RESEND_API_KEY (password-reset email), GOOGLE_CLIENT_ID and
+// GOOGLE_CLIENT_SECRET (Sign in with Google), SENTRY_DSN (error reports).
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "strata",
@@ -20,7 +22,15 @@
   "triggers": { "crons": ["*/15 * * * *", "17 4 * * *"] },
   "limits": { "cpu_ms": 30000 },
   "observability": { "enabled": true },
+  // The Worker answers at this address (Cloudflare makes the DNS record and certificate;
+  // sehalsein.com must be a zone in the same Cloudflare account).
+  "routes": [{ "pattern": "strata.sehalsein.com", "custom_domain": true }],
   "vars": {
-    // "STRATA_PUBLIC_URL": "https://strata.example.com"
+    // Also, when you're ready (see README.md):
+    //   "STRATA_EMAIL_FROM": "Strata <no-reply@sehalsein.com>",
+    //   "STRATA_OPERATOR": "Sehal Sein",
+    //   "STRATA_PRIVACY_CONTACT": "privacy@sehalsein.com",
+    // Passkeys, Google's callback, email links and the apps' QR codes all use this address.
+    "STRATA_PUBLIC_URL": "https://strata.sehalsein.com"
   }
 }
