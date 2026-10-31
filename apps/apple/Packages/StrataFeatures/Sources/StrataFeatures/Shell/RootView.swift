@@ -28,6 +28,8 @@ public struct RootView: View {
                 #endif
             } else if !services.store.isSignedIn {
                 WhoIsWatchingView()
+            } else if services.store.active?.mustChangePassword == true {
+                ChooseNewPasswordView()
             } else if services.store.needsHousehold {
                 HouseholdPickerView()
             } else {

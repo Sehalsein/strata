@@ -42,6 +42,8 @@ public struct SavedSignIn: Codable, Sendable, Hashable, Identifiable {
     /// Signed in without a password (a home-network join, a TV): can watch, not administer.
     public var viewerOnly: Bool
     public var isServerAdmin: Bool
+    /// Signed in with a temporary password from an admin: a new one comes first.
+    public var mustChangePassword: Bool?
 
     public init(serverID: String, userID: String, username: String?, name: String, household: Household? = nil,
                 viewerOnly: Bool = false, isServerAdmin: Bool = false) {
@@ -624,5 +626,6 @@ extension SavedSignIn {
         household = me.household
         viewerOnly = me.viewerOnly
         isServerAdmin = me.user.isServerAdmin
+        mustChangePassword = me.mustChangePassword
     }
 }

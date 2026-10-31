@@ -102,6 +102,9 @@ public struct Me: Codable, Sendable, Hashable {
     public var viewerOnly: Bool
     /// The active household; nil until one is chosen (requests then answer 409).
     public var household: Household?
+    /// Signed in with a temporary password from an admin: until a new one is chosen, the
+    /// server answers nothing else. Absent from older servers.
+    public var mustChangePassword: Bool?
 
     public init(user: User, viewerOnly: Bool = false, household: Household? = nil) {
         self.user = user
