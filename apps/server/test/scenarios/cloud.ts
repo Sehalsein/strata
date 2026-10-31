@@ -36,6 +36,10 @@ try {
   // A made-up invitation still opens nothing.
   expect((await signUp("cat@example.com", "cat", "not-an-invitation")).status).toBe(403);
 
+  // A picture from elsewhere (Google's, say) isn't kept: profile pictures are the server's own.
+  const dee = await server.request("/api/auth/sign-up/email", { method: "POST", ip: "203.0.113.200", json: { email: "dee@example.com", password: "a-good-password", name: "dee", username: "dee", image: "https://example.com/me.png" } });
+  expect((await json(await server.request("/api/me", { token: dee.headers.get("set-auth-token")! }))).user.image).toBeNull();
+
   // The emails in STRATA_ADMIN_EMAILS run the server.
   const boss = await signUp("Boss@Example.com", "boss");
   const bossMe = await json(await server.request("/api/me", { token: boss.headers.get("set-auth-token")! }));

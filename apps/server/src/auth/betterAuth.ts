@@ -208,10 +208,16 @@ export function createAuth(options: AuthOptions) {
       after: createAuthMiddleware(async (ctx) => {
         const adapter = ctx.context.internalAdapter;
         // Cloud: a new account without an invitation owns a new household, named after them
-        // (onboarding lets them rename it), and the sign-in opens in it.
-        if (ctx.path === "/sign-up/email") {
+        // (onboarding lets them rename it), and the sign-in opens in it. By password, or by
+        // Google: its first sign-in (an account in no household yet, just made).
+        if (ctx.path === "/sign-up/email" || ctx.path === "/callback/:id") {
           const created = ctx.context.newSession;
           if (!isCloud || !created || (ctx.body as { invitationId?: unknown } | undefined)?.invitationId) return;
+          if (ctx.path === "/callback/:id") {
+            const isNew = Date.now() - new Date(created.user.createdAt).getTime() < 10 * 60_000;
+            const [inOne] = await db.select({ id: schema.member.id }).from(schema.member).where(eq(schema.member.userId, created.user.id)).limit(1);
+            if (!isNew || inOne) return;
+          }
           const household = await auth.api.createOrganization({
             body: { name: `${created.user.name}'s home`, slug: `home-${crypto.randomUUID().slice(0, 8)}`, userId: created.user.id },
           });
@@ -277,9 +283,11 @@ export function createAuth(options: AuthOptions) {
     databaseHooks: {
       user: {
         create: {
-          // Cloud: the server's admins are named by email (STRATA_ADMIN_EMAILS).
+          // Cloud: the server's admins are named by email (STRATA_ADMIN_EMAILS). A picture
+          // from elsewhere (Google's) isn't kept: profile pictures are the server's own.
           before: async (user) => {
-            if (isAdminEmail(user.email)) return { data: { ...user, role: "admin" } };
+            const image = user.image != null && !isAvatarImage(user.image) ? null : user.image;
+            return { data: { ...user, image, ...(isAdminEmail(user.email) ? { role: "admin" } : {}) } };
           },
         },
         delete: {
@@ -347,10 +355,11 @@ export function createAuth(options: AuthOptions) {
         rateLimit: schema.rateLimit,
       },
     }),
-    // Google signs in only an account that connected it while signed in (Settings ›
-    // Account): it never makes an account, nor joins one by matching email (many Strata
-    // accounts have none), and the Google address needn't be the account's.
-    socialProviders: methods.google ? { google: { ...methods.google, disableSignUp: true, disableImplicitSignUp: true } } : {},
+    // Home servers: Google signs in only an account that connected it while signed in
+    // (Settings › Account): it never makes an account. Cloud: it also signs up, like the
+    // Create account form. Neither joins an account by matching email (many Strata accounts
+    // have none), and the Google address needn't be the account's.
+    socialProviders: methods.google ? { google: { ...methods.google, disableSignUp: !isCloud, disableImplicitSignUp: !isCloud } } : {},
     account: {
       accountLinking: { enabled: true, disableImplicitLinking: true, allowDifferentEmails: true },
     },

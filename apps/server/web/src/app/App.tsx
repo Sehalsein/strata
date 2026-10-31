@@ -33,7 +33,13 @@ export function App() {
   const info = useQuery({ queryKey: queryKeys.info, queryFn: api.info, staleTime: Infinity, retry: false, refetchOnWindowFocus: false });
   const me = useQuery({ queryKey: queryKeys.me, queryFn: authClient.getMe, staleTime: Infinity, retry: false, refetchOnWindowFocus: false, enabled: info.data?.setupRequired === false });
   // Mid-wizard (signed in, steps left): set by the account step, or read back after a reload.
-  const [inWizardState, setInWizard] = useState(false);
+  const [inWizardState, setInWizard] = useState(() => {
+    // Back from signing up with Google (cloud): onboarding, from its first step.
+    if (!new URLSearchParams(window.location.search).has("welcome")) return false;
+    history.replaceState(null, "", window.location.pathname);
+    storeStep(0);
+    return true;
+  });
   const [wizardDismissed, setWizardDismissed] = useState(false);
   const inWizard = inWizardState || (!wizardDismissed && !!me.data && wizardInProgress(info.data?.mode === "cloud"));
   const [addingAccount, setAddingAccount] = useState(false);

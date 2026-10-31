@@ -2,7 +2,8 @@ import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { KeyRound, LoaderCircle } from "lucide-react";
 import { api, ApiError, errorMessage } from "@/lib/api";
-import { queryKeys } from "@/lib/query";
+import { queryClient, queryKeys } from "@/lib/query";
+import type { ServerInfo } from "@/lib/types";
 import { authClient } from "@/lib/auth-client";
 import { BrandMark } from "@/components/brand-mark";
 import { PosterWall } from "@/components/poster-wall";
@@ -11,7 +12,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { FieldGroup, FormField } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function LoginPage({
   serverName,
@@ -29,7 +29,7 @@ export default function LoginPage({
   onCancel?: () => void;
 }) {
   const info = useQuery({ queryKey: queryKeys.info, queryFn: api.info, staleTime: 60_000 });
-  const [tab, setTab] = useState(() => (window.location.pathname === "/signup" ? "create" : "signin"));
+  const [creating, setCreating] = useState(() => window.location.pathname === "/signup");
   const signUp = !!info.data?.signIn?.signUp && !adding && !!onAccountCreated;
   const named = serverName && serverName !== "Strata" ? serverName : null;
   return (
@@ -38,27 +38,20 @@ export default function LoginPage({
         <AuthHeading title="Add an account" description="Sign in with another account. Switch between them from the account menu." />
       ) : signUp ? (
         <AuthHeading
-          title={tab === "create" ? "Create your account" : "Welcome back"}
-          description={tab === "create" ? "Set up your own household in a few minutes." : "Sign in to run your household."}
+          title={creating ? "Create your account" : "Welcome back"}
+          description={creating ? "Set up your own household in a few minutes." : "Sign in to run your household."}
         />
       ) : (
         <AuthHeading title={named ?? "Welcome back"} description={named ? "Sign in with your Strata account." : "Sign in to run your household."} />
       )}
-      {signUp ? (
-        <Tabs value={tab} onValueChange={setTab} className="gap-6">
-          <TabsList className="h-10 w-full">
-            <TabsTrigger value="signin">Sign in</TabsTrigger>
-            <TabsTrigger value="create">Create account</TabsTrigger>
-          </TabsList>
-          <TabsContent value="signin">
-            <SignInForm onSignedIn={onSignedIn} />
-          </TabsContent>
-          <TabsContent value="create">
-            <CreateAccountForm onCreated={onAccountCreated!} />
-          </TabsContent>
-        </Tabs>
-      ) : (
-        <SignInForm onSignedIn={onSignedIn} onCancel={onCancel} />
+      {signUp && creating ? <CreateAccountForm onCreated={onAccountCreated!} /> : <SignInForm onSignedIn={onSignedIn} onCancel={onCancel} />}
+      {signUp && (
+        <p className="text-muted-foreground text-center text-sm">
+          {creating ? "Already have an account? " : "New to Strata? "}
+          <button type="button" className="text-foreground font-medium underline-offset-4 hover:underline" onClick={() => setCreating(!creating)}>
+            {creating ? "Sign in" : "Create an account"}
+          </button>
+        </p>
       )}
       <p className="text-muted-foreground text-xs">
         {signUp && "Joining someone's household? Open the invitation link they sent you. "}
@@ -128,7 +121,13 @@ export function SignInForm({ onSignedIn, onCancel, submitLabel = "Sign in" }: { 
     // Back from Google without a sign-in (an account that hasn't connected it, say).
     if (!new URLSearchParams(window.location.search).has("auth_error")) return null;
     history.replaceState(null, "", window.location.pathname);
-    return { message: "That Google account isn't connected to a Strata account. Sign in with your password, then connect Google from the account menu.", rateLimited: false };
+    return {
+      message:
+        queryClient.getQueryData<ServerInfo>(queryKeys.info)?.signIn?.signUp
+          ? "Couldn't sign in with Google. If you already have an account with that email, sign in with your password, then connect Google from the account menu."
+          : "That Google account isn't connected to a Strata account. Sign in with your password, then connect Google from the account menu.",
+      rateLimited: false,
+    };
   });
   const [pending, setPending] = useState(false);
   const [other, setOther] = useState<"google" | "passkey" | null>(null);
@@ -233,6 +232,19 @@ function CreateAccountForm({ onCreated }: { onCreated: () => void }) {
   const emailError = touched && !EMAIL_RE.test(email.trim()) ? "Enter a valid email." : null;
   const usernameError = touched && !USERNAME_RE.test(username.trim()) ? "2–64 letters, numbers, dots, dashes or underscores." : null;
   const passwordError = touched && password.length < 8 ? "Use at least 8 characters." : null;
+  const info = useQuery({ queryKey: queryKeys.info, queryFn: api.info, staleTime: 60_000 });
+  const [google, setGoogle] = useState(false);
+
+  const withGoogle = async () => {
+    setGoogle(true);
+    setError(null);
+    try {
+      await authClient.signInWithGoogle(); // leaves the page; a new account comes back to onboarding
+    } catch (err) {
+      setError({ message: errorMessage(err), rateLimited: false });
+      setGoogle(false);
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -274,6 +286,16 @@ function CreateAccountForm({ onCreated }: { onCreated: () => void }) {
           {pending && <LoaderCircle className="animate-spin" />}
           {pending ? "Creating your account…" : "Create account"}
         </Button>
+        {info.data?.signIn?.google && (
+          <>
+            <div className="text-muted-foreground flex items-center gap-3 text-xs">
+              <span className="bg-border h-px flex-1" /> or <span className="bg-border h-px flex-1" />
+            </div>
+            <Button type="button" variant="outline" className="w-full" onClick={() => void withGoogle()} disabled={google || pending}>
+              {google ? <LoaderCircle className="animate-spin" /> : <GoogleMark />} Sign up with Google
+            </Button>
+          </>
+        )}
       </FieldGroup>
     </form>
   );

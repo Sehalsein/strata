@@ -118,7 +118,8 @@ export const authClient = {
    */
   async signInWithGoogle() {
     const back = `${window.location.origin}/`;
-    await call(ba.signIn.social({ provider: "google", callbackURL: back, errorCallbackURL: `${back}?auth_error=google` }) as Promise<BaResult<unknown>>);
+    // A new account (cloud sign-up) comes back to onboarding.
+    await call(ba.signIn.social({ provider: "google", callbackURL: back, newUserCallbackURL: `${back}?welcome=1`, errorCallbackURL: `${back}?auth_error=google` }) as Promise<BaResult<unknown>>);
   },
 
   /** Signs in with a passkey saved on this device or a phone nearby. */
