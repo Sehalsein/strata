@@ -5,6 +5,7 @@ import { ModeToggle } from "@/components/mode-toggle";
 import { Poster, PosterWall } from "@/components/poster-wall";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { Faq, Reveal, Screens, Transform } from "./sections";
 
 /** Where the app (the dashboard and the server the Strata apps talk to) lives. */
 const APP_URL = (import.meta.env.VITE_APP_URL as string | undefined) ?? "https://app.strata.sehalsein.com";
@@ -18,9 +19,12 @@ export function LandingPage() {
     <div className="bg-background min-h-svh overflow-x-clip">
       <Hero />
       <main>
+        <Screens />
+        <Transform />
         <Steps />
         <Features />
         <Compare />
+        <Faq />
         <Closing />
       </main>
       <Footer />
@@ -170,12 +174,12 @@ function Devices() {
 function Section({ id, eyebrow, title, lede, children, className }: { id?: string; eyebrow: string; title: string; lede?: string; children: ReactNode; className?: string }) {
   return (
     <section id={id} className={cn("mx-auto max-w-6xl scroll-mt-8 px-5 py-20 sm:px-8 sm:py-28", className)}>
-      <div className="mb-12 max-w-2xl">
+      <Reveal className="mb-12 max-w-2xl">
         <p className="text-brand-text mb-3 text-xs font-semibold tracking-[0.14em] uppercase">{eyebrow}</p>
         <h2 className="text-3xl font-semibold tracking-tight text-balance sm:text-5xl">{title}</h2>
         {lede && <p className="text-muted-foreground mt-4 text-lg text-pretty">{lede}</p>}
-      </div>
-      {children}
+      </Reveal>
+      <Reveal delay={120}>{children}</Reveal>
     </section>
   );
 }
