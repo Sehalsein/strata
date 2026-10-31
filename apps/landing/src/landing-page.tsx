@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArrowRight, Baby, Check, Cloud, Download, Lock, Minus, Play, Server, Sparkles, Tv, UserPlus, Zap } from "lucide-react";
+import { Apple, ArrowRight, Baby, Check, Download, Lock, Play, Server, Sparkles, Tv, UserPlus, Zap } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Poster, PosterWall } from "@/components/poster-wall";
@@ -7,9 +7,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Faq, Reveal, Screens, Transform } from "./sections";
 
-/** Where the app (the dashboard and the server the Strata apps talk to) lives. */
-const APP_URL = (import.meta.env.VITE_APP_URL as string | undefined) ?? "https://app.strata.sehalsein.com";
 const SOURCE_URL = "https://github.com/Sehalsein/strata";
+/** The Mac app (the server, in the menu bar), and how to install on Linux. */
+const MAC_DOWNLOAD = "https://github.com/Sehalsein/strata/releases/download/server-stable/Strata.dmg";
+const LINUX_INSTALL = "https://github.com/Sehalsein/strata/blob/main/apps/server/README.md#install";
 /** Some of the server's own profile pictures (this site passes /api through to it). */
 const AVATARS = ["fox", "panda", "robot", "owl", "dino", "penguin"];
 
@@ -23,7 +24,7 @@ export function LandingPage() {
         <Transform />
         <Steps />
         <Features />
-        <Compare />
+        <Install />
         <Faq />
         <Closing />
       </main>
@@ -40,8 +41,11 @@ function Nav() {
         <span className="text-lg">Strata</span>
       </a>
       <nav className="flex items-center gap-1 sm:gap-2">
-        <a href="#compare" className="hidden px-3 text-sm text-white/70 hover:text-white md:inline">
-          Cloud or at home
+        <a href="#install" className="hidden px-3 text-sm text-white/70 hover:text-white md:inline">
+          Install
+        </a>
+        <a href={SOURCE_URL} className="hidden px-3 text-sm text-white/70 hover:text-white md:inline">
+          Source
         </a>
         <a href="/privacy" className="hidden px-3 text-sm text-white/70 hover:text-white sm:inline">
           Privacy
@@ -49,11 +53,8 @@ function Nav() {
         <div className="dark">
           <ModeToggle />
         </div>
-        <Button variant="ghost" size="sm" asChild className="text-white/85 hover:bg-white/10 hover:text-white">
-          <a href={APP_URL}>Sign in</a>
-        </Button>
         <Button size="sm" asChild>
-          <a href={`${APP_URL}/signup`}>Get started</a>
+          <a href="#install">Download</a>
         </Button>
       </nav>
     </header>
@@ -70,23 +71,23 @@ function Hero() {
       <div className="relative mx-auto grid max-w-6xl items-center gap-14 px-5 pt-10 pb-24 sm:px-8 lg:grid-cols-[1fr_1.15fr] lg:pt-16 lg:pb-32">
         <div className="flex flex-col items-start">
           <span className="animate-in fade-in slide-in-from-bottom-2 mb-6 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-medium text-white/80 backdrop-blur duration-700">
-            <Sparkles className="size-3.5 text-[#f6a574]" /> Strata Cloud is here
+            <Sparkles className="size-3.5 text-[#f6a574]" /> Free and open source
           </span>
           <h1 className="animate-in fade-in slide-in-from-bottom-3 text-5xl leading-[1.02] font-semibold tracking-tight text-balance duration-700 sm:text-7xl">
             Your media,{" "}
             <span className="bg-gradient-to-r from-[#f7c873] via-[#f39256] to-[#d2603f] bg-clip-text text-transparent">beautifully.</span>
           </h1>
           <p className="animate-in fade-in slide-in-from-bottom-4 mt-6 max-w-xl text-lg text-pretty text-white/65 duration-700 sm:text-xl">
-            Strata turns the movies and shows you already have into a home screen worth sitting down to, on iPhone, iPad, Mac and Apple TV. Artwork, details, resume anywhere, and a profile for everyone in the house.
+            Strata turns the movies and shows you already have into a home screen worth sitting down to. Run it on your own Mac or Linux machine and watch on iPhone, iPad, Mac and Apple TV, with a profile for everyone in the house.
           </p>
           <div className="animate-in fade-in slide-in-from-bottom-5 mt-9 flex w-full flex-col gap-3 duration-700 sm:w-auto sm:flex-row">
             <Button size="lg" asChild className="h-12 px-6 text-base shadow-[0_0_40px_-8px_var(--primary)]">
-              <a href={`${APP_URL}/signup`}>
-                Create your household <ArrowRight />
+              <a href={MAC_DOWNLOAD}>
+                <Apple className="fill-current" /> Download for Mac
               </a>
             </Button>
             <Button size="lg" variant="outline" asChild className="h-12 border-white/20 bg-white/5 px-6 text-base text-white hover:bg-white/10 hover:text-white">
-              <a href={APP_URL}>Sign in</a>
+              <a href="#install">Other ways to install</a>
             </Button>
           </div>
           <div className="mt-8 flex items-center gap-3 text-sm text-white/55">
@@ -95,7 +96,7 @@ function Hero() {
                 <img key={a} src={`/api/avatars/${a}.png`} alt="" className="size-8 rounded-full ring-2 ring-[#0b0c0f]" />
               ))}
             </div>
-            Free to get started. A profile for everyone at home.
+            Free and open source. A profile for everyone at home.
           </div>
         </div>
         <Devices />
@@ -186,8 +187,8 @@ function Section({ id, eyebrow, title, lede, children, className }: { id?: strin
 
 function Steps() {
   const steps = [
-    { title: "Create your household", body: "Sign up with your email or Google. Your household gets its own library and settings." },
-    { title: "Bring your media", body: "Connect where your movies and shows live. Strata recognises each one and dresses it up with artwork and details." },
+    { title: "Install Strata", body: "Put the server on a Mac or Linux machine at home. On a Mac it lives in the menu bar and keeps itself up to date." },
+    { title: "Add your media", body: "Point it at the folders where your movies and shows live. Strata recognises each one and dresses it up with artwork and details." },
     { title: "Press play", body: "Open Strata on iPhone, iPad, Mac or Apple TV, and pick up where you left off on any of them." },
   ];
   return (
@@ -272,9 +273,9 @@ function Features() {
               </div>
             </div>
           </Bento>
-          <Bento icon={Lock} title="Private by design" body="No ads, no analytics, no tracking, and nothing is sold. People join your household only by a link you send." className="md:col-span-6">
+          <Bento icon={Lock} title="Yours, at home" body="Your library and everything about it stay on your machine. No ads, no analytics, no tracking, and people join only by a link you send." className="md:col-span-6">
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-              {["No ads", "No tracking", "Encrypted keys", "Invite-only households", "Delete everything any time"].map((t) => (
+              {["Runs on your machine", "No ads", "No tracking", "Invite-only", "Open source"].map((t) => (
                 <span key={t} className="flex items-center gap-1.5">
                   <Check className="text-brand-text size-4" /> {t}
                 </span>
@@ -287,82 +288,60 @@ function Features() {
   );
 }
 
-type Cell = boolean | string;
-
-/** Strata Cloud next to running your own server: the same apps, different trade-offs. */
-const COMPARISON: { label: string; cloud: Cell; home: Cell }[] = [
-  { label: "Set up", cloud: "Sign up in a minute", home: "Install on a Mac or Linux server" },
-  { label: "The Strata apps", cloud: true, home: true },
-  { label: "Profiles, kids limits and invitations", cloud: true, home: true },
-  { label: "Media you keep online", cloud: true, home: true },
-  { label: "Folders on your own disk", cloud: false, home: true },
-  { label: "Devices at home join without a password", cloud: false, home: true },
-  { label: "Works away from home", cloud: true, home: "With your own address or tunnel" },
-  { label: "Updates", cloud: "Always up to date", home: "Updates itself" },
-  { label: "Where your data lives", cloud: "Hosted for you", home: "On your machine" },
-  { label: "Cost", cloud: "Free", home: "Free and open source" },
-];
-
-function Mark({ value }: { value: Cell }) {
-  if (typeof value === "string") return <span className="text-sm">{value}</span>;
-  return value ? <Check className="text-brand-text size-5" aria-label="Yes" /> : <Minus className="text-muted-foreground/50 size-5" aria-label="No" />;
-}
-
-function Compare() {
+/** Getting the server: the Mac app, Homebrew, or a Linux binary. */
+function Install() {
   return (
-    <Section id="compare" eyebrow="Cloud or at home" title="Two ways to run Strata" lede="The same apps either way. Start in the cloud in a minute, or run your own server next to the files on your disk.">
-      <div className="overflow-x-auto rounded-3xl border">
-        <table className="w-full min-w-[34rem] border-collapse text-left">
-          <thead>
-            <tr>
-              <th className="w-2/5 p-4 sm:p-6" />
-              <th className="bg-primary/8 border-primary/30 border-x border-t p-4 align-bottom sm:p-6">
-                <span className="text-brand-text flex items-center gap-2 text-sm font-semibold">
-                  <Cloud className="size-4" /> Strata Cloud
-                </span>
-                <span className="text-muted-foreground mt-1 block text-xs font-normal">We run it for you</span>
-              </th>
-              <th className="p-4 align-bottom sm:p-6">
-                <span className="flex items-center gap-2 text-sm font-semibold">
-                  <Server className="size-4" /> Self-hosted
-                </span>
-                <span className="text-muted-foreground mt-1 block text-xs font-normal">You run it at home</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {COMPARISON.map((row) => (
-              <tr key={row.label} className="border-t">
-                <th scope="row" className="text-muted-foreground p-4 text-sm font-normal sm:px-6">
-                  {row.label}
-                </th>
-                <td className="bg-primary/8 border-primary/30 border-x p-4 sm:px-6">
-                  <Mark value={row.cloud} />
-                </td>
-                <td className="p-4 sm:px-6">
-                  <Mark value={row.home} />
-                </td>
-              </tr>
-            ))}
-            <tr className="border-t">
-              <td className="p-4 sm:p-6" />
-              <td className="bg-primary/8 border-primary/30 border-x border-b p-4 sm:p-6">
-                <Button asChild>
-                  <a href={`${APP_URL}/signup`}>
-                    Get started <ArrowRight />
-                  </a>
-                </Button>
-              </td>
-              <td className="p-4 sm:p-6">
-                <Button variant="outline" asChild>
-                  <a href={SOURCE_URL}>
-                    See the source <ArrowRight />
-                  </a>
-                </Button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+    <Section id="install" eyebrow="Install" title="Up and running on your own machine" lede="The server runs at home, next to your files. The Strata apps on your iPhone, iPad, Mac and Apple TV find it on your network.">
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="bg-card relative flex flex-col gap-5 overflow-hidden rounded-3xl border p-7">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_70%_80%_at_100%_0%,color-mix(in_oklab,var(--primary)_14%,transparent),transparent)]" />
+          <div className="relative flex items-center gap-3">
+            <div className="bg-primary/12 text-brand-text flex size-11 items-center justify-center rounded-xl">
+              <Apple className="size-5 fill-current" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold">Mac</h3>
+              <p className="text-muted-foreground text-sm">Apple silicon, macOS 14 or later</p>
+            </div>
+          </div>
+          <p className="text-muted-foreground relative text-sm leading-relaxed">Drag Strata to Applications and open it. It runs from the menu bar, starts at login and keeps itself up to date.</p>
+          <div className="relative flex flex-col gap-3">
+            <Button asChild className="w-fit">
+              <a href={MAC_DOWNLOAD}>
+                <Download /> Download Strata.dmg
+              </a>
+            </Button>
+            <p className="text-muted-foreground text-xs">Or with Homebrew:</p>
+            <pre className="bg-muted overflow-x-auto rounded-xl px-4 py-3 font-mono text-xs leading-relaxed">{`brew tap sehalsein/strata https://github.com/Sehalsein/strata
+brew trust sehalsein/strata
+brew install --cask strata`}</pre>
+          </div>
+        </div>
+        <div className="bg-card flex flex-col gap-5 rounded-3xl border p-7">
+          <div className="flex items-center gap-3">
+            <div className="bg-primary/12 text-brand-text flex size-11 items-center justify-center rounded-xl">
+              <Server className="size-5" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold">Linux</h3>
+              <p className="text-muted-foreground text-sm">x64 and arm64</p>
+            </div>
+          </div>
+          <p className="text-muted-foreground text-sm leading-relaxed">A single binary that installs itself as a service, with the dashboard built in and updates available.</p>
+          <div className="flex flex-col gap-3">
+            <Button variant="outline" asChild className="w-fit">
+              <a href={LINUX_INSTALL}>
+                Install on Linux <ArrowRight />
+              </a>
+            </Button>
+            <p className="text-muted-foreground text-xs">Or build it yourself:</p>
+            <Button variant="ghost" asChild className="w-fit px-0">
+              <a href={SOURCE_URL}>
+                See the source on GitHub <ArrowRight />
+              </a>
+            </Button>
+          </div>
+        </div>
       </div>
     </Section>
   );
@@ -378,10 +357,10 @@ function Closing() {
         <div className="relative flex flex-col items-center gap-6">
           <BrandMark size={44} />
           <h2 className="max-w-2xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl">Tonight's movie is one tap away.</h2>
-          <p className="max-w-lg text-white/65">Bring your media, invite the people you watch with, and press play.</p>
+          <p className="max-w-lg text-white/65">Install Strata, add your media, invite the people you watch with, and press play.</p>
           <Button size="lg" asChild className="h-12 px-6 text-base shadow-[0_0_40px_-8px_var(--primary)]">
-            <a href={`${APP_URL}/signup`}>
-              Create your household <ArrowRight />
+            <a href={MAC_DOWNLOAD}>
+              <Apple className="fill-current" /> Download for Mac
             </a>
           </Button>
         </div>
@@ -399,11 +378,8 @@ function Footer() {
           <span className="text-muted-foreground text-xs font-normal">© {new Date().getFullYear()} Sehal Sein</span>
         </div>
         <nav className="flex gap-6">
-          <a href={APP_URL} className="hover:text-foreground">
-            Sign in
-          </a>
-          <a href={`${APP_URL}/signup`} className="hover:text-foreground">
-            Get started
+          <a href="#install" className="hover:text-foreground">
+            Install
           </a>
           <a href={SOURCE_URL} className="hover:text-foreground">
             Source

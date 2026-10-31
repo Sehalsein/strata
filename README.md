@@ -1,24 +1,15 @@
 # Strata
 
 **Your media, beautifully.** Strata is a media app for the movies and shows you already
-have. It turns your own library into a home screen worth sitting down to, on iPhone, iPad,
-Mac and Apple TV: artwork and details for every title, resume anywhere, Continue Watching,
-My List, and a profile for everyone in the house.
-
-Two ways to run it, with the same apps:
-
-- **Strata Cloud** at [strata.sehalsein.com](https://strata.sehalsein.com): sign up, bring
-  your media, and press play. Nothing to install.
-- **Self-hosted:** run the server on your own Mac or Linux machine, next to the folders of
-  files on your disk (see [Install the server](#install-the-server)).
-
-The code:
+have. You run the server at home, next to your files, and it turns your library into a
+home screen worth sitting down to on iPhone, iPad, Mac and Apple TV: artwork and details
+for every title, resume anywhere, Continue Watching, My List, and a profile for everyone in
+the house. See [strata.sehalsein.com](https://strata.sehalsein.com).
 
 - **Server** ([apps/server](apps/server)): Bun and Hono, on Postgres, with a web dashboard.
-  On macOS it ships as `Strata.app`, a menu bar app you install like any other. The same
-  code runs Strata Cloud on Cloudflare Workers.
+  On macOS it ships as `Strata.app`, a menu bar app you install like any other.
 - **Apple apps** ([apps/apple](apps/apple)): iPhone, iPad and Apple TV, in SwiftUI.
-- **Landing site** ([apps/landing](apps/landing)): strata.sehalsein.com.
+- **Website** ([apps/landing](apps/landing)): strata.sehalsein.com.
 
 ## Install the server
 

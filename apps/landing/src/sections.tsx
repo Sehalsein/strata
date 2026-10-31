@@ -108,11 +108,11 @@ export function Screens() {
 
 const FAQ: { q: string; a: string }[] = [
   { q: "Does Strata come with movies or shows?", a: "No. Strata doesn't host, sell or provide any media. It's an app for the movies and shows you already have: it organises them, adds artwork and details, and plays them." },
-  { q: "What does it cost?", a: "Strata Cloud is free to get started, and the self-hosted server is free and open source." },
-  { q: "Which devices does it run on?", a: "iPhone, iPad, Mac and Apple TV, with the dashboard in any browser for running your household." },
-  { q: "Who can see my household?", a: "Only the people you invite. Each gets their own profile, and you can set an age limit on kids' profiles." },
-  { q: "Can I run it myself instead?", a: "Yes. Install the server on a Mac or Linux machine and point the same apps at it. It can also play folders of files on that machine's disk." },
-  { q: "What happens to my data?", a: "No ads, no analytics and no tracking, and nothing is sold. The privacy page lists exactly what's kept, and you can have it all deleted." },
+  { q: "What does it cost?", a: "Nothing. Strata is free and open source." },
+  { q: "What do I need to run it?", a: "A Mac with Apple silicon (macOS 14 or later) or a Linux machine, x64 or arm64, at home with your media on it or next to it." },
+  { q: "Which devices can I watch on?", a: "iPhone, iPad, Mac and Apple TV. On your home network they find the server by themselves." },
+  { q: "Who can see my library?", a: "Only the people you invite. Each gets their own profile, and you can set an age limit on kids' profiles." },
+  { q: "Can I watch away from home?", a: "Yes, by giving the server an address you can reach from outside, like a tunnel or a port forward." },
 ];
 
 export function Faq() {
