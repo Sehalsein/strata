@@ -26,7 +26,7 @@ import { ProgressStore } from "./progress";
 import { ContentFilter } from "./catalog/contentRating";
 import { Anilist } from "./catalog/anime/anilist";
 import { Kitsu } from "./catalog/anime/kitsu";
-import { AnimeIds } from "./catalog/anime/ids";
+import { AnimeIds, cachedAnimeIdStore, fileAnimeIdStore } from "./catalog/anime/ids";
 import { AnimeMatcher } from "./catalog/anime/match";
 import { TorboxHousekeeping } from "./sources/torbox/cleanup";
 import { DeviceLinks } from "./deviceLink";
@@ -110,7 +110,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
 
   const tmdb = new Tmdb(cache, () => settings.getSecret("tmdbApiKey"), () => settings.get().language, fetchImpl);
   const omdb = new Omdb(cache, () => settings.getSecret("omdbApiKey"), fetchImpl);
-  const animeIds = new AnimeIds(join(paths.root, "cache"), fetchImpl);
+  const animeIds = new AnimeIds(isCloud ? cachedAnimeIdStore(cache) : fileAnimeIdStore(join(paths.root, "cache")), fetchImpl);
   const anilist = new Anilist(cache, fetchImpl);
   const kitsu = new Kitsu(cache, fetchImpl);
   const library = new Library(db, tmdb, new Matcher(tmdb, new AnimeMatcher(anilist, animeIds, tmdb, kitsu)));

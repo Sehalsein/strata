@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { CalendarService } from "../src/catalog/calendar";
-import { AnimeIds } from "../src/catalog/anime/ids";
+import { AnimeIds, fileAnimeIdStore } from "../src/catalog/anime/ids";
 import type { Anilist, AiringEpisode } from "../src/catalog/anime/anilist";
 import type { Tmdb, TmdbSeason, TmdbShow } from "../src/catalog/tmdb";
 
@@ -28,7 +28,7 @@ const tmdb = {
 } as unknown as Tmdb;
 
 function service(watchlist: number[], airing: AiringEpisode[], inLibrary: string[] = [], allowed: (id: number) => boolean = () => true) {
-  const ids = new AnimeIds("/nonexistent");
+  const ids = new AnimeIds(fileAnimeIdStore("/nonexistent"));
   // Frieren S2 (AniList 182255) is TMDB S1 from episode 29.
   ids.index([
     { type: "TV", anilist_id: 154587, themoviedb_id: { tv: 209867 }, season: { tmdb: 1 } },

@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import type { ApiCache } from "../apiCache";
 import { join } from "node:path";
 import { logger } from "../../log";
 
@@ -26,7 +27,7 @@ export interface AnimeEntry {
   tmdbOffset: number;
 }
 
-interface RawEntry {
+export interface RawEntry {
   type?: string;
   anilist_id?: number;
   kitsu_id?: number;
@@ -46,8 +47,12 @@ export class AnimeIds {
   private loadedAt = 0;
   private loading: Promise<void> | null = null;
 
+  /**
+   * `store` keeps the downloaded list: a file in the data folder (home server), or the
+   * shared cache in the database (cloud server, which has no disk to keep it on).
+   */
   constructor(
-    private readonly cacheDir: string,
+    private readonly store: AnimeIdStore,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
@@ -122,45 +127,82 @@ export class AnimeIds {
   }
 
   private async load() {
-    const file = join(this.cacheDir, "anime-list-full.json");
-    const cached = Bun.file(file);
-    const fresh = (await cached.exists()) && Date.now() - cached.lastModified < MAX_AGE_MS;
-    if (!fresh) {
+    let stored = await this.store.read().catch(() => null);
+    if (!stored || Date.now() - stored.savedAt >= MAX_AGE_MS) {
       try {
-        await this.download(file);
+        const raw = await this.download();
+        await this.store.write(raw);
+        stored = { savedAt: Date.now(), raw };
       } catch (err) {
         // Keep working from an older copy when GitHub is unreachable; without one, try
         // again in 15 minutes rather than on every lookup.
         log.warn("Couldn't refresh the anime id list", err);
-        if (!existsSync(file)) {
+        if (!stored) {
           this.loadedAt = Date.now() - MAX_AGE_MS + RETRY_MS;
           return;
         }
       }
     }
-    try {
-      this.index((await Bun.file(file).json()) as RawEntry[]);
-      log.info(`Anime id list: ${this.byAnilist.size} AniList / ${this.byTv.size} TMDB shows`);
-    } catch (err) {
-      // Throw the bad copy away so the next attempt downloads a fresh one, and back
-      // off like a failed download rather than rereading it on every lookup.
-      log.warn("Anime id list is unreadable", err);
-      rmSync(file, { force: true });
-      this.loadedAt = Date.now() - MAX_AGE_MS + RETRY_MS;
-    }
+    this.index(stored.raw);
+    log.info(`Anime id list: ${this.byAnilist.size} AniList / ${this.byTv.size} TMDB shows`);
   }
 
-  private async download(file: string) {
-    mkdirSync(this.cacheDir, { recursive: true });
+  /** The list, cut down to the fields `index` reads (about a fifth of its 10+ MB). */
+  private async download(): Promise<RawEntry[]> {
     const res = await this.fetchImpl(ANIME_LIST_URL, { signal: AbortSignal.timeout(60_000) });
     if (!res.ok) throw new Error(`anime-lists: HTTP ${res.status}`);
-    const body = await res.text();
-    const parsed = JSON.parse(body) as unknown;
+    const parsed = (await res.json()) as unknown;
     if (!Array.isArray(parsed) || parsed.length < 1000) throw new Error("anime-lists: unexpected content");
-    const tmp = `${file}.tmp`;
-    await Bun.write(tmp, body);
-    renameSync(tmp, file);
+    return (parsed as RawEntry[]).map((r) => ({
+      anilist_id: r.anilist_id,
+      kitsu_id: r.kitsu_id,
+      mal_id: r.mal_id,
+      anidb_id: r.anidb_id,
+      type: r.type,
+      themoviedb_id: r.themoviedb_id,
+      season: r.season,
+      episode_offset: r.episode_offset,
+    }));
   }
+}
+
+/** Where the downloaded anime id list is kept between starts. */
+export interface AnimeIdStore {
+  read(): Promise<{ savedAt: number; raw: RawEntry[] } | null>;
+  write(raw: RawEntry[]): Promise<void>;
+}
+
+/** A file in the data folder (home server). */
+export function fileAnimeIdStore(cacheDir: string): AnimeIdStore {
+  const file = join(cacheDir, "anime-ids.json");
+  return {
+    async read() {
+      if (!existsSync(file)) return null;
+      try {
+        return { savedAt: statSync(file).mtimeMs, raw: JSON.parse(readFileSync(file, "utf8")) as RawEntry[] };
+      } catch {
+        rmSync(file, { force: true }); // unreadable: the next load downloads it again
+        return null;
+      }
+    },
+    async write(raw) {
+      mkdirSync(cacheDir, { recursive: true });
+      writeFileSync(`${file}.tmp`, JSON.stringify(raw));
+      renameSync(`${file}.tmp`, file);
+    },
+  };
+}
+
+/** The shared cache in the database (cloud server). */
+export function cachedAnimeIdStore(cache: ApiCache): AnimeIdStore {
+  const key = "anime-ids:list";
+  return {
+    async read() {
+      const entry = await cache.read(key);
+      return entry ? { savedAt: entry.fetchedAt, raw: entry.value as RawEntry[] } : null;
+    },
+    write: (raw) => cache.write(key, raw),
+  };
 }
 
 /**

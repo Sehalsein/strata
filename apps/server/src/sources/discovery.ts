@@ -1,4 +1,5 @@
 import { type AnimeIds, kitsuEpisode } from "../catalog/anime/ids";
+import { runtime } from "#runtime";
 import type { Tmdb } from "../catalog/tmdb";
 import type { FileRow, Library } from "../library";
 import { logger } from "../log";
@@ -167,7 +168,7 @@ export class Discovery {
       item = await client.torrent(torrentId);
       const ready = (item.download_present || item.download_finished) && (item.files?.length ?? 0) > 0;
       if (ready || Date.now() > deadline) break;
-      await Bun.sleep(1_500);
+      await runtime.sleep(1_500);
     }
 
     if (!(item.download_present || item.download_finished)) {

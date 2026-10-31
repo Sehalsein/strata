@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { and, desc, eq, gt, lt, ne, sql } from "drizzle-orm";
 import type { Db } from "./db";
+import { runtime } from "#runtime";
 import { profiles, sessions, users } from "./db/schema";
 import { LOGIN_PER_ADDRESS, LOGIN_PER_USER, LOGIN_PER_USER_ADDRESS, PIN_PER_SESSION, retryMessage, type Throttle } from "./throttle";
 
@@ -31,7 +32,7 @@ export class AuthError extends Error {
 
 /**
  * Accounts, signed-in devices and profiles.
- * - Passwords and PINs: Argon2id (Bun.password), compared in constant time.
+ * - Passwords and PINs: Argon2id (Bun, or WASM on Workers), compared in constant time.
  * - Session tokens: 256 random bits; only their SHA-256 is stored. They last
  *   `SESSION_TTL_MS` past last use, and a password change signs out the account's other
  *   devices.
@@ -56,14 +57,14 @@ export class Auth {
   }
 
   async createUser(username: string, password: string, isAdmin: boolean) {
-    const passwordHash = await Bun.password.hash(password);
+    const passwordHash = await runtime.hashPassword(password);
     const [row] = await this.db.insert(users).values({ username, passwordHash, isAdmin }).returning({ id: users.id });
     return row!;
   }
 
   /** Creates the first admin, or returns null if any user already exists (safe against two at once). */
   async createFirstAdmin(username: string, password: string): Promise<{ id: number } | null> {
-    const passwordHash = await Bun.password.hash(password);
+    const passwordHash = await runtime.hashPassword(password);
     return this.db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(4831208)`);
       if ((await tx.select({ id: users.id }).from(users).limit(1)).length) return null;
@@ -86,7 +87,7 @@ export class Auth {
 
     const [user] = await this.db.select().from(users).where(eq(users.username, username));
     // Spend comparable time when there's no such user, so usernames can't be probed by timing.
-    const ok = user ? await Bun.password.verify(password, user.passwordHash) : await verifyDummy(password);
+    const ok = user ? await runtime.verifyPassword(password, user.passwordHash) : await verifyDummy(password);
     if (!user || !ok) {
       let locked = 0;
       for (const [key, rule] of keys) locked = Math.max(locked, await this.throttle.fail(key, rule));
@@ -170,8 +171,8 @@ export class Auth {
    */
   async changePassword(userId: number, current: string, next: string, keepTokenHash: string): Promise<boolean> {
     const [user] = await this.db.select().from(users).where(eq(users.id, userId));
-    if (!user || !(await Bun.password.verify(current, user.passwordHash))) return false;
-    await this.db.update(users).set({ passwordHash: await Bun.password.hash(next) }).where(eq(users.id, userId));
+    if (!user || !(await runtime.verifyPassword(current, user.passwordHash))) return false;
+    await this.db.update(users).set({ passwordHash: await runtime.hashPassword(next) }).where(eq(users.id, userId));
     await this.db.delete(sessions).where(and(eq(sessions.userId, userId), ne(sessions.tokenHash, keepTokenHash)));
     return true;
   }
@@ -184,7 +185,7 @@ export class Auth {
       const key = `pin:${tokenHash}`;
       const wait = await this.throttle.retryAfter(key);
       if (wait) throw new AuthError(retryMessage(wait), 429);
-      if (!(pin && (await Bun.password.verify(pin, profile.pinHash)))) {
+      if (!(pin && (await runtime.verifyPassword(pin, profile.pinHash)))) {
         const locked = await this.throttle.fail(key, PIN_PER_SESSION);
         throw new AuthError(locked ? retryMessage(locked) : "Wrong PIN", locked ? 429 : 403);
       }
@@ -207,8 +208,8 @@ export class Auth {
 }
 
 async function verifyDummy(password: string): Promise<false> {
-  dummyHash ??= await Bun.password.hash("strata-dummy");
-  await Bun.password.verify(password, dummyHash);
+  dummyHash ??= await runtime.hashPassword("strata-dummy");
+  await runtime.verifyPassword(password, dummyHash);
   return false;
 }
 

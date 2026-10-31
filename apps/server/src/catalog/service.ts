@@ -1,4 +1,5 @@
 import type { FileProvider } from "../db/schema";
+import { runtime } from "#runtime";
 import type { Library } from "../library";
 import { isResumable, type ProgressRow, type ProgressStore } from "../progress";
 import type { Settings } from "../settings";
@@ -82,7 +83,7 @@ export class CatalogService {
   /** IMDb / Rotten Tomatoes ratings, or null; like AniList, the page waits at most 1.5s. */
   private ratings(imdbId: string | null | undefined): Promise<Ratings | null> {
     if (!this.omdb?.configured || !imdbId) return Promise.resolve(null);
-    return Promise.race([this.omdb.ratings(imdbId).catch(() => null), Bun.sleep(1_500).then(() => null)]);
+    return Promise.race([this.omdb.ratings(imdbId).catch(() => null), runtime.sleep(1_500).then(() => null)]);
   }
 
   /** IMDb rating per episode of one season (empty without an OMDb key). */
@@ -92,7 +93,7 @@ export class CatalogService {
       const imdbId = (await this.tmdb.show(showId)).external_ids?.imdb_id;
       return this.omdb!.episodeRatings(imdbId, seasonNumber);
     };
-    return Promise.race([lookup().catch(() => new Map<number, number>()), Bun.sleep(1_500).then(() => new Map<number, number>())]);
+    return Promise.race([lookup().catch(() => new Map<number, number>()), runtime.sleep(1_500).then(() => new Map<number, number>())]);
   }
 
   /**
@@ -101,7 +102,7 @@ export class CatalogService {
    * shouldn't wait on it; the answer is cached for next time.
    */
   private animeInfo(type: TitleType, tmdbId: number) {
-    return Promise.race([this.animeInfoUncapped(type, tmdbId), Bun.sleep(1_500).then(() => null)]);
+    return Promise.race([this.animeInfoUncapped(type, tmdbId), runtime.sleep(1_500).then(() => null)]);
   }
 
   private async animeInfoUncapped(type: TitleType, tmdbId: number) {

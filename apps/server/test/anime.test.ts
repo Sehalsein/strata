@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AnimeIds, kitsuEpisode } from "../src/catalog/anime/ids";
+import { AnimeIds, fileAnimeIdStore, kitsuEpisode } from "../src/catalog/anime/ids";
 import { relevant, type Release } from "../src/sources/discovery";
 import { AnimeMatcher, pickAnime, resolveEpisode } from "../src/catalog/anime/match";
 import type { Anilist } from "../src/catalog/anime/anilist";
@@ -16,7 +16,7 @@ const RAW = [
 ];
 
 const ids = () => {
-  const map = new AnimeIds("/nonexistent");
+  const map = new AnimeIds(fileAnimeIdStore("/nonexistent"));
   map.index(RAW);
   return map;
 };
@@ -104,7 +104,7 @@ describe("Torrentio anime ids", () => {
 });
 
 test("malformed entries in the downloaded list are ignored, not trusted", () => {
-  const map = new AnimeIds("/nonexistent");
+  const map = new AnimeIds(fileAnimeIdStore("/nonexistent"));
   map.index([
     { anilist_id: 1, themoviedb_id: { tv: "../movie/1" as unknown as number }, season: { tmdb: -3 }, episode_offset: { tmdb: 1.5 } },
     { anilist_id: 2, themoviedb_id: { tv: 42 }, season: { tvdb: 1, tmdb: 1 } },
@@ -175,17 +175,17 @@ test("an unreadable anime id list is thrown away and retried later, not reread o
   const { join } = await import("node:path");
   const { tmpdir } = await import("node:os");
   const dir = mkdtempSync(join(tmpdir(), "strata-anime-"));
-  writeFileSync(join(dir, "anime-list-full.json"), "{not json");
+  writeFileSync(join(dir, "anime-ids.json"), "{not json");
   let downloads = 0;
-  const map = new AnimeIds(dir, (async () => {
+  const map = new AnimeIds(fileAnimeIdStore(dir), (async () => {
     downloads++;
     return new Response("busy", { status: 503 });
   }) as unknown as typeof fetch);
   await map.ready();
-  expect(existsSync(join(dir, "anime-list-full.json"))).toBe(false);
+  expect(existsSync(join(dir, "anime-ids.json"))).toBe(false);
   await map.ready();
   await map.ready();
-  expect(downloads).toBe(0); // fresh-looking copy wasn't downloaded; and no retry yet
+  expect(downloads).toBe(1); // one try for a fresh copy, then a pause before the next
 });
 
 describe("anime tab sections", () => {

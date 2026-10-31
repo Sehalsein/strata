@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import * as schema from "./schema";
 import { migrations } from "./migrations";
 import { logger } from "../log";
-import { restorePathFor } from "../update/marker";
+import { runtime } from "#runtime";
 
 const log = logger("db");
 const BACKUPS_KEPT = 5;
@@ -33,55 +33,15 @@ const handleOf = (db: Db): Handle => handles.get(db)!;
  * - `memory`: bundled, in memory (tests).
  */
 export async function openDatabase(target: string): Promise<Db> {
-  const db = /^postgres(ql)?:\/\//.test(target) ? await openServer(target) : await openBundled(target);
+  const client = await runtime.openClient(target);
+  const db = client.db as unknown as Db;
+  handles.set(db, { kind: client.kind, close: client.close, dump: client.dump });
+  if (client.kind === "server" && /^postgres/.test(target)) log.info(`Using Postgres at ${new URL(target).host}`);
   await migrate(db);
   return db;
 }
 
 export const closeDatabase = (db: Db) => handleOf(db).close();
-
-async function openServer(url: string): Promise<Db> {
-  const { drizzle } = await import("drizzle-orm/bun-sql");
-  const client = new Bun.SQL(url, { max: 10, idleTimeout: 30 });
-  const db = drizzle({ client, schema }) as unknown as Db;
-  handles.set(db, { kind: "server", close: () => client.close() });
-  log.info(`Using Postgres at ${new URL(url).host}`);
-  return db;
-}
-
-async function openBundled(target: string): Promise<Db> {
-  const { PGlite } = await import("@electric-sql/pglite");
-  const { drizzle } = await import("drizzle-orm/pglite");
-  // An update that was rolled back left the previous database as a snapshot to restore.
-  const restore = target !== "memory" && existsSync(restorePathFor(target)) ? restorePathFor(target) : null;
-  if (restore) rmSync(target, { recursive: true, force: true });
-  if (target !== "memory") mkdirSync(target, { recursive: true });
-  const client = await PGlite.create(target === "memory" ? undefined : target, {
-    ...(await bundledAssets()),
-    ...(restore ? { loadDataDir: Bun.file(restore) } : {}),
-  });
-  if (restore) {
-    rmSync(restore);
-    log.info("Restored the database from before the rolled-back update");
-  }
-  const db = drizzle({ client, schema }) as unknown as Db;
-  handles.set(db, {
-    kind: "bundled",
-    close: () => client.close(),
-    dump: async (path) => writeFileSync(path, Buffer.from(await (await client.dumpDataDir("gzip")).arrayBuffer())),
-  });
-  return db;
-}
-
-/** PGlite's WebAssembly and data files, embedded in the compiled server (see `bundledPglite.ts`). */
-async function bundledAssets() {
-  try {
-    const { pgliteAssets } = await import("./bundledPglite");
-    return await pgliteAssets();
-  } catch {
-    return {}; // running from source: PGlite finds its files in node_modules
-  }
-}
 
 /**
  * The schema version lives in `strata_meta`. Several servers may start at once (a cloud
@@ -107,7 +67,7 @@ async function migrate(db: Db) {
   });
 }
 
-/** Rows from `execute`, whichever driver: Bun.SQL returns an array, PGlite `{ rows }`. */
+/** Rows from `execute`, whichever driver: Bun.SQL and postgres.js return an array, PGlite `{ rows }`. */
 export function rowsOf<T = Record<string, unknown>>(result: unknown): T[] {
   if (Array.isArray(result)) return result as T[];
   return ((result as { rows?: T[] }).rows ?? []) as T[];

@@ -1,4 +1,5 @@
 import { logger } from "../../log";
+import { runtime } from "#runtime";
 import type { ApiCache } from "../apiCache";
 
 const log = logger("anilist");
@@ -170,7 +171,7 @@ export class Anilist {
     this.pending++;
     const run = this.queue.then(async () => {
       const wait = this.last + MIN_INTERVAL_MS - Date.now();
-      if (wait > 0) await Bun.sleep(wait);
+      if (wait > 0) await runtime.sleep(wait);
       this.last = Date.now();
       const res = await this.fetchImpl(ENDPOINT, {
         method: "POST",

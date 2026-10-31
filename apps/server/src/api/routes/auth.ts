@@ -12,6 +12,7 @@ import { AuthError } from "../../auth";
 import { checkSetupCode, clearSetupCode } from "../../setupCode";
 import { retryMessage, SETUP_PER_ADDRESS, STARTS_PER_ADDRESS } from "../../throttle";
 import { isCloud } from "../../mode";
+import { runtime } from "#runtime";
 import { launchSecret } from "../../platform/launcher";
 
 const credentials = z.object({
@@ -195,7 +196,7 @@ export const authRoutes = new Hono<Env>()
 
   .post("/profiles", requireAuth, requireAdmin, async (c) => {
     const input = await body(c, profileInput);
-    const pinHash = input.pin ? await Bun.password.hash(input.pin) : null;
+    const pinHash = input.pin ? await runtime.hashPassword(input.pin) : null;
     const isKids = input.isKids ?? false;
     const contentLimit = input.contentLimit ?? (isKids ? "kids" : "none");
     const [row] = await c.var.services.db.insert(profiles).values({ name: input.name, avatar: input.avatar ?? null, pinHash, isKids, contentLimit }).returning();
@@ -207,7 +208,7 @@ export const authRoutes = new Hono<Env>()
     const patch: Partial<typeof profiles.$inferInsert> = {};
     if (input.name !== undefined) patch.name = input.name;
     if (input.avatar !== undefined) patch.avatar = input.avatar;
-    if (input.pin !== undefined) patch.pinHash = input.pin ? await Bun.password.hash(input.pin) : null;
+    if (input.pin !== undefined) patch.pinHash = input.pin ? await runtime.hashPassword(input.pin) : null;
     if (input.isKids !== undefined) patch.isKids = input.isKids;
     if (input.contentLimit !== undefined) patch.contentLimit = input.contentLimit;
     const [row] = await c.var.services.db.update(profiles).set(patch).where(eq(profiles.id, intParam(c, "id"))).returning();
