@@ -14,6 +14,9 @@ const AppLayout = lazy(() => import("./app-layout"));
 const LoginPage = lazy(() => import("@/features/auth/login-page"));
 const SetupWizard = lazy(() => import("@/features/setup/setup-wizard"));
 const InvitePage = lazy(() => import("@/features/invite/invite-page"));
+const PrivacyPage = lazy(() => import("@/features/account/privacy-page"));
+const ForgotPasswordPage = lazy(() => import("@/features/account/password-reset-pages").then((m) => ({ default: m.ForgotPasswordPage })));
+const ResetPasswordPage = lazy(() => import("@/features/account/password-reset-pages").then((m) => ({ default: m.ResetPasswordPage })));
 
 /** Every cached response but the server's info and who's signed in: dropped whenever the account or household changes. */
 const accountData = (q: { queryKey: readonly unknown[] }) => q.queryKey[0] !== "info" && !(q.queryKey[0] === "auth" && q.queryKey[1] === "me");
@@ -75,8 +78,23 @@ export function App() {
   }
 
   const inviteId = /^\/invite\/([^/]+)\/?$/.exec(path)?.[1];
+  const toSignIn = () => navigate("/", { replace: true });
   let screen;
-  if (inviteId && !info.data.setupRequired) {
+  // Pages anyone can open, signed in or not.
+  if (path === "/privacy") {
+    screen = <PrivacyPage />;
+  } else if (path === "/forgot-password") {
+    screen = <ForgotPasswordPage onBack={toSignIn} />;
+  } else if (path === "/reset-password") {
+    screen = (
+      <ResetPasswordPage
+        onDone={async () => {
+          await authChanged();
+          toSignIn();
+        }}
+      />
+    );
+  } else if (inviteId && !info.data.setupRequired) {
     screen = (
       <InvitePage
         invitationId={decodeURIComponent(inviteId)}

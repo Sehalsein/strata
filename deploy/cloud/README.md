@@ -37,6 +37,14 @@ what's on:
   their account first, from the dashboard's account menu; it never creates accounts.
 - **Passkeys:** `STRATA_PUBLIC_URL` on HTTPS (browsers only allow passkeys there).
 
+**Email** (for "Forgot password?"): in [Resend](https://resend.com), verify the domain you'll
+send from and create an API key with sending access only. Then set `RESEND_API_KEY` and
+`STRATA_EMAIL_FROM` (e.g. `Strata <no-reply@yourdomain.com>`, on that domain). Without them
+Strata sends no email and the link doesn't show.
+
+**Privacy page** (`/privacy`): set `STRATA_OPERATOR` (who runs the server, e.g. your name
+or company) and `STRATA_PRIVACY_CONTACT` (an email address or URL for privacy requests).
+
 Put HTTPS in front (the host's proxy usually does). Several containers can share one
 database: migrations take a lock, and sign-ins, settings, TV codes, throttling and the
 catalog cache all live in Postgres. Background jobs (TorBox sync) run in each container,

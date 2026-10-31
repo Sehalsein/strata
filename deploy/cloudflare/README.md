@@ -34,6 +34,14 @@ what's on:
   their account first, from the dashboard's account menu; it never creates accounts.
 - **Passkeys:** `STRATA_PUBLIC_URL` on HTTPS (browsers only allow passkeys there).
 
+**Email** (for "Forgot password?"): in [Resend](https://resend.com), verify the domain you'll
+send from and create an API key with sending access only. Then set `RESEND_API_KEY` and
+`STRATA_EMAIL_FROM` (e.g. `Strata <no-reply@yourdomain.com>`, on that domain). Without them
+Strata sends no email and the link doesn't show.
+
+**Privacy page** (`/privacy`): set `STRATA_OPERATOR` (who runs the server, e.g. your name
+or company) and `STRATA_PRIVACY_CONTACT` (an email address or URL for privacy requests).
+
 On the first request the server creates its tables and logs a **setup code**
 (`npx wrangler tail`): the dashboard asks for it to create the server admin. Then add
 households (the household switcher at the top of the sidebar) and invite their owners.

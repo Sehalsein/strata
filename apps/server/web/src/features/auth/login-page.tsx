@@ -120,6 +120,11 @@ export function SignInForm({ onSignedIn, onCancel, submitLabel = "Sign in" }: { 
           {pending && <LoaderCircle className="animate-spin" />}
           {pending ? "Signing in…" : submitLabel}
         </Button>
+        {methods?.passwordReset && (
+          <a href="/forgot-password" className="text-muted-foreground hover:text-foreground -mt-2 self-end text-xs underline-offset-4 hover:underline">
+            Forgot password?
+          </a>
+        )}
         {(methods?.google || methods?.passkey) && (
           <>
             <div className="text-muted-foreground flex items-center gap-3 text-xs">

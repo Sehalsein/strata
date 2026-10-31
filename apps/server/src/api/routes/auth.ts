@@ -3,7 +3,8 @@ import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { member, organization, user } from "../../db/schema";
+import { account, continueHidden, member, organization, passkey, progress, session, user, watchlist } from "../../db/schema";
+import { emailConfigured } from "../../email";
 import { API_VERSION, VERSION } from "../../version";
 import { body, requireAuth, requireHousehold, requireHouseholdAdmin, type Env } from "../context";
 import { CONTENT_LIMITS } from "../../catalog/contentRating";
@@ -78,7 +79,7 @@ export const authRoutes = new Hono<Env>()
       /** True when this client may join without a password (see /join). */
       localJoin: await canJoinLocally(c),
       /** Ways in besides a password that this server is set up for (the sign-in page's buttons). */
-      signIn: (({ google, passkeys }) => ({ google: !!google, passkey: !!passkeys }))(signInMethods()),
+      signIn: (({ google, passkeys }) => ({ google: !!google, passkey: !!passkeys, passwordReset: emailConfigured() }))(signInMethods()),
     });
   })
 
@@ -151,6 +152,72 @@ export const authRoutes = new Hono<Env>()
     if (!people.some((p) => p.id === input.userId)) throw new HTTPException(404, { message: "No such member" });
     await countStart(c, "join");
     return c.json({ token: await sessionFor(c, input.userId, home.id, true) });
+  })
+
+  // Everything this server keeps about the signed-in person, as one JSON file (GDPR access
+  // and portability). Tokens and password hashes are never included.
+  .get("/me/export", requireAuth, async (c) => {
+    const db = c.var.services.db;
+    const id = c.var.session.user.id;
+    const [person] = await db
+      .select({ id: user.id, name: user.name, username: user.username, email: user.email, createdAt: user.createdAt, updatedAt: user.updatedAt, role: user.role })
+      .from(user)
+      .where(eq(user.id, id));
+    const memberships = await db
+      .select({ household: organization.name, role: member.role, contentLimit: member.contentLimit, isKids: member.isKids, joinedAt: member.createdAt })
+      .from(member)
+      .innerJoin(organization, eq(organization.id, member.organizationId))
+      .where(eq(member.userId, id));
+    const devices = await db
+      .select({
+        device: session.deviceName,
+        model: session.deviceModel,
+        userAgent: session.userAgent,
+        ipAddress: session.ipAddress,
+        location: session.location,
+        signedInAt: session.createdAt,
+        lastActiveAt: session.updatedAt,
+        expiresAt: session.expiresAt,
+        watchOnly: session.viewerOnly,
+      })
+      .from(session)
+      .where(eq(session.userId, id));
+    const signInMethods = await db.select({ provider: account.providerId, connectedAt: account.createdAt }).from(account).where(eq(account.userId, id));
+    const savedPasskeys = await db.select({ name: passkey.name, createdAt: passkey.createdAt }).from(passkey).where(eq(passkey.userId, id));
+    const watchProgress = await db.select().from(progress).where(eq(progress.userId, id));
+    const myList = await db.select().from(watchlist).where(eq(watchlist.userId, id));
+    const hiddenFromContinueWatching = await db.select().from(continueHidden).where(eq(continueHidden.userId, id));
+    const strip = <T extends { userId?: unknown }>(rows: T[]) => rows.map(({ userId: _, ...r }) => r);
+    const file = {
+      exportedAt: new Date().toISOString(),
+      server: c.var.services.settings.get().serverName,
+      account: person,
+      households: memberships,
+      devices,
+      signInMethods: signInMethods.map((m) => ({ ...m, provider: m.provider === "credential" ? "password" : m.provider })),
+      passkeys: savedPasskeys,
+      watchProgress: strip(watchProgress),
+      myList: strip(myList),
+      hiddenFromContinueWatching: strip(hiddenFromContinueWatching),
+    };
+    return new Response(JSON.stringify(file, null, 2), {
+      headers: { "Content-Type": "application/json", "Content-Disposition": `attachment; filename="strata-${person?.username ?? "account"}-data.json"` },
+    });
+  })
+
+  // What the privacy page shows about this server: who runs it and what's switched on.
+  .get("/privacy", async (c) => {
+    const s = c.var.services;
+    const { google, passkeys } = signInMethods();
+    return c.json({
+      serverName: s.settings.get().serverName,
+      contact: process.env.STRATA_PRIVACY_CONTACT || null,
+      operator: process.env.STRATA_OPERATOR || null,
+      mode: isCloud ? "cloud" : "home",
+      email: emailConfigured(),
+      google: !!google,
+      passkeys: !!passkeys,
+    });
   })
 
   .get("/me", requireAuth, async (c) => {

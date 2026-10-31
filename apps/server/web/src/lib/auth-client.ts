@@ -126,6 +126,21 @@ export const authClient = {
     await call(ba.signIn.passkey() as Promise<BaResult<unknown>>);
   },
 
+  /** Emails a reset link when an account has that address (the answer is the same either way). */
+  async requestPasswordReset(email: string) {
+    await call(ba.requestPasswordReset({ email, redirectTo: `${window.location.origin}/reset-password` }) as Promise<BaResult<unknown>>);
+  },
+
+  /** Sets a new password with the token from an emailed reset link. */
+  async resetPassword(token: string, newPassword: string) {
+    await call(ba.resetPassword({ token, newPassword }) as Promise<BaResult<unknown>>);
+  },
+
+  /** Deletes the signed-in account and everything kept about it (needs its password). */
+  async deleteAccount(password: string) {
+    await call(ba.deleteUser({ password }) as Promise<BaResult<unknown>>);
+  },
+
   // Sign-in methods of the signed-in account
 
   /** Whether the account has Google connected. */

@@ -18,6 +18,15 @@ public struct ServerInfo: Codable, Sendable, Hashable {
     /// This device is on the server's home network and may join without a password,
     /// picking a member of the household. Absent from older servers.
     public var localJoin: Bool?
+    /// Ways in besides a password this server is set up for. Absent from older servers.
+    public var signIn: SignInMethods?
+
+    public struct SignInMethods: Codable, Sendable, Hashable {
+        public var google: Bool?
+        public var passkey: Bool?
+        /// "Forgot password?" works: the server can email a reset link.
+        public var passwordReset: Bool?
+    }
 
     public init(name: String = "strata", serverName: String, id: String, version: String, apiVersion: Int, setupRequired: Bool,
                 mode: String? = nil, setupCodeRequired: Bool? = nil, localJoin: Bool? = nil) {

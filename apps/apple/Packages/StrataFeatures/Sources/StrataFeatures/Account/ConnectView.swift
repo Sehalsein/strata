@@ -256,6 +256,7 @@ struct ConnectView: View {
 /// Username (or email) and password.
 struct SignInView: View {
     @Environment(AppServices.self) private var services
+    @Environment(\.openURL) private var openURL
     let target: ServerTarget
     let onSignedIn: () -> Void
 
@@ -298,6 +299,16 @@ struct SignInView: View {
                     Task { await signIn() }
                 }
                 .disabled(login.isEmpty || password.isEmpty || services.store.isAuthenticating)
+                #if os(iOS)
+                // The server emails a reset link; its page asks for the address.
+                if target.info.signIn?.passwordReset == true {
+                    Button("Forgot password?") { openURL(target.url.appending(path: "forgot-password")) }
+                        .font(.stFootnote)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.accentText)
+                        .frame(maxWidth: .infinity)
+                }
+                #endif
             }
             .frame(maxWidth: 480, alignment: .leading)
             .padding(.horizontal, Metrics.gutter)

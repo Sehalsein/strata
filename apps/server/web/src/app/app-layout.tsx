@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useState } from "react";
-import { ChevronsUpDown, Fingerprint, KeyRound, Lock, LogOut, SearchX, UserPlus, UserRound } from "lucide-react";
+import { ChevronsUpDown, Fingerprint, KeyRound, ShieldCheck, Lock, LogOut, SearchX, UserPlus, UserRound } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { errorMessage } from "@/lib/api";
@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/sidebar";
 import { ChangePasswordDialog } from "@/features/auth/change-password-dialog";
 import { SignInMethodsDialog } from "@/features/auth/sign-in-methods-dialog";
+import { YourDataDialog } from "@/features/account/your-data-dialog";
 import { HouseholdSwitcher } from "@/features/households/household-switcher";
 import { matchRoute, NAV_GROUPS, routes } from "./routes";
 import { useSession } from "./session";
@@ -141,6 +142,7 @@ function AccountMenu() {
   const { info, me, isServerAdmin, authChanged, addAccount } = useSession();
   const [changing, setChanging] = useState(false);
   const [methods, setMethods] = useState(false);
+  const [yourData, setYourData] = useState(false);
   const hasOtherMethods = !!(info.signIn?.google || info.signIn?.passkey);
   // Back from connecting Google.
   useEffect(() => {
@@ -204,6 +206,9 @@ function AccountMenu() {
               <Fingerprint /> Sign-in methods
             </DropdownMenuItem>
           )}
+          <DropdownMenuItem onSelect={() => setYourData(true)}>
+            <ShieldCheck /> Your data
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onSelect={() => void run(() => (current ? authClient.signOutAccount(current.session.token) : authClient.signOutAll()), others.length ? `Signed ${name} out` : undefined)}
@@ -219,6 +224,7 @@ function AccountMenu() {
       </DropdownMenu>
       <ChangePasswordDialog open={changing} onOpenChange={setChanging} />
       {hasOtherMethods && <SignInMethodsDialog open={methods} onOpenChange={setMethods} />}
+      <YourDataDialog open={yourData} onOpenChange={setYourData} />
     </>
   );
 }

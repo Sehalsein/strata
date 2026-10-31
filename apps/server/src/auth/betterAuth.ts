@@ -1,11 +1,12 @@
 import { createHash, createHmac } from "node:crypto";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, like, sql } from "drizzle-orm";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, bearer, deviceAuthorization, magicLink, multiSession, organization, username } from "better-auth/plugins";
 import { passkey } from "@better-auth/passkey";
 import type { Db } from "../db";
+import { emailConfigured, sendEmail, simpleEmail } from "../email";
 import * as schema from "../db/schema";
 import { runtime } from "#runtime";
 
@@ -104,6 +105,10 @@ export function createAuth(options: AuthOptions) {
         // admins or the member themself), never asked for from outside.
         if (ctx.path === "/sign-in/magic-link" && ctx.headers?.get(SIGN_IN_CODE_HEADER) !== signInCodeSecret) {
           throw new APIError("NOT_FOUND", { message: "Not found" });
+        }
+        // Password reset is by email: without email set up there's nothing to send.
+        if ((ctx.path === "/request-password-reset" || ctx.path === "/forget-password") && !emailConfigured()) {
+          throw new APIError("NOT_FOUND", { message: "This server can't send email. Ask your household's admin to help." });
         }
         if (ctx.path !== "/sign-up/email") return;
         // The invitation's id is the proof (it's in the link; no mail is sent): an email
@@ -214,6 +219,20 @@ export function createAuth(options: AuthOptions) {
       },
       // A new password signs the account out everywhere else.
       revokeSessionsOnPasswordReset: true,
+      // "Forgot password?" (only with email set up, see ../email.ts): a link for an hour.
+      resetPasswordTokenExpiresIn: 60 * 60,
+      sendResetPassword: async ({ user, url }) => {
+        await sendEmail({
+          to: user.email,
+          subject: "Reset your Strata password",
+          ...simpleEmail({
+            greeting: `Hi ${user.name},`,
+            lines: ["Someone asked to reset the password for your Strata account. If it was you, choose a new one with the button below. The link works for an hour."],
+            button: { label: "Choose a new password", url },
+            footer: "If you didn't ask, ignore this email: your password stays as it is.",
+          }),
+        });
+      },
     },
     session: {
       expiresIn: 90 * DAY_S,
@@ -228,7 +247,39 @@ export function createAuth(options: AuthOptions) {
     },
     user: {
       changeEmail: { enabled: false },
-      deleteUser: { enabled: false },
+      // People delete their own account from the dashboard (with their password). Their
+      // progress, lists, sign-ins and devices go with it; a household left with nobody is
+      // deleted too. An owner hands the household to someone first, and the server's only
+      // admin can't leave it without one.
+      deleteUser: {
+        enabled: true,
+        beforeDelete: async (user) => {
+          if ((user as { role?: string | null }).role === "admin") {
+            const admins = await db.select({ id: schema.user.id }).from(schema.user).where(eq(schema.user.role, "admin")).limit(2);
+            if (admins.length < 2) throw new APIError("BAD_REQUEST", { message: "You're this server's only admin, so this account can't be deleted." });
+          }
+          const owned = await db
+            .select({ organizationId: schema.member.organizationId })
+            .from(schema.member)
+            .where(and(eq(schema.member.userId, user.id), like(schema.member.role, "%owner%")));
+          for (const { organizationId } of owned) {
+            const people = await db.select({ userId: schema.member.userId, role: schema.member.role }).from(schema.member).where(eq(schema.member.organizationId, organizationId));
+            const otherOwner = people.some((p) => p.userId !== user.id && p.role.split(",").includes("owner"));
+            if (people.length > 1 && !otherOwner) {
+              throw new APIError("BAD_REQUEST", { message: "You own a household that has other people in it. Make one of them its owner first (Members), then delete your account." });
+            }
+          }
+        },
+        afterDelete: async (user) => {
+          // Households nobody's in any more go too (their library, settings and keys with them).
+          const orphans = await db
+            .select({ id: schema.organization.id })
+            .from(schema.organization)
+            .where(sql`not exists (select 1 from ${schema.member} where ${schema.member.organizationId} = ${schema.organization.id})`);
+          for (const o of orphans) await db.delete(schema.organization).where(eq(schema.organization.id, o.id));
+          void user;
+        },
+      },
     },
     rateLimit: {
       enabled: true,

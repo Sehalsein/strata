@@ -29,6 +29,12 @@ services:
       TZ: UTC
       # Provider keys (TMDB, TorBox, OMDb) are each household's: set them in the
       # dashboard under Settings › Connections.
+      # Optional: "Forgot password?" by email through Resend (a verified domain and a
+      # sending-only API key), and who runs this server, for its privacy page.
+      # RESEND_API_KEY: ""
+      # STRATA_EMAIL_FROM: "Strata <no-reply@yourdomain.com>"
+      # STRATA_OPERATOR: ""
+      # STRATA_PRIVACY_CONTACT: ""
       # Optional: your own Postgres instead of the bundled database (e.g. the
       # `postgres` service below, or Neon). Uncomment both.
       # DATABASE_URL: postgres://strata:strata@localhost:5432/strata

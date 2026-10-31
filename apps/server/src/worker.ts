@@ -16,6 +16,12 @@ interface Env {
   STRATA_SECRET_KEY: string;
   /** The address people reach the server at, e.g. https://strata.example.com. */
   STRATA_PUBLIC_URL?: string;
+  /** Email (password reset) by Resend: both, or no email at all. */
+  RESEND_API_KEY?: string;
+  STRATA_EMAIL_FROM?: string;
+  /** Who runs the server and how to reach them, for the privacy page. */
+  STRATA_OPERATOR?: string;
+  STRATA_PRIVACY_CONTACT?: string;
   /** "Sign in with Google" shows only with both. */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
@@ -37,6 +43,7 @@ function boot(env: Env) {
       DATABASE_URL: env.DATABASE_URL,
       STRATA_SECRET_KEY: env.STRATA_SECRET_KEY,
       ...(env.STRATA_PUBLIC_URL ? { STRATA_PUBLIC_URL: env.STRATA_PUBLIC_URL } : {}),
+      ...Object.fromEntries((["RESEND_API_KEY", "STRATA_EMAIL_FROM", "STRATA_OPERATOR", "STRATA_PRIVACY_CONTACT"] as const).filter((k) => env[k]).map((k) => [k, env[k]!])),
       ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET ? { GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET } : {}),
     });
     const { createServices } = await import("./services");
