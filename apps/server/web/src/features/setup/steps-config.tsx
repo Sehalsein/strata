@@ -13,6 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SwitchField } from "@/features/settings/fields";
 import { MediaFolders } from "@/features/settings/media-folders";
+import { KeyGuideDisclosure } from "@/features/settings/key-guides";
 import { SecretKeyForm } from "@/features/settings/secret-key-form";
 import type { StepProps } from "./setup-wizard";
 import { StepCard } from "./step-card";
@@ -57,6 +58,7 @@ export function ServicesStep({ onNext, onBack }: StepProps) {
             label="TMDB"
             required
             configured={secrets.tmdbApiKey}
+            guide={<KeyGuideDisclosure secretKey="tmdbApiKey" />}
             description={
               <>
                 Required to browse: titles, artwork and matching your files. Paste the v3 API key or the v4 read access token from{" "}
@@ -72,6 +74,7 @@ export function ServicesStep({ onNext, onBack }: StepProps) {
             secretKey="torboxApiKey"
             label="TorBox"
             configured={secrets.torboxApiKey}
+            guide={<KeyGuideDisclosure secretKey="torboxApiKey" />}
             description={
               <>
                 Optional. Plays files straight from your TorBox library, and finds releases of titles you don't have. Find the key at{" "}

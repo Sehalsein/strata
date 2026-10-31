@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, LoaderCircle } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { KeyGuide } from "./key-guides";
 
 interface Provider {
   key: SecretKey;
@@ -19,8 +20,6 @@ interface Provider {
   /** Initials and colour for its mark. */
   mark: { text: string; className: string };
   what: string;
-  keyHelp: ReactNode;
-  getKeyUrl: string;
   required?: boolean;
 }
 
@@ -30,8 +29,6 @@ const PROVIDERS: Provider[] = [
     name: "TMDB",
     mark: { text: "TM", className: "bg-sky-600 text-white" },
     what: "The catalog: titles, artwork, cast, and matching your files to them.",
-    keyHelp: "A v3 API key or v4 read access token (a free account works).",
-    getKeyUrl: "https://www.themoviedb.org/settings/api",
     required: true,
   },
   {
@@ -39,16 +36,12 @@ const PROVIDERS: Provider[] = [
     name: "TorBox",
     mark: { text: "TB", className: "bg-emerald-600 text-white" },
     what: "Plays your TorBox library straight from TorBox, and finds releases of titles you don't have. Saving a key starts a library sync.",
-    keyHelp: "Your API key from TorBox's settings.",
-    getKeyUrl: "https://torbox.app/settings",
   },
   {
     key: "omdbApiKey",
     name: "OMDb",
     mark: { text: "OM", className: "bg-amber-500 text-black" },
     what: "IMDb and Rotten Tomatoes ratings on title pages.",
-    keyHelp: "A free key by email (1,000 requests a day; Strata caches answers).",
-    getKeyUrl: "https://www.omdbapi.com/apikey.aspx",
   },
 ];
 
@@ -154,12 +147,7 @@ function ProviderCard({ provider: p, configured }: { provider: Provider; configu
 
       {entering && (
         <form onSubmit={save} noValidate className="bg-muted/30 flex flex-col gap-3 border-t p-5">
-          <p className="text-muted-foreground text-sm">
-            {p.keyHelp}{" "}
-            <a href={p.getKeyUrl} target="_blank" rel="noreferrer" className="text-foreground inline-flex items-center gap-1 underline underline-offset-4">
-              Get a key <ExternalLink className="size-3" />
-            </a>
-          </p>
+          <KeyGuide secretKey={p.key} />
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input
               aria-label={`${p.name} API key`}
