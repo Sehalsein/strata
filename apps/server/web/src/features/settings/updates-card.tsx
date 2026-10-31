@@ -1,22 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Download, LoaderCircle, RefreshCw } from "lucide-react";
+import { Download, LoaderCircle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { relativeTime } from "@/lib/format";
 import { queryClient, queryKeys } from "@/lib/query";
 import type { Settings, UpdateStatus } from "@/lib/types";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { InlineError, KeyValue, KeyValueList } from "@/components/page";
+import { InlineError } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { FieldGroup, FormField } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { SwitchField, type SetFn } from "./fields";
+import { type SetFn } from "./fields";
+import { SettingRow, SettingsSection, ToggleRow } from "./layout";
 
 const STATE_LABEL: Record<UpdateStatus["state"], string> = {
   idle: "Up to date",
@@ -101,115 +99,101 @@ export function UpdatesCard({ draft, set }: { draft: Settings; set: SetFn }) {
   const progress = status?.progress;
   const manifestCustom = draft.updateManifestUrl !== "";
 
+  const statusBadge = status && (
+    <Badge variant={status.state === "error" ? "destructive" : status.updateAvailable ? "accent" : busy ? "secondary" : "success"}>
+      {status.state === "idle" && status.updateAvailable ? "Update available" : STATE_LABEL[status.state]}
+    </Badge>
+  );
+  const notices =
+    (status?.latest?.notes && status.updateAvailable) || status?.disabledReason || (status?.state === "downloading" && progress) || status?.state === "waiting-for-idle" || status?.lastError || actionError || (query.error && !startedFrom);
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Updates</CardTitle>
-        <CardDescription>Strata updates itself from a signed release feed.</CardDescription>
-        {status && (
-          <CardAction>
-            <Badge variant={status.state === "error" ? "destructive" : status.updateAvailable ? "accent" : busy ? "secondary" : "success"}>
-              {status.state === "idle" && status.updateAvailable ? "Update available" : STATE_LABEL[status.state]}
-            </Badge>
-          </CardAction>
-        )}
-      </CardHeader>
-      <CardContent>
-        <FieldGroup>
-          <KeyValueList>
-            <KeyValue k="Running" mono>
-              {status ? `v${status.currentVersion}` : "—"} {status && <span className="text-muted-foreground">· {status.platform}</span>}
-            </KeyValue>
-            <KeyValue k="Latest" mono>
-              {status?.latest ? `v${status.latest.version}` : "—"}
-              {status?.lastCheckedAt && <span className="text-muted-foreground"> · checked {relativeTime(status.lastCheckedAt)}</span>}
-            </KeyValue>
-          </KeyValueList>
-
-          {status?.latest?.notes && status.updateAvailable && <p className="text-muted-foreground bg-muted/40 rounded-md border p-3 text-sm whitespace-pre-wrap">{status.latest.notes}</p>}
-          {status?.disabledReason && <p className="text-muted-foreground text-sm">{status.disabledReason}</p>}
-          {status?.state === "downloading" && progress && (
-            <div className="flex items-center gap-3">
-              <Progress value={(progress.received / Math.max(1, progress.total)) * 100} aria-label="Download progress" />
-              <span className="text-muted-foreground font-mono text-xs">{Math.round((progress.received / Math.max(1, progress.total)) * 100)}%</span>
-            </div>
-          )}
-          {status?.state === "waiting-for-idle" && <p className="text-muted-foreground text-sm">The update is downloaded and verified. Strata restarts when the last stream stops.</p>}
-          <InlineError error={status?.lastError} />
-          <InlineError error={actionError ?? (query.error && !startedFrom ? query.error : null)} />
-
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => void check()} disabled={pending !== null || busy}>
-              {pending === "check" || status?.state === "checking" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
-              {pending === "check" || status?.state === "checking" ? "Checking…" : "Check for updates"}
-            </Button>
-            {status?.updateAvailable && !status.disabledReason && (
-              <Button size="sm" onClick={() => setConfirming(true)} disabled={pending !== null || busy}>
-                {pending === "apply" ? <LoaderCircle className="animate-spin" /> : <Download />}
-                {pending === "apply" ? "Starting…" : `Update to v${status.latest?.version}`}
-              </Button>
+    <>
+      <SettingsSection title="Version" description="Strata updates itself from a signed release feed." action={statusBadge}>
+        <SettingRow label="Running">
+          <span className="font-mono text-sm">
+            {status ? `v${status.currentVersion}` : "—"} {status && <span className="text-muted-foreground">· {status.platform}</span>}
+          </span>
+        </SettingRow>
+        <SettingRow label="Latest" description={status?.lastCheckedAt ? `Checked ${relativeTime(status.lastCheckedAt)}.` : undefined}>
+          <span className="font-mono text-sm">{status?.latest ? `v${status.latest.version}` : "—"}</span>
+        </SettingRow>
+        {notices && (
+          <div className="flex flex-col gap-3 px-5 py-4">
+            {status?.latest?.notes && status.updateAvailable && <p className="text-muted-foreground bg-muted/40 rounded-md border p-3 text-sm whitespace-pre-wrap">{status.latest.notes}</p>}
+            {status?.disabledReason && <p className="text-muted-foreground text-sm">{status.disabledReason}</p>}
+            {status?.state === "downloading" && progress && (
+              <div className="flex items-center gap-3">
+                <Progress value={(progress.received / Math.max(1, progress.total)) * 100} aria-label="Download progress" />
+                <span className="text-muted-foreground font-mono text-xs">{Math.round((progress.received / Math.max(1, progress.total)) * 100)}%</span>
+              </div>
             )}
-            {busy && (
-              <Button variant="ghost" size="sm" onClick={() => void query.refetch()}>
-                Refresh
+            {status?.state === "waiting-for-idle" && <p className="text-muted-foreground text-sm">The update is downloaded and verified. Strata restarts when the last stream stops.</p>}
+            <InlineError error={status?.lastError} />
+            <InlineError error={actionError ?? (query.error && !startedFrom ? query.error : null)} />
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2 px-5 py-4">
+          <Button variant="outline" size="sm" onClick={() => void check()} disabled={pending !== null || busy}>
+            {pending === "check" || status?.state === "checking" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
+            {pending === "check" || status?.state === "checking" ? "Checking…" : "Check for updates"}
+          </Button>
+          {status?.updateAvailable && !status.disabledReason && (
+            <Button size="sm" onClick={() => setConfirming(true)} disabled={pending !== null || busy}>
+              {pending === "apply" ? <LoaderCircle className="animate-spin" /> : <Download />}
+              {pending === "apply" ? "Starting…" : `Update to v${status.latest?.version}`}
+            </Button>
+          )}
+          {busy && (
+            <Button variant="ghost" size="sm" onClick={() => void query.refetch()}>
+              Refresh
+            </Button>
+          )}
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="How it updates">
+        <SettingRow label="Channel" description="Nightly is built from every change and is unreviewed. Going back to stable from a nightly installs the stable release. Save before checking.">
+          <ToggleGroup type="single" variant="outline" value={draft.updateChannel} onValueChange={(v) => v && set("updateChannel", v as Settings["updateChannel"])} aria-label="Channel">
+            <ToggleGroupItem value="stable" className="px-4">
+              Stable
+            </ToggleGroupItem>
+            <ToggleGroupItem value="nightly" className="px-4">
+              Nightly
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </SettingRow>
+        <ToggleRow label="Install automatically" description="Checked every 6 hours; installs when nothing is playing." checked={draft.autoUpdate} onChange={(v) => set("autoUpdate", v)} />
+        <SettingRow
+          label="Feed address"
+          htmlFor="manifest-url"
+          description={
+            <>
+              Advanced. Leave empty for the feed built into this server. <code>{"{channel}"}</code> becomes stable or nightly; the signature is read from the same address plus <code>.sig</code> and
+              must match the built-in key.
+            </>
+          }
+        >
+          <div className="flex flex-col items-end gap-1">
+            <Input
+              id="manifest-url"
+              className="font-mono sm:w-72"
+              type="url"
+              placeholder={!manifestCustom && status?.manifestUrl ? status.manifestUrl : "https://…/manifest.json"}
+              value={draft.updateManifestUrl}
+              onChange={(e) => set("updateManifestUrl", e.target.value.trim())}
+              spellCheck={false}
+              autoCapitalize="off"
+            />
+            {manifestCustom && (
+              <Button variant="link" size="sm" className="h-auto px-0" onClick={() => set("updateManifestUrl", "")}>
+                Use the built-in feed
               </Button>
             )}
           </div>
+        </SettingRow>
+      </SettingsSection>
 
-          <FormField label="Channel" description="Nightly is built from every change and is unreviewed. Switching back to stable from a nightly installs the stable release. Save before checking.">
-            {(p) => (
-              <ToggleGroup id={p.id} aria-describedby={p["aria-describedby"]} type="single" variant="outline" value={draft.updateChannel} onValueChange={(v) => v && set("updateChannel", v as Settings["updateChannel"])}>
-                <ToggleGroupItem value="stable" className="px-4">
-                  Stable
-                </ToggleGroupItem>
-                <ToggleGroupItem value="nightly" className="px-4">
-                  Nightly
-                </ToggleGroupItem>
-              </ToggleGroup>
-            )}
-          </FormField>
-
-          <SwitchField checked={draft.autoUpdate} onChange={(v) => set("autoUpdate", v)} label="Install updates automatically" description="Checked every 6 hours; installs when nothing is playing." />
-
-          <Collapsible defaultOpen={manifestCustom}>
-            <CollapsibleTrigger className="group flex items-center gap-1 text-sm font-medium">
-              <ChevronRight className="size-4 transition-transform group-data-[state=open]:rotate-90" />
-              Advanced
-            </CollapsibleTrigger>
-            <CollapsibleContent className="mt-3 flex flex-col gap-3">
-              <FormField
-                label="Manifest URL override"
-                description={
-                  <>
-                    Leave empty to use the feed built into this server. <code>{"{channel}"}</code> becomes stable or nightly; the signature is read from the same URL plus <code>.sig</code> and must still match
-                    the built-in key.
-                  </>
-                }
-              >
-                {(p) => (
-                  <Input
-                    {...p}
-                    className="font-mono"
-                    type="url"
-                    placeholder={!manifestCustom && status?.manifestUrl ? status.manifestUrl : "https://…/manifest.json"}
-                    value={draft.updateManifestUrl}
-                    onChange={(e) => set("updateManifestUrl", e.target.value.trim())}
-                    spellCheck={false}
-                    autoCapitalize="off"
-                  />
-                )}
-              </FormField>
-              {manifestCustom && (
-                <div>
-                  <Button variant="ghost" size="sm" onClick={() => set("updateManifestUrl", "")}>
-                    Use the built-in feed
-                  </Button>
-                </div>
-              )}
-            </CollapsibleContent>
-          </Collapsible>
-        </FieldGroup>
-      </CardContent>
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}
@@ -219,6 +203,6 @@ export function UpdatesCard({ draft, set }: { draft: Settings; set: SetFn }) {
         destructive={false}
         onConfirm={apply}
       />
-    </Card>
+    </>
   );
 }

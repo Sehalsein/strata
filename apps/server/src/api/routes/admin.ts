@@ -11,7 +11,7 @@ import { TorboxClient } from "../../sources/torbox/client";
 import { toCandidate } from "../../sources/resolver";
 import { imageUrl, yearOf } from "../../catalog/tmdb";
 import { API_VERSION, VERSION } from "../../version";
-import { member, organization, session as authSession, user } from "../../db/schema";
+import { member, session as authSession, user } from "../../db/schema";
 import { and, desc, eq, gt } from "drizzle-orm";
 import { isCloud } from "../../mode";
 import { homeNetworkMacs, isPrivateMac } from "../deviceInfo";
@@ -250,7 +250,6 @@ export const adminRoutes = new Hono<Env>()
 
 /** The server admin's own pages: they don't need a household. */
 export const serverAdminRoutes = new Hono<Env>()
-  .use("/households", requireAuth, requireServerAdmin)
   .use("/logs", requireAuth, requireServerAdmin)
   .use("/fs", requireAuth, requireServerAdmin)
   // Folder picker for the setup wizard. Admin-only; lists directories, never files.
@@ -271,11 +270,6 @@ export const serverAdminRoutes = new Hono<Env>()
     if (platform() === "darwin") shortcuts.push({ name: "Volumes", path: "/Volumes" });
     else shortcuts.push({ name: "/mnt", path: "/mnt" }, { name: "/media", path: "/media" });
     return c.json({ path, parent: dirname(path) === path ? null : dirname(path), dirs, shortcuts });
-  })
-  // Households on this server (server admin): the dashboard's household list.
-  .get("/households", async (c) => {
-    const rows = await c.var.services.db.select({ id: organization.id, name: organization.name, slug: organization.slug, createdAt: organization.createdAt }).from(organization);
-    return c.json({ items: rows });
   })
   .get("/logs", (c) => {
     return c.json({ items: recentLogs(Math.min(optionalInt(c.req.query("limit")) ?? 200, 1000)) });
