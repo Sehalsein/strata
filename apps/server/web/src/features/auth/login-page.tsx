@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { KeyRound, LoaderCircle, MailCheck } from "lucide-react";
-import { api, ApiError, errorMessage } from "@/lib/api";
+import { api, ApiError, errorMessage, privacyUrl } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
 import type { ServerInfo } from "@/lib/types";
 import { AuthError, authClient } from "@/lib/auth-client";
@@ -55,7 +55,7 @@ export default function LoginPage({
       )}
       <p className="text-muted-foreground text-xs">
         {signUp && "Joining someone's household? Open the invitation link they sent you. "}
-        <a href="/privacy" className="hover:text-foreground underline">
+        <a href={privacyUrl(info.data)} className="hover:text-foreground underline">
           Privacy
         </a>
       </p>

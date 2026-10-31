@@ -1,0 +1,25 @@
+// strata.sehalsein.com: the landing site (apps/landing), in front of the cloud server at
+// app.strata.sehalsein.com (deploy/cloudflare).
+//
+// - /api/* goes to the server through a service binding, so Strata apps that were set up
+//   with this address, and links in emails sent before the move, keep working.
+// - The dashboard's pages redirect to the app.
+// - Everything else is the site.
+
+interface Env {
+  ASSETS: { fetch(request: Request): Promise<Response> };
+  SERVER: { fetch(request: Request): Promise<Response> };
+  APP_URL: string;
+}
+
+/** The dashboard's pages, as they were reached here before the move. */
+const DASHBOARD = /^\/(signup|overview|library|members|devices|settings|backoffice|logs|link|invite|forgot-password|reset-password)(\/|$)/;
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) return env.SERVER.fetch(request);
+    if (DASHBOARD.test(url.pathname)) return Response.redirect(`${env.APP_URL}${url.pathname}${url.search}`, 301);
+    return env.ASSETS.fetch(request);
+  },
+};

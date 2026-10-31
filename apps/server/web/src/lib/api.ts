@@ -123,3 +123,8 @@ export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
 }
+
+/** Where the privacy page is: the public site in front of the server when there is one, else this one. */
+export function privacyUrl(info: { siteUrl?: string | null } | undefined): string {
+  return info?.siteUrl ? `${info.siteUrl.replace(/\/+$/, "")}/privacy` : "/privacy";
+}

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LoaderCircle, RefreshCw, ServerOff } from "lucide-react";
-import { api, errorMessage } from "@/lib/api";
+import { api, errorMessage, privacyUrl } from "@/lib/api";
 import { authClient, isHouseholdAdmin } from "@/lib/auth-client";
 import { queryClient, queryKeys } from "@/lib/query";
 import { navigate, usePath } from "@/lib/router";
@@ -90,6 +90,11 @@ export function App() {
   const toSignIn = () => navigate("/", { replace: true });
   let screen;
   // Pages anyone can open, signed in or not.
+  if (path === "/privacy" && info.data.siteUrl) {
+    // The cloud's privacy page is on its public site.
+    location.replace(privacyUrl(info.data));
+    return <FullscreenSpinner />;
+  }
   if (path === "/privacy") {
     screen = <PrivacyPage />;
   } else if (path === "/forgot-password") {

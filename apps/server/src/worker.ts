@@ -28,6 +28,10 @@ interface Env {
   SENTRY_DSN?: string;
   /** Emails whose accounts run the server (comma-separated). */
   STRATA_ADMIN_EMAILS?: string;
+  /** The public site in front (its own Worker): the privacy page lives there. */
+  STRATA_SITE_URL?: string;
+  /** The domain passkeys belong to, when the server is on a subdomain of it. */
+  STRATA_PASSKEY_RP_ID?: string;
   /** "Sign in with Google" shows only with both. */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
@@ -54,7 +58,7 @@ async function boot(env: Env): Promise<Booted> {
     DATABASE_URL: env.DATABASE_URL,
     STRATA_SECRET_KEY: env.STRATA_SECRET_KEY,
     ...(env.STRATA_PUBLIC_URL ? { STRATA_PUBLIC_URL: env.STRATA_PUBLIC_URL } : {}),
-    ...Object.fromEntries((["RESEND_API_KEY", "STRATA_EMAIL_FROM", "STRATA_OPERATOR", "STRATA_PRIVACY_CONTACT", "SENTRY_DSN", "STRATA_ADMIN_EMAILS"] as const).filter((k) => env[k]).map((k) => [k, env[k]!])),
+    ...Object.fromEntries((["RESEND_API_KEY", "STRATA_EMAIL_FROM", "STRATA_OPERATOR", "STRATA_PRIVACY_CONTACT", "SENTRY_DSN", "STRATA_ADMIN_EMAILS", "STRATA_SITE_URL", "STRATA_PASSKEY_RP_ID"] as const).filter((k) => env[k]).map((k) => [k, env[k]!])),
     ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET ? { GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET } : {}),
   });
   const { createServices } = await import("./services");

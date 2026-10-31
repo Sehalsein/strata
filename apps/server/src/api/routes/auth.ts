@@ -126,6 +126,8 @@ export const authRoutes = new Hono<Env>()
       apiVersion: API_VERSION,
       /** "home" or "cloud" (stateless; no local folders or home-network join). */
       mode: isCloud ? "cloud" : "home",
+      /** The public site in front of this server, when there is one (it has the privacy page). */
+      siteUrl: process.env.STRATA_SITE_URL || null,
       /** Home servers make their admin first; the cloud has no setup (anyone signs up). */
       setupRequired: !isCloud && !(await s.hasAccounts()),
       /** Setup asks for the code from the server's log (not from the server's own machine). */

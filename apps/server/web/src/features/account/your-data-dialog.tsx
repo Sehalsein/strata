@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Download, LoaderCircle, Trash } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/app/session";
-import { errorMessage } from "@/lib/api";
+import { errorMessage, privacyUrl } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import { Separator } from "@/components/ui/separator";
  * their account and all of it. Deleting asks for the password.
  */
 export function YourDataDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const { me, authChanged } = useSession();
+  const { me, info, authChanged } = useSession();
   const [downloading, setDownloading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [password, setPassword] = useState("");
@@ -73,7 +73,7 @@ export function YourDataDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           <DialogTitle>Your data</DialogTitle>
           <DialogDescription>
             Everything this server keeps about {me.user.name}.{" "}
-            <a href="/privacy" target="_blank" rel="noreferrer" className="underline underline-offset-4">
+            <a href={privacyUrl(info)} target="_blank" rel="noreferrer" className="underline underline-offset-4">
               What's kept and why
             </a>
           </DialogDescription>

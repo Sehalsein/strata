@@ -51,13 +51,6 @@ export function takeIssuedCode(captureId: string): string | undefined {
   return token;
 }
 
-/**
- * The ways in besides a password, each on only when the server is set up for it, so a
- * home server shows neither:
- * - Google: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (redirect URI
- *   `<address>/api/auth/callback/google`).
- * - Passkeys: a public HTTPS address (STRATA_PUBLIC_URL); browsers only allow them on HTTPS.
- */
 /** Cloud: the accounts with these emails run the server (STRATA_ADMIN_EMAILS, comma-separated). */
 export function isAdminEmail(email: string | null | undefined): boolean {
   if (!isCloud || !email) return false;
@@ -77,13 +70,23 @@ const ownsHousehold = async (db: Db, userId: string) =>
 export function isSystemAdmin(user: { role?: string | null; email?: string | null }): boolean {
   return isCloud ? isAdminEmail(user.email) : user.role === "admin";
 }
-
+/**
+ * The ways in besides a password, each on only when the server is set up for it, so a
+ * home server shows neither:
+ * - Google: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (redirect URI
+ *   `<address>/api/auth/callback/google`).
+ * - Passkeys: a public HTTPS address (STRATA_PUBLIC_URL); browsers only allow them on HTTPS.
+ *   They belong to its host, or to STRATA_PASSKEY_RP_ID, a domain it's under: passkeys
+ *   made at strata.example.com keep working when the server moves to app.strata.example.com.
+ */
 export function signInMethods() {
   const google = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET } : null;
   let passkeys: { rpID: string; origin: string } | null = null;
   try {
     const url = process.env.STRATA_PUBLIC_URL ? new URL(process.env.STRATA_PUBLIC_URL) : null;
-    if (url?.protocol === "https:") passkeys = { rpID: url.hostname, origin: url.origin };
+    const rpID = process.env.STRATA_PASSKEY_RP_ID || url?.hostname;
+    const under = !!url && !!rpID && (url.hostname === rpID || url.hostname.endsWith(`.${rpID}`));
+    if (url?.protocol === "https:" && under) passkeys = { rpID: rpID!, origin: url.origin };
   } catch {
     // Not a URL: no passkeys.
   }
@@ -359,6 +362,8 @@ export function createAuth(options: AuthOptions) {
     },
     basePath: "/api/auth",
     baseURL: options.baseURL,
+    // The site in front (STRATA_SITE_URL) passes /api through to this server.
+    ...(process.env.STRATA_SITE_URL ? { trustedOrigins: [new URL(process.env.STRATA_SITE_URL).origin] } : {}),
     secret: createHmac("sha256", options.secretKey).update("strata/better-auth").digest("base64"),
     database: drizzleAdapter(options.db, {
       provider: "pg",

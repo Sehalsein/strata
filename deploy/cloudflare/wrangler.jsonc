@@ -28,14 +28,19 @@
   "limits": { "cpu_ms": 30000 },
   "observability": { "enabled": true },
   // The Worker answers at this address (Cloudflare makes the DNS record and certificate;
-  // sehalsein.com must be a zone in the same Cloudflare account).
-  "routes": [{ "pattern": "strata.sehalsein.com", "custom_domain": true }],
+  // sehalsein.com must be a zone in the same Cloudflare account). The landing site at
+  // strata.sehalsein.com (deploy/landing) passes its /api/* here too.
+  "routes": [{ "pattern": "app.strata.sehalsein.com", "custom_domain": true }],
   "vars": {
     // Password-reset email, through Resend (RESEND_API_KEY is a secret).
     "STRATA_EMAIL_FROM": "Strata <no-reply@sehalsein.com>",
     // Who runs the server and how to reach them, for the privacy page: STRATA_OPERATOR and
     // STRATA_PRIVACY_CONTACT are secrets, so the contact address stays out of this repo.
     // Passkeys, Google's callback, email links and the apps' QR codes all use this address.
-    "STRATA_PUBLIC_URL": "https://strata.sehalsein.com"
+    "STRATA_PUBLIC_URL": "https://app.strata.sehalsein.com",
+    // The landing site, which has the privacy page.
+    "STRATA_SITE_URL": "https://strata.sehalsein.com",
+    // Passkeys made before the server moved to app. belong to strata.sehalsein.com.
+    "STRATA_PASSKEY_RP_ID": "strata.sehalsein.com"
   }
 }
