@@ -140,7 +140,6 @@ export class Discovery {
     const client = this.torbox();
     if (!client) throw new Error("TorBox is not configured");
     let torrentId = this.pending.get(hash);
-    let addedNow = false;
     // Cached torrents turn ready within seconds of being added; real downloads take minutes,
     // so those return progress immediately and the client polls.
     let waitMs = 0;
@@ -158,7 +157,6 @@ export class Discovery {
         ({ torrentId } = await client.createTorrent(`magnet:?${magnet.toString().replace("urn%3Abtih%3A", "urn:btih:")}`));
         log.info(`Added ${release?.title ?? hash} to TorBox (#${torrentId})`);
         this.onAdded(torrentId, hash, release?.title);
-        addedNow = true;
       }
       if (release?.cached) waitMs = READY_WAIT_MS;
     }
@@ -183,14 +181,9 @@ export class Discovery {
     // Anything else in the torrent (collections, extras) goes through normal matching.
     runtime.background(this.library.matchPending().catch((err) => log.warn("Matching after import failed", err)));
     const file = this.pickFile(await this.library.byHash(hash), target);
-    if (!file) {
-      // Added just now for this and of no use: out of the owner's TorBox again.
-      if (addedNow) {
-        await client.deleteTorrent(torrentId).catch((err) => log.warn(`Couldn't remove TorBox #${torrentId}`, err));
-        log.info(`Removed TorBox #${torrentId}: no file for this title in it`);
-      }
-      throw new NoPlayableFileError();
-    }
+    // Not removed here: other files may still match in the background (anime numbering),
+    // and housekeeping already takes out what Strata added and nobody played.
+    if (!file) throw new NoPlayableFileError();
     return { status: "ready", fileId: file.id };
   }
 
