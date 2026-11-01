@@ -49,6 +49,10 @@ public struct StrataError: Error, LocalizedError, Sendable, Equatable {
     /// 429: too many attempts (sign-in is rate-limited).
     public var isRateLimited: Bool { status == 429 }
     public var isNotFound: Bool { status == 404 }
+    /// A request this server doesn't answer: one from before it existed (404), or one a
+    /// gateway in front of it refuses (403, like the public demo's). Only for requests that
+    /// have an older way to ask; elsewhere 403 means "not for this account".
+    public var isUnsupportedHere: Bool { status == 404 || status == 403 }
 
     static func http(_ status: Int, serverMessage: String?, code: String? = nil) -> StrataError {
         let msg = serverMessage?.trimmingCharacters(in: .whitespacesAndNewlines)

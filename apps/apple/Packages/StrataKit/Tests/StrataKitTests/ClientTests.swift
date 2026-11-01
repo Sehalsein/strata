@@ -394,6 +394,18 @@ final class ClientTests: XCTestCase {
         XCTAssertTrue(mine.isEmpty)
     }
 
+    func testHomeAndMyListThroughAGatewayThatRefusesTheNewRequests() async throws {
+        // The public demo's gateway answers requests it doesn't know with 403.
+        StubProtocol.reset { req in req.url?.path == "/api/home" ? .fixture("home") : .json(403, ["error": "That isn't available in the demo."]) }
+        let c = client(ttl: 60)
+        let catalog = try await c.homeCatalog()
+        let mine = try await c.homeProfile()
+        _ = try await c.watchlist()
+        XCTAssertFalse(catalog.isEmpty)
+        XCTAssertTrue(mine.isEmpty)
+        XCTAssertEqual(StubProtocol.recorded.map(\.url!.path), ["/api/home/catalog", "/api/home", "/api/home/profile", "/api/watchlist", "/api/home"])
+    }
+
     func testServerMaxAgeAndStaleWhileRevalidate() async throws {
         var maxAge = "0"
         StubProtocol.reset { _ in

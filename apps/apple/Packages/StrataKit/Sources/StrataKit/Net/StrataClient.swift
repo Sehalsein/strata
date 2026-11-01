@@ -223,7 +223,7 @@ public final class StrataClient: Sendable {
         do {
             let res: ShelvesResponse = try await get("/api/home/catalog", policy: policy)
             return res.shelves
-        } catch let error as StrataError where error.isNotFound {
+        } catch let error as StrataError where error.isUnsupportedHere {
             return try await home()
         }
     }
@@ -235,7 +235,7 @@ public final class StrataClient: Sendable {
         do {
             let res: ShelvesResponse = try await get("/api/home/profile", cached: false)
             return res.shelves
-        } catch let error as StrataError where error.isNotFound {
+        } catch let error as StrataError where error.isUnsupportedHere {
             return []
         }
     }
@@ -246,7 +246,7 @@ public final class StrataClient: Sendable {
         do {
             let res: ItemsResponse<TitleCard> = try await get("/api/watchlist", cached: false)
             return res.items
-        } catch let error as StrataError where error.isNotFound {
+        } catch let error as StrataError where error.isUnsupportedHere {
             return try await home().first { $0.id == "watchlist" }?.items ?? []
         }
     }

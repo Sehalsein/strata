@@ -187,6 +187,10 @@ struct WatchView: View {
                         .foregroundStyle(Theme.onArtwork.opacity(0.8))
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 420)
+                        #if !os(tvOS)
+                        // Under the centre controls while they're up, not behind them.
+                        .padding(.top, chromeVisible ? 160 : 0)
+                        #endif
                         .transition(.opacity)
                 }
             }
