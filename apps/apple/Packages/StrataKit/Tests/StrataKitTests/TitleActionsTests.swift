@@ -23,7 +23,7 @@ final class TitleActionsTests: XCTestCase {
     func testMovieInLibraryPlaysFromLibrary() async throws {
         let movie = try Fixture.decode(MovieDetail.self, "movie_full") // in the library, part watched
         let now = try XCTUnwrap(TitleActions.libraryPlay(movie).choice)
-        XCTAssertEqual(now, PlayChoice(label: "Resume", target: .movie(10378), subtitle: "2008"))
+        XCTAssertEqual(now, PlayChoice(label: "Resume", target: .movie(.tmdb(.movie, 10378)), subtitle: "2008"))
 
         StubProtocol.reset { _ in .fixture("sources") }
         let options = await TitleActions(client: client()).play(movie)
@@ -40,7 +40,7 @@ final class TitleActionsTests: XCTestCase {
 
         StubProtocol.reset { _ in .fixture("sources_discovered") }
         let options = await TitleActions(client: client()).play(movie)
-        XCTAssertEqual(options.choice, PlayChoice(label: "Play", target: .movie(10378), candidateId: "file:1", subtitle: "2008"))
+        XCTAssertEqual(options.choice, PlayChoice(label: "Play", target: .movie(.tmdb(.movie, 10378)), candidateId: "file:1", subtitle: "2008"))
         XCTAssertEqual(options.sources.count, 3)
         XCTAssertTrue(options.lookedFurther)
         XCTAssertEqual(paths, ["/api/sources?mediaType=movie&tmdbId=10378&discover=1"])
@@ -60,7 +60,7 @@ final class TitleActionsTests: XCTestCase {
 
     func testShowResumesUpNextFromLibrary() async throws {
         let show = try fixture(ShowDetail.self, "show_full", ["upNext": ["season": 1, "episode": 2, "positionMs": 60_000, "available": true]])
-        let expected = PlayChoice(label: "Resume S1 · E2", target: .episode(show: 9001, season: 1, episode: 2), subtitle: "S1 · E2")
+        let expected = PlayChoice(label: "Resume S1 · E2", target: .episode(show: .tmdb(.show, 9001), season: 1, episode: 2), subtitle: "S1 · E2")
         XCTAssertEqual(TitleActions.libraryPlay(show).choice, expected)
 
         StubProtocol.reset { _ in .fixture("sources") }
@@ -77,7 +77,7 @@ final class TitleActionsTests: XCTestCase {
 
         StubProtocol.reset { _ in .fixture("sources_discovered") }
         let options = await TitleActions(client: client()).play(show)
-        XCTAssertEqual(options.choice, PlayChoice(label: "Play S2 · E3", target: .episode(show: 9001, season: 2, episode: 3), candidateId: "file:1", subtitle: "S2 · E3"))
+        XCTAssertEqual(options.choice, PlayChoice(label: "Play S2 · E3", target: .episode(show: .tmdb(.show, 9001), season: 2, episode: 3), candidateId: "file:1", subtitle: "S2 · E3"))
         XCTAssertTrue(options.lookedFurther)
         XCTAssertEqual(paths, ["/api/sources?mediaType=episode&tmdbId=9001&season=2&episode=3&discover=1"])
     }
@@ -93,7 +93,7 @@ final class TitleActionsTests: XCTestCase {
     func testCardsAnswerAsTheirPagesWould() async throws {
         // A movie in the library plays straight away, without asking.
         let movie = TitleCard(type: .movie, tmdbId: 10378, title: "Big Buck Bunny", year: 2008, available: [.local])
-        XCTAssertEqual(TitleActions.libraryPlay(movie).choice, PlayChoice(label: "Play", target: .movie(10378), subtitle: "2008"))
+        XCTAssertEqual(TitleActions.libraryPlay(movie).choice, PlayChoice(label: "Play", target: .movie(.tmdb(.movie, 10378)), subtitle: "2008"))
 
         // A show's Up Next comes from its page; in the library, no sources are asked for.
         var show = try XCTUnwrap(JSONSerialization.jsonObject(with: Fixture.data("show_full")) as? [String: Any])
@@ -103,8 +103,8 @@ final class TitleActionsTests: XCTestCase {
         let card = TitleCard(type: .show, tmdbId: 9001, title: "Test Show")
         XCTAssertNil(TitleActions.libraryPlay(card).choice)
         let options = await TitleActions(client: client()).play(card)
-        XCTAssertEqual(options.choice, PlayChoice(label: "Play S1 · E1", target: .episode(show: 9001, season: 1, episode: 1), subtitle: "S1 · E1"))
-        XCTAssertEqual(paths, ["/api/titles/show/9001"])
+        XCTAssertEqual(options.choice, PlayChoice(label: "Play S1 · E1", target: .episode(show: .tmdb(.show, 9001), season: 1, episode: 1), subtitle: "S1 · E1"))
+        XCTAssertEqual(paths, ["/api/titles/tmdb:show:9001"])
     }
 
     func testEpisodeRow() async throws {
@@ -114,14 +114,14 @@ final class TitleActionsTests: XCTestCase {
 
         episode.available = [.local]
         StubProtocol.reset { _ in .fixture("sources") }
-        let fromLibrary = await actions.play(episode, of: 9001)
+        let fromLibrary = await actions.play(episode, of: .tmdb(.show, 9001))
         XCTAssertNil(fromLibrary?.candidateId)
         XCTAssertEqual(fromLibrary?.subtitle, "\(episode.code) · \(episode.name)")
         XCTAssertTrue(StubProtocol.recorded.isEmpty)
 
         episode.available = []
         StubProtocol.reset { _ in .json(200, ["items": []]) }
-        let missing = await actions.play(episode, of: 9001)
+        let missing = await actions.play(episode, of: .tmdb(.show, 9001))
         XCTAssertNil(missing, "nothing found: it isn't in the library")
     }
 
@@ -134,23 +134,23 @@ final class TitleActionsTests: XCTestCase {
         var changes = actions.changes.makeAsyncIterator()
 
         _ = try await c.home()
-        try await actions.setOnList(.movie, tmdbId: 10378, true)
+        try await actions.setOnList(.tmdb(.movie, 10378), true)
         _ = try await c.home()
         let list = await changes.next()
-        XCTAssertEqual(list, .list(.movie, tmdbId: 10378, on: true))
+        XCTAssertEqual(list, .list(.tmdb(.movie, 10378), on: true))
         XCTAssertEqual(list?.changesCalendar, true)
 
-        try await actions.setWatched(.episode(show: 9001, season: 1, episode: 2), true)
+        try await actions.setWatched(.episode(show: .tmdb(.show, 9001), season: 1, episode: 2), true)
         let watched = await changes.next()
-        XCTAssertEqual(watched, .watched(.episode(show: 9001, season: 1, episode: 2), true))
+        XCTAssertEqual(watched, .watched(.episode(show: .tmdb(.show, 9001), season: 1, episode: 2), true))
         XCTAssertEqual(watched?.changesCalendar, false)
 
-        try await actions.hideFromContinue(.show, tmdbId: 9001)
+        try await actions.hideFromContinue(.tmdb(.show, 9001))
         let hidden = await changes.next()
-        XCTAssertEqual(hidden, .hiddenFromContinue(.show, tmdbId: 9001))
+        XCTAssertEqual(hidden, .hiddenFromContinue(.tmdb(.show, 9001)))
 
         _ = try await c.home()
-        await actions.progressSaved(.episode(show: 9001, season: 1, episode: 2))
+        await actions.progressSaved(.episode(show: .tmdb(.show, 9001), season: 1, episode: 2))
         _ = try await c.home()
         let progress = await changes.next()
         XCTAssertEqual(progress, .progress)
@@ -167,12 +167,12 @@ final class TitleActionsTests: XCTestCase {
         let actions = TitleActions(client: client())
         var changes = actions.changes.makeAsyncIterator()
         do {
-            try await actions.setOnList(.show, tmdbId: 9001, true)
+            try await actions.setOnList(.tmdb(.show, 9001), true)
             XCTFail("expected a failure")
         } catch {}
-        try await actions.setWatched(.movie(10378), false)
+        try await actions.setWatched(.movie(.tmdb(.movie, 10378)), false)
         let next = await changes.next()
-        XCTAssertEqual(next, .watched(.movie(10378), false), "the failed change sent nothing")
+        XCTAssertEqual(next, .watched(.movie(.tmdb(.movie, 10378)), false), "the failed change sent nothing")
     }
 
     func testRetriesOnceAfterRecovering() async throws {
@@ -188,14 +188,14 @@ final class TitleActionsTests: XCTestCase {
             current.value = up
             return true
         })
-        try await actions.hideFromContinue(.movie, tmdbId: 10378)
+        try await actions.hideFromContinue(.tmdb(.movie, 10378))
         XCTAssertEqual(StubProtocol.recorded.map { $0.url!.host! }, ["down.test", "strata.test"])
     }
 
     func testNotConnected() async {
         let actions = TitleActions(client: { nil })
         do {
-            try await actions.setWatched(.movie(1), true)
+            try await actions.setWatched(.movie(.tmdb(.movie, 1)), true)
             XCTFail("expected a failure")
         } catch {}
         let options = await actions.play(TitleCard(type: .movie, tmdbId: 1, title: "X"))

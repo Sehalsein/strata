@@ -287,8 +287,11 @@ extension View {
     func routeDestinations() -> some View {
         navigationDestination(for: Route.self) { route in
             switch route {
-            case .movie(let id): MovieDetailView(tmdbId: id)
-            case .show(let id): ShowDetailView(tmdbId: id)
+            case .title(let ref):
+                switch ref.type {
+                case .movie: MovieDetailView(ref: ref)
+                case .show: ShowDetailView(ref: ref)
+                }
             case .browse(let type, let list): BrowseListView(type: type, list: list)
             case .animeList(let id, let title): AnimeListView(id: id, title: title)
             case .shelf(let shelf): ShelfGridView(shelf: shelf)

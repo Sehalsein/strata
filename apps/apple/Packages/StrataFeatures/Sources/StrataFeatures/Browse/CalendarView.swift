@@ -80,7 +80,7 @@ struct CalendarView: View {
                     VStack(spacing: 0) {
                         ForEach(day.episodes) { episode in
                             // A full-width row lifts like an episode row, not like a poster.
-                            NavigationLink(value: Route.show(episode.tmdbId)) { CalendarRow(episode: episode) }
+                            NavigationLink(value: Route.title(episode.ref)) { CalendarRow(episode: episode) }
                                 .buttonStyle(FocusLiftStyle())
                             if episode.id != day.episodes.last?.id { Divider().overlay(Theme.hairline) }
                         }
@@ -141,7 +141,7 @@ private struct CalendarRow: View {
 
     var body: some View {
         HStack(spacing: Metrics.space3) {
-            ArtworkImage(url: episode.posterUrl, aspectRatio: 2 / 3, seed: "show-\(episode.tmdbId)")
+            ArtworkImage(url: episode.posterUrl, aspectRatio: 2 / 3, seed: episode.ref.description)
                 .frame(width: thumbWidth)
             VStack(alignment: .leading, spacing: 3) {
                 Text(episode.title).font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(1)

@@ -96,7 +96,7 @@ struct HomeView: View {
     }
 
     private func watchlistKeys(_ list: [Shelf]) -> Set<String> {
-        Set(list.first { $0.id == "watchlist" }?.items.map { "\($0.type.rawValue)-\($0.tmdbId)" } ?? [])
+        Set(list.first { $0.id == "watchlist" }?.items.map(\.ref.description) ?? [])
     }
 
     /// Episodes airing from today on; the rail stays hidden if the calendar can't load.
@@ -193,7 +193,7 @@ struct ShelfRail: View {
     }
 
     private func hide(_ card: TitleCard) {
-        Task { try? await services.titles.hideFromContinue(card.type, tmdbId: card.tmdbId) }
+        Task { try? await services.titles.hideFromContinue(card.ref) }
     }
 
     /// Watched marks the item done, so it leaves the rail.
@@ -252,7 +252,7 @@ struct ComingUpRail: View {
         if !episodes.isEmpty {
             Rail("Upcoming Episodes", seeAll: { pushRoute(.calendar) }) {
                 ForEach(episodes) { episode in
-                    NavigationLink(value: Route.show(episode.tmdbId)) { ComingUpCard(episode: episode) }
+                    NavigationLink(value: Route.title(episode.ref)) { ComingUpCard(episode: episode) }
                         .buttonStyle(StrataCardStyle())
                 }
             }
@@ -265,7 +265,7 @@ private struct ComingUpCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space2) {
-            ArtworkImage(url: episode.backdropUrl, aspectRatio: 16 / 9, seed: "show-\(episode.tmdbId)",
+            ArtworkImage(url: episode.backdropUrl, aspectRatio: 16 / 9, seed: episode.ref.description,
                          title: episode.backdropUrl == nil ? episode.title : nil)
             VStack(alignment: .leading, spacing: 2) {
                 Text(when).eyebrowStyle(Calendar.current.isDateInToday(episode.date) ? Theme.accentText : Theme.ink3)
@@ -298,7 +298,7 @@ struct HeroCarousel: View {
     @Environment(AppServices.self) private var services
     @Environment(\.pushRoute) private var pushRoute
     let cards: [TitleCard]
-    /// `type-tmdbId` of each title on My List, from Home's own shelf.
+    /// The ref of each title on My List, from Home's own shelf.
     var watchlist: Set<String> = []
     /// Taps on + not yet reflected in `watchlist`.
     @State private var listed: [String: Bool] = [:]
@@ -436,7 +436,7 @@ struct HeroCarousel: View {
         withAnimation(.easeInOut(duration: 0.25)) { plays[card.id] = options }
     }
 
-    private func key(_ card: TitleCard) -> String { "\(card.type.rawValue)-\(card.tmdbId)" }
+    private func key(_ card: TitleCard) -> String { card.ref.description }
     private func isListed(_ card: TitleCard) -> Bool { listed[key(card)] ?? watchlist.contains(key(card)) }
 
     /// Wide like the TV app's: the row's width on iPhone, a generous fixed width on iPad.
@@ -506,7 +506,7 @@ struct HeroCarousel: View {
         listed[key(card)] = on
         Task {
             // On success Home reloads, so the My List rail and Coming Up follow.
-            do { try await services.titles.setOnList(card.type, tmdbId: card.tmdbId, on) } catch { listed[key(card)] = !on }
+            do { try await services.titles.setOnList(card.ref, on) } catch { listed[key(card)] = !on }
         }
     }
 

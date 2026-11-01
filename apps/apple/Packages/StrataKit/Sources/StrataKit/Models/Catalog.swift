@@ -23,7 +23,10 @@ public struct EpisodeRef: Codable, Sendable, Hashable {
 /// (for shows) plus `positionMs`/`durationMs`.
 public struct TitleCard: Codable, Sendable, Hashable, Identifiable {
     public var type: TitleType
-    public var tmdbId: Int
+    /// The ref the server sent; older servers send none (the title is TMDB's).
+    private var sentRef: TitleRef?
+    /// TMDB's id: absent on an AniList title TMDB doesn't have.
+    public var tmdbId: Int?
     public var title: String
     public var year: Int?
     public var overview: String?
@@ -41,11 +44,17 @@ public struct TitleCard: Codable, Sendable, Hashable, Identifiable {
     /// A short label from the server, shown as is ("Episode 12", "TV · 24 episodes").
     public var badge: String? = nil
 
-    public init(type: TitleType, tmdbId: Int, title: String, year: Int? = nil, overview: String? = nil,
+    enum CodingKeys: String, CodingKey {
+        case type, tmdbId, title, year, overview, posterUrl, backdropUrl, rating, available, episode, positionMs, durationMs, role, eyebrow, badge
+        case sentRef = "ref"
+    }
+
+    public init(ref: TitleRef, tmdbId: Int? = nil, title: String, year: Int? = nil, overview: String? = nil,
                 posterUrl: URL? = nil, backdropUrl: URL? = nil, rating: Double? = nil, available: [Provider] = [],
                 episode: EpisodeRef? = nil, positionMs: Int? = nil, durationMs: Int? = nil) {
-        self.type = type
-        self.tmdbId = tmdbId
+        self.type = ref.type
+        self.sentRef = ref
+        self.tmdbId = tmdbId ?? ref.tmdbId
         self.title = title
         self.year = year
         self.overview = overview
@@ -58,11 +67,22 @@ public struct TitleCard: Codable, Sendable, Hashable, Identifiable {
         self.durationMs = durationMs
     }
 
-    /// Unique across types (a movie and a show can share a TMDB id). Continue-watching
-    /// cards for different episodes of one show stay distinct.
+    /// A TMDB title.
+    public init(type: TitleType, tmdbId: Int, title: String, year: Int? = nil, overview: String? = nil,
+                posterUrl: URL? = nil, backdropUrl: URL? = nil, rating: Double? = nil, available: [Provider] = [],
+                episode: EpisodeRef? = nil, positionMs: Int? = nil, durationMs: Int? = nil) {
+        self.init(ref: .tmdb(type, tmdbId), title: title, year: year, overview: overview, posterUrl: posterUrl, backdropUrl: backdropUrl,
+                  rating: rating, available: available, episode: episode, positionMs: positionMs, durationMs: durationMs)
+    }
+
+    /// Which title: the server's ref, or for an older server's card, TMDB's.
+    public var ref: TitleRef { sentRef ?? .tmdb(type, tmdbId ?? 0) }
+
+    /// Unique across sources and types. Continue-watching cards for different episodes
+    /// of one show stay distinct.
     public var id: String {
-        if let episode { return "\(type.rawValue)-\(tmdbId)-s\(episode.season)e\(episode.episode)" }
-        return "\(type.rawValue)-\(tmdbId)"
+        if let episode { return "\(ref)-s\(episode.season)e\(episode.episode)" }
+        return ref.description
     }
 
     public var yearText: String? { year.map(String.init) }
@@ -83,10 +103,15 @@ public struct TitleCard: Codable, Sendable, Hashable, Identifiable {
     /// Nil for a show card without an episode (open the detail page instead).
     public var playbackTarget: PlaybackTarget? {
         switch type {
-        case .movie: return .movie(tmdbId)
-        case .show: return episode.map { .episode(show: tmdbId, season: $0.season, episode: $0.episode) }
+        case .movie: return .movie(ref)
+        case .show: return episode.map { .episode(show: ref, season: $0.season, episode: $0.episode) }
         }
     }
+}
+
+extension TitleCard: ListItem {
+    /// From a source this app knows, and naming its title one way or another.
+    var isUsable: Bool { sentRef.map(\.isSupported) ?? (tmdbId != nil) }
 }
 
 public struct Shelf: Codable, Sendable, Hashable, Identifiable {
@@ -105,7 +130,8 @@ public struct Shelf: Codable, Sendable, Hashable, Identifiable {
     public var id: String
     public var title: String
     public var kind: Kind
-    public var items: [TitleCard]
+    /// Titles this app can't use are left out.
+    @LossyList public var items: [TitleCard]
     /// The server's word for the layout, kept as sent so unknown ones still decode.
     public var styleName: String?
     public var style: Style? { styleName.flatMap(Style.init(rawValue:)) }
@@ -158,8 +184,8 @@ public struct PersonDetail: Codable, Sendable, Hashable, Identifiable {
     public var placeOfBirth: String?
     public var knownFor: String?
     public var profileUrl: URL?
-    public var movies: [TitleCard]
-    public var shows: [TitleCard]
+    @LossyList public var movies: [TitleCard]
+    @LossyList public var shows: [TitleCard]
 
     /// "Born March 3, 1972 in Toronto" / "1940 – 2016".
     public var lifeText: String? {
@@ -285,7 +311,10 @@ public struct ExternalRatings: Codable, Sendable, Hashable {
 
 public struct MovieDetail: Codable, Sendable, Hashable, Identifiable {
     public var type: TitleType
-    public var tmdbId: Int
+    /// Absent from older servers (the title is TMDB's).
+    private var sentRef: TitleRef?
+    /// TMDB's id: absent on an AniList title TMDB doesn't have.
+    public var tmdbId: Int?
     public var imdbId: String?
     public var title: String
     public var tagline: String?
@@ -308,15 +337,25 @@ public struct MovieDetail: Codable, Sendable, Hashable, Identifiable {
     /// AniList details when this is anime.
     public var anime: AnimeInfo?
     public var collection: CollectionRef?
-    public var recommendations: [TitleCard]
+    /// Other seasons and films of an anime (sequels, prequels). Absent from older servers.
+    @LossyList public var related: [TitleCard]
+    @LossyList public var recommendations: [TitleCard]
     public var available: [Provider]
     /// The library files that can play it.
     public var sources: [Candidate]
     public var progress: WatchProgress?
     public var inWatchlist: Bool
 
-    public var id: String { "movie-\(tmdbId)" }
-    public var target: PlaybackTarget { .movie(tmdbId) }
+    enum CodingKeys: String, CodingKey {
+        case type, tmdbId, imdbId, title, tagline, overview, year, releaseDate, runtimeMinutes, genres, rating, ratings, certification
+        case posterUrl, backdropUrl, cast, directors, trailer, videos, anime, collection, related, recommendations, available, sources
+        case progress, inWatchlist
+        case sentRef = "ref"
+    }
+
+    public var ref: TitleRef { sentRef ?? .tmdb(.movie, tmdbId ?? 0) }
+    public var id: String { ref.description }
+    public var target: PlaybackTarget { .movie(ref) }
     public var yearText: String? { year.map(String.init) }
     public var runtimeText: String? { Formatting.runtime(minutes: runtimeMinutes) }
     public var ratingText: String? { Formatting.rating(rating) }
@@ -357,7 +396,10 @@ public struct UpNext: Codable, Sendable, Hashable {
 
 public struct ShowDetail: Codable, Sendable, Hashable, Identifiable {
     public var type: TitleType
-    public var tmdbId: Int
+    /// Absent from older servers (the title is TMDB's).
+    private var sentRef: TitleRef?
+    /// TMDB's id: absent on an AniList title TMDB doesn't have.
+    public var tmdbId: Int?
     public var imdbId: String?
     public var title: String
     public var tagline: String?
@@ -380,12 +422,22 @@ public struct ShowDetail: Codable, Sendable, Hashable, Identifiable {
     /// AniList details when this is anime.
     public var anime: AnimeInfo?
     public var seasons: [SeasonSummary]
-    public var recommendations: [TitleCard]
+    /// An anime's other seasons (sequels, prequels). Absent from older servers.
+    @LossyList public var related: [TitleCard]
+    @LossyList public var recommendations: [TitleCard]
     public var available: [Provider]
     public var upNext: UpNext?
     public var inWatchlist: Bool
 
-    public var id: String { "show-\(tmdbId)" }
+    enum CodingKeys: String, CodingKey {
+        case type, tmdbId, imdbId, title, tagline, overview, year, firstAirDate, lastAirDate, status, genres, rating, ratings
+        case certification, posterUrl, backdropUrl, cast, trailer, videos, anime, seasons, related, recommendations, available
+        case upNext, inWatchlist
+        case sentRef = "ref"
+    }
+
+    public var ref: TitleRef { sentRef ?? .tmdb(.show, tmdbId ?? 0) }
+    public var id: String { ref.description }
     public var yearText: String? { year.map(String.init) }
     /// "2019–2023", "2020–" for running shows, or just the first year.
     public var yearRangeText: String? {
@@ -404,7 +456,7 @@ public struct ShowDetail: Codable, Sendable, Hashable, Identifiable {
         seasons.filter { !$0.isSpecials } + seasons.filter(\.isSpecials)
     }
     public var upNextTarget: PlaybackTarget? {
-        upNext.map { .episode(show: tmdbId, season: $0.season, episode: $0.episode) }
+        upNext.map { .episode(show: ref, season: $0.season, episode: $0.episode) }
     }
 }
 
@@ -436,7 +488,7 @@ public struct EpisodeItem: Codable, Sendable, Hashable, Identifiable {
     public var airDateValue: Date? { Formatting.date(airDate) }
     /// Not aired yet (air date in the future).
     public var isUpcoming: Bool { airDateValue.map { $0 > Date() } ?? false }
-    public func target(show tmdbId: Int) -> PlaybackTarget { .episode(show: tmdbId, season: season, episode: episode) }
+    public func target(show: TitleRef) -> PlaybackTarget { .episode(show: show, season: season, episode: episode) }
 }
 
 public struct SeasonDetail: Codable, Sendable, Hashable, Identifiable {
@@ -453,7 +505,10 @@ public struct SeasonDetail: Codable, Sendable, Hashable, Identifiable {
 /// `GET /api/calendar`: an episode of a show on the profile's list, aired in the last
 /// week or coming up in the next month.
 public struct CalendarEpisode: Codable, Sendable, Hashable, Identifiable {
-    public var tmdbId: Int
+    /// The show's ref; absent from older servers (the show is TMDB's).
+    private var sentRef: TitleRef?
+    /// The show's TMDB id: absent on an AniList show TMDB doesn't have.
+    public var tmdbId: Int?
     public var title: String
     public var posterUrl: URL?
     public var backdropUrl: URL?
@@ -468,7 +523,15 @@ public struct CalendarEpisode: Codable, Sendable, Hashable, Identifiable {
     /// In the server's library.
     public var available: Bool
 
-    public var id: String { "\(tmdbId)-\(season.map(String.init) ?? "x")-\(episode)-\(airDate)" }
+    enum CodingKeys: String, CodingKey {
+        case tmdbId, title, posterUrl, backdropUrl, season, episode, name, airsAt, airDate, available
+        case sentRef = "ref"
+    }
+
+    /// The show.
+    public var ref: TitleRef { sentRef ?? .tmdb(.show, tmdbId ?? 0) }
+
+    public var id: String { "\(ref)-\(season.map(String.init) ?? "x")-\(episode)-\(airDate)" }
 
     /// When it airs: the exact time, or the start of its air date here.
     public var date: Date {
@@ -497,4 +560,8 @@ public struct CalendarEpisode: Codable, Sendable, Hashable, Identifiable {
         guard parts.count == 3 else { return nil }
         return Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
     }
+}
+
+extension CalendarEpisode: ListItem {
+    var isUsable: Bool { sentRef.map(\.isSupported) ?? (tmdbId != nil) }
 }

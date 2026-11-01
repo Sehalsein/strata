@@ -34,7 +34,7 @@ final class ProbeFlowTests: XCTestCase {
             }
         }
         let engine = engine()
-        await engine.load(target: .movie(10378), meta: PlaybackMeta(title: "t"), startMs: 5000)
+        await engine.load(target: .movie(.tmdb(.movie, 10378)), meta: PlaybackMeta(title: "t"), startMs: 5000)
 
         let requests = ServerStub.recorded
         XCTAssertEqual(requests.map { $0.url!.path }, ["/api/play", "/api/files/42/probe", "/api/play"])
@@ -62,7 +62,7 @@ final class ProbeFlowTests: XCTestCase {
             default: (404, Data(#"{"error":"stop here"}"#.utf8))
             }
         }
-        await engine().load(target: .movie(10378), meta: PlaybackMeta(title: "t"), candidateId: "hash:abc")
+        await engine().load(target: .movie(.tmdb(.movie, 10378)), meta: PlaybackMeta(title: "t"), candidateId: "hash:abc")
         XCTAssertEqual(ServerStub.recorded.last?.jsonBody?["candidateId"] as? String, "hash:abc")
     }
 
@@ -71,7 +71,7 @@ final class ProbeFlowTests: XCTestCase {
         let needsProbe = json(["needsProbe": ["fileId": 42, "url": missing.absoluteString]])
         ServerStub.reset { _, _ in (428, needsProbe) }
         let engine = engine()
-        await engine.load(target: .movie(10378), meta: PlaybackMeta(title: "t"))
+        await engine.load(target: .movie(.tmdb(.movie, 10378)), meta: PlaybackMeta(title: "t"))
         guard case .failed(let message) = engine.status else { return XCTFail("\(engine.status)") }
         XCTAssertTrue(message.hasPrefix("This file couldn't be read ("), message)
         XCTAssertTrue(message.hasSuffix("). Pick another source."), message)
@@ -84,7 +84,7 @@ final class ProbeFlowTests: XCTestCase {
             req.url!.path == "/api/play" ? (428, needsProbe) : (200, Data(#"{"ok":true}"#.utf8))
         }
         let engine = engine()
-        await engine.load(target: .movie(10378), meta: PlaybackMeta(title: "t"))
+        await engine.load(target: .movie(.tmdb(.movie, 10378)), meta: PlaybackMeta(title: "t"))
         XCTAssertEqual(ServerStub.recorded.map { $0.url!.path }, ["/api/play", "/api/files/42/probe", "/api/play"])
         guard case .failed = engine.status else { return XCTFail("\(engine.status)") }
     }

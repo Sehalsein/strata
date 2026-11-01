@@ -2,27 +2,30 @@ import Foundation
 
 // MARK: - Target
 
-/// What to play / report progress for. Encodes to the server's target shape
-/// `{mediaType, tmdbId, season?, episode?}`.
+/// What to play / report progress for: a movie, or an episode of a show.
+///
+/// Kept on disk (downloads, progress waiting to be sent) as `{mediaType, ref, season?,
+/// episode?}`; what was kept before refs, `{mediaType, tmdbId, ...}`, reads as TMDB's.
 public struct PlaybackTarget: Codable, Sendable, Hashable {
     public var mediaType: MediaKind
-    public var tmdbId: Int
+    /// The movie, or the episode's show.
+    public var title: TitleRef
     public var season: Int?
     public var episode: Int?
 
-    public init(mediaType: MediaKind, tmdbId: Int, season: Int? = nil, episode: Int? = nil) {
+    public init(mediaType: MediaKind, title: TitleRef, season: Int? = nil, episode: Int? = nil) {
         self.mediaType = mediaType
-        self.tmdbId = tmdbId
+        self.title = title
         self.season = season
         self.episode = episode
     }
 
-    public static func movie(_ tmdbId: Int) -> PlaybackTarget {
-        PlaybackTarget(mediaType: .movie, tmdbId: tmdbId)
+    public static func movie(_ movie: TitleRef) -> PlaybackTarget {
+        PlaybackTarget(mediaType: .movie, title: movie)
     }
 
-    public static func episode(show tmdbId: Int, season: Int, episode: Int) -> PlaybackTarget {
-        PlaybackTarget(mediaType: .episode, tmdbId: tmdbId, season: season, episode: episode)
+    public static func episode(show: TitleRef, season: Int, episode: Int) -> PlaybackTarget {
+        PlaybackTarget(mediaType: .episode, title: show, season: season, episode: episode)
     }
 
     /// The title this target belongs to (a movie, or the episode's show).
@@ -30,14 +33,46 @@ public struct PlaybackTarget: Codable, Sendable, Hashable {
 
     /// The next episode of the same show.
     public func with(season: Int, episode: Int) -> PlaybackTarget {
-        .episode(show: tmdbId, season: season, episode: episode)
+        .episode(show: title, season: season, episode: episode)
     }
 
+    /// TMDB titles go the way every server understands (`mediaType` and `tmdbId`); others
+    /// by `ref` (only servers that know refs have them).
     public var queryItems: [URLQueryItem] {
-        var items = [URLQueryItem(name: "mediaType", value: mediaType.rawValue), URLQueryItem(name: "tmdbId", value: String(tmdbId))]
+        var items: [URLQueryItem]
+        if let tmdbId = title.tmdbId {
+            items = [URLQueryItem(name: "mediaType", value: mediaType.rawValue), URLQueryItem(name: "tmdbId", value: String(tmdbId))]
+        } else {
+            items = [URLQueryItem(name: "ref", value: title.description)]
+        }
         if let season { items.append(URLQueryItem(name: "season", value: String(season))) }
         if let episode { items.append(URLQueryItem(name: "episode", value: String(episode))) }
         return items
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case mediaType, ref, tmdbId, season, episode
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mediaType = try c.decode(MediaKind.self, forKey: .mediaType)
+        season = try c.decodeIfPresent(Int.self, forKey: .season)
+        episode = try c.decodeIfPresent(Int.self, forKey: .episode)
+        if let ref = try c.decodeIfPresent(TitleRef.self, forKey: .ref) {
+            title = ref
+        } else {
+            title = .tmdb(mediaType == .movie ? .movie : .show, try c.decode(Int.self, forKey: .tmdbId))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(mediaType, forKey: .mediaType)
+        try c.encode(title, forKey: .ref)
+        try c.encodeIfPresent(title.tmdbId, forKey: .tmdbId)
+        try c.encodeIfPresent(season, forKey: .season)
+        try c.encodeIfPresent(episode, forKey: .episode)
     }
 }
 

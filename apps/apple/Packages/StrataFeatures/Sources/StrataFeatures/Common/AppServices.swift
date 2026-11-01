@@ -175,8 +175,8 @@ public struct WatchRequest: Identifiable, Hashable {
 }
 
 public enum Route: Hashable {
-    case movie(Int)
-    case show(Int)
+    /// A movie's or a show's page, as its ref says.
+    case title(TitleRef)
     case browse(TitleType, BrowseList)
     /// An Anime tab list in full: its id and title.
     case animeList(String, String)
@@ -188,7 +188,7 @@ public enum Route: Hashable {
 }
 
 public extension TitleCard {
-    var route: Route { type == .movie ? .movie(tmdbId) : .show(tmdbId) }
+    var route: Route { .title(ref) }
     var providerKinds: [ProviderKind] { available.kinds }
 
     /// For Continue Watching / Next Up cards.
@@ -229,6 +229,7 @@ public struct LinkRequest: Identifiable, Hashable {
 }
 
 /// Handles `strata://` deep links:
+/// `strata://title/<ref>` (like `strata://title/anilist:show:154587`), and for TMDB titles
 /// `strata://movie/<id>`, `strata://show/<id>`,
 /// `strata://watch/movie/<id>`, `strata://watch/episode/<show>/<season>/<episode>` (open the
 /// title's page: a link never starts playback by itself),
@@ -257,12 +258,14 @@ public final class AppCoordinator {
         guard url.scheme == "strata" else { return }
         let parts = url.pathComponents.dropFirst().compactMap { Int($0) }
         switch url.host {
-        case "movie": if let id = parts.first { pendingRoute = .movie(id) }
-        case "show": if let id = parts.first { pendingRoute = .show(id) }
+        case "title":
+            if let text = url.pathComponents.dropFirst().first, let ref = TitleRef(string: text), ref.isSupported { pendingRoute = .title(ref) }
+        case "movie": if let id = parts.first { pendingRoute = .title(.tmdb(.movie, id)) }
+        case "show": if let id = parts.first { pendingRoute = .title(.tmdb(.show, id)) }
         case "watch":
             let kind = url.pathComponents.dropFirst().first
-            if kind == "movie", let id = parts.first { pendingRoute = .movie(id) }
-            if kind == "episode", parts.count == 3 { pendingRoute = .show(parts[0]) }
+            if kind == "movie", let id = parts.first { pendingRoute = .title(.tmdb(.movie, id)) }
+            if kind == "episode", parts.count == 3 { pendingRoute = .title(.tmdb(.show, parts[0])) }
         case "link":
             if let code = value("user_code") ?? value("code") { link(code, server: value("server")) }
         case "sign-in":

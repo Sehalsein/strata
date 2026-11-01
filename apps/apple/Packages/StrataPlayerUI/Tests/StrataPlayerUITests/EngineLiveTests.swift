@@ -10,7 +10,7 @@ final class EngineLiveTests: XCTestCase {
     func testPlaysAndAdvances() async throws {
         guard let base = ProcessInfo.processInfo.environment["STRATA_TEST_SERVER"].flatMap(URL.init(string:)),
               let token = ProcessInfo.processInfo.environment["STRATA_TEST_TOKEN"] else { throw XCTSkip("no test server") }
-        for target in [PlaybackTarget.movie(10378), .episode(show: 9001, season: 1, episode: 1)] {
+        for target in [PlaybackTarget.movie(.tmdb(.movie, 10378)), .episode(show: .tmdb(.show, 9001), season: 1, episode: 1)] {
             let engine = PlayerEngine()
             engine.configure(client: StrataClient(baseURL: base, token: token))
             let loaded = Task { await engine.load(target: target, meta: PlaybackMeta(title: "t"), startMs: 0) }
@@ -32,7 +32,7 @@ final class EngineLiveTests: XCTestCase {
               let token = ProcessInfo.processInfo.environment["STRATA_TEST_TOKEN"] else { throw XCTSkip("no test server") }
         let engine = PlayerEngine()
         engine.configure(client: StrataClient(baseURL: base, token: token))
-        await engine.load(target: .movie(10378), meta: PlaybackMeta(title: "t"), startMs: 15_000)
+        await engine.load(target: .movie(.tmdb(.movie, 10378)), meta: PlaybackMeta(title: "t"), startMs: 15_000)
         try await Task.sleep(for: .seconds(2))
         print("after offset start: status=\(engine.status) pos=\(engine.position) offset=\(engine.session?.startOffsetMs ?? -1)")
         XCTAssertEqual(engine.session?.mode, .remux)
@@ -59,7 +59,7 @@ final class EngineLiveTests: XCTestCase {
 
         // Lupin: 4K HEVC, DD+ copied, starts in seconds, seeks far in place.
         var started = Date()
-        await engine.load(target: .episode(show: 96677, season: 1, episode: 1), meta: PlaybackMeta(title: "Lupin"), startMs: 0)
+        await engine.load(target: .episode(show: .tmdb(.show, 96677), season: 1, episode: 1), meta: PlaybackMeta(title: "Lupin"), startMs: 0)
         print("DEVICE lupin start \(Date().timeIntervalSince(started))s status=\(engine.status)")
         XCTAssertEqual(engine.session?.mode, .device)
         XCTAssertTrue(engine.session?.url.host()?.contains("tb-cdn") == true, "straight from TorBox")
@@ -100,7 +100,7 @@ final class EngineLiveTests: XCTestCase {
         XCTAssertEqual(engine.status, .playing)
 
         // One Piece: Opus → lossless ALAC, switch to another track mid-play.
-        await engine.load(target: .episode(show: 37854, season: 1, episode: 1), meta: PlaybackMeta(title: "One Piece"), startMs: 60_000)
+        await engine.load(target: .episode(show: .tmdb(.show, 37854), season: 1, episode: 1), meta: PlaybackMeta(title: "One Piece"), startMs: 60_000)
         XCTAssertEqual(engine.session?.mode, .device)
         XCTAssertEqual(engine.session?.remux?.audio, "lossless")
         try await waitPlaying(engine, past: 62)

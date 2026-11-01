@@ -46,7 +46,7 @@ public final class StrataClient: Sendable {
 
     /// Drops the kept page of the title `target` belongs to (and its seasons).
     public func forget(_ target: PlaybackTarget) async {
-        await cache.remove([Self.titlePath(target.titleType, target.tmdbId)])
+        await cache.remove(Self.titlePaths(target.title))
     }
 
     /// Erases what was kept on disk for a token that's no longer used (a forgotten server,
@@ -308,19 +308,42 @@ public final class StrataClient: Sendable {
         return res.items
     }
 
-    public func movie(_ tmdbId: Int, _ policy: CachePolicy = .fresh) async throws -> MovieDetail {
-        try await get(Self.titlePath(.movie, tmdbId), policy: policy)
+    /// A movie's page (`ref` names a movie).
+    public func movie(_ ref: TitleRef, _ policy: CachePolicy = .fresh) async throws -> MovieDetail {
+        try await title(ref, "", policy)
     }
 
-    public func show(_ tmdbId: Int, _ policy: CachePolicy = .fresh) async throws -> ShowDetail {
-        try await get(Self.titlePath(.show, tmdbId), policy: policy)
+    /// A show's page (`ref` names a show).
+    public func show(_ ref: TitleRef, _ policy: CachePolicy = .fresh) async throws -> ShowDetail {
+        try await title(ref, "", policy)
     }
 
-    public func season(show tmdbId: Int, _ season: Int, _ policy: CachePolicy = .fresh) async throws -> SeasonDetail {
-        try await get(Self.titlePath(.show, tmdbId) + "/seasons/\(season)", policy: policy)
+    public func season(show ref: TitleRef, _ season: Int, _ policy: CachePolicy = .fresh) async throws -> SeasonDetail {
+        try await title(ref, "/seasons/\(season)", policy)
     }
 
-    static func titlePath(_ type: TitleType, _ tmdbId: Int) -> String { "/api/titles/\(type.rawValue)/\(tmdbId)" }
+    /// `GET /api/titles/<ref>` (and what's under it). A server from before refs knows a
+    /// TMDB title only by type and id.
+    private func title<T: Decodable>(_ ref: TitleRef, _ suffix: String, _ policy: CachePolicy) async throws -> T {
+        do {
+            return try await get(Self.titlePath(ref) + suffix, policy: policy)
+        } catch let error as StrataError where error.isNotFound || error.kind == .notCached {
+            guard let old = Self.oldTitlePath(ref) else { throw error }
+            return try await get(old + suffix, policy: policy)
+        }
+    }
+
+    static func titlePath(_ ref: TitleRef) -> String { "/api/titles/\(ref)" }
+
+    /// Where a server from before refs has a TMDB title.
+    static func oldTitlePath(_ ref: TitleRef) -> String? {
+        ref.tmdbId.map { "/api/titles/\(ref.type.rawValue)/\($0)" }
+    }
+
+    /// Every path a title's page may be kept under (and its seasons, under them).
+    static func titlePaths(_ ref: TitleRef) -> [String] {
+        [titlePath(ref)] + (oldTitlePath(ref).map { [$0] } ?? [])
+    }
 
     /// What the server can play a title from. `discover` asks it to look further than its
     /// library where it's set up to (takes a few seconds); the list is whatever it returns.
@@ -342,9 +365,8 @@ public final class StrataClient: Sendable {
                      startMs: Int? = nil,
                      audioStreamIndex: Int? = nil,
                      caps: ClientCaps = .current) async throws -> PlayOutcome {
-        let body = PlayBody(mediaType: target.mediaType, tmdbId: target.tmdbId, season: target.season, episode: target.episode,
-                            candidateId: candidateId, startMs: startMs, audioStreamIndex: audioStreamIndex,
-                            preferMaxHeight: candidateId == nil ? NetworkConditions.shared.preferredMaxHeight : nil, caps: caps)
+        let body = Targeted(target, PlayBody(candidateId: candidateId, startMs: startMs, audioStreamIndex: audioStreamIndex,
+                                             preferMaxHeight: candidateId == nil ? NetworkConditions.shared.preferredMaxHeight : nil, caps: caps))
         let (data, response) = try await rawData(request("POST", "/api/play", body: body))
         let status = response.statusCode
         if status == 428 {
@@ -381,9 +403,8 @@ public final class StrataClient: Sendable {
     /// A file to download and watch offline: its link and how to play it on the device.
     /// Like `play`, the server may first need the file's media info, or time to get it ready.
     public func prepareDownload(_ target: PlaybackTarget, candidateId: String? = nil, caps: ClientCaps = .current) async throws -> DownloadOutcome {
-        let body = PlayBody(mediaType: target.mediaType, tmdbId: target.tmdbId, season: target.season, episode: target.episode,
-                            candidateId: candidateId, startMs: nil, audioStreamIndex: nil,
-                            preferMaxHeight: candidateId == nil ? NetworkConditions.shared.preferredMaxHeight : nil, caps: caps)
+        let body = Targeted(target, PlayBody(candidateId: candidateId, startMs: nil, audioStreamIndex: nil,
+                                             preferMaxHeight: candidateId == nil ? NetworkConditions.shared.preferredMaxHeight : nil, caps: caps))
         let (data, response) = try await rawData(request("POST", "/api/downloads", body: body))
         let status = response.statusCode
         if status == 428 {
@@ -419,28 +440,29 @@ public final class StrataClient: Sendable {
 
     @discardableResult
     public func reportProgress(_ target: PlaybackTarget, positionMs: Int, durationMs: Int, sessionId: String? = nil) async throws -> WatchProgress {
-        let body = ProgressBody(mediaType: target.mediaType, tmdbId: target.tmdbId, season: target.season, episode: target.episode,
-                                positionMs: max(0, positionMs), durationMs: max(0, durationMs), sessionId: sessionId)
+        let body = Targeted(target, ProgressBody(positionMs: max(0, positionMs), durationMs: max(0, durationMs), sessionId: sessionId))
         let res: WatchProgress = try await send("POST", "/api/progress", body: body)
-        await cache.remove([Self.titlePath(target.titleType, target.tmdbId)])
+        await cache.remove(Self.titlePaths(target.title))
         return res
     }
 
     public func setWatched(_ target: PlaybackTarget, _ watched: Bool) async throws {
-        let body = WatchedBody(mediaType: target.mediaType, tmdbId: target.tmdbId, season: target.season, episode: target.episode, watched: watched)
+        let body = Targeted(target, WatchedBody(watched: watched))
         let _: OKResponse = try await send("POST", "/api/watched", body: body)
-        await cache.remove([Self.titlePath(target.titleType, target.tmdbId)])
+        await cache.remove(Self.titlePaths(target.title))
     }
 
     /// Takes a title off Continue Watching and Next Up (until it's watched again); its
     /// progress is kept.
-    public func hideFromContinue(_ type: TitleType, tmdbId: Int) async throws {
-        let _: OKResponse = try await send("DELETE", "/api/continue/\(type.rawValue)/\(tmdbId)")
+    public func hideFromContinue(_ ref: TitleRef) async throws {
+        let path = ref.tmdbId.map { "/api/continue/\(ref.type.rawValue)/\($0)" } ?? "/api/continue/\(ref)"
+        let _: OKResponse = try await send("DELETE", path)
     }
 
-    public func setWatchlist(_ type: TitleType, tmdbId: Int, _ on: Bool) async throws {
-        let _: OKResponse = try await send("PUT", "/api/watchlist", body: WatchlistBody(type: type, tmdbId: tmdbId, on: on))
-        await cache.remove(["/api/calendar", Self.titlePath(type, tmdbId)])
+    public func setWatchlist(_ ref: TitleRef, _ on: Bool) async throws {
+        let body = ref.tmdbId.map { WatchlistBody(type: ref.type, tmdbId: $0, on: on) } ?? WatchlistBody(ref: ref, on: on)
+        let _: OKResponse = try await send("PUT", "/api/watchlist", body: body)
+        await cache.remove(["/api/calendar"] + Self.titlePaths(ref))
     }
 
     /// Fetches a WebVTT track. The server extracts embedded tracks on demand and answers
@@ -547,6 +569,8 @@ public final class StrataClient: Sendable {
         // demand a browser's Origin header (403 "Missing or null Origin").
         req.httpShouldHandleCookies = false
         req.setValue("application/json", forHTTPHeaderField: "Accept")
+        // This app knows titles by ref: the server includes ones TMDB doesn't have.
+        req.setValue("1", forHTTPHeaderField: "X-Strata-Refs")
         // What this device is, for the server's Devices page.
         for (name, value) in DeviceInfo.headers { req.setValue(value, forHTTPHeaderField: name) }
         if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
@@ -643,17 +667,56 @@ private struct DeviceCodeBody: Encodable { var client_id: String }
 private struct DeviceTokenBody: Encodable { var grant_type: String; var device_code: String; var client_id: String }
 private struct DeviceAccessToken: Decodable { var access_token: String }
 private struct UserCodeBody: Encodable { var userCode: String }
-private struct WatchlistBody: Encodable { var type: TitleType; var tmdbId: Int; var on: Bool }
+/// `{type, tmdbId, on}` for a TMDB title (every server reads it), `{ref, on}` otherwise.
+private struct WatchlistBody: Encodable {
+    var type: TitleType?
+    var tmdbId: Int?
+    var ref: TitleRef?
+    var on: Bool
+}
 
 private struct LinkResponse: Decodable {
     var url: URL
 }
 
-private struct PlayBody: Encodable {
-    var mediaType: MediaKind
-    var tmdbId: Int
+/// Which movie or episode a body is about: `mediaType` and `tmdbId` for a TMDB title (every
+/// server reads them), `ref` for another source (only servers that know refs have those).
+private struct TargetFields: Encodable {
+    var mediaType: MediaKind?
+    var tmdbId: Int?
+    var ref: TitleRef?
     var season: Int?
     var episode: Int?
+
+    init(_ target: PlaybackTarget) {
+        if let tmdbId = target.title.tmdbId {
+            mediaType = target.mediaType
+            self.tmdbId = tmdbId
+        } else {
+            ref = target.title
+        }
+        season = target.season
+        episode = target.episode
+    }
+}
+
+/// A body about a movie or episode: the target's fields, then the body's own, in one object.
+private struct Targeted<Body: Encodable>: Encodable {
+    var target: TargetFields
+    var body: Body
+
+    init(_ target: PlaybackTarget, _ body: Body) {
+        self.target = TargetFields(target)
+        self.body = body
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try target.encode(to: encoder)
+        try body.encode(to: encoder)
+    }
+}
+
+private struct PlayBody: Encodable {
     var candidateId: String?
     var startMs: Int?
     var audioStreamIndex: Int?
@@ -663,20 +726,12 @@ private struct PlayBody: Encodable {
 }
 
 private struct ProgressBody: Encodable {
-    var mediaType: MediaKind
-    var tmdbId: Int
-    var season: Int?
-    var episode: Int?
     var positionMs: Int
     var durationMs: Int
     var sessionId: String?
 }
 
 private struct WatchedBody: Encodable {
-    var mediaType: MediaKind
-    var tmdbId: Int
-    var season: Int?
-    var episode: Int?
     var watched: Bool
 }
 

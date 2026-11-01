@@ -40,9 +40,9 @@ public struct PlayOptions: Sendable, Hashable {
 /// Something on My List, watched, or on Continue Watching changed. Screens showing those
 /// (Home, title pages) reload on any of them.
 public enum TitleChange: Sendable, Hashable {
-    case list(TitleType, tmdbId: Int, on: Bool)
+    case list(TitleRef, on: Bool)
     case watched(PlaybackTarget, Bool)
-    case hiddenFromContinue(TitleType, tmdbId: Int)
+    case hiddenFromContinue(TitleRef)
     /// Playback stopped and its position was saved.
     case progress
 
@@ -103,7 +103,7 @@ public final class TitleActions: Sendable {
     /// show's Up Next takes its page, so it waits for `play(_:)`.
     public static func libraryPlay(_ card: TitleCard) -> PlayOptions {
         guard card.type == .movie, card.isAvailable else { return PlayOptions() }
-        return PlayOptions(choice: PlayChoice(label: "Play", target: .movie(card.tmdbId), subtitle: card.yearText))
+        return PlayOptions(choice: PlayChoice(label: "Play", target: .movie(card.ref), subtitle: card.yearText))
     }
 
     /// Play for a movie page. In the library it plays from there (the sources are the
@@ -124,7 +124,7 @@ public final class TitleActions: Sendable {
     /// server finds. Nothing when there's no Up Next.
     public func play(_ show: ShowDetail) async -> PlayOptions {
         guard let next = show.upNext else { return PlayOptions(asked: true) }
-        let found = await sources(.episode(show: show.tmdbId, season: next.season, episode: next.episode), discover: !next.isAvailable)
+        let found = await sources(.episode(show: show.ref, season: next.season, episode: next.episode), discover: !next.isAvailable)
         var options = Self.libraryPlay(show)
         if options.choice == nil, let first = found.first {
             options.choice = Self.upNextChoice(show, next, candidateId: first.id)
@@ -142,11 +142,11 @@ public final class TitleActions: Sendable {
         case .movie:
             let library = Self.libraryPlay(card)
             if library.choice != nil { return PlayOptions(choice: library.choice, asked: true) }
-            let found = await sources(.movie(card.tmdbId), discover: true)
-            return PlayOptions(choice: found.first.map { PlayChoice(label: "Play", target: .movie(card.tmdbId), candidateId: $0.id, subtitle: card.yearText) },
+            let found = await sources(.movie(card.ref), discover: true)
+            return PlayOptions(choice: found.first.map { PlayChoice(label: "Play", target: .movie(card.ref), candidateId: $0.id, subtitle: card.yearText) },
                                asked: true, lookedFurther: true)
         case .show:
-            guard let show = try? await perform({ try await $0.show(card.tmdbId) }) else { return PlayOptions(asked: true) }
+            guard let show = try? await perform({ try await $0.show(card.ref) }) else { return PlayOptions(asked: true) }
             // In the library, no need to ask what else it could play from.
             let library = Self.libraryPlay(show)
             if library.choice != nil { return PlayOptions(choice: library.choice, asked: true) }
@@ -157,7 +157,7 @@ public final class TitleActions: Sendable {
 
     /// Play for an episode row: from the library, else the first source the server finds.
     /// Nil when it has nothing ("isn't in your library").
-    public func play(_ episode: EpisodeItem, of show: Int) async -> PlayChoice? {
+    public func play(_ episode: EpisodeItem, of show: TitleRef) async -> PlayChoice? {
         let subtitle = "\(episode.code) · \(episode.name)"
         let target = episode.target(show: show)
         if episode.isAvailable { return PlayChoice(label: "Play", target: target, subtitle: subtitle) }
@@ -167,7 +167,7 @@ public final class TitleActions: Sendable {
 
     private static func upNextChoice(_ show: ShowDetail, _ next: UpNext, candidateId: String?) -> PlayChoice {
         PlayChoice(label: "\(next.isResume ? "Resume" : "Play") \(next.code)",
-                   target: .episode(show: show.tmdbId, season: next.season, episode: next.episode),
+                   target: .episode(show: show.ref, season: next.season, episode: next.episode),
                    candidateId: candidateId, subtitle: next.code)
     }
 
@@ -181,9 +181,9 @@ public final class TitleActions: Sendable {
     // MARK: - Changes
 
     /// Adds a title to My List or takes it off.
-    public func setOnList(_ type: TitleType, tmdbId: Int, _ on: Bool) async throws {
-        try await perform { try await $0.setWatchlist(type, tmdbId: tmdbId, on) }
-        continuation.yield(.list(type, tmdbId: tmdbId, on: on))
+    public func setOnList(_ ref: TitleRef, _ on: Bool) async throws {
+        try await perform { try await $0.setWatchlist(ref, on) }
+        continuation.yield(.list(ref, on: on))
     }
 
     /// Marks a movie or episode watched (it leaves Continue Watching) or unwatched.
@@ -193,9 +193,9 @@ public final class TitleActions: Sendable {
     }
 
     /// Takes a title off Continue Watching until it's watched again; its progress is kept.
-    public func hideFromContinue(_ type: TitleType, tmdbId: Int) async throws {
-        try await perform { try await $0.hideFromContinue(type, tmdbId: tmdbId) }
-        continuation.yield(.hiddenFromContinue(type, tmdbId: tmdbId))
+    public func hideFromContinue(_ ref: TitleRef) async throws {
+        try await perform { try await $0.hideFromContinue(ref) }
+        continuation.yield(.hiddenFromContinue(ref))
     }
 
     /// Playback of `target` stopped and its final position was saved (by the player's own
