@@ -248,6 +248,19 @@ struct TokenResponse: Codable, Sendable {
 
 struct ItemsResponse<T: Codable & Sendable>: Codable, Sendable {
     var items: [T]
+
+    init(items: [T]) { self.items = items }
+
+    /// Titles this app can't use are left out of the list rather than failing it.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if T.self is ListItem.Type {
+            var list = try container.nestedUnkeyedContainer(forKey: .items)
+            items = list.decodeLossy(T.self)
+        } else {
+            items = try container.decode([T].self, forKey: .items)
+        }
+    }
 }
 
 struct ShelvesResponse: Codable, Sendable {

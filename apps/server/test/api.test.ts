@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { makeFixtures, noFfmpeg, startTestServer, type TestServer } from "./helpers";
+import { tmdbRef } from "../src/catalog/ref";
 
 let server: TestServer;
 let token: string;
@@ -235,7 +236,7 @@ describe("setup and auth", () => {
     expect(exported.headers.get("content-disposition")).toContain("strata-dora-data.json");
     const file = (await exported.json()) as any;
     expect(file.account).toMatchObject({ username: "dora", email: "dora@example.com" });
-    expect(file.myList).toEqual([expect.objectContaining({ tmdbId: 10378 })]);
+    expect(file.myList).toEqual([expect.objectContaining({ source: "tmdb", titleId: 10378 })]);
     expect((await json(await server.request("/api/watchlist", { token: dora }))).items).toEqual([expect.objectContaining({ type: "movie", tmdbId: 10378 })]);
     expect(file.devices.length).toBeGreaterThan(0);
     expect(JSON.stringify(file)).not.toContain(dora);
@@ -334,7 +335,7 @@ describe("setup and auth", () => {
     // Nor the files of those titles, by id.
     const h = await server.household();
     const file = await h.library.upsert({ provider: "local", ref: "/m/Night.mkv", name: "Night.mkv", size: 1, parsed: { title: "Night", kind: "movie" } as never });
-    await h.library.setManualMatch(file.id, "movie", 666);
+    await h.library.setManualMatch(file.id, tmdbRef("movie", 666));
     expect((await server.request(`/api/files/${file.id}/link`, { method: "POST", token: bob })).status).toBe(403);
     expect((await server.request(`/api/files/${file.id}/content`, { token: bob })).status).toBe(404);
     expect((await server.request(`/api/files/${file.id}/probe`, { method: "POST", token: bob, json: { durationMs: 1, video: [], audio: [], subtitles: [] } })).status).not.toBe(200);
@@ -470,6 +471,16 @@ describe("library", () => {
     expect(trending.items[0].available).toEqual(["local"]);
   });
 
+  test("catalog answers say how long the apps may keep them; errors and the rest don't", async () => {
+    const cacheControl = async (path: string) => (await server.request(path, { token })).headers.get("cache-control");
+    expect(await cacheControl("/api/genres/movie")).toBe("private, max-age=86400, stale-while-revalidate=604800");
+    expect(await cacheControl("/api/home/catalog")).toBe("private, max-age=86400, stale-while-revalidate=604800");
+    expect(await cacheControl("/api/home/profile")).toBe("no-store");
+    expect(await cacheControl("/api/home")).toBeNull();
+    expect(await cacheControl("/api/genres/nope")).toBeNull();
+    expect(await cacheControl("/api/me")).toBeNull();
+  });
+
   test("genres: the list, and rails for one genre (trending, then new)", async () => {
     const genres = (await json(await server.request("/api/genres/movie", { token }))).items;
     expect(genres.some((g: any) => g.id === -1)).toBe(false); // anime has its own tab now
@@ -522,9 +533,9 @@ describe("playback", () => {
     expect((await res.arrayBuffer()).byteLength).toBe(100);
   });
 
-  test("Continue Watching: removing a title hides it until it's watched again", async () => {
+  test("Continue Watching: removing a title hides it until it's watched again (the kept rails follow each change)", async () => {
     const watch = (positionMs: number) => server.request("/api/progress", { method: "POST", token, json: { mediaType: "movie", tmdbId: 666, positionMs, durationMs: 3_600_000 } });
-    const continuing = async () => ((await json(await server.request("/api/home", { token }))).shelves.find((s: any) => s.id === "continue")?.items ?? []).map((c: any) => c.tmdbId);
+    const continuing = async () => ((await json(await server.request("/api/home/profile", { token }))).shelves.find((s: any) => s.id === "continue")?.items ?? []).map((c: any) => c.tmdbId);
     await watch(600_000);
     expect(await continuing()).toContain(666);
     expect((await server.request("/api/continue/movie/666", { method: "DELETE", token })).status).toBe(200);
@@ -533,6 +544,12 @@ describe("playback", () => {
     await watch(700_000); // watched again: back, with its progress
     expect(await continuing()).toContain(666);
     expect((await server.request("/api/continue/album/1", { method: "DELETE", token })).status).toBe(400);
+    // Home in one answer still has them, after the hero.
+    const ids = (await json(await server.request("/api/home", { token }))).shelves.map((s: any) => s.id);
+    expect(ids.indexOf("continue")).toBeGreaterThan(-1);
+    expect(ids.slice(0, ids.indexOf("continue")).every((id: string) => id === "featured")).toBe(true);
+    const catalogIds = (await json(await server.request("/api/home/catalog", { token }))).shelves.map((s: any) => s.id);
+    expect(catalogIds).not.toContain("continue");
   });
 
   test.skipIf(noFfmpeg)("mkv remuxes to HLS from the resume point", async () => {

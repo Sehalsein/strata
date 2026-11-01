@@ -47,7 +47,7 @@ struct CalendarView: View {
             }
             ProfileToolbarItems()
         }
-        .refreshable { await services.client?.clearCache(); await load() }
+        .refreshable { await load(force: true) }
         .alert("Notifications are off for Strata", isPresented: $alertsDenied) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -80,7 +80,7 @@ struct CalendarView: View {
                     VStack(spacing: 0) {
                         ForEach(day.episodes) { episode in
                             // A full-width row lifts like an episode row, not like a poster.
-                            NavigationLink(value: Route.show(episode.tmdbId)) { CalendarRow(episode: episode) }
+                            NavigationLink(value: Route.title(episode.ref)) { CalendarRow(episode: episode) }
                                 .buttonStyle(FocusLiftStyle())
                             if episode.id != day.episodes.last?.id { Divider().overlay(Theme.hairline) }
                         }
@@ -116,11 +116,9 @@ struct CalendarView: View {
         return day.formatted(.dateTime.weekday(.wide).month(.wide).day())
     }
 
-    private func load() async {
-        let result = await services.load { try await $0.calendar() }
-        if case .loading = result { return }
-        episodes = result
-        if case .loaded(let list) = result { await EpisodeAlerts.schedule(list) }
+    private func load(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.calendar($1) }) { episodes = $0 }
+        if case .loaded(let list) = episodes { await EpisodeAlerts.schedule(list) }
     }
 
     private func toggleAlerts() async {
@@ -143,7 +141,7 @@ private struct CalendarRow: View {
 
     var body: some View {
         HStack(spacing: Metrics.space3) {
-            ArtworkImage(url: episode.posterUrl, aspectRatio: 2 / 3, seed: "show-\(episode.tmdbId)")
+            ArtworkImage(url: episode.posterUrl, aspectRatio: 2 / 3, seed: episode.ref.description)
                 .frame(width: thumbWidth)
             VStack(alignment: .leading, spacing: 3) {
                 Text(episode.title).font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(1)

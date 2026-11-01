@@ -151,6 +151,9 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     await anime.ids.refresh();
     return { entries: anime.ids.size };
   });
+  // Anime matched to TMDB before titles had sources moves to AniList's titles, once per
+  // household (it needs the anime id list, so it's a job rather than a migration).
+  register("moveAnimeToAnilist", () => eachHousehold("Moving anime to AniList", (h) => h.moveAnimeToAnilist()));
   register("cleanTorbox", () => eachHousehold("TorBox cleanup", (h) => h.cleanTorbox()));
   // Catalog answers (TMDB, Kitsu, AniList) a month unused are only taking space.
   register("pruneCatalogCache", async () => ({ removed: await cache.prune() }));

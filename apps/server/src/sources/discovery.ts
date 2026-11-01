@@ -1,4 +1,4 @@
-import { type AnimeIds, kitsuEpisode } from "../catalog/anime/ids";
+import { type AnimeIds, kitsuEpisode, tmdbEpisodeOf } from "../catalog/anime/ids";
 import { runtime } from "#runtime";
 import type { Tmdb } from "../catalog/tmdb";
 import type { FileRow, Library } from "../library";
@@ -10,6 +10,7 @@ import type { TorboxClient, TorboxItem } from "./torbox/client";
 import { ingestItem } from "./torbox/sync";
 import { SharedWork } from "../inFlight";
 import { globalFetch } from "../net";
+import { targetRef, type TitleTarget } from "../catalog/ref";
 
 const log = logger("discovery");
 const RELEASE_TTL_MS = 20 * 60_000;
@@ -19,12 +20,8 @@ const SCRAPER_TIMEOUT_MS = 12_000;
 const SCRAPER_BACKOFF_MS = 5 * 60_000;
 const READY_WAIT_MS = 20_000;
 
-export interface DiscoveryTarget {
-  mediaType: "movie" | "episode";
-  tmdbId: number;
-  season?: number;
-  episode?: number;
-}
+/** The movie or episode releases are looked for. */
+export type DiscoveryTarget = TitleTarget;
 
 /** A torrent release found by a scraper, not (yet) in the library. */
 export interface Release {
@@ -48,7 +45,14 @@ export type AcquireResult =
 
 export class NotReadyError extends Error {
   constructor(readonly info: Extract<AcquireResult, { status: "downloading" }>) {
-    super("This release is still downloading on TorBox");
+    super("TorBox is fetching it. It starts playing as soon as it's ready.");
+  }
+}
+
+/** A release that turned out not to have the title in it (a pack of other seasons, say). */
+export class NoPlayableFileError extends Error {
+  constructor() {
+    super("That release doesn't have this in it");
   }
 }
 
@@ -107,13 +111,19 @@ export class Discovery {
 
   /** The release discovery would play automatically, if any is cached. */
   async bestCached(target: DiscoveryTarget): Promise<Release | undefined> {
+    return (await this.cachedReleases(target))[0];
+  }
+
+  /** Cached releases in the order Play tries them: within the size limit first, best first. */
+  async cachedReleases(target: DiscoveryTarget): Promise<Release[]> {
     const maxBytes = this.settings().maxReleaseSizeGb * 1024 ** 3;
     const releases = (await this.releases(target)).filter((r) => r.cached);
-    return releases.find((r) => !maxBytes || !r.size || r.size <= maxBytes) ?? releases[0];
+    const fits = (r: Release) => !maxBytes || !r.size || r.size <= maxBytes;
+    return [...releases.filter(fits), ...releases.filter((r) => !fits(r))];
   }
 
   releases(target: DiscoveryTarget): Promise<Release[]> {
-    const key = `${target.mediaType}:${target.tmdbId}:${target.season ?? ""}:${target.episode ?? ""}`;
+    const key = `${target.source}:${target.mediaType}:${target.titleId}:${target.season ?? ""}:${target.episode ?? ""}`;
     return this.cache.get(key, () => this.search(target));
   }
 
@@ -171,7 +181,9 @@ export class Discovery {
     // Anything else in the torrent (collections, extras) goes through normal matching.
     runtime.background(this.library.matchPending().catch((err) => log.warn("Matching after import failed", err)));
     const file = this.pickFile(await this.library.byHash(hash), target);
-    if (!file) throw new Error("The release has no playable file for this title");
+    // Not removed here: other files may still match in the background (anime numbering),
+    // and housekeeping already takes out what Strata added and nobody played.
+    if (!file) throw new NoPlayableFileError();
     return { status: "ready", fileId: file.id };
   }
 
@@ -182,32 +194,41 @@ export class Discovery {
    */
   private async assignMatches(rows: FileRow[], target: DiscoveryTarget, fileName?: string) {
     // Never relabel a file that's already matched (or hand-matched) to another title.
-    rows = rows.filter((r) => !((r.matchStatus === "matched" || r.matchStatus === "manual") && r.tmdbId !== null && r.tmdbId !== target.tmdbId));
+    rows = rows.filter((r) => !((r.matchStatus === "matched" || r.matchStatus === "manual") && r.titleId !== null && (r.source !== target.source || r.titleId !== target.titleId)));
     if (target.mediaType === "movie") {
       const movies = rows.filter((r) => (JSON.parse(r.parsedJson ?? "{}") as ParsedName).kind !== "episode");
       const pick = (fileName && movies.find((r) => r.name === fileName)) || movies.sort((a, b) => b.size - a.size)[0];
-      if (pick) await this.library.setManualMatch(pick.id, "movie", target.tmdbId, undefined, undefined, "matched");
+      if (pick) await this.library.setManualMatch(pick.id, targetRef(target), undefined, undefined, "matched");
       return;
     }
     // The file the scraper pointed at is this episode, whatever its own numbering says
     // ("[Group] Frieren - 30.mkv" is TMDB S1E30); the rest match as usual.
-    const pointed = fileName ? rows.find((r) => r.name === fileName) : undefined;
-    if (pointed) await this.library.setManualMatch(pointed.id, "show", target.tmdbId, target.season, target.episode, "matched");
+    const show = targetRef(target);
+    let pointed = fileName ? rows.find((r) => r.name === fileName) : undefined;
+    // An AniList episode's release: the scraper's file, or the torrent's only video. The
+    // rest are left to the anime matcher (their numbering may not be AniList's).
+    if (target.source === "anilist") {
+      pointed ??= rows.length === 1 ? rows[0] : undefined;
+      if (pointed) await this.library.setManualMatch(pointed.id, show, 1, target.episode, "matched");
+      return;
+    }
+    if (pointed) await this.library.setManualMatch(pointed.id, show, target.season, target.episode, "matched");
     for (const row of rows) {
       if (row === pointed) continue;
       const parsed = JSON.parse(row.parsedJson ?? "{}") as ParsedName;
       if (parsed.anime) continue; // anime numbering: left to the anime matcher (matchPending)
       if (parsed.season !== undefined && parsed.episode !== undefined) {
-        await this.library.setManualMatch(row.id, "show", target.tmdbId, parsed.season, parsed.episode, "matched");
+        await this.library.setManualMatch(row.id, show, parsed.season, parsed.episode, "matched");
       }
     }
   }
 
   private pickFile(rows: FileRow[], target: DiscoveryTarget): FileRow | undefined {
-    const matching = rows.filter((r) =>
-      target.mediaType === "movie"
-        ? r.mediaType === "movie" && r.tmdbId === target.tmdbId
-        : r.mediaType === "episode" && r.tmdbId === target.tmdbId && r.season === target.season && r.episode === target.episode,
+    const matching = rows.filter(
+      (r) =>
+        r.source === target.source &&
+        r.titleId === target.titleId &&
+        (target.mediaType === "movie" ? r.mediaType === "movie" : r.mediaType === "episode" && r.season === target.season && r.episode === target.episode),
     );
     return matching.sort((a, b) => b.size - a.size)[0];
   }
@@ -237,18 +258,20 @@ export class Discovery {
   }
 
   private async search(target: DiscoveryTarget): Promise<Release[]> {
-    const imdbId = await this.imdbId(target);
-    if (!imdbId) return [];
+    // Scrapers are asked by IMDb id (looked up on TMDB) and, for anime, by Kitsu id. An
+    // AniList title's TMDB title and numbering come from the anime id list.
+    const tmdbTarget = target.source === "anilist" ? await this.tmdbTargetOf(target).catch(() => null) : target;
+    const [imdbId, kitsu] = await Promise.all([tmdbTarget ? this.imdbId(tmdbTarget) : null, this.kitsuId(target).catch(() => null)]);
+    if (!imdbId && !kitsu) return [];
     const settings = this.settings();
     const client = this.torbox();
     const jobs: Promise<Release[]>[] = [];
     if (settings.torrentioUrl) {
       const base = settings.torrentioUrl;
-      jobs.push(this.scrape("Torrentio", () => this.torrentio(base, imdbId, target)));
-      const kitsu = await this.kitsuId(target).catch(() => null);
+      if (imdbId && tmdbTarget) jobs.push(this.scrape("Torrentio", () => this.torrentio(base, imdbId, tmdbTarget)));
       if (kitsu) jobs.push(this.scrape("Torrentio", () => this.torrentio(base, kitsu, target, true)));
     }
-    if (settings.useTorboxSearch && client) jobs.push(this.scrape("TorBox search", () => this.torboxSearch(client, imdbId, target)));
+    if (imdbId && tmdbTarget && settings.useTorboxSearch && client) jobs.push(this.scrape("TorBox search", () => this.torboxSearch(client, imdbId, tmdbTarget)));
 
     const byHash = new Map<string, Release>();
     for (const result of await Promise.allSettled(jobs)) {
@@ -262,7 +285,8 @@ export class Discovery {
       }
     }
 
-    let releases = [...byHash.values()].filter((r) => relevant(r, target));
+    // Releases found by IMDb id are checked against TMDB's numbering; Kitsu's are the episode.
+    let releases = [...byHash.values()].filter((r) => relevant(r, tmdbTarget ?? target));
     // Fill in cache state for releases TorBox's search didn't report on.
     const unknown = releases.filter((r) => r.origin === "torrentio" && !r.cached).map((r) => r.hash);
     if (client && unknown.length) {
@@ -277,24 +301,46 @@ export class Discovery {
   }
 
   private async imdbId(target: DiscoveryTarget): Promise<string | null> {
+    if (target.source !== "tmdb") return null;
     if (target.mediaType === "movie") {
-      const m = await this.tmdb.movie(target.tmdbId);
+      const m = await this.tmdb.movie(target.titleId);
       return m.imdb_id ?? m.external_ids?.imdb_id ?? null;
     }
-    return (await this.tmdb.show(target.tmdbId)).external_ids?.imdb_id ?? null;
+    return (await this.tmdb.show(target.titleId)).external_ids?.imdb_id ?? null;
+  }
+
+  /**
+   * An AniList target as TMDB's title and numbering, where the anime id list maps it
+   * (Frieren S2's episode 2 is TMDB S1E30), else null.
+   */
+  private async tmdbTargetOf(target: DiscoveryTarget): Promise<DiscoveryTarget | null> {
+    if (!this.animeIds) return null;
+    await this.animeIds.ready();
+    const entry = this.animeIds.anilist(target.titleId);
+    if (target.mediaType === "movie") return entry?.tmdbMovie ? { source: "tmdb", mediaType: "movie", titleId: entry.tmdbMovie } : null;
+    if (!entry?.tmdbTv || target.episode === undefined) return null;
+    const seasons = entry.tmdbSeason === undefined ? (await this.tmdb.show(entry.tmdbTv)).seasons.map((s) => ({ season: s.season_number, episodes: s.episode_count })) : [];
+    const at = tmdbEpisodeOf(entry, target.episode, seasons);
+    return at ? { source: "tmdb", mediaType: "episode", titleId: entry.tmdbTv, season: at.season, episode: at.episode } : null;
   }
 
   /** "kitsu:<id>" / "kitsu:<id>:<episode>" for anime titles, else null. */
   private async kitsuId(target: DiscoveryTarget): Promise<string | null> {
     if (!this.animeIds) return null;
     await this.animeIds.ready();
+    // Kitsu, like AniList, has an entry per season or cour: the episode number carries over.
+    if (target.source === "anilist") {
+      const id = this.animeIds.anilist(target.titleId)?.kitsuId;
+      if (!id) return null;
+      return target.mediaType === "movie" ? `kitsu:${id}` : `kitsu:${id}:${target.episode}`;
+    }
     if (target.mediaType === "movie") {
-      const id = this.animeIds.movie(target.tmdbId)?.kitsuId;
+      const id = this.animeIds.movie(target.titleId)?.kitsuId;
       return id ? `kitsu:${id}` : null;
     }
-    const entries = this.animeIds.show(target.tmdbId);
+    const entries = this.animeIds.show(target.titleId);
     if (!entries.length) return null;
-    const show = await this.tmdb.show(target.tmdbId);
+    const show = await this.tmdb.show(target.titleId);
     const seasons = show.seasons.map((s) => ({ season: s.season_number, episodes: s.episode_count }));
     const at = kitsuEpisode(entries, target.season!, target.episode!, seasons);
     return at ? `kitsu:${at.kitsuId}:${at.episode}` : null;

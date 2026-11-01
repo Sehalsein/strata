@@ -24,7 +24,7 @@ final class OfflinePlayTests: XCTestCase {
             "chapters": [],
         ]
         let response = try JSONDecoder().decode(DownloadResponse.self, from: JSONSerialization.data(withJSONObject: json))
-        var item = DownloadItem(signInID: "me", target: .movie(1), title: "Clip", subtitle: nil, artworkURL: nil, response: response)
+        var item = DownloadItem(signInID: "me", target: .movie(.tmdb(.movie, 1)), title: "Clip", subtitle: nil, artworkURL: nil, response: response)
         item.positionMs = 6_000
 
         let engine = PlayerEngine() // no client: nothing goes to a server

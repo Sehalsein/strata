@@ -3,11 +3,10 @@ import type { Household } from "../household";
 import type { MediaInfo } from "../media/probe";
 import type { PlayRequest } from "../playback/service";
 import type { DiscoveryTarget } from "../sources/discovery";
-import type { Shelf, TitleType } from "./service";
+import { targetRef, tmdbRef, type TitleRef, type TitleTarget } from "./ref";
+import type { BrowseList, Shelf, TitleType } from "./service";
 
-type Target = { mediaType: "movie" | "episode"; tmdbId: number; season?: number; episode?: number };
-
-const titleType = (mediaType: "movie" | "episode"): TitleType => (mediaType === "movie" ? "movie" : "show");
+const notFound = () => new HTTPException(404, { message: "Title not found" });
 
 /**
  * One person's view of their household's catalog: pages, titles, sources, playback and
@@ -22,6 +21,16 @@ export class Viewer {
 
   home(): Promise<Shelf[]> {
     return this.household.catalog.home(this.userId).then((s) => this.shelves(s));
+  }
+
+  /** Home's rails that are the same for everyone: the hero, new and trending. */
+  homeCatalog(): Promise<Shelf[]> {
+    return this.household.catalog.homeCatalog().then((s) => this.shelves(s));
+  }
+
+  /** Continue Watching, Up Next and My List. */
+  homeProfile(): Promise<Shelf[]> {
+    return this.household.catalog.homeProfile(this.userId).then((s) => this.shelves(s));
   }
 
   genres(type: TitleType) {
@@ -44,6 +53,12 @@ export class Viewer {
     return this.household.catalog.animePage(category).then((s) => this.shelves(s));
   }
 
+  /** One of the Anime tab's lists in full, or null for one it doesn't have. */
+  async animeList(id: string) {
+    const list = await this.household.catalog.animeList(id);
+    return list && { title: list.title, items: await this.cards(list.items) };
+  }
+
   /** My List: the titles on this person's list, newest first. */
   async watchlist() {
     return this.cards(await this.household.catalog.watchlist(this.userId));
@@ -59,7 +74,7 @@ export class Viewer {
     return { ...person, movies: await this.cards(person.movies), shows: await this.cards(person.shows) };
   }
 
-  async browse(type: TitleType, list: "trending" | "popular" | "topRated" | "library") {
+  async browse(type: TitleType, list: BrowseList) {
     return this.cards(await this.household.catalog.browse(type, list));
   }
 
@@ -68,42 +83,65 @@ export class Viewer {
   }
 
   async movie(id: number) {
-    await this.assertAllowed("movie", id);
+    await this.assertAllowed(tmdbRef("movie", id));
     const movie = await this.household.catalog.movie(this.userId, id);
     return { ...movie, recommendations: await this.cards(movie.recommendations) };
   }
 
   async show(id: number) {
-    await this.assertAllowed("show", id);
+    await this.assertAllowed(tmdbRef("show", id));
     const show = await this.household.catalog.show(this.userId, id);
     return { ...show, recommendations: await this.cards(show.recommendations) };
   }
 
   async season(showId: number, season: number) {
-    await this.assertAllowed("show", showId);
+    await this.assertAllowed(tmdbRef("show", showId));
     return this.household.catalog.season(this.userId, showId, season);
   }
 
+  /** A title's page by its ref: TMDB's or AniList's, in the same shape. */
+  async title(ref: TitleRef) {
+    if (ref.source === "anilist") {
+      await this.assertAllowed(ref);
+      const page = await this.household.catalog.anilistTitle(this.userId, ref);
+      if (!page) throw notFound();
+      return { ...page, recommendations: await this.cards(page.recommendations), related: await this.cards(page.related) };
+    }
+    return ref.type === "movie" ? this.movie(ref.id) : this.show(ref.id);
+  }
+
+  /** A season of a show by its ref, like `title`. AniList's shows have one, season 1. */
+  async titleSeason(ref: TitleRef, season: number) {
+    if (ref.type !== "show") throw new HTTPException(404, { message: "Movies have no seasons" });
+    if (ref.source === "anilist") {
+      await this.assertAllowed(ref);
+      const page = await this.household.catalog.anilistSeason(this.userId, ref, season);
+      if (!page) throw new HTTPException(404, { message: "Season not found" });
+      return page;
+    }
+    return this.season(ref.id, season);
+  }
+
   /** The library's copies of a title (instant). */
-  async sources(target: Target) {
-    await this.assertAllowed(titleType(target.mediaType), target.tmdbId);
-    return this.household.catalog.sources(target.mediaType, target.tmdbId, target.season, target.episode);
+  async sources(target: TitleTarget) {
+    await this.assertAllowed(targetRef(target));
+    return this.household.catalog.sources(target);
   }
 
   /** Releases from the scrapers (a few seconds), within the household's hourly allowance. */
   async discover(target: DiscoveryTarget) {
-    await this.assertAllowed(titleType(target.mediaType), target.tmdbId);
+    await this.assertAllowed(targetRef(target));
     await this.household.spendSearch();
     return this.household.discovery.candidates(target);
   }
 
   async play(req: PlayRequest) {
-    await this.assertAllowed(titleType(req.mediaType), req.tmdbId);
+    await this.assertAllowed(targetRef(req));
     return this.household.playback.play({ userId: this.userId }, req);
   }
 
   async prepareDownload(req: Omit<PlayRequest, "startMs">) {
-    await this.assertAllowed(titleType(req.mediaType), req.tmdbId);
+    await this.assertAllowed(targetRef(req));
     return this.household.playback.prepareDownload(req);
   }
 
@@ -125,9 +163,9 @@ export class Viewer {
     await this.household.plays.mine(this.userId, sessionId);
   }
 
-  /** May this person have `type`/`tmdbId` on their list? Taking it off always is. */
-  async assertMayList(type: TitleType, tmdbId: number, on: boolean) {
-    if (on) await this.assertAllowed(type, tmdbId);
+  /** May this person have `ref` on their list? Taking it off always is. */
+  async assertMayList(ref: TitleRef, on: boolean) {
+    if (on) await this.assertAllowed(ref);
   }
 
   /** A fresh link for a library file (null: it's on this server's disk). */
@@ -155,11 +193,11 @@ export class Viewer {
     return this.maxAge.then((age) => age !== null);
   }
 
-  private async assertAllowed(type: TitleType, tmdbId: number) {
-    if (await this.limited()) await this.household.content.assertAllowed(this.userId, type, tmdbId);
+  private async assertAllowed(ref: TitleRef) {
+    if (await this.limited()) await this.household.content.assertAllowed(this.userId, ref);
   }
 
-  private async cards<T extends { type: TitleType; tmdbId: number }>(cards: T[]): Promise<T[]> {
+  private async cards<T extends { ref: string }>(cards: T[]): Promise<T[]> {
     return (await this.limited()) ? this.household.content.filter(this.userId, cards) : cards;
   }
 
@@ -177,8 +215,8 @@ export class Viewer {
   private async fileAllowed(fileId: number): Promise<boolean> {
     if (!(await this.limited())) return true;
     const file = await this.household.library.get(fileId);
-    if (!file?.mediaType || file.tmdbId == null) return false;
-    return this.household.content.allowed(this.userId, titleType(file.mediaType), file.tmdbId);
+    if (!file?.mediaType || file.titleId == null) return false;
+    return this.household.content.allowed(this.userId, targetRef({ source: file.source, mediaType: file.mediaType, titleId: file.titleId }));
   }
 
   private async assertFile(fileId: number) {

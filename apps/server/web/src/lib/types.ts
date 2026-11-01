@@ -308,6 +308,8 @@ export interface ParsedName {
   videoCodec?: string;
   hdr?: string;
   group?: string;
+  /** Named like a fansub release ("[Group] Title - 12"). */
+  anime?: boolean;
 }
 
 export type LibrarySort = "lastAccessed" | "added" | "title" | "name" | "size" | "year";
@@ -335,6 +337,11 @@ export interface LibraryFile {
   ref?: string;
   matchStatus: MatchStatus;
   mediaType: "movie" | "episode" | null;
+  /** Where the matched title comes from: TMDB, or AniList for anime. */
+  titleSource: TitleSource;
+  /** The matched title ("anilist:show:154587"), or null. */
+  titleRef: string | null;
+  /** TMDB's id, for TMDB titles. */
   tmdbId: number | null;
   season: number | null;
   episode: number | null;
@@ -342,6 +349,20 @@ export interface LibraryFile {
   title: string | null;
   year: number | null;
   parsed: ParsedName | null;
+}
+
+export type TitleSource = "tmdb" | "anilist";
+
+export interface AnilistResult {
+  /** "anilist:show:154587" or "anilist:movie:21519". */
+  ref: string;
+  anilistId: number;
+  title: string;
+  year: number | null;
+  /** AniList's format: TV, MOVIE, OVA, ONA… */
+  format: string | null;
+  posterUrl: string | null;
+  episodes: number | null;
 }
 
 export interface TmdbResult {

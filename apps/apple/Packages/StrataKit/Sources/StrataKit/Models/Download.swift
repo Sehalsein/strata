@@ -65,7 +65,9 @@ public struct DownloadItem: Codable, Sendable, Hashable, Identifiable {
     }
 
     public static func id(signInID: String, target: PlaybackTarget) -> String {
-        [signInID, target.mediaType.rawValue, String(target.tmdbId), target.season.map(String.init) ?? "", target.episode.map(String.init) ?? ""].joined(separator: ":")
+        // A TMDB title keeps the id it had before refs, so downloads from then still match.
+        let title = target.title.tmdbId.map(String.init) ?? target.title.description
+        return [signInID, target.mediaType.rawValue, title, target.season.map(String.init) ?? "", target.episode.map(String.init) ?? ""].joined(separator: ":")
     }
 
     public var progress: Double {

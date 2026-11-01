@@ -9,6 +9,7 @@ import { dashboardUrls } from "../../platform/network";
 import { householdSettingsSchema, SECRET_KEYS, serverSettingsSchema, settingsSchema, type SecretKey } from "../../settings";
 import { toCandidate } from "../../sources/resolver";
 import { imageUrl, yearOf } from "../../catalog/tmdb";
+import { formatRef, parseRef, targetRef, tmdbRef } from "../../catalog/ref";
 import { API_VERSION, VERSION } from "../../version";
 import { member, session as authSession, user } from "../../db/schema";
 import { and, desc, eq, gt } from "drizzle-orm";
@@ -194,7 +195,12 @@ export const adminRoutes = new Hono<Env>()
         ref: f.provider === "local" ? f.ref : undefined,
         matchStatus: f.matchStatus,
         mediaType: f.mediaType,
-        tmdbId: f.tmdbId,
+        // `ref` and `source` are the file's own (its path, its release type: web, bluray…);
+        // the title's are `titleRef` and `titleSource`.
+        titleSource: f.source,
+        titleRef: f.mediaType && f.titleId !== null ? formatRef(targetRef({ source: f.source, mediaType: f.mediaType, titleId: f.titleId })) : null,
+        // TMDB's id, for TMDB titles (what the admin pages show and match by).
+        tmdbId: f.source === "tmdb" ? f.titleId : null,
         season: f.season,
         episode: f.episode,
         title,
@@ -206,11 +212,22 @@ export const adminRoutes = new Hono<Env>()
     });
   })
 
+  // A title by its ref ("anilist:show:154587"), or a TMDB id and type (older dashboards).
   .post("/files/:id/match", async (c) => {
-    const input = await body(c, z.object({ type: z.enum(["movie", "show"]), tmdbId: z.number().int(), season: z.number().int().optional(), episode: z.number().int().optional() }));
+    const episodeFields = { season: z.number().int().min(0).optional(), episode: z.number().int().min(0).optional() };
+    const input = await body(c, z.union([
+      z.object({ ref: z.string().max(64), ...episodeFields }),
+      z.object({ type: z.enum(["movie", "show"]), tmdbId: z.number().int(), ...episodeFields }),
+    ]));
+    const ref = "ref" in input ? parseRef(input.ref) : tmdbRef(input.type, input.tmdbId);
+    if (!ref) throw new HTTPException(400, { message: "Not a title ref" });
     const id = intParam(c, "id");
     if (!await c.var.household.library.get(id)) throw new HTTPException(404, { message: "No such file" });
-    await c.var.household.library.setManualMatch(id, input.type, input.tmdbId, input.season, input.episode);
+    try {
+      await c.var.household.library.setManualMatch(id, ref, input.season, input.episode);
+    } catch (err) {
+      throw new HTTPException(400, { message: err instanceof Error ? err.message : String(err) });
+    }
     return c.json({ ok: true });
   })
 
@@ -233,6 +250,29 @@ export const adminRoutes = new Hono<Env>()
     const page = type === "movie" ? await tmdb.searchMovie(q) : await tmdb.searchShow(q);
     return c.json({
       items: page.results.slice(0, 20).map((r) => ({ tmdbId: r.id, title: r.title ?? r.name ?? "", year: yearOf(r.release_date ?? r.first_air_date), posterUrl: imageUrl(r.poster_path, "w185") })),
+    });
+  })
+
+  // AniList's anime for Fix Match (not adult titles).
+  .get("/anilist/search", async (c) => {
+    const q = c.req.query("q")?.trim().slice(0, 200);
+    if (!q) return c.json({ items: [] });
+    const results = await c.var.household.anilist.search(q).catch(() => {
+      throw new HTTPException(502, { message: "AniList didn't answer; try again in a minute" });
+    });
+    return c.json({
+      items: results.filter((m) => !m.isAdult).map((m) => {
+        const ref = { source: "anilist" as const, type: m.format === "MOVIE" ? ("movie" as const) : ("show" as const), id: m.id };
+        return {
+          ref: formatRef(ref),
+          anilistId: m.id,
+          title: m.title.english?.trim() || m.title.romaji?.trim() || "",
+          year: m.seasonYear ?? null,
+          format: m.format ?? null,
+          posterUrl: m.coverImage?.large ?? m.coverImage?.extraLarge ?? null,
+          episodes: m.episodes ?? null,
+        };
+      }),
     });
   })
 
@@ -279,8 +319,16 @@ async function sessionDtoFor(services: Services, h: Household) {
     userId: s.userId,
     userName: names.get(s.userId) ?? null,
     fileId: s.fileId,
-    title: await h.library.titleOf(s.target.mediaType === "movie" ? "movie" : "show", s.target.tmdbId),
-    target: s.target,
+    title: await h.library.titleOf(targetRef(s.target)),
+    // As before sources (the web admin reads tmdbId: TMDB titles only), with source and ref.
+    target: {
+      source: s.target.source,
+      ref: formatRef(targetRef(s.target)),
+      mediaType: s.target.mediaType,
+      tmdbId: s.target.source === "tmdb" ? s.target.titleId : null,
+      season: s.target.season,
+      episode: s.target.episode,
+    },
     mode: s.plan.mode,
     reasons: s.plan.reasons,
     source: s.inputKind === "url" ? "torbox" : "local",

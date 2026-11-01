@@ -149,3 +149,19 @@ export function optionalInt(value: string | undefined): number | undefined {
   if (!Number.isInteger(n)) throw new HTTPException(400, { message: `Invalid number ${value}` });
   return n;
 }
+
+export const MINUTE = 60;
+export const HOUR = 60 * MINUTE;
+export const DAY = 24 * HOUR;
+
+/**
+ * Tells the apps how long they may keep a successful GET answer (`private`: per signed-in
+ * profile, never a shared cache). Past that they show what they kept and refresh it in the
+ * background (stale-while-revalidate); pull-to-refresh always asks again.
+ */
+export function cacheFor(maxAge: number): MiddlewareHandler {
+  return async (c, next) => {
+    await next();
+    if (c.res.status === 200) c.header("Cache-Control", `private, max-age=${maxAge}, stale-while-revalidate=${7 * DAY}`);
+  };
+}

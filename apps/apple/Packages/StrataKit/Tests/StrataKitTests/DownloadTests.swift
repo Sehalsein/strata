@@ -21,7 +21,7 @@ final class DownloadTests: XCTestCase {
 
     func testPrepareDownloadResolvesTheServersOwnAddress() async throws {
         StubProtocol.reset { _ in .json(200, Self.response) }
-        guard case .ready(let res) = try await client().prepareDownload(.movie(42), candidateId: "file:7") else { return XCTFail("expected ready") }
+        guard case .ready(let res) = try await client().prepareDownload(.movie(.tmdb(.movie, 42)), candidateId: "file:7") else { return XCTFail("expected ready") }
         XCTAssertEqual(res.url.absoluteString, "http://strata.test:8420/api/files/7/content")
         XCTAssertEqual(res.mode, .device)
         XCTAssertEqual(res.subtitleTracks.first?.isEmbedded, true)
@@ -33,7 +33,7 @@ final class DownloadTests: XCTestCase {
 
     func testPrepareDownload428AsksForTheFilesDetails() async throws {
         StubProtocol.reset { _ in .json(428, ["needsProbe": ["fileId": 7, "url": "https://cdn.torbox.test/7"]]) }
-        guard case .needsProbe(let fileId, let url) = try await client().prepareDownload(.movie(42)) else { return XCTFail("expected needsProbe") }
+        guard case .needsProbe(let fileId, let url) = try await client().prepareDownload(.movie(.tmdb(.movie, 42))) else { return XCTFail("expected needsProbe") }
         XCTAssertEqual(fileId, 7)
         XCTAssertEqual(url.host, "cdn.torbox.test")
     }
@@ -47,7 +47,7 @@ final class DownloadTests: XCTestCase {
     func testOfflinePlayResponseResumesWhereItWasLeft() throws {
         let data = try JSONSerialization.data(withJSONObject: Self.response)
         let response = try JSONDecoder().decode(DownloadResponse.self, from: data)
-        var item = DownloadItem(signInID: "me", target: .movie(42), title: "Film", subtitle: "2021", artworkURL: nil, response: response)
+        var item = DownloadItem(signInID: "me", target: .movie(.tmdb(.movie, 42)), title: "Film", subtitle: "2021", artworkURL: nil, response: response)
         XCTAssertEqual(item.id, "me:movie:42::")
         XCTAssertEqual(item.fileExtension, "mkv")
         item.positionMs = 600_000
@@ -64,9 +64,9 @@ final class DownloadTests: XCTestCase {
     func testProgressQueueKeepsTheLatestAndSendsItOnceOnline() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("queue-\(UUID().uuidString).json")
         let queue = ProgressQueue(url: url)
-        await queue.enqueue(signInID: "me", target: .movie(42), positionMs: 1000, durationMs: 9000)
-        await queue.enqueue(signInID: "me", target: .movie(42), positionMs: 5000, durationMs: 9000)
-        await queue.enqueue(signInID: "other", target: .movie(42), positionMs: 7000, durationMs: 9000)
+        await queue.enqueue(signInID: "me", target: .movie(.tmdb(.movie, 42)), positionMs: 1000, durationMs: 9000)
+        await queue.enqueue(signInID: "me", target: .movie(.tmdb(.movie, 42)), positionMs: 5000, durationMs: 9000)
+        await queue.enqueue(signInID: "other", target: .movie(.tmdb(.movie, 42)), positionMs: 7000, durationMs: 9000)
 
         StubProtocol.reset { _ in throw URLError(.notConnectedToInternet) }
         await queue.flush(client: client(), signInID: "me")

@@ -43,6 +43,7 @@ export const queryKeys = {
   files: (filters: LibraryFilters) => ["admin", "files", filters] as const,
   filesAll: ["admin", "files"] as const,
   tmdbSearch: (q: string, type: "movie" | "show") => ["admin", "tmdb", type, q] as const,
+  anilistSearch: (q: string) => ["admin", "anilist", q] as const,
   torboxAccount: ["admin", "torbox", "account"] as const,
   updateStatus: ["admin", "update"] as const,
   fs: (path: string | undefined) => ["admin", "fs", path ?? ""] as const,

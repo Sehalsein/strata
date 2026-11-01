@@ -52,12 +52,17 @@ struct AnimeView: View {
             if !categories.isEmpty { ToolbarItem(placement: .primaryAction) { menu } }
             ProfileToolbarItems()
         }
-        .refreshable { await services.client?.clearCache(); await load(quietly: true) }
+        .refreshable { await load(force: true) }
         #endif
-        .task {
-            if case .loaded(let items) = await services.load({ try await $0.animeCategories() }) { categories = items }
+        .task { await loadCategories() }
+        .task(id: category) {
+            shelves = .loading
+            await load()
         }
-        .task(id: category) { await load() }
+    }
+
+    private func loadCategories(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.animeCategories($1) }) { if case .loaded(let items) = $0 { categories = items } }
     }
 
     private var menu: some View {
@@ -87,12 +92,45 @@ struct AnimeView: View {
         shelves.value?.first { $0.style == .hero && !$0.items.isEmpty }
     }
 
-    /// `quietly` (pull to refresh) keeps the page up while it reloads, and on failure.
-    private func load(quietly: Bool = false) async {
-        if !quietly { shelves = .loading }
-        let result = await services.load { try await $0.anime(category: category?.id) }
-        if case .loading = result { return }
-        if quietly, case .failed = result, shelves.value != nil { return }
-        shelves = result
+    private func load(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.anime(category: category?.id, $1) }) { shelves = $0 }
+    }
+}
+
+/// One of the Anime tab's lists in full ("See all"), in the server's order.
+struct AnimeListView: View {
+    @Environment(AppServices.self) private var services
+    let id: String
+    let title: String
+    @State private var items: Loadable<[TitleCard]> = .loading
+
+    var body: some View {
+        ScrollView {
+            switch items {
+            case .loading: ProgressView().padding(Metrics.space12)
+            case .failed(let message):
+                MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load \(title)", message: message, actionTitle: "Try Again") {
+                    Task { await load(force: true) }
+                }
+            case .loaded(let cards):
+                PosterGrid {
+                    ForEach(cards) { card in
+                        NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.buttonStyle(StrataCardStyle())
+                    }
+                }
+                .padding(.vertical, Metrics.space4)
+            }
+        }
+        .background(Theme.bg.ignoresSafeArea())
+        .fullBleedOnTV()
+        .navigationTitle(title)
+        #if !os(tvOS)
+        .refreshable { await load(force: true) }
+        #endif
+        .task { await load() }
+    }
+
+    private func load(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.animeList(id, $1) }) { items = $0 }
     }
 }

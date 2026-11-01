@@ -75,6 +75,9 @@ public enum Metrics {
     public static let radiusMD: CGFloat = 14
     public static let radiusLG: CGFloat = 22
 
+    /// Cards a rail shows before the rest are left to its "See all".
+    public static let railLimit = 10
+
     #if os(tvOS)
     public static let gutter: CGFloat = 80
     public static let posterWidth: CGFloat = 248

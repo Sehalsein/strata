@@ -106,18 +106,18 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(card.episode?.code, "S1 · E1")
         XCTAssertEqual(card.positionMs, 120_000)
         XCTAssertEqual(card.progressFraction ?? 0, 0.08, accuracy: 0.0001)
-        XCTAssertEqual(card.playbackTarget, .episode(show: 9001, season: 1, episode: 1))
-        XCTAssertEqual(card.id, "show-9001-s1e1")
+        XCTAssertEqual(card.playbackTarget, .episode(show: .tmdb(.show, 9001), season: 1, episode: 1))
+        XCTAssertEqual(card.id, "tmdb:show:9001-s1e1")
         let titles = try XCTUnwrap(home.first { $0.id == "watchlist" })
         XCTAssertEqual(titles.kind, .titles)
         let movie = try XCTUnwrap(titles.items.first)
-        XCTAssertEqual(movie.id, "movie-10378")
+        XCTAssertEqual(movie.id, "tmdb:movie:10378")
         XCTAssertEqual(movie.posterUrl?.absoluteString, "https://image.tmdb.org/t/p/w342/bbb.jpg")
         XCTAssertNil(movie.backdropUrl)
         XCTAssertNil(movie.progressFraction)
         XCTAssertTrue(movie.isAvailable)
         XCTAssertEqual(movie.availabilityLabel, "Library")
-        XCTAssertEqual(movie.playbackTarget, .movie(10378))
+        XCTAssertEqual(movie.playbackTarget, .movie(.tmdb(.movie, 10378)))
         XCTAssertEqual(Set(home.map(\.id)), ["continue", "watchlist", "libraryMovies", "libraryShows", "trendingMovies", "trendingShows"])
     }
 
@@ -172,7 +172,7 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(m.progress?.completed, true)
         XCTAssertNil(m.resumeMs)
         XCTAssertTrue(m.inWatchlist)
-        XCTAssertEqual(m.target, .movie(10378))
+        XCTAssertEqual(m.target, .movie(.tmdb(.movie, 10378)))
 
         let full = try Fixture.decode(MovieDetail.self, "movie_full")
         XCTAssertEqual(full.cast.count, 2)
@@ -190,7 +190,7 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(s.seasons.first?.availableEpisodes, 2)
         XCTAssertEqual(s.upNext, UpNext(season: 1, episode: 1, positionMs: 120_000))
         XCTAssertEqual(s.upNext?.isResume, true)
-        XCTAssertEqual(s.upNextTarget, .episode(show: 9001, season: 1, episode: 1))
+        XCTAssertEqual(s.upNextTarget, .episode(show: .tmdb(.show, 9001), season: 1, episode: 1))
         XCTAssertEqual(s.yearRangeText, "2020")
 
         let full = try Fixture.decode(ShowDetail.self, "show_full")
@@ -209,7 +209,7 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(e1.progressFraction ?? 0, 0.08, accuracy: 0.0001)
         XCTAssertNil(season.episodes[1].progress)
         XCTAssertFalse(season.episodes[1].isUpcoming)
-        XCTAssertEqual(e1.target(show: 9001), .episode(show: 9001, season: 1, episode: 1))
+        XCTAssertEqual(e1.target(show: .tmdb(.show, 9001)), .episode(show: .tmdb(.show, 9001), season: 1, episode: 1))
     }
 
     func testCandidates() throws {
@@ -303,7 +303,7 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     func testTargetEncodingOmitsNil() throws {
-        let data = try JSONEncoder().encode(PlaybackTarget.movie(5))
+        let data = try JSONEncoder().encode(PlaybackTarget.movie(.tmdb(.movie, 5)))
         let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         XCTAssertEqual(obj["mediaType"] as? String, "movie")
         XCTAssertNil(obj["season"])

@@ -148,6 +148,8 @@ private final class TokenBox: @unchecked Sendable {
 public final class ServerStore {
     public private(set) var servers: [SavedServer] = []
     public private(set) var signIns: [SavedSignIn] = []
+    /// Servers taken off the connect screen's list (ids). Signing in to one brings it back.
+    public private(set) var hiddenServerIDs: Set<String> = []
     /// The active sign-in's id. Nil with saved sign-ins means "Who's watching?".
     public private(set) var activeID: String?
     /// Authenticated client for the active sign-in (nil when none is active).
@@ -188,6 +190,7 @@ public final class ServerStore {
     private static let serversKey = "strata.servers.v2"
     private static let signInsKey = "strata.signIns.v2"
     private static let activeKey = "strata.activeSignIn.v2"
+    private static let hiddenServersKey = "strata.hiddenServers.v1"
     /// Before accounts (one token per server, bound to a profile).
     private static let profileEraServersKey = "strata.servers"
     private static let profileEraActiveKey = "strata.activeServer"
@@ -208,6 +211,7 @@ public final class ServerStore {
             signIns = saved.filter { s in tokens.read(s.id) != nil && servers.contains { $0.id == s.serverID } }
         }
         servers.removeAll { server in !signIns.contains { $0.serverID == server.id } }
+        hiddenServerIDs = Set(defaults.stringArray(forKey: Self.hiddenServersKey) ?? [])
         activeID = defaults.string(forKey: Self.activeKey).flatMap { id in signIns.contains { $0.id == id } ? id : nil }
             ?? (signIns.count == 1 ? signIns.first?.id : nil)
         rebuildClient()
@@ -222,11 +226,28 @@ public final class ServerStore {
         try await probeServer(address).info
     }
 
-    /// `probe`, also returning the normalised URL that answered.
+    /// `probe`, also returning the normalised URL that answered. A bare domain name is tried
+    /// over HTTPS first, then as a home server (see `ServerAddress.candidates`) — but only
+    /// when nothing at all listens for HTTPS there. A certificate error, a timeout or any
+    /// answer means something is there, and falling back to plain HTTP then could hand a
+    /// password to whoever is in the way.
     public func probeServer(_ address: String) async throws -> (url: URL, info: ServerInfo) {
-        guard let url = ServerAddress.normalize(address) else {
+        let candidates = ServerAddress.candidates(address)
+        guard !candidates.isEmpty else {
             throw StrataError(kind: .invalidInput, message: "That doesn't look like a valid server address.")
         }
+        for (i, url) in candidates.enumerated() {
+            do {
+                return try await probeServer(at: url)
+            } catch {
+                let failure = StrataError.wrap(error)
+                guard i < candidates.count - 1, failure.nothingListening else { throw failure }
+            }
+        }
+        throw StrataError(kind: .invalidInput, message: "That doesn't look like a valid server address.")
+    }
+
+    private func probeServer(at url: URL) async throws -> (url: URL, info: ServerInfo) {
         let info: ServerInfo
         do {
             info = try await StrataClient(baseURL: url, session: session, cacheTTL: 0).info()
@@ -350,12 +371,14 @@ public final class ServerStore {
         server.version = info.version
         server.addresses = [url] + server.addresses.filter { $0 != url }
         upsert(server)
+        if hiddenServerIDs.contains(info.id) { showHiddenServers(info.id) }
 
         let id = SavedSignIn.id(server: info.id, user: me.user.id)
         if let old = tokens.read(id), old != token {
             // The account signed in again on this device: end its previous session (best-effort).
             let previous = StrataClient(baseURL: url, token: old, session: session, cacheTTL: 0)
             Task { try? await previous.signOut() }
+            StrataClient.purgeCache(token: old)
         }
         var signIn = SavedSignIn(serverID: info.id, userID: me.user.id, username: me.user.username, name: me.user.name)
         signIn.apply(me)
@@ -397,6 +420,24 @@ public final class ServerStore {
             Task { try? await c.signOut() }
         }
         forget(id)
+    }
+
+    /// Takes a server off the connect screen's list on this device. Nothing is signed out.
+    public func hideServer(_ id: String) {
+        hiddenServerIDs.insert(id)
+        defaults.set(Array(hiddenServerIDs).sorted(), forKey: Self.hiddenServersKey)
+    }
+
+    /// Takes these servers off the list (a "Clear List").
+    public func hideServers(_ ids: [String]) {
+        hiddenServerIDs.formUnion(ids)
+        defaults.set(Array(hiddenServerIDs).sorted(), forKey: Self.hiddenServersKey)
+    }
+
+    /// Puts hidden servers back on the list: all of them, or just `id`.
+    public func showHiddenServers(_ id: String? = nil) {
+        if let id { hiddenServerIDs.remove(id) } else { hiddenServerIDs.removeAll() }
+        defaults.set(Array(hiddenServerIDs).sorted(), forKey: Self.hiddenServersKey)
     }
 
     /// Names a saved server on this device.
@@ -522,6 +563,11 @@ public final class ServerStore {
         guard info.id == server.id else {
             throw StrataError(kind: .invalidInput, message: "That address belongs to a different server (\(info.serverName)).")
         }
+        // The app tries a server's other addresses with its sign-in: a server it reaches over
+        // HTTPS mustn't gain a plain-HTTP address on the internet that could be listened in on.
+        if url.scheme == "http", !ServerAddress.isLocal(url), server.addresses.contains(where: { $0.scheme == "https" }) {
+            throw StrataError(kind: .invalidInput, message: "\(server.name) is reached over HTTPS, so its other addresses must be too (or on your local network).")
+        }
         if !server.addresses.contains(url) { server.addresses.append(url) }
         upsert(server)
     }
@@ -598,6 +644,7 @@ public final class ServerStore {
     }
 
     private func forget(_ id: String) {
+        if let token = tokens.read(id) { StrataClient.purgeCache(token: token) }
         tokens.write(nil, id)
         let serverID = signIns.first { $0.id == id }?.serverID
         signIns.removeAll { $0.id == id }
@@ -617,7 +664,7 @@ public final class ServerStore {
             client = nil
             return
         }
-        client = StrataClient(baseURL: server.url, token: token, session: session)
+        client = StrataClient(baseURL: server.url, token: token, session: session, persistent: true)
     }
 
     private func persist() {

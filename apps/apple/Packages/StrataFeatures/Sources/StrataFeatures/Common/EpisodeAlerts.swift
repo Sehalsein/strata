@@ -45,8 +45,8 @@ public enum EpisodeAlerts {
             let what = [item.code, item.name].compactMap { $0 }.joined(separator: " · ")
             content.body = item.hasTime ? "\(what) is out now." : "\(what) airs today."
             content.sound = .default
-            content.threadIdentifier = "show-\(item.tmdbId)"
-            content.userInfo = ["url": "strata://show/\(item.tmdbId)"]
+            content.threadIdentifier = item.ref.description
+            content.userInfo = ["url": "strata://title/\(item.ref)"]
             let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
             let request = UNNotificationRequest(identifier: idPrefix + item.id, content: content, trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false))
             try? await center.add(request)

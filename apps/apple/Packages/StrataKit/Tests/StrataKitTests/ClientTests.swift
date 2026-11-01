@@ -25,6 +25,23 @@ final class ServerAddressTests: XCTestCase {
         }
     }
 
+    func testCandidatesTryHTTPSFirstForABareDomain() {
+        let cases: [(String, [String])] = [
+            ("strata-demo.example.workers.dev", ["https://strata-demo.example.workers.dev", "http://strata-demo.example.workers.dev:8420"]),
+            ("192.168.1.20", ["http://192.168.1.20:8420"]),
+            ("nas.local", ["http://nas.local:8420"]),
+            ("nas", ["http://nas:8420"]),
+            ("box.example.com:9000", ["http://box.example.com:9000"]),
+            ("http://box.example.com", ["http://box.example.com:8420"]),
+            ("https://box.example.com", ["https://box.example.com"]),
+            ("[fd7a:115c::1]", ["http://[fd7a:115c::1]:8420"]),
+            ("not a host", []),
+        ]
+        for (input, expected) in cases {
+            XCTAssertEqual(ServerAddress.candidates(input).map(\.absoluteString), expected, "input: \(input)")
+        }
+    }
+
     func testResolveRelative() {
         let base = URL(string: "http://192.168.1.20:8420")!
         XCTAssertEqual(ServerAddress.resolve(URL(string: "/api/stream/abc/stream.m3u8")!, against: base).absoluteString,
@@ -43,7 +60,7 @@ final class ClientTests: XCTestCase {
 
     func testPlayStartedResolvesURLsAndSendsBody() async throws {
         StubProtocol.reset { _ in .fixture("play_remux") }
-        let outcome = try await client().play(.episode(show: 9001, season: 1, episode: 2), candidateId: "file:3", startMs: 12_000, audioStreamIndex: 2)
+        let outcome = try await client().play(.episode(show: .tmdb(.show, 9001), season: 1, episode: 2), candidateId: "file:3", startMs: 12_000, audioStreamIndex: 2)
         guard case .started(let res) = outcome else { return XCTFail("expected started") }
         XCTAssertEqual(res.url.absoluteString, "http://strata.test:8420/api/stream/a83f4d9d1b7e1f6bf8b6b7a81fd81607/stream.m3u8")
         XCTAssertEqual(res.subtitleTracks[0].url?.absoluteString, "http://strata.test:8420/api/stream/a83f4d9d1b7e1f6bf8b6b7a81fd81607/subtitles/s2.vtt")
@@ -69,7 +86,7 @@ final class ClientTests: XCTestCase {
 
     func testPlayMovieOmitsEpisodeFields() async throws {
         StubProtocol.reset { _ in .fixture("play_direct") }
-        _ = try await client().play(.movie(10378))
+        _ = try await client().play(.movie(.tmdb(.movie, 10378)))
         let body = try XCTUnwrap(StubProtocol.recorded.first?.jsonBody)
         XCTAssertNil(body["season"])
         XCTAssertNil(body["startMs"], "nil startMs lets the server resume from saved progress")
@@ -78,7 +95,7 @@ final class ClientTests: XCTestCase {
 
     func testPlay202IsPreparing() async throws {
         StubProtocol.reset { _ in .fixture("preparing", status: 202) }
-        let outcome = try await client().play(.movie(10378), candidateId: "hash:abc")
+        let outcome = try await client().play(.movie(.tmdb(.movie, 10378)), candidateId: "hash:abc")
         guard case .preparing(let status) = outcome else { return XCTFail("expected preparing") }
         XCTAssertEqual(status.title, "Getting it ready")
         XCTAssertEqual(status.progress, 0.37, accuracy: 0.0001)
@@ -87,14 +104,14 @@ final class ClientTests: XCTestCase {
 
     func testPlay428AsksForTheFilesMediaInfo() async throws {
         StubProtocol.reset { _ in .fixture("needs_probe", status: 428) }
-        let outcome = try await client().play(.movie(10378))
+        let outcome = try await client().play(.movie(.tmdb(.movie, 10378)))
         XCTAssertEqual(outcome, .needsProbe(fileId: 42, url: URL(string: "https://store-031.weur.tb-cdn.st/dld/4a1b6c?token=abc&file=Big.Buck.Bunny.2008.2160p.mkv")!))
     }
 
     func testPlayOtherErrorsStillThrow() async throws {
         StubProtocol.reset { _ in .fixture("error_404", status: 404) }
         do {
-            _ = try await client().play(.movie(1))
+            _ = try await client().play(.movie(.tmdb(.movie, 1)))
             XCTFail("expected error")
         } catch let e as StrataError {
             XCTAssertEqual(e.status, 404)
@@ -119,7 +136,7 @@ final class ClientTests: XCTestCase {
     func testErrorShapeSurfacesServerMessage() async throws {
         StubProtocol.reset { _ in .fixture("error_404", status: 404) }
         do {
-            _ = try await client().movie(1)
+            _ = try await client().movie(.tmdb(.movie, 1))
             XCTFail("expected error")
         } catch let e as StrataError {
             XCTAssertEqual(e.kind, .http)
@@ -309,7 +326,7 @@ final class ClientTests: XCTestCase {
 
     func testSourcesQuery() async throws {
         StubProtocol.reset { _ in .fixture("sources_discovered") }
-        let items = try await client().sources(.episode(show: 9001, season: 2, episode: 3), discover: true)
+        let items = try await client().sources(.episode(show: .tmdb(.show, 9001), season: 2, episode: 3), discover: true)
         XCTAssertEqual(items.count, 3)
         let q = try XCTUnwrap(StubProtocol.recorded.first?.url?.query)
         XCTAssertEqual(q, "mediaType=episode&tmdbId=9001&season=2&episode=3&discover=1")
@@ -323,10 +340,10 @@ final class ClientTests: XCTestCase {
             }
         }
         let c = client()
-        let p = try await c.reportProgress(.movie(10378), positionMs: 13_000, durationMs: 30_000, sessionId: "abc")
+        let p = try await c.reportProgress(.movie(.tmdb(.movie, 10378)), positionMs: 13_000, durationMs: 30_000, sessionId: "abc")
         XCTAssertTrue(p.completed)
-        try await c.setWatched(.episode(show: 1, season: 1, episode: 1), true)
-        try await c.setWatchlist(.show, tmdbId: 9001, true)
+        try await c.setWatched(.episode(show: .tmdb(.show, 1), season: 1, episode: 1), true)
+        try await c.setWatchlist(.tmdb(.show, 9001), true)
         try await c.stopPlayback(sessionId: "abc")
         let reqs = StubProtocol.recorded
         XCTAssertEqual(reqs.map { "\($0.httpMethod!) \($0.url!.path)" }, [
@@ -342,17 +359,125 @@ final class ClientTests: XCTestCase {
     func testCacheAndClear() async throws {
         StubProtocol.reset { _ in .fixture("home") }
         let c = client(ttl: 60)
-        _ = try await c.home()
-        _ = try await c.home()
+        _ = try await c.homeCatalog()
+        _ = try await c.homeCatalog()
         XCTAssertEqual(StubProtocol.recorded.count, 1)
+        XCTAssertEqual(StubProtocol.recorded[0].cachePolicy, .reloadIgnoringLocalCacheData)
         await c.clearCache()
-        _ = try await c.home()
+        _ = try await c.homeCatalog()
         XCTAssertEqual(StubProtocol.recorded.count, 2)
-        // Mutations invalidate.
-        StubProtocol.reset { req in req.url?.path == "/api/watchlist" ? .json(200, ["ok": true]) : .fixture("home") }
-        try await c.setWatchlist(.movie, tmdbId: 1, false)
-        _ = try await c.home()
-        XCTAssertEqual(StubProtocol.recorded.map(\.url!.path), ["/api/watchlist", "/api/home"])
+        // The profile's rails are never kept.
+        _ = try await c.homeProfile()
+        _ = try await c.homeProfile()
+        XCTAssertEqual(StubProtocol.recorded.count, 4)
+        // Mutations drop what they change, and nothing else.
+        StubProtocol.reset { req in
+            switch req.url?.path {
+            case "/api/watchlist": .json(200, ["ok": true])
+            case "/api/calendar": .json(200, ["items": []])
+            default: .fixture("home")
+            }
+        }
+        _ = try await c.calendar()
+        try await c.setWatchlist(.tmdb(.movie, 1), false)
+        _ = try await c.homeCatalog()
+        _ = try await c.calendar()
+        XCTAssertEqual(StubProtocol.recorded.map(\.url!.path), ["/api/calendar", "/api/watchlist", "/api/calendar"])
+    }
+
+    func testHomeFromAServerWithoutParts() async throws {
+        StubProtocol.reset { req in req.url?.path == "/api/home" ? .fixture("home") : .json(404, ["error": "Not found"]) }
+        let c = client(ttl: 60)
+        let catalog = try await c.homeCatalog()
+        let mine = try await c.homeProfile()
+        XCTAssertFalse(catalog.isEmpty)
+        XCTAssertTrue(mine.isEmpty)
+    }
+
+    func testHomeAndMyListThroughAGatewayThatRefusesTheNewRequests() async throws {
+        // The public demo's gateway answers requests it doesn't know with 403.
+        StubProtocol.reset { req in req.url?.path == "/api/home" ? .fixture("home") : .json(403, ["error": "That isn't available in the demo."]) }
+        let c = client(ttl: 60)
+        let catalog = try await c.homeCatalog()
+        let mine = try await c.homeProfile()
+        _ = try await c.watchlist()
+        XCTAssertFalse(catalog.isEmpty)
+        XCTAssertTrue(mine.isEmpty)
+        XCTAssertEqual(StubProtocol.recorded.map(\.url!.path), ["/api/home/catalog", "/api/home", "/api/home/profile", "/api/watchlist", "/api/home"])
+    }
+
+    func testServerMaxAgeAndStaleWhileRevalidate() async throws {
+        var maxAge = "0"
+        StubProtocol.reset { _ in
+            var reply = StubProtocol.Reply.fixture("home")
+            reply.headers["Cache-Control"] = "private, max-age=\(maxAge), stale-while-revalidate=604800"
+            return reply
+        }
+        let c = client(ttl: 60)
+        // Nothing kept yet.
+        do { _ = try await c.homeCatalog(.cachedOnly); XCTFail("expected notCached") } catch let e as StrataError { XCTAssertEqual(e.kind, .notCached) }
+        XCTAssertEqual(StubProtocol.recorded.count, 0)
+        // max-age=0 overrides the client's 60s: kept, but stale at once.
+        _ = try await c.homeCatalog()
+        _ = try await c.homeCatalog(.cachedOnly)
+        _ = try await c.homeCatalog()
+        XCTAssertEqual(StubProtocol.recorded.count, 2)
+        // A day's max-age: fresh until a reload asks anyway.
+        maxAge = "86400"
+        _ = try await c.homeCatalog(.reload)
+        _ = try await c.homeCatalog()
+        XCTAssertEqual(StubProtocol.recorded.count, 3)
+        _ = try await c.homeCatalog(.reload)
+        XCTAssertEqual(StubProtocol.recorded.count, 4)
+    }
+
+    func testPersistentCacheSurvivesANewClientAndTitlesDropTheirSeasons() async throws {
+        StubProtocol.reset { req in
+            if req.url?.path == "/api/progress" { return .json(200, ["positionMs": 1, "durationMs": 2, "completed": false]) }
+            var reply = StubProtocol.Reply.fixture(req.url!.path.contains("seasons") ? "season" : "show")
+            reply.headers["Cache-Control"] = "private, max-age=86400"
+            return reply
+        }
+        let token = "disk-\(UUID().uuidString)"
+        func make() -> StrataClient { StrataClient(baseURL: base, token: token, session: StubProtocol.session(), persistent: true) }
+        let first = make()
+        defer { Task { await first.clearCache() } }
+        _ = try await first.show(.tmdb(.show, 9001))
+        _ = try await first.season(show: .tmdb(.show, 9001), 1)
+        _ = try await make().show(.tmdb(.show, 9001))
+        _ = try await make().season(show: .tmdb(.show, 9001), 1)
+        XCTAssertEqual(StubProtocol.recorded.count, 2)
+
+        try await first.reportProgress(.episode(show: .tmdb(.show, 9001), season: 1, episode: 2), positionMs: 1, durationMs: 2)
+        _ = try await make().show(.tmdb(.show, 9001))
+        _ = try await make().season(show: .tmdb(.show, 9001), 1)
+        XCTAssertEqual(StubProtocol.recorded.map(\.url!.path).suffix(3), ["/api/progress", "/api/titles/tmdb:show:9001", "/api/titles/tmdb:show:9001/seasons/1"])
+    }
+
+    func testAnswerTheServerTurnsDownIsNoLongerKept() async throws {
+        var denied = false
+        StubProtocol.reset { req in
+            if denied { return .json(403, ["error": "Not allowed for this profile"]) }
+            var reply = StubProtocol.Reply.fixture("show")
+            reply.headers["Cache-Control"] = "private, max-age=0"
+            return reply
+        }
+        let token = "deny-\(UUID().uuidString)"
+        let c = StrataClient(baseURL: base, token: token, session: StubProtocol.session(), persistent: true)
+        _ = try await c.show(.tmdb(.show, 9001))
+        _ = try await c.show(.tmdb(.show, 9001), .cachedOnly)
+        denied = true
+        do { _ = try await c.show(.tmdb(.show, 9001)); XCTFail("expected 403") } catch let e as StrataError { XCTAssertEqual(e.status, 403) }
+        // Gone from memory and disk: a new client (a cold launch) has nothing to show either.
+        for client in [c, StrataClient(baseURL: base, token: token, session: StubProtocol.session(), persistent: true)] {
+            do { _ = try await client.show(.tmdb(.show, 9001), .cachedOnly); XCTFail("expected notCached") } catch let e as StrataError { XCTAssertEqual(e.kind, .notCached) }
+        }
+
+        denied = false
+        _ = try await c.show(.tmdb(.show, 9001))
+        StrataClient.purgeCache(token: token)
+        let fresh = StrataClient(baseURL: base, token: token, session: StubProtocol.session(), persistent: true)
+        do { _ = try await fresh.show(.tmdb(.show, 9001), .cachedOnly); XCTFail("expected notCached") } catch let e as StrataError { XCTAssertEqual(e.kind, .notCached) }
     }
 
     func testSubtitlesRetryOn202() async throws {

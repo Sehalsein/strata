@@ -15,7 +15,7 @@ const release = (title: string, over: Partial<Release> = {}): Release => ({
 });
 
 describe("release filtering", () => {
-  const ep = { mediaType: "episode" as const, tmdbId: 1, season: 2, episode: 3 };
+  const ep = { source: "tmdb" as const, mediaType: "episode" as const, titleId: 1, season: 2, episode: 3 };
 
   test("episodes, packs and ranges", () => {
     expect(relevant(release("Show.S02E03.1080p.WEB"), ep)).toBe(true);
@@ -28,7 +28,7 @@ describe("release filtering", () => {
   });
 
   test("movies drop cams and episodes", () => {
-    const movie = { mediaType: "movie" as const, tmdbId: 1 };
+    const movie = { source: "tmdb" as const, mediaType: "movie" as const, titleId: 1 };
     expect(relevant(release("Film.2024.1080p.WEB-DL"), movie)).toBe(true);
     expect(relevant(release("Film.2024.HDCAM.x264"), movie)).toBe(false);
     expect(relevant(release("Film.S01E01.1080p"), movie)).toBe(false);
@@ -171,11 +171,11 @@ describe("discovery end to end", () => {
   });
 
   test("a library torrent can't be replayed as a different title", async () => {
-    const before = (await (await server.household()).library.byHash(CACHED)).map((f) => [f.id, f.mediaType, f.tmdbId]);
+    const before = (await (await server.household()).library.byHash(CACHED)).map((f) => [f.id, f.mediaType, f.titleId]);
     expect(before.length).toBeGreaterThan(0);
     const res = await server.request("/api/play", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 1, candidateId: `hash:${CACHED}` } });
     expect(res.status).toBe(404);
-    expect((await (await server.household()).library.byHash(CACHED)).map((f) => [f.id, f.mediaType, f.tmdbId])).toEqual(before);
+    expect((await (await server.household()).library.byHash(CACHED)).map((f) => [f.id, f.mediaType, f.titleId])).toEqual(before);
   });
 
   test("an uncached release reports download progress", async () => {
@@ -186,4 +186,41 @@ describe("discovery end to end", () => {
     await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, candidateId: `hash:${UNCACHED}` } });
     expect(torrents.filter((t) => t.hash === UNCACHED)).toHaveLength(1);
   }, 60_000);
+});
+
+describe("releases for AniList titles", () => {
+  test("Torrentio by the entry's Kitsu id and AniList episode, and by IMDb id in TMDB's numbering", async () => {
+    const { Discovery } = await import("../src/sources/discovery");
+    const { AnimeIds, fileAnimeIdStore } = await import("../src/catalog/anime/ids");
+    const { settingsSchema } = await import("../src/settings");
+    const ids = new AnimeIds(fileAnimeIdStore("/nonexistent"));
+    ids.index([
+      { type: "TV", anilist_id: 154587, kitsu_id: 46474, themoviedb_id: { tv: 209867 }, season: { tvdb: 1, tmdb: 1 } },
+      { type: "TV", anilist_id: 182255, kitsu_id: 49240, themoviedb_id: { tv: 209867 }, season: { tvdb: 2, tmdb: 1 }, episode_offset: { tmdb: 28 } },
+      { type: "TV", anilist_id: 777 },
+    ]);
+    ids.ready = async () => {};
+    const asked: string[] = [];
+    const fetchImpl = (async (input: string) => {
+      const path = new URL(input).pathname;
+      asked.push(path);
+      const streams = path.includes("kitsu")
+        ? [{ title: "[SubsPlease] Sousou no Frieren S2 - 02 (1080p)\n👤 40 💾 1.4 GB", infoHash: "a".repeat(40) }]
+        : [
+            { title: "Frieren.S01E30.1080p.WEB\n👤 10 💾 1.4 GB", infoHash: "b".repeat(40) },
+            { title: "Frieren.S01E29.1080p.WEB\n👤 10 💾 1.4 GB", infoHash: "c".repeat(40) },
+          ];
+      return Response.json({ streams });
+    }) as unknown as typeof fetch;
+    const tmdb = { show: async () => ({ id: 209867, external_ids: { imdb_id: "tt22248376" }, seasons: [{ season_number: 1, episode_count: 38 }] }) } as never;
+    const settings = settingsSchema.parse({ torrentioUrl: "https://torrentio.example" });
+    const discovery = new Discovery(tmdb, {} as never, () => settings as never, () => null, fetchImpl, () => {}, ids);
+
+    const releases = await discovery.releases({ source: "anilist", mediaType: "episode", titleId: 182255, season: 1, episode: 2 });
+    expect(asked.sort()).toEqual(["/stream/series/kitsu:49240:2.json", "/stream/series/tt22248376:1:30.json"]);
+    // Kitsu's pick is the episode; IMDb's are checked against TMDB S1E30.
+    expect(releases.map((r) => r.hash[0]).sort()).toEqual(["a", "b"]);
+    // Not on the id list: nothing to ask for.
+    expect(await discovery.releases({ source: "anilist", mediaType: "episode", titleId: 999, season: 1, episode: 1 })).toEqual([]);
+  });
 });

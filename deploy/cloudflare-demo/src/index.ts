@@ -41,7 +41,8 @@ function classify(method: string, url: URL): Kind | null {
   if (method === "GET") {
     if (p.startsWith("/api/stream/")) return "stream";
     if (p === "/api/sources" && url.searchParams.has("discover")) return null; // release search
-    if (/^\/api\/(info|me|home|search|sources|shows|calendar|anime|anime\/categories|avatars)$/.test(p)) return "api";
+    if (/^\/api\/(info|me|home|home\/catalog|home\/profile|watchlist|search|sources|shows|calendar|anime|anime\/categories|avatars)$/.test(p)) return "api";
+    if (/^\/api\/anime\/list\/[a-z]{1,20}$/.test(p)) return "api";
     if (/^\/api\/(genres|browse|titles|person)\//.test(p)) return "api";
     if (/^\/api\/avatars\/[a-z0-9-]+\.png$/.test(p)) return "api";
     if (/^\/api\/auth\/(get-session|organization\/list|device)$/.test(p)) return "api";
@@ -58,7 +59,7 @@ function classify(method: string, url: URL): Kind | null {
     return null;
   }
   if (method === "PUT" && p === "/api/watchlist") return "api";
-  if (method === "DELETE" && /^\/api\/(play\/[A-Za-z0-9-]{8,64}|continue\/(movie|show)\/\d+)$/.test(p)) return "api";
+  if (method === "DELETE" && /^\/api\/(play\/[A-Za-z0-9-]{8,64}|continue\/(movie|show)\/\d+|continue\/(tmdb|anilist):(movie|show):\d+)$/.test(p)) return "api";
   return null;
 }
 

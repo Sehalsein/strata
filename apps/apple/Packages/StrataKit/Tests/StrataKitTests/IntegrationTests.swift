@@ -67,12 +67,12 @@ final class IntegrationTests: XCTestCase {
         let shelves = try await client.home()
         XCTAssertTrue(shelves.allSatisfy { $0.kind == .continue || $0.kind == .titles })
         // …and progress and lists follow the account.
-        let sources = try await client.sources(.movie(10378))
+        let sources = try await client.sources(.movie(.tmdb(.movie, 10378)))
         XCTAssertTrue(sources.isEmpty)
-        let progress = try await client.reportProgress(.movie(10378), positionMs: 1000, durationMs: 60_000)
+        let progress = try await client.reportProgress(.movie(.tmdb(.movie, 10378)), positionMs: 1000, durationMs: 60_000)
         XCTAssertEqual(progress.positionMs, 1000)
-        try await client.setWatchlist(.movie, tmdbId: 10378, true)
-        try await client.setWatched(.movie(10378), true)
+        try await client.setWatchlist(.tmdb(.movie, 10378), true)
+        try await client.setWatched(.movie(.tmdb(.movie, 10378)), true)
 
         try await client.signOut()
         do {

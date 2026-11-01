@@ -17,7 +17,8 @@ struct BrowseView: View {
     /// The server's Shows page; `nil` before it loads, or from an older server.
     @State private var page: [Shelf]?
 
-    private let order: [BrowseList] = [.trending, .popular, .topRated]
+    /// Movies have what's newly out to rent or buy after Trending, and what's in cinemas last.
+    private var order: [BrowseList] { type == .movie ? [.trending, .latestReleases, .popular, .topRated, .inTheaters] : [.trending, .popular, .topRated] }
     private var title: String { type == .movie ? "Movies" : "Shows" }
 
     var body: some View {
@@ -67,14 +68,19 @@ struct BrowseView: View {
             }
             ProfileToolbarItems()
         }
-        .refreshable { await services.client?.clearCache(); await load() }
+        .refreshable { await load(force: true); await loadGenreShelves(force: true) }
         #endif
         .task { await load() }
         .task { await loadGenres() }
         .task(id: genre) {
-            guard let genre else { return }
-            await loadGenre(genre)
+            genreShelves = .loading
+            await loadGenreShelves()
         }
+    }
+
+    private func loadGenreShelves(force: Bool = false) async {
+        guard let genre else { return }
+        await services.loadCached(force: force, { try await $0.genreShelves(type, genreId: genre.id, $1) }) { genreShelves = $0 }
     }
 
     @ViewBuilder private func genreContent(_ genre: Genre) -> some View {
@@ -119,59 +125,51 @@ struct BrowseView: View {
                 }
                 ForEach(order, id: \.self) { list in
                     if let items = lists[list], !items.isEmpty {
-                        Rail(railTitle(list), seeAll: items.count > 20 ? { pushRoute(.browse(type, list)) } : nil) {
-                            ForEach(items.prefix(20)) { card in
+                        Rail(railTitle(list), link: items.count > Metrics.railLimit ? Route.browse(type, list) : nil) {
+                            ForEach(items.prefix(Metrics.railLimit)) { card in
                                 NavigationLink(value: card.route) { PosterCardLabel(card: card) }
                                     .buttonStyle(StrataCardStyle())
                             }
-                            #if os(tvOS)
-                            if items.count > 20 {
-                                NavigationLink(value: Route.browse(type, list)) { SeeAllTile() }
-                                .buttonStyle(StrataCardStyle())
-                            }
-                            #endif
                         }
                     }
                 }
     }
 
-    private func loadGenres() async {
-        if case .loaded(let items) = await services.load({ try await $0.genres(type) }) { genres = items }
+    private func loadGenres(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.genres(type, $1) }) { if case .loaded(let items) = $0 { genres = items } }
     }
 
     private func railTitle(_ list: BrowseList) -> String {
         switch list {
         case .library: "In Your Library"
+        case .latestReleases, .inTheaters, .popular, .topRated: list.title
         case .trending: "Trending"
-        case .popular: "Popular"
-        case .topRated: "Top Rated"
         }
     }
 
     private func loadGenre(_ genre: Genre) async {
         genreShelves = .loading
-        let result = await services.load { try await $0.genreShelves(type, genreId: genre.id) }
-        if case .loading = result { return }
-        genreShelves = result
+        await loadGenreShelves()
     }
 
-    private func load() async {
+    private func load(force: Bool = false) async {
         // Try Again shows the skeleton again while it loads.
         if lists.isEmpty { error = nil }
         // Older servers have no Shows page: they get the lists below.
-        if type == .show, let shelves = try? await services.client?.shows(), !shelves.isEmpty {
+        if type == .show, let shelves = try? await services.client?.shows(force ? .reload : .fresh), !shelves.isEmpty {
             page = shelves
             return
         }
-        await withTaskGroup(of: (BrowseList, Loadable<[TitleCard]>).self) { group in
+        await withTaskGroup(of: Void.self) { group in
             for list in order {
-                group.addTask { @MainActor in (list, await services.load { try await $0.browse(type, list: list) }) }
-            }
-            for await (list, result) in group {
-                switch result {
-                case .loaded(let items): lists[list] = items
-                case .failed(let message): if list != .library { error = message }
-                case .loading: break
+                group.addTask { @MainActor in
+                    await services.loadCached(force: force, { try await $0.browse(type, list: list, $1) }) { result in
+                        switch result {
+                        case .loaded(let items): lists[list] = items; error = nil
+                        case .failed(let message): if list != .library { error = message }
+                        case .loading: break
+                        }
+                    }
                 }
             }
         }
@@ -217,25 +215,6 @@ extension GenreMenu where Item == Genre {
     }
 }
 
-/// The poster-sized "See all" card that ends a rail.
-struct SeeAllTile: View {
-    var body: some View {
-        // Poster-shaped: the shape sets the size, the label sits on it (a VStack given an
-        // aspect ratio shrinks to its content instead).
-        RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
-            .fill(Theme.surface1)
-            .aspectRatio(2 / 3, contentMode: .fit)
-            .frame(width: Metrics.posterWidth)
-            .overlay {
-                VStack {
-                    Image(systemName: "chevron.right").font(.title2)
-                    Text("See all").font(.stCallout)
-                }
-                .foregroundStyle(Theme.accentText)
-            }
-    }
-}
-
 /// A full grid of one list ("See all").
 struct BrowseListView: View {
     @Environment(AppServices.self) private var services
@@ -267,16 +246,17 @@ struct BrowseListView: View {
         .fullBleedOnTV()
         .navigationTitle(list.title)
         #if os(iOS)
-        .refreshable { await services.client?.clearCache(); await load() }
+        .refreshable { await load(force: true) }
         #endif
         .task { await load() }
     }
 
-    private func load() async {
-        let result = await services.load { try await $0.browse(type, list: list) }
-        if case .loading = result { return }
-        if case .failed = result, items.value != nil { return }
-        items = result
+    /// A failed reload keeps the list up.
+    private func load(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.browse(type, list: list, $1) }) { result in
+            if case .failed = result, items.value != nil { return }
+            items = result
+        }
     }
 }
 
@@ -340,6 +320,25 @@ struct SearchView: View {
     }
 }
 
+/// A shelf's every title ("See all"), as the server sent them.
+struct ShelfGridView: View {
+    let shelf: Shelf
+
+    var body: some View {
+        ScrollView {
+            PosterGrid {
+                ForEach(shelf.items) { card in
+                    NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.buttonStyle(StrataCardStyle())
+                }
+            }
+            .padding(.vertical, Metrics.space4)
+        }
+        .background(Theme.bg.ignoresSafeArea())
+        .fullBleedOnTV()
+        .navigationTitle(shelf.title)
+    }
+}
+
 /// The account's watchlist, from the server's My List shelf.
 struct MyListView: View {
     @Environment(AppServices.self) private var services
@@ -376,11 +375,8 @@ struct MyListView: View {
                 }
             }
         }
-        .refreshable { await services.client?.clearCache(); items = await services.load { try await $0.watchlist() } }
+        .refreshable { items = await services.load { try await $0.watchlist() } }
         #endif
-        .task {
-            await services.client?.clearCache()
-            items = await services.load { try await $0.watchlist() }
-        }
+        .task { items = await services.load { try await $0.watchlist() } }
     }
 }

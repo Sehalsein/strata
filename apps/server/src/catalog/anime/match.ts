@@ -1,14 +1,16 @@
 import type { ParsedName } from "../../media/parse";
 import { diceCoefficient, normalize, type MatchResult } from "../matcher";
 import { type Tmdb, yearOf } from "../tmdb";
-import type { Anilist, AnilistMedia } from "./anilist";
-import type { AnimeEntry, AnimeIds } from "./ids";
+import { AnilistUnavailableError, type Anilist, type AnilistMedia } from "./anilist";
+import { anilistEpisode, type AnimeEntry, type AnimeIds } from "./ids";
 import type { Kitsu } from "./kitsu";
 
 /**
- * Matches anime-style file names ("[Group] Sousou no Frieren - 12") to TMDB: AniList
- * finds the anime from its (usually romaji) title, the id list maps it to the TMDB show
- * or movie, and the episode is translated to TMDB's season/episode numbering.
+ * Matches anime-style file names ("[Group] Sousou no Frieren - 12") to AniList titles:
+ * AniList finds the anime from its (usually romaji) title, and where the id list maps it
+ * to TMDB, the episode is placed through TMDB's numbering on the AniList entry (season
+ * or cour) it belongs to, numbered as that entry numbers it. AniList shows have one
+ * season (1).
  */
 export class AnimeMatcher {
   constructor(
@@ -20,28 +22,57 @@ export class AnimeMatcher {
 
   async match(parsed: ParsedName): Promise<MatchResult | null> {
     await this.ids.ready();
-    let media = pickAnime(await this.anilist.search(parsed.title), parsed);
+    let anilistDown: unknown = null;
+    const found = await this.anilist.search(parsed.title).catch((err) => ((anilistDown = err), [] as AnilistMedia[]));
+    const media = pickAnime(found, parsed);
+    let anilistId = media?.id;
     let entry = media ? this.ids.anilist(media.id) : undefined;
-    // AniList down or without a mapped result: Kitsu's search, through its ids.
-    if (!entry && this.kitsu) {
-      media = pickAnime(await this.kitsu.search(parsed.title), parsed);
-      entry = media ? this.ids.kitsu(media.id) : undefined;
+    // AniList down or without a result: Kitsu's search, through its ids.
+    if (!media && this.kitsu) {
+      const kitsuMedia = pickAnime(await this.kitsu.search(parsed.title).catch(() => []), parsed);
+      entry = kitsuMedia ? this.ids.kitsu(kitsuMedia.id) : undefined;
+      anilistId = entry?.anilistId;
     }
-    if (!media || !entry) return null;
+    if (!anilistId) {
+      if (anilistDown) throw anilistDown;
+      // Only Kitsu knows it, and the id list has no AniList id for it: TMDB's, as before.
+      return entry ? this.matchTmdb(parsed, entry) : null;
+    }
 
+    if (parsed.episode === undefined) return anilistMatch(this.anilist, "movie", anilistId);
+
+    let at = { anilistId, episode: parsed.episode };
+    if (entry?.tmdbTv) {
+      const seasons = await this.tmdbSeasons(entry.tmdbTv);
+      const entries = this.ids.show(entry.tmdbTv);
+      const tmdbAt = resolveEpisode(entries, entry, parsed.season, parsed.episode, seasons);
+      at = anilistEpisode(entries, tmdbAt.season, tmdbAt.episode, seasons) ?? at;
+    }
+    const show = await anilistMatch(this.anilist, "show", at.anilistId);
+    return show && { ...show, season: 1, episode: at.episode };
+  }
+
+  /** A TMDB show's seasons (episode counts), or none when TMDB can't say. */
+  private async tmdbSeasons(tmdbTv: number) {
+    const show = await this.tmdb.show(tmdbTv).catch(() => null);
+    return (show?.seasons ?? []).filter((s) => s.season_number > 0).map((s) => ({ season: s.season_number, episodes: s.episode_count }));
+  }
+
+  /** The TMDB title an id-list entry maps to, in TMDB's numbering. */
+  private async matchTmdb(parsed: ParsedName, entry: AnimeEntry): Promise<MatchResult | null> {
     if (parsed.episode === undefined) {
       if (!entry.tmdbMovie) return null;
       const m = await this.tmdb.movie(entry.tmdbMovie);
-      return { type: "movie", tmdbId: m.id, title: m.title, year: yearOf(m.release_date), posterPath: m.poster_path ?? null, backdropPath: m.backdrop_path ?? null, genreIds: m.genres.map((g) => g.id) };
+      return { source: "tmdb", type: "movie", titleId: m.id, title: m.title, year: yearOf(m.release_date), posterPath: m.poster_path ?? null, backdropPath: m.backdrop_path ?? null, genreIds: m.genres.map((g) => g.id) };
     }
-
     if (!entry.tmdbTv) return null;
     const show = await this.tmdb.show(entry.tmdbTv);
     const seasons = show.seasons.filter((s) => s.season_number > 0).map((s) => ({ season: s.season_number, episodes: s.episode_count }));
     const at = resolveEpisode(this.ids.show(entry.tmdbTv), entry, parsed.season, parsed.episode, seasons);
     return {
+      source: "tmdb",
       type: "show",
-      tmdbId: show.id,
+      titleId: show.id,
       title: show.name,
       year: yearOf(show.first_air_date),
       posterPath: show.poster_path ?? null,
@@ -51,6 +82,28 @@ export class AnimeMatcher {
       episode: at.episode,
     };
   }
+}
+
+/**
+ * An AniList title as a match: its English (else romaji) title, year, cover and banner
+ * (full URLs). Null when it isn't a `type` (AniList's movies are format MOVIE); throws
+ * when AniList can't answer, so the file is matched again later rather than without
+ * its artwork.
+ */
+export async function anilistMatch(anilist: Anilist, type: "movie" | "show", id: number): Promise<MatchResult | null> {
+  const media = await anilist.title(id);
+  if (!media) throw new AnilistUnavailableError();
+  if ((media.format === "MOVIE") !== (type === "movie")) return null;
+  return {
+    source: "anilist",
+    type,
+    titleId: id,
+    title: media.title.english?.trim() || media.title.romaji?.trim() || `AniList ${id}`,
+    year: media.seasonYear ?? media.startDate?.year ?? null,
+    posterPath: media.coverImage?.extraLarge ?? media.coverImage?.large ?? null,
+    backdropPath: media.bannerImage ?? null,
+    genreIds: null,
+  };
 }
 
 /** The AniList result whose romaji, English or alternative title best matches. */

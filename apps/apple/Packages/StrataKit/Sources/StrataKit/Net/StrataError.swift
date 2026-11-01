@@ -16,6 +16,8 @@ public struct StrataError: Error, LocalizedError, Sendable, Equatable {
         /// Bad input on our side (e.g. an empty or malformed address).
         case invalidInput
         case cancelled
+        /// `CachePolicy.cachedOnly` found nothing kept on this device.
+        case notCached
     }
 
     public var kind: Kind
@@ -25,6 +27,9 @@ public struct StrataError: Error, LocalizedError, Sendable, Equatable {
     /// The server's machine-readable code when it sent one (Better Auth's `code`, e.g.
     /// "INVALID_USERNAME_OR_PASSWORD", or an OAuth `error` like "expired_token").
     public var code: String?
+    /// Nothing answered at the address (connection refused), as opposed to something that
+    /// answered badly (a certificate, a timeout, an HTTP error).
+    public var nothingListening = false
 
     public init(kind: Kind, status: Int? = nil, message: String, code: String? = nil) {
         self.kind = kind
@@ -44,6 +49,10 @@ public struct StrataError: Error, LocalizedError, Sendable, Equatable {
     /// 429: too many attempts (sign-in is rate-limited).
     public var isRateLimited: Bool { status == 429 }
     public var isNotFound: Bool { status == 404 }
+    /// A request this server doesn't answer: one from before it existed (404), or one a
+    /// gateway in front of it refuses (403, like the public demo's). Only for requests that
+    /// have an older way to ask; elsewhere 403 means "not for this account".
+    public var isUnsupportedHere: Bool { status == 404 || status == 403 }
 
     static func http(_ status: Int, serverMessage: String?, code: String? = nil) -> StrataError {
         let msg = serverMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -100,6 +109,8 @@ public struct StrataError: Error, LocalizedError, Sendable, Equatable {
         default:
             message = "Couldn't reach the server\(at). (\(error.localizedDescription))"
         }
-        return StrataError(kind: .network, message: message)
+        var failure = StrataError(kind: .network, message: message)
+        failure.nothingListening = error.code == .cannotConnectToHost
+        return failure
     }
 }

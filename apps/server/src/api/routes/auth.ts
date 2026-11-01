@@ -149,7 +149,9 @@ export const authRoutes = new Hono<Env>()
     const challenge = c.req.header("x-strata-challenge") ?? "";
     if (!secret || !isLoopbackRequest(c) || !/^[0-9a-f]{32,128}$/.test(challenge)) throw new HTTPException(404, { message: "Not found" });
     const port = new URL(c.req.url).port || "80";
-    return c.json({ proof: createHmac("sha256", secret).update(`${challenge}|${port}`).digest("hex") });
+    const sign = (text: string) => createHmac("sha256", secret).update(text).digest("hex");
+    // The version is signed too, so the app can show it without trusting another request.
+    return c.json({ proof: sign(`${challenge}|${port}`), version: VERSION, versionProof: sign(`${challenge}|${port}|${VERSION}`) });
   })
 
   // First run: the server admin's account and their household. Needs the code the

@@ -3,6 +3,7 @@ import type { ProgressStore } from "../progress";
 import type { Anilist } from "./anime/anilist";
 import type { AnimeEntry, AnimeIds } from "./anime/ids";
 import { resolveEpisode } from "./anime/match";
+import { formatRef, parseRef, tmdbRef, type TitleRef } from "./ref";
 import { imageUrl, type Tmdb, type TmdbSeason, type TmdbShow } from "./tmdb";
 
 const DAY_S = 86_400;
@@ -12,11 +13,17 @@ export const CALENDAR_FUTURE_DAYS = 30;
 
 /** An episode of a show on a profile's list, aired recently or coming up. */
 export interface CalendarEpisode {
-  tmdbId: number;
+  /** The show (`formatRef`). */
+  ref: string;
+  /** TMDB's id: TMDB shows, and AniList shows the anime id list maps to TMDB. */
+  tmdbId?: number;
   title: string;
   posterUrl: string | null;
   backdropUrl: string | null;
-  /** TMDB numbering; null for an anime episode TMDB doesn't have yet. */
+  /**
+   * The show's numbering: TMDB's (null for an anime episode TMDB doesn't have yet), or 1
+   * for an AniList show (its episodes are AniList's).
+   */
   season: number | null;
   episode: number;
   name: string | null;
@@ -42,7 +49,7 @@ export class CalendarService {
     private readonly progress: ProgressStore,
     private readonly anime?: { ids: AnimeIds; anilist: Anilist },
     /** The profile's content limit: shows above it stay off its calendar. */
-    private readonly allowed: (userId: string, tmdbId: number) => Promise<boolean> = async () => true,
+    private readonly allowed: (userId: string, show: TitleRef) => Promise<boolean> = async () => true,
   ) {}
 
   async episodes(userId: string, now = Date.now()): Promise<CalendarEpisode[]> {
@@ -50,8 +57,12 @@ export class CalendarService {
     const today = Math.floor(now / 1000 / DAY_S) * DAY_S;
     const from = today - CALENDAR_PAST_DAYS * DAY_S;
     const to = today + (CALENDAR_FUTURE_DAYS + 1) * DAY_S;
-    const listed = (await this.progress.watchlist(userId)).filter((r) => r.type === "show").map((r) => r.tmdbId);
-    const showIds = (await Promise.all(listed.map(async (id) => ((await this.allowed(userId, id).catch(() => false)) ? id : null)))).filter((id): id is number => id !== null);
+    // TMDB shows' episodes come from TMDB (and AniList, through the anime id list);
+    // AniList shows' from AniList's schedule.
+    const listed = (await this.progress.watchlist(userId)).filter((r) => r.type === "show").map((r): TitleRef => ({ source: r.source, type: "show", id: r.titleId }));
+    const shown = (await Promise.all(listed.map(async (ref) => ((await this.allowed(userId, ref).catch(() => false)) ? ref : null)))).filter((ref): ref is TitleRef => ref !== null);
+    const showIds = shown.filter((r) => r.source === "tmdb").map((r) => r.id);
+    const anilistIds = shown.filter((r) => r.source === "anilist").map((r) => r.id);
     await this.anime?.ids.ready().catch(() => {});
 
     const shows = (await Promise.all(showIds.map((id) => this.tmdb.show(id).catch(() => null)))).filter((s): s is TmdbShow => !!s);
@@ -59,15 +70,17 @@ export class CalendarService {
     const anime = shows.filter((s) => animeEntries.get(s.id)!.length > 0);
     const other = shows.filter((s) => animeEntries.get(s.id)!.length === 0);
 
-    const [fromAnilist, fromTmdb] = await Promise.all([
+    const [fromAnilist, fromTmdb, anilistShows] = await Promise.all([
       this.animeEpisodes(anime, animeEntries, from, to).catch(() => [] as CalendarEpisode[]),
       Promise.all(other.map((s) => this.tmdbEpisodes(s, isoDate(from), isoDate(to)).catch(() => [] as CalendarEpisode[]))).then((l) => l.flat()),
+      this.anilistShowEpisodes(anilistIds, from, to).catch(() => [] as CalendarEpisode[]),
     ]);
     const key = (e: CalendarEpisode) => e.airsAt ?? `${e.airDate}T23:59:59Z`;
-    const all = [...fromAnilist, ...fromTmdb];
+    const all = [...fromAnilist, ...fromTmdb, ...anilistShows];
     await Promise.all(
       all.map(async (e) => {
-        e.available = e.season !== null && (await this.library.filesFor("episode", e.tmdbId, e.season, e.episode)).length > 0;
+        const show = parseRef(e.ref);
+        e.available = !!show && e.season !== null && (await this.library.filesFor(show, e.season, e.episode)).length > 0;
       }),
     );
     return all.sort((a, b) => key(a).localeCompare(key(b)) || a.title.localeCompare(b.title));
@@ -98,6 +111,34 @@ export class CalendarService {
     );
   }
 
+  /** Episodes of AniList shows on the list, from AniList's schedule: numbered as AniList numbers them. */
+  private async anilistShowEpisodes(anilistIds: number[], from: number, to: number): Promise<CalendarEpisode[]> {
+    if (!anilistIds.length || !this.anime) return [];
+    const { anilist, ids } = this.anime;
+    const airing = await anilist.airing(anilistIds, from, to);
+    const media = new Map((await Promise.all([...new Set(airing.map((a) => a.mediaId))].map((id) => anilist.title(id).catch(() => null)))).filter((m) => !!m).map((m) => [m!.id, m!]));
+    return airing.flatMap((a) => {
+      const m = media.get(a.mediaId);
+      if (!m || m.isAdult) return [];
+      const tmdbId = ids.anilist(a.mediaId)?.tmdbTv;
+      return [
+        {
+          ref: formatRef({ source: "anilist", type: "show", id: a.mediaId }),
+          ...(tmdbId ? { tmdbId } : {}),
+          title: m.title.english?.trim() || m.title.romaji?.trim() || "",
+          posterUrl: m.coverImage?.extraLarge ?? m.coverImage?.large ?? null,
+          backdropUrl: m.bannerImage ?? null,
+          season: 1,
+          episode: a.episode,
+          name: null,
+          airsAt: new Date(a.airingAt * 1000).toISOString(),
+          airDate: isoDate(a.airingAt),
+          available: false, // filled in by episodes()
+        },
+      ];
+    });
+  }
+
   private async tmdbEpisodes(show: TmdbShow, from: string, to: string): Promise<CalendarEpisode[]> {
     // The latest season, and the next episode's when it's a new one.
     const latest = Math.max(0, ...show.seasons.map((s) => s.season_number));
@@ -111,6 +152,7 @@ export class CalendarService {
 
   private entry(show: TmdbShow, season: number | null, episode: number, name: string | null, airsAt: string | null, airDate: string): CalendarEpisode {
     return {
+      ref: formatRef(tmdbRef("show", show.id)),
       tmdbId: show.id,
       title: show.name,
       posterUrl: imageUrl(show.poster_path, "w342"),

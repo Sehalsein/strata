@@ -17,6 +17,8 @@ struct WatchView: View {
     /// "Choose Source" after a source failed to play.
     @State private var showSources = false
     @State private var upNextDismissed = false
+    /// Seconds the current load has taken, for saying what's happening when it's slow.
+    @State private var loadingSeconds = 0
     @State private var pip = PiPController()
     #if os(tvOS)
     @FocusState private var surfaceFocused: Bool
@@ -130,6 +132,13 @@ struct WatchView: View {
             await start()
             scheduleHide()
         }
+        .task(id: engine.status == .loading) {
+            loadingSeconds = 0
+            while engine.status == .loading, !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                loadingSeconds += 1
+            }
+        }
         .onChange(of: engine.status) { _, status in
             if status == .ended {
                 if engine.nextEpisode?.available == true, !upNextDismissed { playNext() } else { close() }
@@ -141,9 +150,10 @@ struct WatchView: View {
             PlayerOrientation.leavePlayer()
             #endif
             hideTask?.cancel()
+            let played = engine.target
             Task {
                 await engine.unload()
-                await services.titles.progressSaved()
+                await services.titles.progressSaved(played)
             }
         }
     }
@@ -164,12 +174,27 @@ struct WatchView: View {
     @ViewBuilder private var stateOverlay: some View {
         switch engine.status {
         case .loading:
-            // With the controls up, their play button shows the spinner instead (iOS).
-            #if os(tvOS)
-            ProgressView().controlSize(.large).tint(.white)
-            #else
-            if !chromeVisible { ProgressView().controlSize(.large).tint(.white) }
-            #endif
+            VStack(spacing: Metrics.space4) {
+                // With the controls up, their play button shows the spinner instead (iOS).
+                #if os(tvOS)
+                ProgressView().controlSize(.large).tint(.white)
+                #else
+                if !chromeVisible { ProgressView().controlSize(.large).tint(.white) }
+                #endif
+                if let loadingCaption {
+                    Text(loadingCaption)
+                        .font(.stCallout)
+                        .foregroundStyle(Theme.onArtwork.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 420)
+                        #if !os(tvOS)
+                        // Under the centre controls while they're up, not behind them.
+                        .padding(.top, chromeVisible ? 160 : 0)
+                        #endif
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.25), value: loadingCaption)
         case .preparing(let status):
             VStack(spacing: Metrics.space4) {
                 Image(systemName: "arrow.down.circle").font(.system(size: 44)).foregroundStyle(Theme.warning)
@@ -205,6 +230,16 @@ struct WatchView: View {
             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Metrics.radiusLG, style: .continuous))
         default:
             EmptyView()
+        }
+    }
+
+    /// What a slow start is doing: nothing at first (most start within a second or two),
+    /// then the search for a copy, then TorBox fetching the one it found.
+    private var loadingCaption: String? {
+        switch loadingSeconds {
+        case ..<2: nil
+        case ..<8: "Finding a copy to play…"
+        default: "Getting it from TorBox. This can take a moment."
         }
     }
 

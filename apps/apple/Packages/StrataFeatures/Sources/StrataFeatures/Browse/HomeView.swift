@@ -6,8 +6,17 @@ import StrataPlayerUI
 struct HomeView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.showsSidebar) private var showsSidebar
-    @State private var shelves: Loadable<[Shelf]> = .loading
+    /// The rails that are the same for everyone, kept on this device (see `loadCached`).
+    @State private var catalog: Loadable<[Shelf]> = .loading
+    /// Continue Watching, Up Next and My List: asked for on every visit, never kept.
+    @State private var mine: [Shelf] = []
     @State private var upcoming: [CalendarEpisode] = []
+
+    /// The hero, then the account's rails, then the catalog's.
+    private var shelves: Loadable<[Shelf]> {
+        guard case .loaded(let list) = catalog else { return catalog }
+        return .loaded(list.filter { $0.id == "featured" } + mine + list.filter { $0.id != "featured" })
+    }
 
     var body: some View {
         ScrollView {
@@ -66,7 +75,7 @@ struct HomeView: View {
         .fullBleedOnTV()
         .task { await load(force: false) }
         .task { await loadUpcoming() }
-        .onChange(of: services.progressRevision) { Task { await load(force: false); await loadUpcoming() } }
+        .onChange(of: services.progressRevision) { Task { await loadMine(); await loadUpcoming() } }
     }
 
     /// The rails under the hero. Continue Watching and Next Up are one rail, like the TV
@@ -87,7 +96,7 @@ struct HomeView: View {
     }
 
     private func watchlistKeys(_ list: [Shelf]) -> Set<String> {
-        Set(list.first { $0.id == "watchlist" }?.items.map { "\($0.type.rawValue)-\($0.tmdbId)" } ?? [])
+        Set(list.first { $0.id == "watchlist" }?.items.map(\.ref.description) ?? [])
     }
 
     /// Episodes airing from today on; the rail stays hidden if the calendar can't load.
@@ -106,12 +115,13 @@ struct HomeView: View {
     }
 
     private func load(force: Bool) async {
-        if force { await services.client?.clearCache() }
-        let result = await services.load { try await $0.home() }
-        if case .loading = result { return }
-        // A reload after playing or a My List change keeps the page if it fails.
-        if case .failed = result, shelves.value != nil { return }
-        shelves = result
+        async let profile: Void = loadMine()
+        await services.loadCached(force: force, { try await $0.homeCatalog($1) }) { catalog = $0 }
+        await profile
+    }
+
+    private func loadMine() async {
+        if let list = await services.load({ try await $0.homeProfile() }).value { mine = list }
     }
 }
 
@@ -130,16 +140,16 @@ struct PageStack<Content: View>: View {
     }
 }
 
-/// One server shelf as a rail of the right card type.
+/// One server shelf as a rail of the right card type. A rail of titles shows the first
+/// `Metrics.railLimit`; the rest (or the bigger list behind it) are behind its title's "›".
 struct ShelfRail: View {
     @Environment(AppServices.self) private var services
     @Environment(\.pushRoute) private var pushRoute
     let shelf: Shelf
 
     var body: some View {
-        // My List lives on Home: its title opens the full list.
-        Rail(shelf.title, seeAll: shelf.id == "watchlist" ? { pushRoute(.myList) } : nil) {
-            ForEach(shelf.items) { card in
+        Rail(shelf.title, link: seeAll) {
+            ForEach(shelf.kind == .continue ? shelf.items : Array(shelf.items.prefix(Metrics.railLimit))) { card in
                 if shelf.kind == .continue {
                     ContinueCard(id: card.id,
                                  overline: card.episode?.code ?? card.yearText,
@@ -170,16 +180,20 @@ struct ShelfRail: View {
                     .buttonStyle(StrataCardStyle())
                 }
             }
-            #if os(tvOS)
-            if shelf.id == "watchlist" {
-                NavigationLink(value: Route.myList) { SeeAllTile() }.buttonStyle(StrataCardStyle())
-            }
-            #endif
         }
     }
 
+    /// Where the title's "›" goes: My List (it lives on Home now), the server's full list, or a
+    /// grid of what this shelf has past the rail.
+    private var seeAll: Route? {
+        guard shelf.kind == .titles else { return nil }
+        if shelf.id == "watchlist" { return .myList }
+        if let more = shelf.more { return .animeList(more, shelf.title) }
+        return shelf.items.count > Metrics.railLimit ? .shelf(shelf) : nil
+    }
+
     private func hide(_ card: TitleCard) {
-        Task { try? await services.titles.hideFromContinue(card.type, tmdbId: card.tmdbId) }
+        Task { try? await services.titles.hideFromContinue(card.ref) }
     }
 
     /// Watched marks the item done, so it leaves the rail.
@@ -238,7 +252,7 @@ struct ComingUpRail: View {
         if !episodes.isEmpty {
             Rail("Upcoming Episodes", seeAll: { pushRoute(.calendar) }) {
                 ForEach(episodes) { episode in
-                    NavigationLink(value: Route.show(episode.tmdbId)) { ComingUpCard(episode: episode) }
+                    NavigationLink(value: Route.title(episode.ref)) { ComingUpCard(episode: episode) }
                         .buttonStyle(StrataCardStyle())
                 }
             }
@@ -251,7 +265,7 @@ private struct ComingUpCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space2) {
-            ArtworkImage(url: episode.backdropUrl, aspectRatio: 16 / 9, seed: "show-\(episode.tmdbId)",
+            ArtworkImage(url: episode.backdropUrl, aspectRatio: 16 / 9, seed: episode.ref.description,
                          title: episode.backdropUrl == nil ? episode.title : nil)
             VStack(alignment: .leading, spacing: 2) {
                 Text(when).eyebrowStyle(Calendar.current.isDateInToday(episode.date) ? Theme.accentText : Theme.ink3)
@@ -284,7 +298,7 @@ struct HeroCarousel: View {
     @Environment(AppServices.self) private var services
     @Environment(\.pushRoute) private var pushRoute
     let cards: [TitleCard]
-    /// `type-tmdbId` of each title on My List, from Home's own shelf.
+    /// The ref of each title on My List, from Home's own shelf.
     var watchlist: Set<String> = []
     /// Taps on + not yet reflected in `watchlist`.
     @State private var listed: [String: Bool] = [:]
@@ -422,7 +436,7 @@ struct HeroCarousel: View {
         withAnimation(.easeInOut(duration: 0.25)) { plays[card.id] = options }
     }
 
-    private func key(_ card: TitleCard) -> String { "\(card.type.rawValue)-\(card.tmdbId)" }
+    private func key(_ card: TitleCard) -> String { card.ref.description }
     private func isListed(_ card: TitleCard) -> Bool { listed[key(card)] ?? watchlist.contains(key(card)) }
 
     /// Wide like the TV app's: the row's width on iPhone, a generous fixed width on iPad.
@@ -492,7 +506,7 @@ struct HeroCarousel: View {
         listed[key(card)] = on
         Task {
             // On success Home reloads, so the My List rail and Coming Up follow.
-            do { try await services.titles.setOnList(card.type, tmdbId: card.tmdbId, on) } catch { listed[key(card)] = !on }
+            do { try await services.titles.setOnList(card.ref, on) } catch { listed[key(card)] = !on }
         }
     }
 

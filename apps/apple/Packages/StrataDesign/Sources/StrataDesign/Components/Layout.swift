@@ -5,11 +5,35 @@ import SwiftUI
 public struct Rail<Content: View>: View {
     let title: String
     let seeAll: (() -> Void)?
+    /// The title as a link to the full list ("Trending ›"), pushing a navigation value.
+    let titleLink: AnyView?
     @ViewBuilder let content: () -> Content
 
     public init(_ title: String, seeAll: (() -> Void)? = nil, @ViewBuilder content: @escaping () -> Content) {
         self.title = title
         self.seeAll = seeAll
+        self.titleLink = nil
+        self.content = content
+    }
+
+    /// A rail whose title opens `link` (a value the enclosing stack navigates to); none, a plain title.
+    public init<Link: Hashable>(_ title: String, link: Link?, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.seeAll = nil
+        self.titleLink = link.map { link in
+            AnyView(NavigationLink(value: link) {
+                HStack(spacing: 4) {
+                    Text(title).railHeaderStyle()
+                    Image(systemName: "chevron.right")
+                        .font(.stCallout.weight(.bold))
+                        .foregroundStyle(Theme.ink3)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityHint("Shows the full list"))
+        }
         self.content = content
     }
 
@@ -37,10 +61,18 @@ public struct Rail<Content: View>: View {
 }
 
 extension Rail {
-    /// The title; with `seeAll`, a link to the full list with a chevron, like the TV
-    /// app's ("Trending Movies ›"). tvOS headers can't take focus, so rails there end
-    /// in a See All tile instead.
+    /// The title; with `link` or `seeAll`, a link to the full list with a chevron, like
+    /// the TV app's ("Trending Movies ›"). A `link` title is a navigation link, which takes
+    /// focus on tvOS too.
     @ViewBuilder private var header: some View {
+        if let titleLink {
+            titleLink
+        } else {
+            actionHeader
+        }
+    }
+
+    @ViewBuilder private var actionHeader: some View {
         #if os(tvOS)
         Text(title).railHeaderStyle().accessibilityAddTraits(.isHeader)
         #else

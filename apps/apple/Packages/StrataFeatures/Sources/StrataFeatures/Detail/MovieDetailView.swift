@@ -6,7 +6,7 @@ import StrataPlayerUI
 struct MovieDetailView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
-    let tmdbId: Int
+    let ref: TitleRef
     @State private var detail: Loadable<MovieDetail> = .loading
     @State private var inWatchlist = false
     /// What Play does, and the sources behind it; nil until the server answers.
@@ -34,12 +34,15 @@ struct MovieDetailView: View {
         .toolbar(.hidden, for: .tabBar)
         // Content loads after the page appears, so focus Play once it's there
         // (otherwise the back button gets it).
-        .onChange(of: detail.value?.tmdbId) { _, id in if id != nil { heroFocus = hasPlay ? .play : .list } }
+        .onChange(of: detail.value?.ref) { _, id in if id != nil { heroFocus = hasPlay ? .play : .list } }
         // For a title the server looks up, Play arrives after the page: move to it then.
         .onChange(of: hasPlay) { _, hasPlay in if hasPlay, heroFocus != .play { heroFocus = .play } }
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #endif
+        #if !os(tvOS)
+        .refreshable { await load(force: true) }
         #endif
         .task { await load() }
         .onChange(of: services.progressRevision) { Task { await load() } }
@@ -107,6 +110,8 @@ struct MovieDetailView: View {
 
             VideosRail(videos: movie.videos ?? [])
 
+            RelatedRail(titles: movie.related)
+
             if !movie.recommendations.isEmpty {
                 Rail("More Like This") {
                     ForEach(movie.recommendations) { card in
@@ -156,22 +161,37 @@ struct MovieDetailView: View {
                                    candidateId: candidateId))
     }
 
-    private func load() async {
-        let result = await services.load { try await $0.movie(tmdbId) }
-        if case .loading = result { return }
-        // Fades in over the skeleton the first time; later reloads swap in place.
-        if case .loading = detail {
-            withAnimation(.easeOut(duration: 0.25)) { detail = result }
-        } else {
-            detail = result
+    private func load(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.movie(ref, $1) }) { result in
+            // Fades in over the skeleton the first time; later reloads swap in place.
+            if case .loading = detail {
+                withAnimation(.easeOut(duration: 0.25)) { detail = result }
+            } else {
+                detail = result
+            }
+            if let movie = result.value { inWatchlist = movie.inWatchlist }
         }
-        if let movie = result.value { inWatchlist = movie.inWatchlist }
     }
 
     private func toggleWatchlist(_ movie: MovieDetail) async {
         inWatchlist.toggle()
         let on = inWatchlist
-        do { try await services.titles.setOnList(.movie, tmdbId: movie.tmdbId, on) } catch { inWatchlist = !on }
+        do { try await services.titles.setOnList(movie.ref, on) } catch { inWatchlist = !on }
+    }
+}
+
+/// "Other Seasons": an anime's sequels and prequels, when the server lists them.
+struct RelatedRail: View {
+    let titles: [TitleCard]
+
+    var body: some View {
+        if !titles.isEmpty {
+            Rail("Other Seasons") {
+                ForEach(titles) { card in
+                    NavigationLink(value: card.route) { PosterCardLabel(card: card) }.buttonStyle(StrataCardStyle())
+                }
+            }
+        }
     }
 }
 

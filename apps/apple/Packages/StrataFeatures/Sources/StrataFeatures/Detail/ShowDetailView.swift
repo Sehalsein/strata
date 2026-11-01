@@ -6,7 +6,7 @@ import StrataPlayerUI
 struct ShowDetailView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
-    let tmdbId: Int
+    let ref: TitleRef
     @State private var detail: Loadable<ShowDetail> = .loading
     @State private var selectedSeason: Int?
     @State private var season: Loadable<SeasonDetail> = .loading
@@ -48,12 +48,15 @@ struct ShowDetailView: View {
         #if os(tvOS)
         .toolbar(.hidden, for: .tabBar)
         // Content loads after the page appears, so focus Play once it's there.
-        .onChange(of: detail.value?.tmdbId) { _, id in if id != nil { heroFocus = hasPlay ? .play : .list } }
+        .onChange(of: detail.value?.ref) { _, id in if id != nil { heroFocus = hasPlay ? .play : .list } }
         // For a title the server looks up, Play arrives after the page: move to it then.
         .onChange(of: hasPlay) { _, hasPlay in if hasPlay, heroFocus != .play { heroFocus = .play } }
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #endif
+        #if !os(tvOS)
+        .refreshable { await load(force: true); await loadSeason(quietly: true, force: true) }
         #endif
         .task { await load() }
         .onChange(of: services.progressRevision) { Task { await load(); await loadSeason(quietly: true) } }
@@ -100,6 +103,8 @@ struct ShowDetailView: View {
 
             VideosRail(videos: show.videos ?? [])
 
+            RelatedRail(titles: show.related)
+
             if !show.recommendations.isEmpty {
                 Rail("More Like This") {
                     ForEach(show.recommendations) { card in
@@ -121,15 +126,15 @@ struct ShowDetailView: View {
         }
         .padding(.bottom, Metrics.space12)
         .sheet(item: $sourcesFor) { episode in
-            SourcePickerSheet(target: episode.target(show: show.tmdbId), title: "\(show.title) · \(episode.code)") { candidate in
+            SourcePickerSheet(target: episode.target(show: show.ref), title: "\(show.title) · \(episode.code)") { candidate in
                 play(show, season: episode.season, episode: episode.episode, name: episode.name, still: episode.stillUrl, candidateId: candidate.id)
             }
         }
         #if os(iOS)
         .sheet(item: $downloadFor) { episode in
-            SourcePickerSheet(target: episode.target(show: show.tmdbId), title: "\(show.title) · \(episode.code)", purpose: .download) { candidate in
+            SourcePickerSheet(target: episode.target(show: show.ref), title: "\(show.title) · \(episode.code)", purpose: .download) { candidate in
                 Task {
-                    notice = await services.download(episode.target(show: show.tmdbId), candidateId: candidate.id, title: show.title,
+                    notice = await services.download(episode.target(show: show.ref), candidateId: candidate.id, title: show.title,
                                                      subtitle: "\(episode.code) · \(episode.name)", artworkURL: episode.stillUrl ?? show.backdropUrl)
                 }
             }
@@ -137,7 +142,7 @@ struct ShowDetailView: View {
         #endif
         .sheet(isPresented: $showUpNextSources) {
             if let upNext = show.upNext {
-                SourcePickerSheet(target: .episode(show: show.tmdbId, season: upNext.season, episode: upNext.episode),
+                SourcePickerSheet(target: .episode(show: show.ref, season: upNext.season, episode: upNext.episode),
                                   title: "\(show.title) · \(code(upNext.season, upNext.episode))", known: playOptions?.sources ?? [], lookFurther: playOptions?.lookedFurther == false) { candidate in
                     play(show, season: upNext.season, episode: upNext.episode, name: nil, still: nil, candidateId: candidate.id)
                 }
@@ -182,7 +187,7 @@ struct ShowDetailView: View {
                         Button {
                             Task { await playEpisode(show, episode) }
                         } label: {
-                            EpisodeRow(id: "\(show.tmdbId)-\(episode.id)",
+                            EpisodeRow(id: "\(show.ref)-\(episode.id)",
                                        number: episode.episode,
                                        title: episode.name,
                                        overview: episode.overview,
@@ -192,7 +197,7 @@ struct ShowDetailView: View {
                                        progress: episode.progressFraction,
                                        isCurrent: show.upNext.map { $0.season == episode.season && $0.episode == episode.episode } ?? false) {
                                 #if os(iOS)
-                                if let item = DownloadStore.shared.item(signInID: services.store.activeID, target: episode.target(show: show.tmdbId)) {
+                                if let item = DownloadStore.shared.item(signInID: services.store.activeID, target: episode.target(show: show.ref)) {
                                     DownloadStateLabel(item: item).font(.stHeadline).foregroundStyle(Theme.ink3)
                                 }
                                 #endif
@@ -224,7 +229,7 @@ struct ShowDetailView: View {
                             }
                             #if os(iOS)
                             if !episode.isUpcoming {
-                                if let item = DownloadStore.shared.item(signInID: services.store.activeID, target: episode.target(show: show.tmdbId)) {
+                                if let item = DownloadStore.shared.item(signInID: services.store.activeID, target: episode.target(show: show.ref)) {
                                     DownloadActions(item: item)
                                 } else {
                                     Button { downloadFor = episode } label: { Label("Download Episode", systemImage: "arrow.down.circle") }
@@ -265,7 +270,7 @@ struct ShowDetailView: View {
 
     private func play(_ show: ShowDetail, season: Int, episode: Int, name: String?, still: URL?, candidateId: String? = nil, startMs: Int? = nil) {
         let subtitle = [code(season, episode), name].compactMap { $0 }.joined(separator: " · ")
-        services.play(WatchRequest(target: .episode(show: show.tmdbId, season: season, episode: episode),
+        services.play(WatchRequest(target: .episode(show: show.ref, season: season, episode: episode),
                                    meta: PlaybackMeta(title: show.title, subtitle: subtitle, artworkURL: still ?? show.backdropUrl),
                                    candidateId: candidateId, startMs: startMs))
     }
@@ -280,45 +285,43 @@ struct ShowDetailView: View {
         guard resolving == nil else { return }
         resolving = episode.id
         defer { resolving = nil }
-        if let choice = await services.titles.play(episode, of: show.tmdbId) {
+        if let choice = await services.titles.play(episode, of: show.ref) {
             services.play(choice, title: show.title, artworkURL: episode.stillUrl ?? show.backdropUrl)
         } else {
             notice = "\(code(episode.season, episode.episode)) isn't in your library."
         }
     }
 
-    private func load() async {
-        let result = await services.load { try await $0.show(tmdbId) }
-        if case .loading = result { return }
-        // Fades in over the skeleton the first time; later reloads swap in place.
-        if case .loading = detail {
-            withAnimation(.easeOut(duration: 0.25)) { detail = result }
-        } else {
-            detail = result
-        }
-        if let show = result.value {
-            inWatchlist = show.inWatchlist
-            if selectedSeason == nil { selectedSeason = show.upNext?.season ?? show.orderedSeasons.first?.season }
+    private func load(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.show(ref, $1) }) { result in
+            // Fades in over the skeleton the first time; later reloads swap in place.
+            if case .loading = detail {
+                withAnimation(.easeOut(duration: 0.25)) { detail = result }
+            } else {
+                detail = result
+            }
+            if let show = result.value {
+                inWatchlist = show.inWatchlist
+                if selectedSeason == nil { selectedSeason = show.upNext?.season ?? show.orderedSeasons.first?.season }
+            }
         }
     }
 
     /// `quietly` keeps the current episodes on screen while refreshing their progress.
-    private func loadSeason(quietly: Bool = false) async {
+    private func loadSeason(quietly: Bool = false, force: Bool = false) async {
         guard let n = selectedSeason else { return }
         if !quietly { season = .loading }
-        let result = await services.load { try await $0.season(show: tmdbId, n) }
-        if case .loading = result { return }
-        season = result
+        await services.loadCached(force: force, { try await $0.season(show: ref, n, $1) }) { season = $0 }
     }
 
     /// The page reloads (with Up Next) on the change that follows.
     private func setWatched(_ show: ShowDetail, _ episode: EpisodeItem, _ watched: Bool) async {
-        try? await services.titles.setWatched(episode.target(show: show.tmdbId), watched)
+        try? await services.titles.setWatched(episode.target(show: show.ref), watched)
     }
 
     private func toggleWatchlist(_ show: ShowDetail) async {
         inWatchlist.toggle()
         let on = inWatchlist
-        do { try await services.titles.setOnList(.show, tmdbId: show.tmdbId, on) } catch { inWatchlist = !on }
+        do { try await services.titles.setOnList(show.ref, on) } catch { inWatchlist = !on }
     }
 }
