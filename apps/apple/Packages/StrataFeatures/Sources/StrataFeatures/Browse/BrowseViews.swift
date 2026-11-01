@@ -17,8 +17,8 @@ struct BrowseView: View {
     /// The server's Shows page; `nil` before it loads, or from an older server.
     @State private var page: [Shelf]?
 
-    /// Movies lead with what's newly out: to rent or buy, then in cinemas.
-    private var order: [BrowseList] { type == .movie ? [.latestReleases, .inTheaters, .trending, .popular, .topRated] : [.trending, .popular, .topRated] }
+    /// Movies have what's newly out to rent or buy after Trending, and what's in cinemas last.
+    private var order: [BrowseList] { type == .movie ? [.trending, .latestReleases, .popular, .topRated, .inTheaters] : [.trending, .popular, .topRated] }
     private var title: String { type == .movie ? "Movies" : "Shows" }
 
     var body: some View {
