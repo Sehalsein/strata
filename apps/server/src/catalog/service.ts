@@ -139,6 +139,18 @@ export function plainDescription(text: string | null | undefined): string | unde
   return plain || undefined;
 }
 
+/** The Movies and Shows tabs' lists. Latest Releases and New in Theaters are films only. */
+export type BrowseList = "trending" | "popular" | "topRated" | "library" | "latestReleases" | "inTheaters";
+
+/** TMDB popularity below which a new release is too obscure for Latest Releases and New in Theaters. */
+const MIN_RELEASE_POPULARITY = 10;
+
+/** One of each title, first kept (TMDB's pages can overlap as they shift). */
+function dedupe(items: TmdbListItem[]): TmdbListItem[] {
+  const seen = new Set<number>();
+  return items.filter((i) => !seen.has(i.id) && !!seen.add(i.id));
+}
+
 export class CatalogService {
   constructor(
     private readonly tmdb: Tmdb,
@@ -304,11 +316,52 @@ export class CatalogService {
     return out.slice(0, 10);
   }
 
-  async browse(type: TitleType, list: "trending" | "popular" | "topRated" | "library"): Promise<TitleCard[]> {
+  async browse(type: TitleType, list: BrowseList): Promise<TitleCard[]> {
     if (list === "library") return await this.libraryCards(type, 500);
+    if (list === "latestReleases" || list === "inTheaters") {
+      if (type !== "movie") return [];
+      return await this.cards(list === "latestReleases" ? await this.latestReleases() : await this.inTheaters(), "movie");
+    }
     const tmdbType = type === "movie" ? "movie" : "tv";
     const page = list === "trending" ? await this.tmdb.trending(tmdbType) : list === "popular" ? await this.tmdb.popular(tmdbType) : await this.tmdb.topRated(tmdbType);
     return await this.cards(page.results, type);
+  }
+
+  /**
+   * Films out to rent or buy in the last 60 days, newest digital release first, by the
+   * household's region's dates. Older films back as a new digital release, and ones
+   * hardly anyone is watching, are left out.
+   */
+  private async latestReleases(): Promise<TmdbListItem[]> {
+    const day = (offset: number) => new Date(Date.now() - offset * 86_400_000).toISOString().slice(0, 10);
+    const pages = await Promise.all(
+      [1, 2, 3].map((page) =>
+        this.tmdb
+          .discover("movie", {
+            region: this.settings().region,
+            with_release_type: "4",
+            "release_date.gte": day(60),
+            "release_date.lte": day(0),
+            "primary_release_date.gte": day(365),
+            "with_runtime.gte": "60",
+            sort_by: "release_date.desc",
+            page: String(page),
+          })
+          .then((r) => r.results)
+          .catch(() => [] as TmdbListItem[]),
+      ),
+    );
+    return dedupe(pages.flat()).filter((m) => (m.popularity ?? 0) >= MIN_RELEASE_POPULARITY).slice(0, 40);
+  }
+
+  /** Films in the household's region's cinemas now, newest release first. */
+  private async inTheaters(): Promise<TmdbListItem[]> {
+    const region = this.settings().region;
+    const pages = await Promise.all([1, 2, 3].map((page) => this.tmdb.nowPlaying(region, page).then((r) => r.results).catch(() => [] as TmdbListItem[])));
+    return dedupe(pages.flat())
+      .filter((m) => (m.popularity ?? 0) >= MIN_RELEASE_POPULARITY)
+      .sort((a, b) => (b.release_date ?? "").localeCompare(a.release_date ?? "") || (b.popularity ?? 0) - (a.popularity ?? 0))
+      .slice(0, 40);
   }
 
   /** TMDB's genres. Anime has its own tab (see `animePage`). */

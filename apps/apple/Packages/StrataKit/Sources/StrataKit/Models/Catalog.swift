@@ -201,9 +201,15 @@ public struct PersonDetail: Codable, Sendable, Hashable, Identifiable {
 
 public enum BrowseList: String, Codable, Sendable, Hashable, CaseIterable {
     case trending, popular, topRated, library
+    /// Films out to rent or buy lately, newest digital release first.
+    case latestReleases
+    /// Films in cinemas now, newest release first.
+    case inTheaters
 
     public var title: String {
         switch self {
+        case .latestReleases: "Latest Releases"
+        case .inTheaters: "New in Theaters"
         case .trending: "Trending"
         case .popular: "Popular"
         case .topRated: "Top Rated"
