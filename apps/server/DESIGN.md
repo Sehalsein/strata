@@ -1,274 +1,322 @@
 # Strata Server — Design
 
-Status: draft, pre-implementation (2026-10-20).
+Status: implemented; this describes the code as it is (2026-10-31).
 
-Strata Server is a self-hosted media service. It presents one **catalog** (TMDB) and,
-for any title, resolves a playable stream from **local files** or **TorBox**. The Apple
-app talks only to this server. There is no Jellyfin anywhere in the stack.
+Strata Server is a media service. It presents one **catalog** (TMDB) and, for any title,
+resolves a playable stream from **local files** or **TorBox**. The Apple apps talk only to
+this server. There is no Jellyfin anywhere in the stack.
 
 ## Decisions
 
 | Topic | Decision |
 |---|---|
-| Runtime | Bun, single process, runs locally (Mac mini first). Cloudflare is not a target for now. |
-| Language / libs | TypeScript, Hono (HTTP), Drizzle + `bun:sqlite`, Zod, ffmpeg/ffprobe as external tools. |
-| Distribution | One headless `bun build --compile` binary (Jellyfin-style). No native Mac app. |
-| Server UI | Web dashboard (React + Vite) embedded in the binary and served at `http://host:port/`. The first visit runs a setup wizard. |
-| Users | Household: one admin + profiles (optional PIN), per-profile progress and watchlist. LAN-first; remote via Tailscale or similar. |
-| Sources | Local folders + TorBox. TorBox discovery via built-in scrapers (Stremio-addon-style) and TorBox's own search. |
-| Player | Apple app keeps AVPlayer. Server direct-plays when possible, otherwise remuxes to HLS with ffmpeg. |
+| Modes | One codebase, two modes fixed at build time (`src/mode.ts`): **home** (self-hosted, one server per home) and **cloud** (hosted, many households). |
+| Runtimes | Bun (home server, cloud container) and Cloudflare Workers (the cloud server). `#runtime` picks `src/runtime/bun.ts` or `src/runtime/workers.ts` per build. |
+| Language / libs | TypeScript, Hono (HTTP), Drizzle on Postgres, Better Auth, Zod, ffmpeg/ffprobe as external tools. |
+| Database | Postgres. Home: bundled PGlite in the data folder, or any Postgres via `DATABASE_URL`. Cloud: `DATABASE_URL` (Neon). |
+| Distribution | Home: the Mac app (Strata.app) and `bun build --compile` binaries for macOS and Linux, with ffmpeg inside. Cloud: deployed to Workers or as a container. No home Docker image. |
+| Server UI | Web dashboard (React + Vite) served at `/`. Home: embedded in the binary, first visit runs setup. Cloud: static assets. |
+| Accounts | Better Auth. Households are organizations with owner/admin/member roles; a server admin runs the server. |
+| Sources | Local folders (home only) + TorBox. TorBox discovery via built-in scrapers (Stremio-addon-style) and TorBox's own search. |
+| Player | The Apple apps keep AVPlayer. TorBox files go straight to the app; the server remuxes or transcodes local files when it has to. |
 | Jellyfin | Removed, along with the old Jellyfin-based web and Android TV apps. |
-| Apple app | Data layer rewritten in place; design system, player chrome and shells are kept. |
+
+## Modes and runtimes
+
+`src/profile.ts` turns mode × runtime into a `DeploymentProfile`: a list of capabilities
+(first-run setup, open sign-up, admins by email, local media, Bonjour, home-network join,
+self-update, local state, behind a proxy, timers or cron). Code asks the profile for what it
+needs, not for the mode. `/api/info` publishes the public part, so the dashboard and apps
+don't work it out again.
+
+| | Home | Cloud |
+|---|---|---|
+| Accounts | Setup makes the server admin; households grow by invitation | Open sign-up with email confirmation; each account gets a household in onboarding |
+| Server admin | The account made at setup | Emails in `STRATA_ADMIN_EMAILS` (once confirmed) |
+| Database | Bundled PGlite, or `DATABASE_URL` | `DATABASE_URL` (required) |
+| Secret key | `secret.key` in the data folder | `STRATA_SECRET_KEY` |
+| Local folders, ffmpeg | Yes | No |
+| Bonjour, home-network join | Yes | No |
+| Jobs | In-process timers | Cron Triggers on Workers |
+| Updates | Self-update (binaries) | Deploy a new version |
+
+The public demo runs with the profile marked read-only: nobody may change anything in it.
 
 ## Architecture
 
 ```
-Apple app ──HTTP/JSON──► Strata Server (one Bun binary)
-                           ├─ api/          Hono routes, auth, OpenAPI
-                           ├─ catalog/      TMDB fetch + cache, shelves, search
+Apple apps ──HTTP/JSON──► Strata Server
+                           ├─ api/          Hono app, middleware, routes/
+                           ├─ auth/         Better Auth setup + per-path policy, permissions
+                           ├─ household.ts  one household's Library, catalog, playback, discovery, TorBox
+                           ├─ catalog/      TMDB/OMDb + cache, anime ids, shelves, search, viewer, content ratings
                            ├─ sources/
-                           │   ├─ local/    folder scan, filename parse, TMDB match, ffprobe
-                           │   ├─ torbox/   library, cache check, add, request link
-                           │   └─ scrapers/ stream-addon protocol, TorBox search
-                           ├─ resolve/      rank candidates → pick best source
-                           ├─ playback/     sessions, direct vs HLS, ffmpeg jobs, progress
-                           ├─ jobs/         scheduler: scans, pre-warm, update checks
-                           ├─ update/       manifest check, verify, swap, rollback
-                           ├─ db/           Drizzle schema + migrations (SQLite)
-                           └─ cli/          setup / status / logs / update / uninstall
+                           │   ├─ local/    folder scan
+                           │   ├─ torbox/   client, library sync, cleanup
+                           │   ├─ discovery scrapers + TorBox search, cache check, add
+                           │   └─ resolver  candidates and ranking
+                           ├─ media/        filename parse (anitomy), ffprobe
+                           ├─ playback/     decide, prepare, sessions, plays, ffmpeg args, subtitles
+                           ├─ jobs.ts       named jobs; cloudSchedule.ts has the schedule
+                           ├─ update/       SelfUpdate: signed manifest, verify, swap, rollback
+                           ├─ db/           Drizzle schema + migrations (Postgres)
+                           ├─ platform/     ffmpeg, Bonjour, keep-awake, service install, launcher
+                           ├─ runtime/      Bun vs Workers
+                           ├─ main.ts       Bun entry and CLI
+                           └─ worker.ts     Workers entry (fetch + scheduled)
 ```
 
-Everything the Apple app sees is keyed by TMDB id. Where a file lives is a server
-concern.
+Everything the Apple apps see is keyed by TMDB id. Where a file lives is a server concern.
+
+**Households.** `Household` (`src/household.ts`) is one household's Strata over its own
+settings and TorBox key: `Library`, catalog, calendar, content filter, discovery, TorBox
+housekeeping, playback and its plays, plus upkeep (`syncTorbox`, `cleanTorbox`,
+`scanFolders`, `setSecret`). Everything reaches the database through household-scoped
+stores, so one household never sees another's data. `Viewer` (`src/catalog/viewer.ts`) is
+one person's view of it, with their content limit applied: nothing above the limit leaves
+it, so a route can't forget to check.
+
+## Accounts and permissions
+
+Accounts are Better Auth (`src/auth/betterAuth.ts`), built from its plugins and hooks, with
+no custom auth endpoints.
+
+- **Households** are organizations. Roles: owner, admin, member. Owners and admins run the
+  household in the dashboard; members use the apps to watch.
+- **Server admin** runs the server (settings, logs, households, updates). Home: the account
+  made at setup (with the setup code from the server's log). Cloud: `STRATA_ADMIN_EMAILS`.
+- **Watch-only sessions**: a device that joined on the home network without a password
+  (`POST /api/join`), a QR sign-in code from the dashboard, or a TV approved with a device
+  code. They can watch and pick a household, but only call an allowlist of Better Auth paths.
+- Other ways in, when configured: Google, passkeys (on a public HTTPS address).
+- Every Better Auth path's extra rules sit in one `policy` table in `betterAuth.ts`, run
+  before and after the path. Who may do what is in `src/auth/permissions.ts`
+  (`permissionsOf`), which the API middleware, the auth hooks and `/api/me` all use.
 
 ## Data directory
 
-The database is embedded: SQLite via `bun:sqlite`, which is part of the Bun runtime inside
-the binary. There is no separate database server. The database is created on first run and
-migrated automatically on each start.
+Home servers keep their state in a data folder. Cloud servers keep everything lasting in
+Postgres and use the disk only for throwaway caches.
 
 | Platform | Default location |
 |---|---|
 | macOS | `~/Library/Application Support/Strata` |
-| Linux | `~/.local/share/strata`, or `/var/lib/strata` when installed as a system service |
-| Docker | `/data` (mounted volume) |
+| Linux | `$XDG_DATA_HOME/strata` (`~/.local/share/strata`) |
 
 Override it with `--data-dir` or `STRATA_DATA_DIR`.
 
 ```
-strata.db (+ -wal, -shm)   SQLite in WAL mode: users, profiles, catalog cache, progress, settings
-secret.key                 encrypts the TorBox/TMDB keys stored in the DB
-backups/                   automatic DB backup before every migration/update (last N kept)
-cache/images/              resized posters and backdrops
+db/                        bundled Postgres (PGlite), unless DATABASE_URL is set
+secret.key                 encrypts the TorBox/TMDB/OMDb keys stored in the DB
+backups/                   daily DB backups and one before every update (last 10 kept)
 cache/transcode/           HLS segments (cleaned when sessions end)
 logs/
-bin/ffmpeg                 only if downloaded
 ```
 
+The database is created on first start and migrated on each start. The schema version is
+in `strata_meta`; an advisory lock lets one of several servers migrate while the others
+wait.
+
 The binary and the data are separate. Updates replace only the binary. Uninstalling leaves
-the data unless it is deleted explicitly. The DB must live on a local disk, not an SMB/NFS
-share, because SQLite locking over network filesystems is unreliable. Media folders can
-be network shares.
+the data unless it is deleted explicitly. Media folders can be network shares.
 
-## Data model (first cut)
+## Data model
 
-- `users` (admin login), `profiles` (name, avatar, PIN hash, preferences)
-- `titles` (tmdb id, type movie|show, cached metadata JSON, imdb id, fetched_at)
-- `episodes` (show tmdb id, season, episode, metadata)
-- `local_files` (path, size, mtime, parsed name, matched tmdb id/season/episode, probe JSON)
-- `torbox_items` (torbox id, hash, file list, matched tmdb ids, cached state)
-- `candidates` (resolved source options per title/episode with quality, size, codecs, provider, expiry)
-- `progress` (profile, tmdb id, season/episode, position, duration, completed, updated_at)
-- `watchlist`, `history`
-- `settings` (media folders, TorBox key, source preferences, update channel)
+- Better Auth: `user`, `session`, `account`, `verification`, `organization` (households),
+  `member` (role, content limit), `invitation`, `device_code`, `passkey`, `rate_limit`
+- `settings` (server), `household_settings` (per household; keys encrypted)
+- `files` (local and TorBox files: parsed name, matched TMDB id/season/episode, probe)
+- `torbox_added` (what Strata added to TorBox, for cleanup)
+- `media_items`, `api_cache` (TMDB/OMDb answers shared by all households)
+- `progress`, `continue_hidden`, `watchlist`
+- `play_sessions`, `auth_attempts`
 
 ## Source resolution
 
-`find(tmdbId, season?, episode?) → Candidate[]`, `resolve(candidate) → PlayableStream`.
+`find(tmdbId, season?, episode?) → Candidate[]`, then `prepare()` turns a candidate into a
+playback plan.
 
-1. **Local**: matched `local_files` rows. Instant, free, preferred by default.
-2. **TorBox library**: files already in your TorBox account. Instant.
-3. **TorBox cached**: scraper results whose info-hash is cached on TorBox (`checkcached`).
-   Resolving adds the torrent (`createtorrent`) and requests a download link (`requestdl`).
+1. **Local**: matched local files. Instant, free, preferred by default.
+2. **TorBox library**: files already in the household's TorBox account. Instant.
+3. **TorBox cached**: scraper results whose info-hash is cached on TorBox. Playing adds the
+   torrent and requests a download link.
 4. **TorBox uncached**: shown as "Download", never auto-played.
 
-Ranking comes from per-profile preferences: source priority, max resolution, max size,
-HDR/DV preference, audio language, and avoiding codecs that need a full transcode.
-The next episode is pre-resolved during playback.
+Ranking comes from household settings: source priority, max resolution, max release size,
+whether to show uncached releases. The next episode is pre-warmed during playback.
 
-Scrapers need IMDb ids; these come from TMDB `external_ids`.
+Scrapers need IMDb ids; these come from TMDB `external_ids`. Anime adds AniList/Kitsu ids.
 
 ## Playback
 
-`POST /api/play { tmdbId, season?, episode?, candidateId?, caps }` →
-`{ sessionId, mode: "direct" | "hls", url, audioTracks, subtitleTracks, resumeAt }`
+`POST /api/play { tmdbId, season?, episode?, candidateId?, startMs?, caps }` →
+`{ sessionId, mode, url, remux, startOffsetMs, seekToMs, audioTracks, subtitleTracks, … }`
 
-The client sends its capabilities (`caps`): containers, video codecs, audio codecs,
-HDR/DV support. The server then chooses a mode:
+The client sends its capabilities (`caps`): containers, codecs, max height, HDR and Dolby
+Vision profiles, and whether it can repackage files itself. `src/playback/decide.ts` picks
+a mode:
 
-- **direct**: the container and codecs play natively (MP4/MOV, H.264/HEVC, AAC/AC3/EAC3).
-  Local files are served with HTTP range support. TorBox links get a 302 redirect.
-- **hls remux**: an MKV or another container with compatible codecs.
-  ffmpeg runs `-c:v copy` to fMP4 HLS. This is cheap.
-- **hls + audio transcode**: DTS/TrueHD is converted to EAC3; video is still copied.
-- **hls full transcode**: last resort (e.g. AV1 on old devices). Uses VideoToolbox on macOS.
+- **direct**: the container and codecs play natively. TorBox links go to the app as they
+  are; local files are served with HTTP range support (`/api/stream/:sid/file`).
+- **device**: the app fetches the file and repackages it itself (the plan says how); nothing
+  runs on the server. This is how TorBox files play everywhere, and the only way on cloud.
+- **remux**: ffmpeg copies the video into fMP4 HLS; audio is copied or converted (e.g.
+  DTS/TrueHD to EAC3). Home only.
+- **transcode**: last resort. Uses VideoToolbox on macOS, and falls back to software if the
+  hardware encoder stalls.
 
-ffmpeg reads TorBox links directly over HTTP, so nothing is downloaded first.
+TorBox bytes never pass through the server: the hand-off is the TorBox link itself. An
+expired link is refreshed with `POST /api/play/:sessionId/link`. Dolby Vision profile 7 is
+played as its HDR10 base layer. When the server can't read a file (Workers have no ffprobe)
+it answers 428 and the app probes the file and sends the details.
 
-Subtitles: text subtitles (SRT/ASS) are extracted to WebVTT, which the app already renders.
-Image subtitles (PGS/VobSub) need burn-in. That is deferred.
+`PlaybackService` (`src/playback/service.ts`) prepares plays; `SessionManager` keeps every
+play on the server; `HouseholdPlays` lets a household see and stop only its own.
 
-Seeking: the full HLS playlist is generated up front from the duration. A request
-for a segment far from the running encoder restarts ffmpeg at that offset
-(`-ss`). This is the most complex part of playback.
+Subtitles: text subtitles (SRT/ASS) are converted to WebVTT. Image subtitles (PGS/VobSub)
+are not supported yet.
 
-Progress is reported to `POST /api/progress` every ~10s and on pause/stop.
+Seeking: an HLS stream starts at the resume point (`startOffsetMs`). A seek outside it
+starts a new session at that offset, which replaces the old one.
 
-## API sketch
+Progress is reported to `POST /api/progress` during playback and on pause/stop.
+
+## API
+
+The routes are in `src/api/routes`; `src/api/app.ts` mounts them.
 
 ```
-GET  /api/info                         version, apiVersion, update status (no auth)
-POST /api/auth/login                   admin/user login → token
-GET  /api/profiles  POST /api/profiles/:id/select
-GET  /api/home                         shelves: continue, next up, watchlist, trending, local, recently added
-GET  /api/search?q=
-GET  /api/titles/:type/:tmdbId         detail + availability summary
-GET  /api/titles/show/:id/seasons/:n   episodes + per-episode availability
-GET  /api/titles/:type/:tmdbId/sources candidates (optional ?season&episode)
-POST /api/play                         start session
-GET  /api/stream/:session/...          direct bytes or HLS playlist/segments
-POST /api/progress   DELETE /api/play/:session
+/api/auth/*                            Better Auth: sign-in/up, sessions, households, members,
+                                       invitations, TV device codes, passkeys
+GET  /api/info                         version, apiVersion, capabilities (no auth)
+POST /api/setup/admin  POST /api/join  first-run admin (home); home-network join
+GET  /api/me  /api/me/export  /api/privacy
+GET  /api/household/manageable         PATCH /api/household/members/:id
+POST /api/household/members/:id/sign-in-code
+GET  /api/avatars
+GET  /api/home  /api/shows  /api/anime  /api/calendar  /api/search?q=
+GET  /api/genres/:type  /api/browse/:type/:list  /api/browse/:type/genre/:id  /api/person/:id
+GET  /api/titles/movie/:id  /api/titles/show/:id  /api/titles/show/:id/seasons/:n
+GET  /api/sources                      candidates for a title or episode
+POST /api/play  POST /api/play/:sid/link  DELETE /api/play/:sid
+POST /api/downloads                    a file to keep on the device
+POST /api/files/:id/link  GET /api/files/:id/content  POST /api/files/:id/probe
+GET  /api/stream/:sid/...              file bytes, HLS playlist/segments, WebVTT subtitles
+POST /api/progress  POST /api/watched  DELETE /api/continue/:type/:tmdbId
 GET/PUT /api/watchlist
-GET/PUT /api/admin/settings   POST /api/admin/scan   POST /api/admin/update
+/api/admin/...                         household admins: status, settings, secrets, devices,
+                                       files and matching, sessions, jobs, TorBox account
+                                       server admin: logs, folder browser, update
 ```
 
-The OpenAPI spec is generated from the Zod schemas. The Swift client is kept in sync with it.
+There is no generated spec. The contract with the Apple apps is checked by
+`test/contract.test.ts`: every field in StrataKit's JSON fixtures must still be in the live
+response.
 
 ## Running the server
 
-Like Jellyfin, the server is a headless process configured from a browser.
+Like Jellyfin, a home server is a headless process configured from a browser.
 
 - Run `strata-server`. It prints `Strata is running at http://192.168.1.20:8420`, and you
-  open that address in any browser.
-- Works on a Mac, a Linux box, a NAS or a VPS.
+  open that address in any browser. Or install the Mac app, which runs it for you.
+- Works on a Mac, a Linux box or a NAS.
 - `strata-server service install` registers it with launchd or systemd, so it starts at boot
   and restarts after crashes.
-- On macOS the server keeps the machine awake while a stream is active (`caffeinate -w <pid>`).
-- On a NAS: run the Docker image, or the Linux binary directly.
+- On macOS the server keeps the machine awake while a stream is active (`caffeinate`).
 
-## Web dashboard (in the binary)
+## Web dashboard
 
-- **Location**: `apps/server/web`, built with React + Vite. The build output is embedded
-  in the compiled binary and served at `/`. The API lives at `/api`.
-- **Setup wizard** (first visit, before any admin exists):
-  1. Create the admin account.
-  2. Add media folders (a server-side folder browser, as in Jellyfin).
-  3. Enter the TorBox API key and TMDB key.
-  4. Create profiles.
-- **Dashboard**:
-  - server status
-  - active streams (with stop)
-  - library scans and unmatched files (manual TMDB fix-up)
-  - TorBox status and usage
-  - logs
-  - update status
-- **Settings**:
-  - library folders
-  - source priority and ranking rules
-  - profiles and PINs
-  - network (port, bind address, Bonjour)
-  - transcoding (hardware acceleration, temp directory, max concurrent)
-  - update channel
-- Secrets are stored server-side, encrypted at rest with a key in the data directory.
-- Watching in the browser is out of scope for now. The dashboard is admin-only.
-  A web player against the Strata API could be added later.
+- **Location**: `apps/server/web`, built with React + Vite. Home: embedded in the binary
+  and served at `/`. Cloud: served as static assets. The API lives at `/api`.
+- **For admins only.** Household owners and admins run accounts and data there; members
+  watch in the apps.
+- **Setup** (home, first visit): create the server admin with the setup code from the log.
+  Cloud: sign up, confirm the email, and set up a household in onboarding.
+- **Household**: overview, library (folders, unmatched files, manual TMDB fix-up), members
+  and invitations, devices, settings and keys.
+- **Server** (server admin): status, households, logs, updates.
+- Secrets are stored server-side, encrypted at rest.
+- Watching in the browser is out of scope.
 
-The server advertises itself over Bonjour (`_strata._tcp`), so the Apple client apps find it
-on the LAN automatically.
+A home server advertises itself over Bonjour (`_strata._tcp`), so the Apple apps find it on
+the LAN.
+
+## Jobs
+
+`src/jobs.ts` runs named jobs on demand or on a schedule, never overlapping. The schedule
+is one table, `JOB_SCHEDULE` in `src/cloudSchedule.ts`: what each job needs, its interval
+on timers (Bun), and its Cron Trigger (Workers). `test/cloudSchedule.test.ts` checks the
+crons against `deploy/cloudflare/wrangler.jsonc`. On cloud each job's last run is kept in
+the database, since any instance may run it.
+
+| Job | Runs on |
+|---|---|
+| `scanLocal` | home, every `scanIntervalMinutes` |
+| `syncTorbox` | every 15 min (each household at most every `torboxSyncMinutes`) |
+| `checkUpdates` | self-updating servers, every 6 h |
+| `backupDatabase` | home, daily |
+| `pruneAuth`, `cleanTorbox`, `pruneCatalogCache`, `refreshAnimeIds` | daily |
 
 ## Builds and updates
 
-- **Binary**: `bun build --compile` for `darwin-arm64` (today's Mac), plus `linux-x64` and
-  `linux-arm64` so a later move to a NAS needs no code changes. The web dashboard is embedded
-  in each binary.
-- **Docker image** (`linux-x64` and `linux-arm64`): the binary plus ffmpeg. It is the normal
-  way to run on Synology, Unraid or TrueNAS.
-  - Config via env vars (`STRATA_DATA_DIR`, `STRATA_PORT`).
-  - Mounts: `/data` for state, plus media folders.
-  - Inside Docker the image tag is the update mechanism; self-update is disabled.
+- **Binary**: `bun build --compile` for `darwin-arm64`, `linux-x64` and `linux-arm64`
+  (`scripts/build.ts`). Each embeds the web dashboard and a pinned ffmpeg/ffprobe. Darwin
+  builds are re-signed ad hoc with `codesign --sign -` and must be built on macOS.
+- **Mac app** (`apps/macos`): Strata.app runs the server with its own ffmpeg. It is updated
+  by installing a new version, not by self-update.
+- **Cloud**: `deploy/cloudflare` (the server Worker, Neon), `deploy/cloud` (the same server
+  as a container), `deploy/cloudflare-demo` (the public demo: a Worker in front of a
+  container), `deploy/landing` (the landing page).
 - **Portability rules**:
-  - OS-specific behaviour sits behind small adapters:
-    - service install: launchd / systemd / none in Docker
-    - keep-awake: `caffeinate` / no-op
-    - hardware transcoding: VideoToolbox / VAAPI / QSV / software
+  - OS- and runtime-specific behaviour sits behind small adapters: `#runtime`, service
+    install (launchd / systemd), keep-awake (`caffeinate` / no-op), hardware transcoding.
   - All paths come from config. Nothing assumes macOS.
-- **Moving machines**: the whole state is one data directory (SQLite DB, encrypted secrets,
-  caches). Copy it to the new machine and update the media folder paths in the dashboard.
-  Progress, profiles and TorBox matches carry over. No native npm modules, only `bun:sqlite`.
-- **ffmpeg**: uses ffmpeg from `PATH`. If none is found, a pinned static build is downloaded
-  into the data directory and checked against its hash.
+- **Moving machines**: the whole state of a home server is one data folder. Copy it to the
+  new machine and update the media folder paths in the dashboard.
+- **ffmpeg**: release binaries carry their own. Otherwise ffmpeg from `PATH`, or a pinned
+  static build set up in the data folder and checked against its hash.
 - **Headless CLI**:
-  - `strata-server`: run in the foreground.
-  - `strata-server service install|uninstall|status|restart`: register with launchd (per-user
-    LaunchAgent) or systemd (user unit; `--system` for a system unit). The service runs a copy
-    at `~/.local/bin/strata-server` so self-update can replace it in place.
-  - `strata-server update [--check]`, `strata-server --data-dir <path>`.
-- **Release CI**: not built yet. Planned to follow dispatch-ai's desktop model: every merge
-  ships a nightly (`<next-patch>-nightly.<run>`), a version with no `server-v<version>` tag
-  ships a stable release; signed manifests and versioned binaries go to a public Cloudflare
-  R2 bucket (`server/`, `server/nightly/`), with `latest/` aliases for an `install.sh`. A
-  private GitHub repo can't serve as the feed without a token in every server.
-  - No Developer ID signing or notarization. Binaries fetched by `curl` or by the updater
-    are not quarantined. Darwin builds are re-signed ad hoc with `codesign --sign -`;
-    current macOS kills Bun's linker-signed output on launch. That means darwin builds
-    run on a macOS runner.
-  - The pieces exist already: `scripts/build.ts --version/--update-url`,
-    `scripts/release-manifest.ts` (writes and signs `manifest.json`), `scripts/keygen.ts`.
-- **Updates**: the feed base URL is baked in at build time (`STRATA_UPDATE_URL`); the channel
-  (`stable`/`nightly`) picks `<base>/manifest.json` or `<base>/nightly/manifest.json`, and an
-  `updateManifestUrl` setting can override it. Without either, updates report "not configured".
+  - `strata-server` / `strata-server serve`: run in the foreground.
+  - `strata-server service install|uninstall|status|restart`.
+  - `strata-server update [--check]`, `strata-server version`, `--data-dir <path>`.
+- **Release CI** (`.github/workflows/server-release.yml`): every server change merged to
+  main ships a nightly (`<next-patch>-nightly.<run>`); a version with no `server-v<version>`
+  tag ships a stable release. Binaries and signed manifests are published as GitHub releases
+  (`server-nightly`, `server-stable`).
+- **Updates** (`src/update`): `SelfUpdate` has two adapters. The compiled binary's checks
+  the signed feed, downloads, swaps itself and restarts; a deployed server's (cloud, the Mac
+  app) just reports why it can't. The feed base URL is baked in at build time; the channel
+  (`stable`/`nightly`) picks the manifest, and an `updateManifestUrl` setting can override it.
   1. Verify the Ed25519 signature (key compiled in), the channel, and the SHA-256.
   2. Run the new binary with `--version`; on macOS re-sign it ad hoc first.
   3. Wait until no stream is active.
   4. Back up the DB and write a `pending-update.json` marker.
   5. Swap the binary, keeping `.old`.
-  6. Exit with code 75, and the service manager restarts it (in the foreground, the old process
-     supervises the new one).
+  6. Restart.
   If the new version fails to boot twice (the marker is cleared after 30 s of uptime), the
   next start restores `.old` and the DB backup. Downgrades are refused, except nightly →
   stable on the stable channel. The dashboard shows "Update available" with an **Update now**
   button, or applies updates automatically if configured to.
-- **Client integration**: `/api/info` exposes the server version and API compatibility. The
-  Apple client app blocks incompatible servers with a clear message.
+- **Client integration**: `/api/info` exposes the server version, API compatibility and
+  capabilities. The Apple apps block incompatible servers with a clear message.
 
 ## Phases
 
-1. **Foundation**
-   - Server skeleton, SQLite, auth + profiles, settings, TMDB catalog.
-   - Local scanning and matching, TorBox library sync.
-   - Direct play + HLS remux, progress/resume.
-   - `/api/info`, compiled binary.
-   - Embedded web dashboard: setup wizard, folders, keys, profiles, status.
-2. **Discovery and polish**
-   - Scrapers + TorBox cache check/add.
-   - Ranking preferences, next-episode pre-warm.
-   - Subtitle extraction.
-   - Full dashboard settings, Bonjour.
-   - Headless CLI service install.
-   - Release CI + self-update.
-3. **Apple app**
-   - Replace the Jellyfin data layer with a Strata client.
-   - Add a source picker, server version gate, and admin update button.
-4. **Later**
-   - Promote-to-local downloads, watchlist auto-acquire.
+1. **Foundation**: done.
+2. **Discovery and polish**: done (scrapers, ranking, pre-warm, subtitle extraction,
+   Bonjour, service install, release CI, self-update).
+3. **Apple apps**: done (Strata client, source picker, server version gate).
+4. **Cloud**: done (Postgres, Better Auth households, Workers + Neon, demo).
+5. **Later**
+   - Watchlist auto-acquire.
    - Trakt sync.
-   - An MPV fallback player, which a cloud deploy would require.
+   - Image subtitles (PGS/VobSub).
 
 ## Open risks
 
-- On-the-fly HLS seeking with ffmpeg is fiddly. Prototype it first, against a real TorBox MKV.
-- DV profile 7 (most UHD Blu-ray remuxes) does not play on Apple devices. It needs a
-  fallback to the HDR10 base layer or the candidate must be ranked down.
-- Public scrapers change or disappear, so they sit behind the provider interface and
-  can be swapped.
-- TorBox links expire. Sessions must re-resolve when a link fails mid-playback.
+- Public scrapers change or disappear, so they sit behind the discovery interface, and one
+  that fails is skipped for a while.
+- TorBox links expire. Sessions refresh them (`/api/play/:sid/link`) when one fails
+  mid-playback.
+- Workers: a request's work ends when it answers, so background work keeps the request
+  open, and each request opens its own database connection.

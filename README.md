@@ -1,11 +1,15 @@
 # Strata
 
-A self-hosted media server with native Apple apps. You browse one catalog of movies,
-shows and anime, and play what's in your own library on iPhone, iPad and Apple TV.
+**Your media, beautifully.** Strata is a media app for the movies and shows you already
+have. You run the server at home, next to your files, and it turns your library into a
+home screen worth sitting down to on iPhone, iPad, Mac and Apple TV: artwork and details
+for every title, resume anywhere, Continue Watching, My List, and a profile for everyone in
+the house. See [strata.sehalsein.com](https://strata.sehalsein.com).
 
-- **Server** ([apps/server](apps/server)): Bun, Hono and SQLite, with a web dashboard. On
-  macOS it ships as `Strata.app`, a menu bar app you install like any other.
+- **Server** ([apps/server](apps/server)): Bun and Hono, on Postgres, with a web dashboard.
+  On macOS it ships as `Strata.app`, a menu bar app you install like any other.
 - **Apple apps** ([apps/apple](apps/apple)): iPhone, iPad and Apple TV, in SwiftUI.
+- **Website** ([apps/landing](apps/landing)): strata.sehalsein.com.
 
 ## Install the server
 

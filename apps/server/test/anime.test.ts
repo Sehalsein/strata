@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AnimeIds, kitsuEpisode } from "../src/catalog/anime/ids";
+import { AnimeIds, fileAnimeIdStore, kitsuEpisode } from "../src/catalog/anime/ids";
 import { relevant, type Release } from "../src/sources/discovery";
 import { AnimeMatcher, pickAnime, resolveEpisode } from "../src/catalog/anime/match";
 import type { Anilist } from "../src/catalog/anime/anilist";
@@ -16,7 +16,7 @@ const RAW = [
 ];
 
 const ids = () => {
-  const map = new AnimeIds("/nonexistent");
+  const map = new AnimeIds(fileAnimeIdStore("/nonexistent"));
   map.index(RAW);
   return map;
 };
@@ -104,7 +104,7 @@ describe("Torrentio anime ids", () => {
 });
 
 test("malformed entries in the downloaded list are ignored, not trusted", () => {
-  const map = new AnimeIds("/nonexistent");
+  const map = new AnimeIds(fileAnimeIdStore("/nonexistent"));
   map.index([
     { anilist_id: 1, themoviedb_id: { tv: "../movie/1" as unknown as number }, season: { tmdb: -3 }, episode_offset: { tmdb: 1.5 } },
     { anilist_id: 2, themoviedb_id: { tv: 42 }, season: { tvdb: 1, tmdb: 1 } },
@@ -120,7 +120,7 @@ test("AniList: identical lookups share one request, failures back off", async ()
   const { startTestServer } = await import("./helpers");
   const server = await startTestServer();
   let calls = 0;
-  const anilist = new Anilist(server.services.db, (async () => {
+  const anilist = new Anilist(server.services.cache, (async () => {
     calls++;
     return new Response("busy", { status: 500 });
   }) as unknown as typeof fetch);
@@ -137,7 +137,7 @@ describe("Kitsu", () => {
     const { Kitsu } = await import("../src/catalog/anime/kitsu");
     const { startTestServer } = await import("./helpers");
     const server = await startTestServer();
-    const kitsu = new Kitsu(server.services.db, (async (url: string) => {
+    const kitsu = new Kitsu(server.services.cache, (async (url: string) => {
       seen.push(decodeURIComponent(String(url)));
       return Response.json(body);
     }) as unknown as typeof fetch);
@@ -175,17 +175,39 @@ test("an unreadable anime id list is thrown away and retried later, not reread o
   const { join } = await import("node:path");
   const { tmpdir } = await import("node:os");
   const dir = mkdtempSync(join(tmpdir(), "strata-anime-"));
-  writeFileSync(join(dir, "anime-list-full.json"), "{not json");
+  writeFileSync(join(dir, "anime-ids.json"), "{not json");
   let downloads = 0;
-  const map = new AnimeIds(dir, (async () => {
+  const map = new AnimeIds(fileAnimeIdStore(dir), (async () => {
     downloads++;
     return new Response("busy", { status: 503 });
   }) as unknown as typeof fetch);
   await map.ready();
-  expect(existsSync(join(dir, "anime-list-full.json"))).toBe(false);
+  expect(existsSync(join(dir, "anime-ids.json"))).toBe(false);
   await map.ready();
   await map.ready();
-  expect(downloads).toBe(0); // fresh-looking copy wasn't downloaded; and no retry yet
+  expect(downloads).toBe(1); // one try for a fresh copy, then a pause before the next
+});
+
+test("on Workers lookups never download the list; only the daily refresh does", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "strata-anime-"));
+  let downloads = 0;
+  const map = new AnimeIds(
+    fileAnimeIdStore(dir),
+    (async () => {
+      downloads++;
+      return Response.json(Array.from({ length: 1000 }, (_, i) => ({ anilist_id: i + 1, themoviedb_id: { tv: i + 1 } })));
+    }) as unknown as typeof fetch,
+    false,
+  );
+  await map.ready();
+  expect(downloads).toBe(0);
+  expect(map.size).toBe(0);
+  await map.refresh();
+  expect(downloads).toBe(1);
+  expect(map.anilist(5)?.tmdbTv).toBe(5);
 });
 
 describe("anime tab sections", () => {
@@ -223,7 +245,7 @@ describe("anime tab sections", () => {
     ]); // Top Upcoming has nothing, so it's left out
     // Frieren's two seasons are one card; the title AniList has but TMDB doesn't is skipped.
     expect(shelves[1]!.items.map((c) => c.title)).toEqual(["Frieren", "One Piece", "Your Name."]);
-    expect(shelves[0]!.items.map((c) => c.eyebrow)).toEqual(["#1 Spotlight", "#2 Spotlight", "#3 Spotlight"]);
+    expect(shelves[0]!.items.map((c) => c.eyebrow)).toEqual(["#1 in Anime", "#2 in Anime", "#3 in Anime"]);
     expect(shelves[2]!.items.map((c) => c.badge)).toEqual(["Episode 4", "Episode 1150", undefined]);
     expect(shelves[3]!.items.map((c) => c.badge)).toEqual([undefined, undefined, undefined]);
   });
@@ -239,5 +261,35 @@ describe("anime tab sections", () => {
 
   test("when AniList can't answer, the tab falls back to Kitsu's rails (none here)", async () => {
     expect(await catalog(null).animePage()).toEqual([]);
+  });
+});
+
+describe("shows tab", () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const item = (id: number, extra: Record<string, unknown> = {}) => ({ id, name: `Show ${id}`, overview: "…", poster_path: "/p.jpg", backdrop_path: "/b.jpg", original_language: "en", genre_ids: [18], ...extra });
+  const page = (ids: number[]) => ({ results: ids.map((id) => item(id)) });
+  const tmdb = {
+    trending: async () => page([1, 2, 3, 4]),
+    popular: async () => page([1, 2, 3]),
+    topRated: async () => page([2, 3, 4]),
+    discover: async () => page([1, 2, 3, 4]),
+    // 1–3 had an episode this week; 4's last one aired long ago.
+    show: async (id: number) => item(id, { last_episode_to_air: { season_number: 2, episode_number: id, air_date: id === 4 ? "2020-01-01" : today } }),
+  } as unknown as Tmdb;
+  const library = { availability: () => new Map() } as never;
+
+  test("rails like the Anime tab's, with the episode that just aired on each latest card", async () => {
+    const shelves = await new CatalogService(tmdb, library, {} as never, () => ({}) as never).showsPage();
+    expect(shelves.map((s) => [s.id, s.style ?? null])).toEqual([
+      ["shows-spotlight", "hero"],
+      ["shows-trending", null],
+      ["shows-latest-episodes", null],
+      ["shows-new", null],
+      ["shows-popular", null],
+      ["shows-top-rated", null],
+      ["shows-coming-soon", null],
+    ]);
+    expect(shelves[0]!.items[0]!.eyebrow).toBe("#1 in Shows");
+    expect(shelves[2]!.items.map((c) => c.badge)).toEqual(["S2 · E1", "S2 · E2", "S2 · E3"]);
   });
 });

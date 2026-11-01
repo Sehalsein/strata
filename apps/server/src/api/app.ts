@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { ZodError } from "zod";
 import { TmdbError } from "../catalog/tmdb";
@@ -8,13 +9,17 @@ import { NotReadyError } from "../sources/discovery";
 import type { Services } from "../services";
 import { logger } from "../log";
 import type { Env } from "./context";
-import { adminRoutes } from "./routes/admin";
+import { adminRoutes, serverAdminRoutes } from "./routes/admin";
 import { authRoutes } from "./routes/auth";
+import { avatarRoutes } from "./routes/avatars";
 import { catalogRoutes } from "./routes/catalog";
 import { streamRoutes } from "./routes/stream";
 import { systemRoutes } from "./routes/system";
 import { webHandler } from "../web/static";
 import { gzipJson } from "./gzip";
+import { RateLimitError } from "../throttle";
+import { clientAddress } from "./localNetwork";
+import { CLIENT_ADDRESS_HEADER } from "../auth/betterAuth";
 
 const log = logger("http");
 
@@ -29,12 +34,25 @@ export function createApp(services: Services) {
   });
 
   app.use("/api/*", gzipJson());
+  // Nothing the apps or dashboard send is near this; a bigger body is refused before it's read.
+  app.use("/api/*", bodyLimit({ maxSize: 1024 * 1024, onError: (c) => c.json({ error: "Request too large" }, 413) }));
+
+  // Accounts, sign-in, households, members, invitations, TV codes (Better Auth).
+  // Its rate limits count per client: it reads the address from a header only this
+  // server sets (a client's own copy is dropped), worked out like everywhere else here.
+  app.on(["GET", "POST"], "/api/auth/*", (c) => {
+    const headers = new Headers(c.req.raw.headers);
+    headers.set(CLIENT_ADDRESS_HEADER, clientAddress(c));
+    return services.auth.handler(new Request(c.req.raw, { headers }));
+  });
 
   // Order matters: catalogRoutes applies requireAuth to everything it sees under /api,
   // so the public and stream routes must be registered first.
   app.route("/api", authRoutes);
+  app.route("/api", avatarRoutes);
   app.route("/api", streamRoutes);
   app.route("/api/admin", systemRoutes);
+  app.route("/api/admin", serverAdminRoutes);
   app.route("/api/admin", adminRoutes);
   app.route("/api", catalogRoutes);
 
@@ -42,11 +60,13 @@ export function createApp(services: Services) {
   app.get("*", webHandler(services.config.webDir));
 
   app.onError((err, c) => {
-    if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
+    // A prepared answer (e.g. with a `code` the apps act on) goes out as it is.
+    if (err instanceof HTTPException) return err.res ? err.getResponse() : c.json({ error: err.message }, err.status);
     // Not an error for the client: the release is downloading; poll by repeating the request.
     // `title` and `message` are what the apps show while they wait.
     if (err instanceof NotReadyError) return c.json({ ...err.info, title: "Getting it ready", message: err.message, error: err.message }, 202);
     if (err instanceof ZodError) return c.json({ error: "Invalid request", issues: err.issues }, 400);
+    if (err instanceof RateLimitError) return c.json({ error: err.message }, 429, { "Retry-After": String(Math.ceil(err.retryAfterMs / 1000)) });
     if (err instanceof TmdbError || err instanceof PlaybackError || err instanceof TorboxError) {
       return c.json({ error: err.message }, err.status as 400);
     }

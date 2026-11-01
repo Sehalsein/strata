@@ -6,8 +6,14 @@ on:
       - "apps/apple/**"
       - ".github/workflows/apple-*.yml"
   push:
+    # main, and the branches work happens on (a push there checks it before any PR exists).
     branches:
       - main
+      - strata-server
+      - "fix/**"
+      - "feat/**"
+      - "codex/**"
+      - "test/**"
     paths:
       - "apps/apple/**"
       - ".github/workflows/apple-*.yml"
@@ -25,7 +31,7 @@ jobs:
     name: ${{ matrix.name }}
     # macOS 26: the packages target macOS 26, and their SwiftUI tests run on the host.
     runs-on: macos-26
-    timeout-minutes: 35
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
@@ -51,6 +57,19 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Restore FFmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: apps/apple/Packages/StrataRemux/Frameworks
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('apps/apple/Packages/StrataRemux/scripts/build-ffmpeg.sh') }}
+
+      # StrataRemux links FFmpeg (LGPL, built from source); the framework isn't kept in git.
+      - name: Build FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        working-directory: apps/apple
+        run: Packages/StrataRemux/scripts/build-ffmpeg.sh
+
       - name: Generate Xcode project
         working-directory: apps/apple
         run: xcodegen generate
@@ -61,6 +80,7 @@ jobs:
         run: |
           swift test --package-path Packages/StrataKit
           swift test --package-path Packages/StrataDesign
+          swift test --package-path Packages/StrataRemux
 
       - name: Build ${{ matrix.name }}
         uses: Apple-Actions/xcodebuild@v1

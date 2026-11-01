@@ -40,7 +40,7 @@ public struct SubtitleOverlay: View {
     }
 }
 
-/// "Up next" card that counts down to the next episode.
+/// "Up Next" card that counts down to the next episode.
 public struct UpNextCard: View {
     let next: NextEpisode
     let countdown: Int
@@ -59,7 +59,7 @@ public struct UpNextCard: View {
             ArtworkImage(url: next.stillUrl, aspectRatio: 16 / 9, seed: next.code, cornerRadius: Metrics.radiusSM)
                 .frame(width: 160)
             VStack(alignment: .leading, spacing: Metrics.space1) {
-                Text("Up next in \(countdown)s").eyebrowStyle(Theme.accentText)
+                Text("Up Next in \(countdown)s").eyebrowStyle(Theme.accentText)
                 Text(next.name).font(.stHeadline).foregroundStyle(Theme.onArtwork).lineLimit(2)
                 Text(next.code).font(.stFootnote).foregroundStyle(Theme.onArtwork.opacity(0.7))
                 GlassEffectContainer(spacing: Metrics.space2) {
@@ -80,12 +80,24 @@ public struct UpNextCard: View {
 /// What's playing and how: shown from the player's info button.
 public struct StreamDetailsPanel: View {
     let session: PlayResponse?
+    /// Device mode: data read from the file so far.
+    let bytesRead: Int64?
 
-    public init(session: PlayResponse?) { self.session = session }
+    public init(session: PlayResponse?, bytesRead: Int64? = nil) {
+        self.session = session
+        self.bytesRead = bytesRead
+    }
+
+    /// The audio line, saying when DTS or TrueHD is being decoded on the device.
+    private func audio(_ session: PlayResponse) -> String {
+        let title = session.selectedAudio?.displayTitle ?? "—"
+        guard session.mode == .device, let plan = session.remux, plan.audio != "copy" else { return title }
+        return title + " → Lossless (ALAC)"
+    }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space4) {
-            Text("Stream details").font(.stTitle2).foregroundStyle(Theme.ink)
+            Text("Stream Details").font(.stTitle2).foregroundStyle(Theme.ink)
             if let session {
                 let c = session.candidate
                 Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Metrics.space4, verticalSpacing: Metrics.space3) {
@@ -93,8 +105,11 @@ public struct StreamDetailsPanel: View {
                     row("File", c.displayName)
                     row("Playback", session.mode.label)
                     row("Video", [c.resolutionLabel, c.codecLabel, c.hdrLabel].compactMap { $0 }.joined(separator: " · "))
-                    row("Audio", session.selectedAudio?.displayTitle ?? "—")
+                    row("Audio", audio(session))
                     if let size = c.sizeLabel { row("Size", size) }
+                    if session.mode == .device, let bytesRead, bytesRead > 0, let read = Formatting.size(bytes: Int(bytesRead)) {
+                        row("Read", read)
+                    }
                 }
                 if !session.reasons.isEmpty {
                     Text(session.reasons.joined(separator: "; "))

@@ -1,0 +1,81 @@
+{
+  "sessionId": "a83f4d9d1b7e1f6bf8b6b7a81fd81607",
+  "mode": "device",
+  "url": "https://store-031.weur.tb-cdn.st/zip/3f1a/Big.Buck.Bunny.mkv?token=abc",
+  "startOffsetMs": 0,
+  "seekToMs": 12000,
+  "durationMs": 30000,
+  "candidate": {
+    "id": "file:1",
+    "fileId": 1,
+    "provider": "local",
+    "name": "Big.Buck.Bunny.2008.1080p.BluRay.x264.mkv",
+    "size": 6981110,
+    "resolution": 480,
+    "source": "bluray",
+    "videoCodec": "h264",
+    "hdr": null,
+    "audio": [
+      {
+        "codec": "ac3",
+        "channels": 1
+      }
+    ],
+    "durationMs": 30000,
+    "probed": true,
+    "availability": "ready"
+  },
+  "audioTracks": [
+    {
+      "index": 1,
+      "codec": "dts",
+      "channels": 1,
+      "selected": true
+    }
+  ],
+  "subtitleTracks": [
+    {
+      "id": "s2",
+      "codec": "subrip",
+      "language": "eng",
+      "forced": false,
+      "isDefault": false,
+      "external": false,
+      "url": null,
+      "embedded": true,
+      "streamIndex": 2
+    },
+    {
+      "id": "x0",
+      "codec": "srt",
+      "language": "en",
+      "forced": true,
+      "isDefault": false,
+      "external": true,
+      "url": "/api/stream/a83f4d9d1b7e1f6bf8b6b7a81fd81607/subtitles/x0.vtt"
+    },
+    {
+      "id": "s3",
+      "codec": "hdmv_pgs_subtitle",
+      "language": "eng",
+      "forced": false,
+      "isDefault": false,
+      "external": false,
+      "url": null,
+      "embedded": false,
+      "streamIndex": 3
+    }
+  ],
+  "chapters": [],
+  "reasons": [
+    "container mkv → repackaged on device",
+    "audio dts → lossless on device"
+  ],
+  "nextEpisode": null,
+  "remux": {
+    "audio": "lossless",
+    "audioStreamIndex": 1,
+    "videoStreamIndex": 0,
+    "stripDolbyVision": false
+  }
+}

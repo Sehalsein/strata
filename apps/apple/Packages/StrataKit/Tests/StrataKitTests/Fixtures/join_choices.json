@@ -1,0 +1,13 @@
+{
+    "household": {
+        "id": "9e895efb-9561-47a1-b771-e7444228ae25",
+        "name": "owner's home"
+    },
+    "members": [
+        {
+            "id": "3c53118d-39eb-45da-a048-346839d1cd79",
+            "name": "owner",
+            "isKids": false
+        }
+    ]
+}

@@ -1,4 +1,5 @@
 import { type AnimeIds, kitsuEpisode } from "../catalog/anime/ids";
+import { runtime } from "#runtime";
 import type { Tmdb } from "../catalog/tmdb";
 import type { FileRow, Library } from "../library";
 import { logger } from "../log";
@@ -7,6 +8,8 @@ import type { Settings } from "../settings";
 import { detailLabel, type Candidate } from "./resolver";
 import type { TorboxClient, TorboxItem } from "./torbox/client";
 import { ingestItem } from "./torbox/sync";
+import { SharedWork } from "../inFlight";
+import { globalFetch } from "../net";
 
 const log = logger("discovery");
 const RELEASE_TTL_MS = 20 * 60_000;
@@ -50,7 +53,8 @@ export class NotReadyError extends Error {
 }
 
 export class Discovery {
-  private cache = new Map<string, { at: number; releases: Promise<Release[]> }>();
+  /** Releases found per title, for a few minutes (on Workers only finished searches are shared). */
+  private cache = new SharedWork<string, Release[]>({ remember: true, ttlMs: RELEASE_TTL_MS, max: RELEASE_CACHE_MAX });
   /** Torrents we added that weren't ready yet, by hash. */
   private pending = new Map<string, number>();
   private scraperDown = new Map<string, number>();
@@ -60,11 +64,13 @@ export class Discovery {
     private readonly library: Library,
     private readonly settings: () => Settings,
     private readonly torbox: () => TorboxClient | null,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = globalFetch,
     /** Told about every torrent discovery adds, so housekeeping can remove it later. */
     private readonly onAdded: (torrentId: number, hash: string, name?: string) => void = () => {},
     /** Anime id list, for asking Torrentio by Kitsu id (much better anime coverage). */
     private readonly animeIds?: AnimeIds,
+    /** Asked before anything is added to TorBox; throws to refuse (the household's daily limit). */
+    private readonly allowAdd: () => Promise<void> = async () => {},
   ) {}
 
   get available(): boolean {
@@ -74,7 +80,7 @@ export class Discovery {
   /** Releases for a title, ranked, excluding ones already in the library. */
   async candidates(target: DiscoveryTarget): Promise<Candidate[]> {
     if (!this.available) return [];
-    const known = this.library.knownHashes();
+    const known = await this.library.knownHashes();
     const { showUncached } = this.settings();
     return (await this.releases(target))
       .filter((r) => !known.has(r.hash) && (r.cached || showUncached))
@@ -108,24 +114,7 @@ export class Discovery {
 
   releases(target: DiscoveryTarget): Promise<Release[]> {
     const key = `${target.mediaType}:${target.tmdbId}:${target.season ?? ""}:${target.episode ?? ""}`;
-    const hit = this.cache.get(key);
-    if (hit && Date.now() - hit.at < RELEASE_TTL_MS) return hit.releases;
-    const releases = this.search(target);
-    this.pruneCache();
-    this.cache.set(key, { at: Date.now(), releases });
-    releases.catch(() => this.cache.delete(key));
-    return releases;
-  }
-
-  /** Drops expired lookups, then the oldest beyond a cap, so browsing doesn't grow it forever. */
-  private pruneCache() {
-    const now = Date.now();
-    for (const [key, entry] of this.cache) if (now - entry.at >= RELEASE_TTL_MS) this.cache.delete(key);
-    // Map keeps insertion order, so the first keys are the oldest.
-    for (const key of this.cache.keys()) {
-      if (this.cache.size < RELEASE_CACHE_MAX) break;
-      this.cache.delete(key);
-    }
+    return this.cache.get(key, () => this.search(target));
   }
 
   /**
@@ -135,7 +124,7 @@ export class Discovery {
   async acquire(target: DiscoveryTarget, hash: string): Promise<AcquireResult> {
     hash = hash.toLowerCase();
     if (!isInfoHash(hash)) throw new Error("Invalid info-hash");
-    const existing = this.pickFile(this.library.byHash(hash), target);
+    const existing = this.pickFile(await this.library.byHash(hash), target);
     if (existing) return { status: "ready", fileId: existing.id };
 
     const client = this.torbox();
@@ -154,6 +143,7 @@ export class Discovery {
       if (owned) {
         torrentId = owned.id;
       } else {
+        await this.allowAdd();
         ({ torrentId } = await client.createTorrent(`magnet:?${magnet.toString().replace("urn%3Abtih%3A", "urn:btih:")}`));
         log.info(`Added ${release?.title ?? hash} to TorBox (#${torrentId})`);
         this.onAdded(torrentId, hash, release?.title);
@@ -167,7 +157,7 @@ export class Discovery {
       item = await client.torrent(torrentId);
       const ready = (item.download_present || item.download_finished) && (item.files?.length ?? 0) > 0;
       if (ready || Date.now() > deadline) break;
-      await Bun.sleep(1_500);
+      await runtime.sleep(1_500);
     }
 
     if (!(item.download_present || item.download_finished)) {
@@ -175,12 +165,12 @@ export class Discovery {
       return { status: "downloading", torrentId, progress: item.progress ?? 0, etaSeconds: item.eta ?? null, name: item.name };
     }
     this.pending.delete(hash);
-    const rows = ingestItem(this.library, "torrents", { ...item, hash: item.hash ?? hash });
+    const rows = await ingestItem(this.library, "torrents", { ...item, hash: item.hash ?? hash });
     const release = (await this.releases(target).catch(() => [])).find((r) => r.hash === hash);
     await this.assignMatches(rows, target, release?.fileName);
     // Anything else in the torrent (collections, extras) goes through normal matching.
-    void this.library.matchPending().catch((err) => log.warn("Matching after import failed", err));
-    const file = this.pickFile(this.library.byHash(hash), target);
+    runtime.background(this.library.matchPending().catch((err) => log.warn("Matching after import failed", err)));
+    const file = this.pickFile(await this.library.byHash(hash), target);
     if (!file) throw new Error("The release has no playable file for this title");
     return { status: "ready", fileId: file.id };
   }

@@ -1,0 +1,8 @@
+{
+    "device_code": "oJ7GE4aZNiLBFBVpEMYCIWHrL2S60lJlIHZabdzO",
+    "user_code": "K9Y933UB",
+    "verification_uri": "http://127.0.0.1:8434/link",
+    "verification_uri_complete": "http://127.0.0.1:8434/link?user_code=K9Y933UB",
+    "expires_in": 600,
+    "interval": 2
+}

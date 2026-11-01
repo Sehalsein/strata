@@ -87,3 +87,35 @@ describe("source labels", () => {
     expect(detailLabel(0)).toBeUndefined();
   });
 });
+
+describe("device mode (the app repackages files itself)", () => {
+  const device = { ...DEFAULT_CAPS, deviceRemux: true };
+
+  test("mkv is handed to the app with video and Dolby audio copied", () => {
+    expect(decide(media(), device)).toMatchObject({ mode: "device", video: "copy", audio: "copy" });
+    expect(decide(media({ audio: [{ index: 1, codec: "ac3", channels: 6, isDefault: true }] }), device).audio).toBe("copy");
+  });
+
+  test("DTS and TrueHD are kept lossless on the device", () => {
+    for (const codec of ["dts", "truehd"]) {
+      expect(decide(media({ audio: [{ index: 1, codec, channels: 8, isDefault: true }] }), device)).toMatchObject({ mode: "device", audio: "lossless" });
+    }
+  });
+
+  test("files the player takes as they are still play directly", () => {
+    expect(decide(media({ container: "mp4" }), device).mode).toBe("direct");
+  });
+
+  test("Dolby Vision profile 7 is repackaged on the device as its base layer", () => {
+    expect(decide(media({ container: "mp4", video: { hdr: "dv", dvProfile: 7 } }), device)).toMatchObject({ mode: "device", stripDolbyVision: true });
+  });
+
+  test("video that needs re-encoding still transcodes here", () => {
+    expect(decide(media({ video: { codec: "vc1" } }), device).mode).toBe("transcode");
+    expect(decide(media({ audio: [{ index: 1, codec: "dts", channels: 6, isDefault: true }], video: { codec: "vc1" } }), device).audio).not.toBe("lossless");
+  });
+
+  test("older apps (no deviceRemux) get HLS as before", () => {
+    expect(decide(media(), DEFAULT_CAPS).mode).toBe("remux");
+  });
+});

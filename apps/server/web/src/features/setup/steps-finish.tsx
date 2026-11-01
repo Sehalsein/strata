@@ -1,0 +1,241 @@
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowRight, CircleCheck, CircleDashed, Copy, LayoutDashboard, Library, LoaderCircle, MonitorSmartphone, PartyPopper, RefreshCw, Tv, UserPlus, Users } from "lucide-react";
+import { QrCode } from "@/components/qr-code";
+import { toast } from "sonner";
+import { api, errorMessage } from "@/lib/api";
+import { authClient } from "@/lib/auth-client";
+import { queryKeys } from "@/lib/query";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { InvitationList, InviteDialog } from "@/features/members/household-people";
+import type { StepProps } from "./setup-wizard";
+import { StepCard } from "./step-card";
+
+export function PeopleStep({ onNext, onBack }: StepProps) {
+  const [inviting, setInviting] = useState(false);
+  const household = useQuery({ queryKey: queryKeys.household, queryFn: authClient.getHousehold });
+  const pending = (household.data?.invitations ?? []).some((i) => i.status === "pending");
+  return (
+    <StepCard
+      icon={Users}
+      title="Invite people"
+      description="Everyone who watches gets their own account, progress and My List. Send each a link now, or later from Members, where you can also set up kids' accounts."
+      onBack={onBack}
+      actions={
+        <Button size="lg" onClick={onNext} variant={pending ? "default" : "outline"}>
+          {pending ? "Continue" : "Skip for now"} <ArrowRight />
+        </Button>
+      }
+    >
+      {household.data && !household.data.invitations.length ? (
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center">
+          <div className="bg-primary/12 text-brand-text flex size-11 items-center justify-center rounded-full">
+            <UserPlus className="size-5" />
+          </div>
+          <div className="space-y-1">
+            <p className="font-medium">No one invited yet</p>
+            <p className="text-muted-foreground max-w-sm text-sm">Family, housemates, friends: send each a link and they make their own account in your household.</p>
+          </div>
+          <Button onClick={() => setInviting(true)}>
+            <UserPlus /> Invite someone
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div>
+            <Button variant="outline" onClick={() => setInviting(true)}>
+              <UserPlus /> Invite someone
+            </Button>
+          </div>
+          <InvitationList compact />
+        </div>
+      )}
+      <InviteDialog open={inviting} onOpenChange={setInviting} householdName={household.data?.name} />
+    </StepCard>
+  );
+}
+
+/** The address the apps should use: the server's LAN URL when it knows one, else this page's origin. */
+function useServerAddress() {
+  const status = useQuery({ queryKey: queryKeys.status, queryFn: api.status });
+  const lan = status.data?.network.urls[0];
+  const here = window.location.origin;
+  // Opened via localhost: other devices can't use that, so prefer the LAN address.
+  const isLoopback = /^https?:\/\/(localhost|127\.|\[::1\])/.test(here);
+  return { address: isLoopback ? (lan ?? here) : here, lan, loading: status.isPending && isLoopback };
+}
+
+export function DevicesStep({ info, onNext, onBack }: StepProps) {
+  const { address, lan, loading } = useServerAddress();
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(address);
+      toast.success("Address copied");
+    } catch {
+      toast.error("Couldn't copy — select the address instead");
+    }
+  };
+  return (
+    <StepCard
+      icon={MonitorSmartphone}
+      title="Connect your devices"
+      description={info.mode === "cloud" ? "Install Strata on your iPhone, iPad, Mac or Apple TV, then add this address." : "Install Strata on your iPhone, iPad, Mac or Apple TV, then pick this server."}
+      onBack={onBack}
+      actions={
+        <Button size="lg" onClick={onNext}>
+          Continue <ArrowRight />
+        </Button>
+      }
+    >
+      <div className="grid gap-6 sm:grid-cols-[auto_1fr] sm:items-start">
+        {loading ? <Skeleton className="size-44" /> : <QrCode value={address} />}
+        <div className="flex min-w-0 flex-col gap-4">
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium">Server address</p>
+            <div className="flex items-center gap-2">
+              <code className="bg-muted min-w-0 truncate rounded-md px-3 py-2 text-sm">{address}</code>
+              <Button variant="outline" size="icon" onClick={() => void copy()} aria-label="Copy address">
+                <Copy />
+              </Button>
+            </div>
+            {lan && lan !== address && <p className="text-muted-foreground text-xs">On your home network: {lan}</p>}
+          </div>
+          <ol className="text-muted-foreground list-decimal space-y-1.5 pl-5 text-sm">
+            {info.capabilities.bonjour && <li>On your home network, “{info.serverName}” shows up in the app by itself (Bonjour).</li>}
+            <li>{info.mode === "cloud" ? "Enter" : "Otherwise, enter"} the address above, or scan the code with your iPhone's camera.</li>
+            <li>Sign in with your account. Everyone you invite signs in with their own.</li>
+          </ol>
+          <div className="flex gap-3 rounded-lg border p-3">
+            <Tv className="text-muted-foreground mt-0.5 size-5 shrink-0" />
+            <p className="text-muted-foreground text-sm">
+              <span className="text-foreground font-medium">Apple TV:</span> choose to sign in with a code. The TV shows a code and a QR code; scan it with a phone, or open <span className="font-mono">Link a TV</span> in this dashboard, and approve it there — no typing a password with the remote.
+            </p>
+          </div>
+        </div>
+      </div>
+    </StepCard>
+  );
+}
+
+export function DoneStep({ info, onBack, onFinish }: Omit<StepProps, "onNext"> & { onFinish: (to?: string) => void }) {
+  const settings = useQuery({ queryKey: queryKeys.settings, queryFn: api.settings });
+  const household = useQuery({ queryKey: queryKeys.household, queryFn: authClient.getHousehold });
+  const [syncing, setSyncing] = useState(false);
+  const [leaving, setLeaving] = useState<string | null>(null);
+
+  const s = settings.data;
+  const torbox = !!s?.secrets.torboxApiKey;
+
+  const syncTorbox = async () => {
+    setSyncing(true);
+    try {
+      await api.runJob("syncTorbox");
+      toast.success("TorBox sync started");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const finish = async (to: string) => {
+    setLeaving(to);
+    if (s?.settings.mediaFolders.length) {
+      try {
+        await api.runJob("scanLocal");
+      } catch {
+        /* the scan also runs on its schedule */
+      }
+    }
+    onFinish(to);
+  };
+
+  return (
+    <StepCard
+      icon={PartyPopper}
+      title="You're all set"
+      description={info.mode === "cloud" ? "Here's where things stand. Anything left can be done later in Settings." : "Strata scans your folders and matches files in the background. Here's where things stand."}
+      onBack={onBack}
+      actions={
+        <>
+          <Button size="lg" variant="outline" onClick={() => void finish("/library")} disabled={!!leaving}>
+            {leaving === "/library" ? <LoaderCircle className="animate-spin" /> : <Library />}
+            Open Library
+          </Button>
+          <Button size="lg" onClick={() => void finish("/")} disabled={!!leaving}>
+            {leaving === "/" ? <LoaderCircle className="animate-spin" /> : <LayoutDashboard />}
+            Go to Overview
+          </Button>
+        </>
+      }
+    >
+      {!s || !household.data ? (
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} className="h-10" />
+          ))}
+        </div>
+      ) : (
+        <ul className="divide-y rounded-lg border">
+          <Summary done label={info.mode === "cloud" ? "Your account" : "Admin account"} detail="Created" />
+          <Summary done={s.secrets.tmdbApiKey} label="TMDB" detail={s.secrets.tmdbApiKey ? "Connected" : "Not set — add it in Settings › Provider keys"} />
+          <Summary
+            done={torbox}
+            optional
+            label="TorBox"
+            detail={torbox ? "Connected" : "Not set"}
+            action={
+              torbox && (
+                <Button variant="outline" size="sm" onClick={() => void syncTorbox()} disabled={syncing}>
+                  {syncing ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
+                  Sync TorBox now
+                </Button>
+              )
+            }
+          />
+          {info.mode !== "cloud" && (
+            <Summary
+              done={s.settings.mediaFolders.length > 0}
+              optional
+              label="Media folders"
+              detail={s.settings.mediaFolders.length ? `${s.settings.mediaFolders.length} folder${s.settings.mediaFolders.length === 1 ? "" : "s"}` : "None"}
+            />
+          )}
+          <Summary done label="Household" detail={household.data.name} />
+          <Summary
+            done={household.data.members.length > 1 || household.data.invitations.some((i) => i.status === "pending")}
+            optional
+            label="People"
+            detail={(() => {
+              const invited = household.data.invitations.filter((i) => i.status === "pending").length;
+              const members = household.data.members.length;
+              return `${members} member${members === 1 ? "" : "s"}${invited ? ` · ${invited} invited` : ""}`;
+            })()}
+          />
+          {info.mode !== "cloud" && <Summary done label="Server name" detail={s.settings.serverName} />}
+        </ul>
+      )}
+      <p className="text-muted-foreground text-sm">
+        {info.mode === "cloud" ? "Keys and playback limits live in Settings; people in Members." : "Unmatched files can be fixed from Library. Keys, folders and playback limits live in Settings. Active streams and background jobs show on the Overview."}
+      </p>
+    </StepCard>
+  );
+}
+
+function Summary({ done, optional, label, detail, action }: { done: boolean; optional?: boolean; label: string; detail: string; action?: React.ReactNode }) {
+  return (
+    <li className="flex flex-wrap items-center gap-3 p-3">
+      {done ? <CircleCheck className="text-ok size-5 shrink-0" /> : <CircleDashed className="text-muted-foreground size-5 shrink-0" />}
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-2 text-sm font-medium">
+          {label}
+          {optional && !done && <Badge variant="secondary">Optional</Badge>}
+        </p>
+        <p className="text-muted-foreground truncate text-sm">{detail}</p>
+      </div>
+      {action}
+    </li>
+  );
+}

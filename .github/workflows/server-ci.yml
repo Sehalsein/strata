@@ -3,7 +3,8 @@ name: Server CI
 # Typecheck, test and build-check the server and its dashboard on every change to them.
 on:
   push:
-    branches: [main, strata-server]
+    # main, and the branches work happens on (a push there checks it before any PR exists).
+    branches: [main, strata-server, "fix/**", "feat/**", "codex/**", "test/**"]
     paths:
       - "apps/server/**"
       - "package.json"
@@ -25,7 +26,7 @@ concurrency:
 
 jobs:
   test:
-    name: Typecheck, test, build
+    name: Typecheck and test
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -37,14 +38,16 @@ jobs:
         with:
           bun-version: 1.2.20
 
-      # The tests generate small media fixtures with ffmpeg and probe them with ffprobe.
+      # The tests generate small media fixtures with ffmpeg and probe them with ffprobe. Without
+      # both on PATH those tests skip themselves, so this step fails loudly if either is missing.
       - name: Install ffmpeg
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          ffmpeg -hide_banner -version | head -1
+          ffprobe -hide_banner -version | head -1
 
       - name: Install
-        run: |
-          bun install --frozen-lockfile
-          bun install --frozen-lockfile --cwd apps/server/web
+        run: bun install --frozen-lockfile
 
       - name: Typecheck
         working-directory: apps/server
@@ -54,10 +57,32 @@ jobs:
         working-directory: apps/server
         run: bun test
 
-      # The dashboard is embedded in every release binary: a broken build should fail here, not there.
-      - name: Build the dashboard and a Linux binary
+  # The dashboard is embedded in every release binary: a broken build should fail here, not there.
+  web:
+    name: Dashboard and binary build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.2.20
+
+      - name: Install
+        run: |
+          bun install --frozen-lockfile
+          bun install --frozen-lockfile --cwd apps/server/web
+
+      - name: Build the dashboard
+        working-directory: apps/server/web
+        run: bun run build
+
+      - name: Build a Linux binary with the dashboard embedded
         working-directory: apps/server
-        run: bun scripts/build.ts --target bun-linux-x64
+        run: bun scripts/build.ts --target bun-linux-x64 --skip-web
 
   # A fresh install on a machine with no ffmpeg: the server sets up its own (pinned and
   # checksummed) on first start, and that ffmpeg works on this platform.

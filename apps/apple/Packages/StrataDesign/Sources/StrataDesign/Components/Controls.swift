@@ -4,11 +4,14 @@ import SwiftUI
 public struct PlayButton: View {
     let title: String
     let systemImage: String
+    /// Widens the button, like the TV app's hero (`.infinity` to fill the row).
+    let maxWidth: CGFloat?
     let action: () -> Void
 
-    public init(_ title: String = "Play", systemImage: String = "play.fill", action: @escaping () -> Void) {
+    public init(_ title: String = "Play", systemImage: String = "play.fill", maxWidth: CGFloat? = nil, action: @escaping () -> Void) {
         self.title = title
         self.systemImage = systemImage
+        self.maxWidth = maxWidth
         self.action = action
     }
 
@@ -18,7 +21,7 @@ public struct PlayButton: View {
                 .font(.stHeadline)
                 .foregroundStyle(Theme.onAccent)
                 .padding(.horizontal, Metrics.space2)
-                .frame(minHeight: 30)
+                .frame(maxWidth: maxWidth, minHeight: 30)
         }
         .buttonStyle(.glassProminent)
         .tint(Theme.apricot)
@@ -192,16 +195,19 @@ public struct AvailabilityLabel: View {
     }
 }
 
-/// Profile disc with the name's initial, fill chosen stably per profile.
+/// Profile disc: the profile's picture from its server, or the name's initial on a fill
+/// chosen stably per profile (also while the picture loads).
 public struct ProfileAvatar: View {
     let name: String
     let seed: String
     let size: CGFloat
+    let imageURL: URL?
 
-    public init(name: String, seed: String, size: CGFloat = 96) {
+    public init(name: String, seed: String, size: CGFloat = 96, imageURL: URL? = nil) {
         self.name = name
         self.seed = seed
         self.size = size
+        self.imageURL = imageURL
     }
 
     public var body: some View {
@@ -212,6 +218,13 @@ public struct ProfileAvatar: View {
                 Text(name.prefix(1).uppercased())
                     .font(.system(size: size * 0.38, weight: .bold))
                     .foregroundStyle(Theme.onAccent)
+            }
+            .overlay {
+                if let imageURL {
+                    RemoteImage(url: imageURL, maxPixel: Int(size * 3)) { Color.clear }
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
+                }
             }
             .accessibilityLabel(name)
     }

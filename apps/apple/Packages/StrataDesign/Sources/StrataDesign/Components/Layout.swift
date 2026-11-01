@@ -15,19 +15,7 @@ public struct Rail<Content: View>: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title).railHeaderStyle().accessibilityAddTraits(.isHeader)
-                Spacer()
-                #if !os(tvOS)
-                if let seeAll {
-                    Button("See all", action: seeAll)
-                        .font(.stCallout)
-                        .foregroundStyle(Theme.accentText)
-                        .buttonStyle(.plain)
-                }
-                #endif
-            }
-            .padding(.horizontal, Metrics.gutter)
+            header.padding(.horizontal, Metrics.gutter)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: Metrics.cardGap) {
@@ -39,17 +27,63 @@ public struct Rail<Content: View>: View {
                 #endif
             }
             .scrollClipDisabled()
+            #if os(tvOS)
+            // Down from a card with nothing straight below it (the end of a long rail over a
+            // short one) still lands on the next rail.
+            .focusSection()
+            #endif
         }
+    }
+}
+
+extension Rail {
+    /// The title; with `seeAll`, a link to the full list with a chevron, like the TV
+    /// app's ("Trending Movies ›"). tvOS headers can't take focus, so rails there end
+    /// in a See All tile instead.
+    @ViewBuilder private var header: some View {
+        #if os(tvOS)
+        Text(title).railHeaderStyle().accessibilityAddTraits(.isHeader)
+        #else
+        if let seeAll {
+            Button(action: seeAll) {
+                HStack(spacing: 4) {
+                    Text(title).railHeaderStyle()
+                    Image(systemName: "chevron.right")
+                        .font(.stCallout.weight(.bold))
+                        .foregroundStyle(Theme.ink3)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityHint("Shows all")
+        } else {
+            Text(title).railHeaderStyle().accessibilityAddTraits(.isHeader)
+        }
+        #endif
     }
 }
 
 /// A responsive grid of poster cards (Movies, Shows, search results, My List).
 public struct PosterGrid<Content: View>: View {
     @ViewBuilder let content: () -> Content
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
     public init(@ViewBuilder content: @escaping () -> Content) { self.content = content }
 
+    /// Three columns on an iPhone and in a narrow iPad window, rather than two (or one)
+    /// oversized ones; the rails' poster size elsewhere.
+    private var minimum: CGFloat {
+        #if os(iOS)
+        sizeClass == .compact ? 100 : Metrics.posterWidth
+        #else
+        Metrics.posterWidth
+        #endif
+    }
+
     public var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: Metrics.posterWidth), spacing: Metrics.cardGap, alignment: .top)],
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: minimum), spacing: Metrics.cardGap, alignment: .top)],
                   alignment: .leading, spacing: Metrics.space8) {
             content()
         }

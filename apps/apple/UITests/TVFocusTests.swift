@@ -21,13 +21,13 @@ final class TVFocusTests: XCTestCase {
         }
     }
 
-    /// Launches past "Who's watching?" (picking the focused first profile) when it shows.
+    /// Launches past "Who's watching?" (picking the focused account) when it shows.
     private func launchSignedIn(_ arguments: [String] = []) {
         app.launchArguments = arguments
         app.launch()
         if app.staticTexts["Who's watching?"].waitForExistence(timeout: 6) {
             press(.select, pause: 2)
-            if !arguments.isEmpty { app.terminate(); app.launch() } // re-run the launch link now a profile is picked
+            if !arguments.isEmpty { app.terminate(); app.launch() } // re-run the launch link now an account is picked
         }
     }
 
@@ -57,7 +57,7 @@ final class TVFocusTests: XCTestCase {
     }
 
     /// Signed-out TV on the server's home network: picking the server found on the
-    /// network goes straight to "Who's watching?" with no password or code.
+    /// network goes straight to "Who's watching?" (the household's members), no password or code.
     func testHomeNetworkJoin() {
         app.launch()
         XCTAssertTrue(app.buttons["Enter Address"].waitForExistence(timeout: 15))
@@ -107,12 +107,12 @@ final class TVFocusTests: XCTestCase {
         snapshot("signin-03-qr")
         let code = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Code '")).firstMatch
         if code.exists { print("SIGNIN_CODE \(code.label.replacingOccurrences(of: "Code ", with: "").replacingOccurrences(of: " ", with: ""))") }
-        // Approved from the phone: the TV moves on to the profile picker.
-        XCTAssertTrue(app.staticTexts["Who's watching?"].waitForExistence(timeout: 180), "the TV should sign in once the code is approved")
-        snapshot("signin-04-profiles")
+        // Approved from the phone: the TV signs in as that account, in its household.
+        XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 180), "the TV should sign in once the code is approved")
+        snapshot("signin-04-home")
     }
 
-    /// The profile tab at the end of the tab bar opens Settings with Switch Profile.
+    /// The account tab at the end of the tab bar opens Settings with Switch Account.
     func testProfileTab() {
         launchSignedIn()
         XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 15))
@@ -122,19 +122,22 @@ final class TVFocusTests: XCTestCase {
         press(.right, 6)
         Thread.sleep(forTimeInterval: 2)
         snapshot("profile-02-tab")
-        XCTAssertTrue(app.buttons["Switch Profile"].waitForExistence(timeout: 5), "the profile tab should show Settings")
+        XCTAssertTrue(app.buttons["Add Profile"].waitForExistence(timeout: 5), "the account tab should show Settings")
         press(.down, pause: 1)
         snapshot("profile-03-settings")
     }
 
-    /// Movies tab genre chips, then a cast member's page from a movie's detail page.
+    /// The Movies tab's genre menu, then a cast member's page from a movie's detail page.
     func testGenresAndPerson() {
         let movie = ProcessInfo.processInfo.environment["STRATA_TEST_MOVIE"] ?? "10378"
         launchSignedIn(["-StrataTab", "movies"])
-        XCTAssertTrue(app.buttons["All"].waitForExistence(timeout: 15), "genre chips should show on Movies")
-        press(.down, pause: 1)
-        press(.right, pause: 1)
-        press(.select, pause: 3)
+        XCTAssertTrue(app.buttons["Filter by genre"].waitForExistence(timeout: 15), "the genre menu should show on Movies")
+        Thread.sleep(forTimeInterval: 3)
+        press(.down, pause: 1) // from the tab bar to the menu
+        press(.select, pause: 1.5)
+        snapshot("genre-00-menu-open")
+        press(.down, pause: 0.5) // the first genre after All Genres
+        press(.select, pause: 4)
         snapshot("genre-01-selected")
         press(.down, pause: 1.5)
         snapshot("genre-02-rails")
@@ -204,7 +207,11 @@ final class TVFocusTests: XCTestCase {
         Thread.sleep(forTimeInterval: 2)
         snapshot("03-episodes")
 
+        // A watch link opens the title's page (it never plays by itself); Play has focus.
         open("strata://watch/movie/992") // Sherlock Jr., resumed mid-scene
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume'")).firstMatch.waitForExistence(timeout: 20))
+        Thread.sleep(forTimeInterval: 2)
+        press(.select)
         Thread.sleep(forTimeInterval: 14)
         press(.up, pause: 1) // controls
         snapshot("04-player")
@@ -220,10 +227,10 @@ final class TVFocusTests: XCTestCase {
         press(.down, pause: 1.2)
         print("CAROUSEL focus: \(focused().label)")
         snapshot("home-01-hero-focused")
-        press(.right, 3, pause: 1.2) // Play → More Info → next title
+        press(.right, 4, pause: 1.2) // Play → + → More Info → next title
         print("CAROUSEL after right: \(focused().label)")
         snapshot("home-02-next-title")
-        press(.left, 2, pause: 1.2)
+        press(.left, 3, pause: 1.2)
         snapshot("home-03-back")
         press(.down, pause: 1.5)
         print("CAROUSEL after down: \(focused().label)")

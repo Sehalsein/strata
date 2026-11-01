@@ -1,12 +1,12 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { UpdateError } from "../../update";
-import { requireAdmin, requireAuth, type Env } from "../context";
+import { requireServerAdmin, requireAuth, type Env } from "../context";
 
 /** Self-update. Mounted under /api/admin. */
 export const systemRoutes = new Hono<Env>()
-  .use("/update", requireAuth, requireAdmin)
-  .use("/update/*", requireAuth, requireAdmin)
+  .use("/update", requireAuth, requireServerAdmin)
+  .use("/update/*", requireAuth, requireServerAdmin)
 
   .get("/update", (c) => c.json(c.var.services.updater.status()))
 

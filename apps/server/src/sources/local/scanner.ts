@@ -37,7 +37,7 @@ export async function scanLocal(
         continue;
       }
       const segments = relative(folder.path, path).split(sep);
-      library.upsert({
+      await library.upsert({
         provider: "local",
         ref: path,
         name: segments[segments.length - 1]!,
@@ -49,9 +49,9 @@ export async function scanLocal(
       if (seen.length % 50 === 0) report(seen.length, 0, "Scanning files");
     }
   }
-  const missing = library.markMissing("local", seen);
+  const missing = await library.markMissing("local", seen);
   const { matched, unmatched } = await library.matchPending((done, total) => report(done, total, "Matching titles"));
-  library.pruneOrphans();
+  await library.pruneOrphans();
   log.info(`Scanned ${folders.length} folder(s): ${seen.length} files, ${missing} missing`);
   return { folders: folders.length, files: seen.length, missing, matched, unmatched };
 }

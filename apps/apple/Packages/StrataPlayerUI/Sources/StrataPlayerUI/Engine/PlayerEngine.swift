@@ -3,6 +3,7 @@ import AVFoundation
 import Combine
 import Observation
 import StrataKit
+import StrataRemux
 
 /// What the player shows for the current title (Now Playing, chrome, Live Activity).
 public struct PlaybackMeta: Sendable, Hashable {
@@ -19,6 +20,11 @@ public struct PlaybackMeta: Sendable, Hashable {
 }
 
 /// Drives AVPlayer against a Strata server session.
+///
+/// In device mode the server only hands over the file's link: StrataRemux repackages it
+/// on the device and AVPlayer plays that from a loopback address. Video never streams
+/// through the server (only files on its own disk do): a file the device can't play fails
+/// with a message to pick another source.
 ///
 /// Every time exposed here (`position`, `duration`, `seek(to:)`, chapters, subtitle cues) is
 /// **media time** — seconds into the title — regardless of where the current HLS stream starts.
@@ -49,6 +55,13 @@ public final class PlayerEngine {
     public private(set) var meta: PlaybackMeta?
     /// The current server session: mode, candidate (source file), reasons, URLs.
     public private(set) var session: PlayResponse?
+    #if os(tvOS)
+    /// The frame rate and dynamic range the TV should switch to for this title (the player
+    /// view hands it to its window's display manager); nil when nothing's playing.
+    public private(set) var displayCriteria: AVDisplayCriteria?
+    #endif
+    /// Device mode: what the repackaging is doing, for Stream Details.
+    public var remuxStats: RemuxSession.Stats? { remux?.stats }
 
     public private(set) var audioTracks: [AudioTrack] = []
     public private(set) var subtitleTracks: [SubtitleTrack] = []
@@ -82,6 +95,8 @@ public final class PlayerEngine {
 
     /// When the sleep timer will pause playback, if armed.
     public private(set) var sleepTimerEnds: Date?
+    /// The sleep timer's chosen length, `.off` when it isn't armed (for the menu's checkmark).
+    public private(set) var sleepOption: SleepOption = .off
     private var sleepTask: Task<Void, Never>?
 
     public enum SleepOption: Int, CaseIterable, Identifiable, Sendable {
@@ -107,6 +122,20 @@ public final class PlayerEngine {
     public private(set) var client: StrataClient?
     private var nowPlaying: NowPlayingBridge?
 
+    // Device mode
+    /// Repackages the current file on the device (device mode only).
+    private var remux: RemuxSession?
+    /// Lines read so far from each embedded text track, by stream index, in media time.
+    private var embeddedCues: [Int: [VTTCue]] = [:]
+    /// The stream's own subtitle tracks (embedded text tracks, as WebVTT), which the player
+    /// draws itself: in Picture in Picture and on AirPlay too.
+    private var nativeSubtitles: AVMediaSelectionGroup?
+    /// The name each embedded track has in the stream, by `SubtitleTrack.id`.
+    private var nativeSubtitleNames: [String: String] = [:]
+    /// Set when the player refused this title's stream with subtitle tracks in it: it's
+    /// repackaged without them, and the overlay shows the lines.
+    private var skipNativeSubtitles = false
+
     // Session plumbing
     private var timeline = MediaTimeline(startOffset: 0, duration: 0, isHLS: false)
     private var loadTask: Task<Void, Never>?
@@ -116,6 +145,8 @@ public final class PlayerEngine {
     private var generation = 0
     /// Media time being restarted to; the timeline isn't trusted until the new item plays.
     private var restartTarget: TimeInterval?
+    /// Files whose media info this load already read for the server (see `probe`).
+    private var probedFiles = Set<Int>()
     @ObservationIgnored private var lastReportAt = Date.distantPast
     @ObservationIgnored private var lastReportedMs: Int?
     /// Set once the first item became ready; before that there's no real position to report
@@ -127,6 +158,12 @@ public final class PlayerEngine {
     private var statusObservation: NSKeyValueObservation?
     private var timeControlObservation: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
+    private var externalObservation: NSKeyValueObservation?
+
+    /// Told every position the engine reports (a download keeps where it was left).
+    @ObservationIgnored public var onProgress: (@MainActor (PlaybackTarget, _ positionMs: Int, _ durationMs: Int) -> Void)?
+    /// Told a position that couldn't reach the server, to send later.
+    @ObservationIgnored public var onUndeliveredProgress: (@Sendable (PlaybackTarget, _ positionMs: Int, _ durationMs: Int) -> Void)?
 
     /// Progress is reported this often while playing.
     public var progressInterval: TimeInterval = 10
@@ -158,6 +195,8 @@ public final class PlayerEngine {
         await teardown(reportFinal: true)
         generation += 1
         let gen = generation
+        skipNativeSubtitles = false
+        probedFiles = []
         self.target = target
         self.meta = meta
         status = .loading
@@ -169,10 +208,43 @@ public final class PlayerEngine {
             do {
                 let res = try await self.requestPlay(client: client, target: target, candidateId: candidateId, startMs: startMs, audioIndex: nil, gen: gen)
                 try await self.start(res, gen: gen, newTitle: true, autoplay: true)
+            } catch let failure as DeviceFailure {
+                guard gen == self.generation else { return }
+                Log.player.warning("device play failed: \(failure.message, privacy: .public)")
+                self.status = .failed(failure.message)
             } catch {
                 guard gen == self.generation, !(error is CancellationError) else { return }
                 let e = StrataError.wrap(error)
                 if e.kind != .cancelled { self.status = .failed(e.message) }
+            }
+        }
+        loadTask = task
+        await task.value
+    }
+
+    /// Plays a downloaded file (`res` from `DownloadItem.playResponse`) without the server:
+    /// the same engine as a stream, reading the file from disk.
+    public func load(offline res: PlayResponse, target: PlaybackTarget, meta: PlaybackMeta) async {
+        await teardown(reportFinal: true)
+        generation += 1
+        let gen = generation
+        skipNativeSubtitles = false
+        probedFiles = []
+        self.target = target
+        self.meta = meta
+        status = .loading
+        position = TimeInterval(res.seekToMs) / 1000
+        nowPlaying?.update(meta: meta, position: position, duration: duration, rate: 0)
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.start(res, gen: gen, newTitle: true, autoplay: true)
+            } catch let failure as DeviceFailure {
+                guard gen == self.generation else { return }
+                self.status = .failed(failure.message)
+            } catch {
+                guard gen == self.generation, !(error is CancellationError) else { return }
+                self.status = .failed(StrataError.wrap(error).message)
             }
         }
         loadTask = task
@@ -189,6 +261,7 @@ public final class PlayerEngine {
     /// Calls `/api/play`, asking again while the server gets the source ready (`.preparing`).
     /// `candidateId` keeps a restart (seek, audio switch) on the same file.
     private func requestPlay(client: StrataClient, target: PlaybackTarget, candidateId: String?, startMs: Int?, audioIndex: Int?, gen: Int) async throws -> PlayResponse {
+        var candidateId = candidateId
         while true {
             try Task.checkCancellation()
             switch try await client.play(target, candidateId: candidateId, startMs: startMs, audioStreamIndex: audioIndex) {
@@ -199,8 +272,35 @@ public final class PlayerEngine {
                 guard gen == generation else { throw CancellationError() }
                 status = .preparing(progress)
                 try await Task.sleep(nanoseconds: UInt64(preparePollInterval * 1_000_000_000))
+            case .needsProbe(let fileId, let url):
+                guard gen == generation else { throw CancellationError() }
+                try await probe(fileId: fileId, url: url, client: client, gen: gen)
+                // Ask again for the same file: the one the server chose, if we didn't name one.
+                candidateId = candidateId ?? "file:\(fileId)"
             }
         }
+    }
+
+    /// The server can't read files itself, so it asks the app for a file's media info the
+    /// first time it plays it: read the header from the link and send it. Once per file per
+    /// load, so a server that keeps asking can't loop forever.
+    private func probe(fileId: Int, url: URL, client: StrataClient, gen: Int) async throws {
+        guard probedFiles.insert(fileId).inserted else {
+            throw DeviceFailure(message: "The server couldn't use what this file holds. Pick another source.")
+        }
+        status = .loading
+        let info: MediaInfo
+        do {
+            // MediaProbe reads on its own queue; the main actor only waits.
+            info = try await MediaProbe.probe(url: url)
+        } catch {
+            guard gen == generation, !(error is CancellationError) else { throw CancellationError() }
+            Log.player.warning("probe failed: \(error.localizedDescription, privacy: .public)")
+            throw DeviceFailure(message: "This file couldn't be read (\(error.localizedDescription)). Pick another source.")
+        }
+        guard gen == generation else { throw CancellationError() }
+        try await client.reportProbe(fileId: fileId, info: info)
+        guard gen == generation else { throw CancellationError() }
     }
 
     /// Installs a play response as the current item. `newTitle` resets tracks/subtitles;
@@ -208,6 +308,26 @@ public final class PlayerEngine {
     private func start(_ res: PlayResponse, gen: Int, newTitle: Bool, autoplay: Bool) async throws {
         guard gen == generation else { throw CancellationError() }
         let previous = session
+        let previousRemux = remux
+        // Device mode: open the file and repackage it here before anything changes on screen.
+        var url = res.url
+        var newRemux: RemuxSession?
+        if res.mode == .device {
+            let local = makeRemux(res)
+            do {
+                url = try await local.start()
+                #if os(iOS)
+                // An Apple TV on AirPlay fetches the stream itself: it gets the Wi-Fi address.
+                if player.isExternalPlaybackActive { url = try await local.networkPlaylistURL() }
+                #endif
+            } catch {
+                local.stop()
+                guard gen == generation else { throw CancellationError() }
+                throw DeviceFailure(message: "This file couldn't be opened (\(error.localizedDescription)). Pick another source.")
+            }
+            guard gen == generation else { local.stop(); throw CancellationError() }
+            newRemux = local
+        }
         removeObservers()
 
         session = res
@@ -226,15 +346,46 @@ public final class PlayerEngine {
         }
 
         if res.mode.isHLS { try await waitForPlaylist(res.url, gen: gen) }
-        let item = AVPlayerItem(url: res.url)
+        let item = AVPlayerItem(url: url)
         // Start buffering a little ahead; long forward buffers waste server work on a remux.
-        item.preferredForwardBufferDuration = res.mode.isHLS ? 30 : 0
+        // On the device a minute ahead rides out a slow patch in the network.
+        switch res.mode {
+        case .remux, .transcode: item.preferredForwardBufferDuration = 30
+        case .device: item.preferredForwardBufferDuration = 60
+        case .direct: item.preferredForwardBufferDuration = 0
+        }
         player.replaceCurrentItem(with: item)
         attachObservers(item)
         isBuffering = true
+        remux = newRemux
+        if newTitle || res.mode != .device { embeddedCues = [:] }
+        if previousRemux !== newRemux { previousRemux?.stop() }
         if let previous, previous.sessionId != res.sessionId { stopSession(previous.sessionId) }
 
-        try await waitUntilReady(item)
+        do {
+            try await waitUntilReady(item)
+        } catch let error as StrataError where res.mode == .device {
+            guard gen == generation else { throw CancellationError() }
+            if !skipNativeSubtitles, newRemux?.subtitleRenditions.isEmpty == false {
+                // Try once more without the subtitle tracks before giving up on the device.
+                Log.player.warning("stream with subtitle tracks refused (\(error.message, privacy: .public)); trying without")
+                skipNativeSubtitles = true
+                return try await start(res, gen: gen, newTitle: newTitle, autoplay: autoplay)
+            }
+            // AVPlayer refused what the device made (a codec it can't decode, say).
+            throw DeviceFailure(message: "This file can't play on this device (\(error.message)). Pick another source.")
+        }
+        guard gen == generation else { throw CancellationError() }
+        #if os(tvOS)
+        if newTitle || displayCriteria == nil {
+            if let format = newRemux?.videoFormat {
+                displayCriteria = DisplayMatch.criteria(for: format)
+            } else if res.mode == .direct {
+                displayCriteria = await DisplayMatch.criteria(for: item.asset)
+            }
+        }
+        #endif
+        nativeSubtitles = res.mode == .device ? try? await item.asset.loadMediaSelectionGroup(for: .legible) : nil
         guard gen == generation else { throw CancellationError() }
         if let seek = MediaTimeline.initialSeek(res) {
             await player.seek(to: CMTime(seconds: seek, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
@@ -260,6 +411,8 @@ public final class PlayerEngine {
             activeSubtitleId = nil
             subtitleCues = []
         }
+        // The player only draws the stream's subtitles we turned on (not ones it picks by itself).
+        applyNativeSubtitle()
         nowPlaying?.update(meta: meta, position: position, duration: duration, rate: player.rate)
         reportProgress(force: true)
     }
@@ -321,7 +474,7 @@ public final class PlayerEngine {
         case .inPlace(let stream):
             restartTask?.cancel()
             position = target
-            let tolerance = timeline.isHLS ? CMTime(seconds: 0.5, preferredTimescale: 600) : .zero
+            let tolerance = session?.mode == .direct ? .zero : CMTime(seconds: 0.5, preferredTimescale: 600)
             await player.seek(to: CMTime(seconds: stream, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance)
             if status == .ended { status = .paused }
             reportProgress(force: true)
@@ -377,7 +530,7 @@ public final class PlayerEngine {
                 let e = StrataError.wrap(error)
                 if e.kind != .cancelled {
                     self.restartTarget = nil
-                    self.status = .failed(e.message)
+                    self.status = .failed((error as? DeviceFailure)?.message ?? e.message)
                 }
             }
         }
@@ -407,6 +560,7 @@ public final class PlayerEngine {
     /// Survives moving to the next episode; cleared on `unload()`.
     public func setSleepTimer(_ option: SleepOption) {
         sleepTask?.cancel()
+        sleepOption = option
         guard option != .off else {
             sleepTimerEnds = nil
             return
@@ -418,6 +572,7 @@ public final class PlayerEngine {
             guard let self, !Task.isCancelled else { return }
             self.pause()
             self.sleepTimerEnds = nil
+            self.sleepOption = .off
         }
     }
 
@@ -425,7 +580,11 @@ public final class PlayerEngine {
 
     /// Switches audio by restarting the stream at the current position with that track.
     public func selectAudio(_ track: AudioTrack) async {
-        guard session != nil, track.index != activeAudioIndex else { return }
+        guard let current = session, track.index != activeAudioIndex else { return }
+        if current.mode == .device {
+            await switchDeviceAudio(to: track, in: current)
+            return
+        }
         activeAudioIndex = track.index
         let at = restartTarget ?? position
         restartTarget = at
@@ -438,10 +597,19 @@ public final class PlayerEngine {
     public func selectSubtitle(_ track: SubtitleTrack?) async {
         subtitleTask?.cancel()
         subtitleError = nil
+        defer { applyNativeSubtitle() }
         guard let track else {
             activeSubtitleId = nil
             subtitleCues = []
             isLoadingSubtitles = false
+            return
+        }
+        if track.isEmbedded, let index = track.streamIndex {
+            activeSubtitleId = track.id
+            isLoadingSubtitles = false
+            // The player draws it from the stream; otherwise the overlay shows the lines read
+            // from the file so far.
+            subtitleCues = nativeOption(for: track) == nil ? embeddedCues[index] ?? [] : []
             return
         }
         guard let url = track.url else {
@@ -480,16 +648,159 @@ public final class PlayerEngine {
         Task { await selectSubtitle(forced) }
     }
 
+    // MARK: - Device mode
+
+    /// The device couldn't open or play the file.
+    private struct DeviceFailure: Error {
+        let message: String
+    }
+
+    /// Audio the player takes as it is; anything else (DTS, TrueHD…) is decoded and kept lossless.
+    private static let copyableAudio = Set(ClientCaps.current.audioCodecs)
+
+    /// The stream's own track for an embedded subtitle, if the player found it.
+    private func nativeOption(for track: SubtitleTrack) -> AVMediaSelectionOption? {
+        guard let group = nativeSubtitles, let name = nativeSubtitleNames[track.id] else { return nil }
+        return group.options.first { $0.displayName == name }
+    }
+
+    /// Has the player draw the active embedded track itself, or nothing.
+    private func applyNativeSubtitle() {
+        guard let group = nativeSubtitles, let item = player.currentItem else { return }
+        item.select(activeSubtitle.flatMap(nativeOption(for:)), in: group)
+    }
+
+    private func makeRemux(_ res: PlayResponse) -> RemuxSession {
+        let plan = res.remux
+        let source: RemuxSession.Source
+        if res.url.isFileURL {
+            source = .file(res.url)
+        } else {
+            let client = client
+            let sessionId = res.sessionId
+            let refresh: (@Sendable () async throws -> URL)? = client.map { client in { try await client.refreshLink(sessionId: sessionId) } }
+            source = .remote(res.url, refresh: refresh)
+        }
+        let hdr = res.candidate.hdr?.lowercased()
+        let local = RemuxSession(source: source, plan: StrataRemux.RemuxPlan(
+            videoStreamIndex: plan?.videoStreamIndex.map(Int32.init),
+            audioStreamIndex: plan?.audioStreamIndex.map(Int32.init),
+            audio: plan?.audio == "copy" || plan == nil ? .copy : .lossless,
+            stripDolbyVision: plan?.stripDolbyVision ?? false,
+            videoRange: hdr == "hlg" ? "HLG" : hdr == nil || hdr == "" ? "SDR" : "PQ"
+        ))
+        // Each embedded text track becomes a WebVTT track, named uniquely so it can be found.
+        var names: [String: String] = [:]
+        var renditions: [RemuxSession.SubtitleRendition] = []
+        // A playlist that declares HDR is refused outright where HDR can't be shown (without
+        // the declaration the player tone-maps it), so there the overlay draws the lines.
+        let withTracks = !skipNativeSubtitles && (hdr == nil || hdr == "" || AVPlayer.eligibleForHDRPlayback)
+        for track in res.subtitleTracks where track.isEmbedded && withTracks {
+            var name = track.displayTitle
+            var n = 2
+            while names.values.contains(name) { name = "\(track.displayTitle) \(n)"; n += 1 }
+            names[track.id] = name
+            renditions.append(.init(streamIndex: Int32(track.streamIndex!), name: name, language: LanguageName.normalized(track.language),
+                                    isDefault: false, forced: track.forced))
+        }
+        nativeSubtitleNames = names
+        local.subtitleRenditions = renditions
+        local.onCues = { [weak self, weak local] cues in
+            Task { @MainActor [weak self] in
+                guard let local else { return }
+                self?.receive(cues, from: local)
+            }
+        }
+        return local
+    }
+
+    /// Keeps lines read from the file, and shows them when their track is on.
+    private func receive(_ cues: [SubtitleCue], from source: RemuxSession) {
+        guard source === remux else { return }
+        var touched = Set<Int>()
+        for cue in cues {
+            let index = Int(cue.streamIndex)
+            let line = VTTCue(start: cue.start, end: cue.end, text: cue.text)
+            // A new session after an audio switch reads some of the same lines again.
+            guard embeddedCues[index]?.contains(line) != true else { continue }
+            embeddedCues[index, default: []].append(line)
+            touched.insert(index)
+        }
+        for index in touched { embeddedCues[index]?.sort { $0.start < $1.start } }
+        if let active = activeSubtitle, active.isEmbedded, let index = active.streamIndex, touched.contains(index),
+           nativeOption(for: active) == nil {
+            subtitleCues = embeddedCues[index] ?? []
+        }
+    }
+
+    /// Switches audio by repackaging the same file with the other track, at the same spot.
+    /// Nothing goes to the server.
+    private func switchDeviceAudio(to track: AudioTrack, in current: PlayResponse) async {
+        restartTask?.cancel()
+        let gen = generation
+        let at = position
+        let wasPlaying = status == .playing || status == .ended || status == .ready
+        var res = current
+        res.remux?.audioStreamIndex = track.index
+        res.remux?.audio = Self.copyableAudio.contains(track.codec.lowercased()) ? "copy" : "lossless"
+        res.audioTracks = current.audioTracks.map { var t = $0; t.selected = t.index == track.index; return t }
+        res.seekToMs = timeline.ms(at)
+        activeAudioIndex = track.index
+        await restartDevice(res, at: at, wasPlaying: wasPlaying, gen: gen)
+    }
+
+    /// Repackages the file again from `at` (another audio track, or a new address for
+    /// AirPlay). Nothing goes to the server.
+    private func restartDevice(_ res: PlayResponse, at: TimeInterval, wasPlaying: Bool, gen: Int) async {
+        var res = res
+        res.seekToMs = timeline.ms(at)
+        player.pause()
+        isBuffering = true
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.start(res, gen: gen, newTitle: false, autoplay: wasPlaying)
+            } catch {
+                guard gen == self.generation, !(error is CancellationError), !Task.isCancelled else { return }
+                self.status = .failed((error as? DeviceFailure)?.message ?? StrataError.wrap(error).message)
+            }
+        }
+        restartTask = task
+        await task.value
+    }
+
+    #if os(iOS)
+    /// AirPlay started or stopped. The Apple TV can't reach this device's 127.0.0.1, so in
+    /// device mode the stream moves to the Wi-Fi address while it plays there, and back
+    /// to loopback after.
+    private func externalPlaybackChanged(_ active: Bool) {
+        guard let current = session, current.mode == .device, restartTarget == nil,
+              let url = (player.currentItem?.asset as? AVURLAsset)?.url else { return }
+        let onLoopback = url.host == "127.0.0.1"
+        guard active == onLoopback else { return }
+        Log.player.info("AirPlay \(active ? "started" : "stopped", privacy: .public); moving the stream")
+        restartTask?.cancel()
+        let gen = generation
+        let at = position
+        let wasPlaying = status == .playing || status == .ready
+        restartTask = Task { [weak self] in await self?.restartDevice(current, at: at, wasPlaying: wasPlaying, gen: gen) }
+    }
+    #endif
+
     // MARK: - Unload
 
     /// Stops playback: reports the final position, ends the server session, clears state.
     public func unload() async {
         sleepTask?.cancel()
         sleepTimerEnds = nil
+        sleepOption = .off
         await teardown(reportFinal: true)
         generation += 1
         target = nil
         meta = nil
+        #if os(tvOS)
+        displayCriteria = nil
+        #endif
         status = .idle
         nowPlaying?.update(meta: nil, position: 0, duration: 0, rate: 0)
     }
@@ -506,6 +817,11 @@ public final class PlayerEngine {
         removeObservers()
         player.pause()
         player.replaceCurrentItem(with: nil)
+        remux?.stop()
+        remux = nil
+        embeddedCues = [:]
+        nativeSubtitles = nil
+        nativeSubtitleNames = [:]
         session = nil
         timeline = MediaTimeline(startOffset: 0, duration: 0, isHLS: false)
         restartTarget = nil
@@ -527,7 +843,7 @@ public final class PlayerEngine {
     }
 
     private func stopSession(_ id: String) {
-        guard let client else { return }
+        guard let client, !id.hasPrefix("offline-") else { return }
         Task.detached { try? await client.stopPlayback(sessionId: id) }
     }
 
@@ -538,14 +854,18 @@ public final class PlayerEngine {
     @ObservationIgnored private var nowPlayingRate: Float = -1
 
     private func reportProgress(force: Bool) {
-        guard let client, let target, let session, didStartPlayback else { return }
+        guard let target, let session, didStartPlayback else { return }
         let ms = timeline.ms(restartTarget ?? position)
         guard force || Date().timeIntervalSince(lastReportAt) >= progressInterval else { return }
         guard ms != lastReportedMs || force else { return }
         lastReportAt = Date()
         lastReportedMs = ms
         let durationMs = session.durationMs
-        let sessionId = session.sessionId
+        onProgress?(target, ms, durationMs)
+        let undelivered = onUndeliveredProgress
+        guard let client else { undelivered?(target, ms, durationMs); return }
+        // A downloaded file has no session on the server.
+        let sessionId = session.isOffline ? nil : session.sessionId
         // In order: a slow earlier report must never land after (and overwrite) a later one.
         let previous = reportChain
         reportChain = Task.detached {
@@ -554,6 +874,7 @@ public final class PlayerEngine {
                 try await client.reportProgress(target, positionMs: ms, durationMs: durationMs, sessionId: sessionId)
             } catch {
                 Log.player.warning("progress report failed: \(StrataError.wrap(error).message, privacy: .public)")
+                if StrataError.wrap(error).kind == .network { undelivered?(target, ms, durationMs) }
             }
         }
     }
@@ -608,6 +929,12 @@ public final class PlayerEngine {
                 }
             }
         }
+        #if os(iOS)
+        externalObservation = player.observe(\.isExternalPlaybackActive, options: [.new]) { [weak self] p, _ in
+            let active = p.isExternalPlaybackActive
+            Task { @MainActor [weak self] in self?.externalPlaybackChanged(active) }
+        }
+        #endif
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.restartTarget == nil else { return }
@@ -625,6 +952,7 @@ public final class PlayerEngine {
         }
         statusObservation = nil
         timeControlObservation = nil
+        externalObservation = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
     }

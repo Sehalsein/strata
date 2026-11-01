@@ -1,6 +1,7 @@
 import UIKit
 import UserNotifications
 import StrataFeatures
+import StrataKit
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
@@ -14,6 +15,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     #if os(iOS)
+    /// Downloads finished (or need attention) while the app was closed: the store takes the
+    /// session's events and calls this when it has handled them.
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
+        DownloadStore.shared.backgroundCompletion = completionHandler
+    }
+
     /// Landscape only while the player is up on iPhone (PlayerOrientation).
     func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
         PlayerOrientation.allowed

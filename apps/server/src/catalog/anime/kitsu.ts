@@ -1,8 +1,7 @@
-import { eq } from "drizzle-orm";
-import type { Db } from "../../db";
-import { tmdbCache } from "../../db/schema";
 import { logger } from "../../log";
+import type { ApiCache } from "../apiCache";
 import type { AnilistMedia } from "./anilist";
+import { globalFetch } from "../../net";
 
 const log = logger("kitsu");
 const BASE = "https://kitsu.app/api/edge";
@@ -42,12 +41,10 @@ const SEASONS = ["winter", "spring", "summer", "fall"] as const;
  * unavailable. Kitsu ids map to TMDB through the anime id list. Cached in tmdb_cache.
  */
 export class Kitsu {
-  private inFlight = new Map<string, Promise<KitsuAnime[] | null>>();
-  private failures = new Map<string, number>();
 
   constructor(
-    private readonly db: Db,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly cache: ApiCache,
+    private readonly fetchImpl: typeof fetch = globalFetch,
   ) {}
 
   /** Kitsu ids, in rank order, for one rail of series or films. */
@@ -101,35 +98,17 @@ export class Kitsu {
   }
 
   private async request(path: string, cacheKey: string, ttl: number): Promise<KitsuAnime[] | null> {
-    const cached = this.db.select().from(tmdbCache).where(eq(tmdbCache.key, cacheKey)).get();
-    if (cached && Date.now() - cached.fetchedAt < ttl) return JSON.parse(cached.json) as KitsuAnime[];
-    const stale = cached && Date.now() - cached.fetchedAt < MAX_STALE_MS ? (JSON.parse(cached.json) as KitsuAnime[]) : null;
-
-    const failedAt = this.failures.get(cacheKey);
-    if (failedAt && Date.now() - failedAt < FAILURE_TTL_MS) return stale;
-    const sharing = this.inFlight.get(cacheKey);
-    if (sharing) return sharing;
-
-    const work = (async () => {
-      try {
+    try {
+      return await this.cache.get<KitsuAnime[]>(cacheKey, { ttl, maxStale: MAX_STALE_MS, backoff: FAILURE_TTL_MS }, async () => {
         const res = await this.fetchImpl(`${BASE}/${path}`, { headers: { Accept: "application/vnd.api+json" }, signal: AbortSignal.timeout(15_000) });
         if (!res.ok) throw new Error(`Kitsu HTTP ${res.status}`);
         const body = (await res.json()) as { data?: unknown };
         if (!Array.isArray(body.data)) throw new Error("Kitsu: unexpected response");
-        const data = body.data as KitsuAnime[];
-        this.failures.delete(cacheKey);
-        const row = { key: cacheKey, json: JSON.stringify(data), fetchedAt: Date.now() };
-        this.db.insert(tmdbCache).values(row).onConflictDoUpdate({ target: tmdbCache.key, set: { json: row.json, fetchedAt: row.fetchedAt } }).run();
-        return data;
-      } catch (err) {
-        log.warn("Kitsu request failed", err);
-        this.failures.delete(cacheKey);
-        this.failures.set(cacheKey, Date.now());
-        if (this.failures.size > 1_000) this.failures.delete(this.failures.keys().next().value!);
-        return stale;
-      }
-    })().finally(() => this.inFlight.delete(cacheKey));
-    this.inFlight.set(cacheKey, work);
-    return work;
+        return body.data as KitsuAnime[];
+      });
+    } catch (err) {
+      log.warn("Kitsu request failed", err);
+      return null;
+    }
   }
 }

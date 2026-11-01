@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from "hono";
+import { runtime } from "#runtime";
 
 const MIN_BYTES = 1024;
 
@@ -9,6 +10,8 @@ const MIN_BYTES = 1024;
  * CompressionStream.)
  */
 export function gzipJson(): MiddlewareHandler {
+  // On Workers, Cloudflare compresses responses itself (and there's no Bun.gzipSync).
+  if (runtime.name === "workers") return async (_c, next) => next();
   return async (c, next) => {
     await next();
     if (c.req.path.startsWith("/api/stream/") || !/\bgzip\b/.test(c.req.header("accept-encoding") ?? "")) return;

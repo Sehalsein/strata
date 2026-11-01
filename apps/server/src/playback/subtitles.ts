@@ -83,12 +83,12 @@ export class SubtitleService {
   constructor(
     private readonly cacheDir: string,
     private readonly ffmpeg: () => FfmpegInfo | null,
-  ) {
-    mkdirSync(cacheDir, { recursive: true });
-  }
+  ) {}
 
   /** Path of the cached .vtt, extracting it first if needed. */
   vtt(fileId: number, input: string, track: SubtitleTrack): Promise<string> {
+    // Made when first needed: the cloud server has no folder of its own.
+    mkdirSync(this.cacheDir, { recursive: true });
     const out = join(this.cacheDir, `${fileId}-${track.id}.vtt`);
     if (existsSync(out)) return Promise.resolve(out);
     const key = out;

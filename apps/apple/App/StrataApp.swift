@@ -13,6 +13,11 @@ struct StrataApp: App {
                 .environment(services)
                 .onAppear { configureAudioSession() }
                 .onOpenURL { url in services.coordinator.handle(url: url) }
+                // A server's `/link?user_code=…` page (a TV's QR code) handed to the app, for
+                // servers set up with associated domains.
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                    if let url = activity.webpageURL { services.coordinator.handle(url: url) }
+                }
                 #if DEBUG
                 // `-StrataOpenURL strata://…` opens a link at launch (simulator testing).
                 .task {

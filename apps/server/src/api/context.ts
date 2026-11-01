@@ -2,8 +2,30 @@ import type { Context, MiddlewareHandler } from "hono";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 import type { z } from "zod";
-import type { AuthedSession } from "../auth";
+import { and, eq } from "drizzle-orm";
+import { member, session as sessionTable } from "../db/schema";
+import { describeDevice, deviceChanges } from "./deviceInfo";
+import { isSystemAdmin } from "../auth/betterAuth";
+import { permissionsOf, type Permissions } from "../auth/permissions";
+import type { Household } from "../household";
 import type { Services } from "../services";
+
+/** Who's asking: their account, this device's household (if any) and their role in it. */
+export interface RequestSession {
+  /** Better Auth's session token (the bearer token). */
+  token: string;
+  user: { id: string; username: string | null; name: string; email: string; image: string | null; isServerAdmin: boolean };
+  organizationId: string | null;
+  /** "owner" | "admin" | "member" in the active household, once `requireHousehold` ran. */
+  role: string | null;
+  /** Joined without a password or a TV: can watch, never administer. */
+  viewerOnly: boolean;
+  /** Signed in with a temporary password: only /me works until a new one is chosen. */
+  mustChangePassword: boolean;
+}
+
+/** The answer to anything but /api/me while a temporary password is in use. */
+export const PASSWORD_CHANGE_REQUIRED = "PASSWORD_CHANGE_REQUIRED";
 
 export type Env = {
   /** The Bun server, passed as the second argument to fetch (absent in tests unless given). */
@@ -12,30 +34,89 @@ export type Env = {
   };
   Variables: {
     services: Services;
-    session: AuthedSession;
+    session: RequestSession;
+    household: Household;
   };
 };
 
+/** A signed-in account (Better Auth session, from the bearer token or cookie). */
 export const requireAuth: MiddlewareHandler<Env> = createMiddleware<Env>(async (c, next) => {
-  const header = c.req.header("authorization");
-  const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
-  const session = token ? c.var.services.auth.verify(token) : null;
-  if (!session) throw new HTTPException(401, { message: "Not signed in" });
-  c.set("session", session);
+  const result = await c.var.services.auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null);
+  if (!result) throw new HTTPException(401, { message: "Not signed in" });
+  const u = result.user as typeof result.user & { username?: string | null; role?: string | null; banned?: boolean | null; mustChangePassword?: boolean | null };
+  const s = result.session as typeof result.session & { activeOrganizationId?: string | null; viewerOnly?: boolean | null };
+  const viewerOnly = !!s.viewerOnly;
+  // Keeps the Devices page current: where the device is now, and what it is. Written only
+  // when something changed, which is rare (a new network, an app update).
+  const changes = deviceChanges(s as Parameters<typeof deviceChanges>[0], describeDevice(c));
+  if (changes) {
+    await c.var.services.db
+      .update(sessionTable)
+      .set({ ...changes, updatedAt: new Date() })
+      .where(eq(sessionTable.token, s.token))
+      .catch(() => {});
+  }
+  c.set("session", {
+    token: s.token,
+    user: { id: u.id, username: u.username ?? null, name: u.name, email: u.email, image: u.image ?? null, isServerAdmin: isSystemAdmin(c.var.services.profile, u) && !viewerOnly },
+    organizationId: s.activeOrganizationId ?? null,
+    role: null,
+    viewerOnly,
+    // Devices that joined without a password (home, a TV) never used the temporary one.
+    mustChangePassword: !!u.mustChangePassword && !viewerOnly,
+  });
+  if (!!u.mustChangePassword && !viewerOnly && new URL(c.req.url).pathname !== "/api/me") {
+    throw new HTTPException(403, {
+      res: Response.json({ error: "Choose a new password first: you signed in with a temporary one.", code: PASSWORD_CHANGE_REQUIRED }, { status: 403 }),
+    });
+  }
   await next();
 });
 
-export const requireAdmin: MiddlewareHandler<Env> = createMiddleware<Env>(async (c, next) => {
-  // The hosted public demo (scripts/demo/serve.ts --public) is read-only for everyone.
-  if (process.env.STRATA_DEMO === "1") throw new HTTPException(403, { message: "The demo can't be changed." });
-  if (!c.var.session.user.isAdmin) throw new HTTPException(403, { message: "Admin only" });
+/**
+ * The device's household: set (with `/api/auth/organization/set-active`) and one the
+ * account belongs to. Loads that household's services for the route.
+ */
+export const requireHousehold: MiddlewareHandler<Env> = createMiddleware<Env>(async (c, next) => {
+  const session = c.var.session;
+  if (!session.organizationId) throw new HTTPException(409, { message: "Choose a household first" });
+  const [row] = await c.var.services.db
+    .select({ role: member.role })
+    .from(member)
+    .where(and(eq(member.organizationId, session.organizationId), eq(member.userId, session.user.id)));
+  if (!row) throw new HTTPException(403, { message: "You're not in this household" });
+  session.role = row.role;
+  c.set("household", await c.var.services.households.get(session.organizationId));
   await next();
 });
 
-export function profileOf(c: Context<Env>): number {
-  const id = c.var.session.profileId;
-  if (id === null) throw new HTTPException(409, { message: "Select a profile first" });
-  return id;
+/** What the signed-in device may do in its household (see auth/permissions.ts). */
+export function permissions(c: Context<Env>): Permissions {
+  const { viewerOnly, role, user } = c.var.session;
+  return permissionsOf(c.var.services.profile, { viewerOnly, role, isServerAdmin: user.isServerAdmin });
+}
+
+const DEMO_REFUSAL = "The demo can't be changed.";
+
+/** The household's owner or an admin, signed in with a password (not a TV or home join). */
+export const requireHouseholdAdmin: MiddlewareHandler<Env> = createMiddleware<Env>(async (c, next) => {
+  const may = permissions(c);
+  if (!may.change) throw new HTTPException(403, { message: DEMO_REFUSAL });
+  if (!may.administerHousehold) throw new HTTPException(403, { message: "Only the household's owner or admins can do that" });
+  await next();
+});
+
+/** The server admin (the account made at setup), signed in with a password. */
+export const requireServerAdmin: MiddlewareHandler<Env> = createMiddleware<Env>(async (c, next) => {
+  const may = permissions(c);
+  if (!may.change) throw new HTTPException(403, { message: DEMO_REFUSAL });
+  if (!may.administerServer) throw new HTTPException(403, { message: "Only the server's admin can do that" });
+  await next();
+});
+
+/** The signed-in account: whose progress and lists these are. */
+export function userOf(c: Context<Env>): string {
+  return c.var.session.user.id;
 }
 
 export async function body<S extends z.ZodTypeAny>(c: Context, schema: S): Promise<z.infer<S>> {

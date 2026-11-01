@@ -50,10 +50,9 @@ struct AnimeView: View {
         #endif
         .toolbar {
             if !categories.isEmpty { ToolbarItem(placement: .primaryAction) { menu } }
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-            ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() }
+            ProfileToolbarItems()
         }
-        .refreshable { await services.client?.clearCache(); await load() }
+        .refreshable { await services.client?.clearCache(); await load(quietly: true) }
         #endif
         .task {
             if case .loaded(let items) = await services.load({ try await $0.animeCategories() }) { categories = items }
@@ -88,10 +87,12 @@ struct AnimeView: View {
         shelves.value?.first { $0.style == .hero && !$0.items.isEmpty }
     }
 
-    private func load() async {
-        shelves = .loading
+    /// `quietly` (pull to refresh) keeps the page up while it reloads, and on failure.
+    private func load(quietly: Bool = false) async {
+        if !quietly { shelves = .loading }
         let result = await services.load { try await $0.anime(category: category?.id) }
         if case .loading = result { return }
+        if quietly, case .failed = result, shelves.value != nil { return }
         shelves = result
     }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@strata/server",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,12 +12,25 @@
     "package:mac": "bun scripts/package-mac.ts"
   },
   "dependencies": {
-    "drizzle-orm": "^0.45.2",
-    "hono": "^4.13",
-    "zod": "^3.25"
+    "@better-auth/passkey": "1.7.14",
+    "@electric-sql/pglite": "0.5.14",
+    "@neondatabase/serverless": "1.2.0",
+    "@noble/hashes": "2.4.0",
+    "better-auth": "1.7.14",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.14",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.3",
-    "typescript": "5.9"
+    "@resvg/resvg-js": "2.6.2",
+    "@types/bun": "^1.4.4",
+    "typescript": "~7.0.2",
+    "wrangler": "^4.156.0"
+  },
+  "imports": {
+    "#runtime": {
+      "workerd": "./src/runtime/workers.ts",
+      "default": "./src/runtime/bun.ts"
+    }
   }
 }

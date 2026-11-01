@@ -4,7 +4,8 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
-  "observability": { "enabled": true },
+  "secrets": { "required": ["TMDB_API_KEY", "DEMO_RESTORE_KEY"] },
+  "observability": { "enabled": true, "redact_query_string": true, "logs": { "enabled": true }, "traces": { "enabled": true, "head_sampling_rate": 0.1 } },
   "containers": [
     {
       "class_name": "StrataDemo",
@@ -13,7 +14,9 @@
       // One instance, never more: the cost ceiling (see README). "basic" (1/4 vCPU) rather than
       // "lite" (1/16) so a cold start takes seconds, not most of a minute.
       "max_instances": 1,
-      "instance_type": "basic"
+      "instance_type": "basic",
+      // The container's own logs (it doesn't take the Worker's observability settings).
+      "observability": { "logs": { "enabled": true } }
     }
   ],
   "durable_objects": {

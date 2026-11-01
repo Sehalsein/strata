@@ -1,3 +1,4 @@
+import type { SecretKey } from "../src/settings";
 import { mkdirSync, mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,15 +87,33 @@ export const fakeTmdb: typeof fetch = (async (input: string | URL | Request) => 
 
 export interface TestServer {
   services: Services;
+  /** The first household (made at setup). */
+  household: () => Promise<import("../src/household").Household>;
   request: (path: string, init?: RequestInit & { json?: unknown; token?: string; ip?: string }) => Promise<Response>;
   dataDir: string;
 }
 
-export async function startTestServer(fetchImpl: typeof fetch = fakeTmdb): Promise<TestServer> {
+export async function startTestServer(
+  fetchImpl: typeof fetch = fakeTmdb,
+  overrides: {
+    ffmpeg?: null;
+    /** Keys every household gets (each household has its own). */
+    keys?: Partial<Record<SecretKey, string>>;
+    /** Another kind of server than this process's (deploymentProfile("cloud", "workers")…). */
+    profile?: import("../src/profile").DeploymentProfile;
+  } = {},
+): Promise<TestServer> {
   const dataDir = mkdtempSync(join(tmpdir(), "strata-test-"));
-  process.env.TMDB_API_KEY = "test-key";
   process.env.STRATA_NO_FFMPEG_DOWNLOAD = "1"; // tests use the machine's ffmpeg, never a download
-  const services = await createServices({ dataDir, port: 0, host: "127.0.0.1" }, { fetch: fetchImpl });
+  const { keys = { tmdbApiKey: "test-key" }, ...serviceOverrides } = overrides;
+  const services = await createServices({ dataDir, port: 0, host: "127.0.0.1", databaseUrl: "memory" }, { fetch: fetchImpl, ...serviceOverrides });
+  // Each household gets the test keys the first time it's loaded.
+  const loadHousehold = services.households.get.bind(services.households);
+  services.households.get = async (id) => {
+    const h = await loadHousehold(id);
+    for (const [key, value] of Object.entries(keys) as [SecretKey, string][]) if (!h.settingsStore.hasSecret(key)) await h.settingsStore.setSecret(key, value);
+    return h;
+  };
   const app = createApp(services);
   /** `ip` simulates the client address (otherwise the request has none, i.e. not local). */
   const request = async (path: string, init: RequestInit & { json?: unknown; token?: string; ip?: string } = {}) => {
@@ -108,12 +127,26 @@ export async function startTestServer(fetchImpl: typeof fetch = fakeTmdb): Promi
     const env = init.ip ? { requestIP: () => ({ address: init.ip! }) } : {};
     return app.fetch(new Request(`http://test${path}`, { ...init, headers, body: bodyInit }), env);
   };
-  return { services, request, dataDir };
+  const household = async () => services.households.get((await services.householdIds())[0]!);
+  return { services, household, request, dataDir };
 }
 
-/** Generates small real media files with ffmpeg (cached between runs). */
+/**
+ * ffmpeg and ffprobe on PATH. Tests that make, probe or stream real media need both, and are
+ * skipped (with a warning) where they aren't installed; CI installs them, so it runs them all.
+ */
+export const hasFfmpeg = !!Bun.which("ffmpeg") && !!Bun.which("ffprobe");
+/** For `test.skipIf(noFfmpeg)`. */
+export const noFfmpeg = !hasFfmpeg;
+if (noFfmpeg) console.warn("ffmpeg/ffprobe not on PATH: skipping the tests that need real media. Install ffmpeg to run them.");
+
+/**
+ * Generates small real media files with ffmpeg (cached between runs). Without ffmpeg, the
+ * same names hold placeholder bytes (in their own folder, so they never stand in for real
+ * fixtures): enough for scanning and naming, not for anything that probes or plays them.
+ */
 export async function makeFixtures(): Promise<string> {
-  const root = join(tmpdir(), "strata-fixtures-v2");
+  const root = join(tmpdir(), hasFfmpeg ? "strata-fixtures-v2" : "strata-fixtures-v2-placeholders");
   mkdirSync(root, { recursive: true });
   const srt = join(root, "subs.srt");
   if (!existsSync(srt)) await Bun.write(srt, "1\n00:00:01,000 --> 00:00:04,000\nHello from Strata\n\n2\n00:00:20,000 --> 00:00:22,500\nSecond line\n");
@@ -129,6 +162,10 @@ export async function makeFixtures(): Promise<string> {
     const out = join(root, rel);
     if (existsSync(out)) continue;
     mkdirSync(join(out, ".."), { recursive: true });
+    if (noFfmpeg) {
+      await Bun.write(out, "placeholder: no ffmpeg to make real media\n");
+      continue;
+    }
     const proc = Bun.spawn(
       ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24:duration=30", "-f", "lavfi", "-i", "sine=frequency=440:duration=30", ...codec, out],
       { stderr: "pipe" },
@@ -138,4 +175,11 @@ export async function makeFixtures(): Promise<string> {
   const sidecar = join(root, "Movies/Big Buck Bunny (2008)/Big.Buck.Bunny.2008.1080p.BluRay.x264.en.forced.srt");
   if (!existsSync(sidecar)) await Bun.write(sidecar, "1\n00:00:02,000 --> 00:00:03,000\nForced sidecar\n");
   return root;
+}
+
+/** Runs first-run setup (as the server's own machine): the admin's token and their household. */
+export async function setUp(server: TestServer, username = "admin", password = "test-password") {
+  const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username, password } });
+  const { token } = (await res.json()) as { token: string };
+  return { token, household: await server.household() };
 }

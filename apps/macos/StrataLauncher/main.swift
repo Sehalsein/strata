@@ -140,11 +140,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // The server stops itself if this app disappears without stopping it (crash, force quit).
         env["STRATA_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         env["STRATA_LAUNCH_SECRET"] = launchSecret
-        let ffmpegDir = bundle.appendingPathComponent("Contents/Resources/ffmpeg")
-        if FileManager.default.fileExists(atPath: ffmpegDir.appendingPathComponent("ffmpeg").path) {
-            env["STRATA_FFMPEG"] = ffmpegDir.appendingPathComponent("ffmpeg").path
-            env["STRATA_FFPROBE"] = ffmpegDir.appendingPathComponent("ffprobe").path
-        }
         process.environment = env
 
         try FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -280,7 +275,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 setState("Couldn't verify the server on port \(port). Choose Restart Server.", running: false)
                 return
             }
-            NSWorkspace.shared.open(URL(string: "settings?checkUpdate=1#updates", relativeTo: dashboardURL)!.absoluteURL)
+            NSWorkspace.shared.open(URL(string: "backoffice/settings?checkUpdate=1#updates", relativeTo: dashboardURL)!.absoluteURL)
         }
     }
 

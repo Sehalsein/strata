@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { CalendarService } from "../src/catalog/calendar";
-import { AnimeIds } from "../src/catalog/anime/ids";
+import { AnimeIds, fileAnimeIdStore } from "../src/catalog/anime/ids";
 import type { Anilist, AiringEpisode } from "../src/catalog/anime/anilist";
 import type { Tmdb, TmdbSeason, TmdbShow } from "../src/catalog/tmdb";
 
@@ -28,7 +28,7 @@ const tmdb = {
 } as unknown as Tmdb;
 
 function service(watchlist: number[], airing: AiringEpisode[], inLibrary: string[] = [], allowed: (id: number) => boolean = () => true) {
-  const ids = new AnimeIds("/nonexistent");
+  const ids = new AnimeIds(fileAnimeIdStore("/nonexistent"));
   // Frieren S2 (AniList 182255) is TMDB S1 from episode 29.
   ids.index([
     { type: "TV", anilist_id: 154587, themoviedb_id: { tv: 209867 }, season: { tmdb: 1 } },
@@ -49,7 +49,7 @@ describe("calendar", () => {
       { mediaId: 182255, episode: 3, airingAt: at("2026-10-31T15:00:00Z") },
       { mediaId: 182255, episode: 4, airingAt: at("2026-11-07T15:00:00Z") },
     ], ["1:2:2"]);
-    const items = await calendar.episodes(1, NOW);
+    const items = await calendar.episodes("u1", NOW);
     // Episode 1 (Oct 20) is more than a week ago, episode 4 (Dec 30) more than a month ahead.
     expect(items.map((i) => [i.title, i.season, i.episode, i.airDate, i.airsAt])).toEqual([
       ["Frieren", 1, 30, "2026-10-24", "2026-10-24T15:00:00.000Z"],
@@ -67,13 +67,13 @@ describe("calendar", () => {
 
   test("shows above the profile's content limit stay off its calendar, without being looked up", async () => {
     const { calendar, asked } = service([1, 209867], [{ mediaId: 182255, episode: 3, airingAt: at("2026-10-31T15:00:00Z") }], [], (id) => id !== 209867);
-    const items = await calendar.episodes(1, NOW);
+    const items = await calendar.episodes("u1", NOW);
     expect(new Set(items.map((i) => i.title))).toEqual(new Set(["The Drama"]));
     expect(asked).toEqual([]);
   });
 
   test("an empty list, or shows TMDB can't find, make an empty calendar", async () => {
-    expect(await service([], []).calendar.episodes(1, NOW)).toEqual([]);
-    expect(await service([404], []).calendar.episodes(1, NOW)).toEqual([]);
+    expect(await service([], []).calendar.episodes("u1", NOW)).toEqual([]);
+    expect(await service([404], []).calendar.episodes("u1", NOW)).toEqual([]);
   });
 });

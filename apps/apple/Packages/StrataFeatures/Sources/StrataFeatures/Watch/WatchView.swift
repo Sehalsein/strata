@@ -14,6 +14,8 @@ struct WatchView: View {
     @State private var chromeVisible = true
     @State private var hideTask: Task<Void, Never>?
     @State private var showDetails = false
+    /// "Choose Source" after a source failed to play.
+    @State private var showSources = false
     @State private var upNextDismissed = false
     @State private var pip = PiPController()
     #if os(tvOS)
@@ -25,7 +27,7 @@ struct WatchView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            PlayerSurface(player: engine.player, gravity: engine.videoGravity, pip: pip)
+            PlayerSurface(engine: engine, pip: pip)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
@@ -59,6 +61,13 @@ struct WatchView: View {
             }
             #endif
 
+            #if os(iOS)
+            // Space, arrows, J/L, M and C with a hardware keyboard (iPad).
+            PlayerKeyCommands(engine: engine, onToggleCaptions: toggleCaptions,
+                              onToggleFullscreen: { engine.toggleVideoGravity() },
+                              onTogglePiP: { if pip.isAvailable { pip.toggle() } })
+            #endif
+
             SubtitleOverlay(engine: engine, raised: chromeVisible)
 
             stateOverlay
@@ -67,7 +76,9 @@ struct WatchView: View {
             if chromeVisible, !showsStateCard {
                 PlayerChrome(engine: engine, onClose: close, onDetails: { showDetails = true },
                              onPiP: pip.isAvailable ? { pip.toggle() } : nil,
-                             onInteraction: { scheduleHide(after: 8) })
+                             onInteraction: { scheduleHide(after: 8) },
+                             // Held up while scrubbing: hiding would drop the scrub.
+                             onScrubbing: { scrubbing in if scrubbing { hideTask?.cancel() } else { scheduleHide(after: 8) } })
                     .transition(.opacity)
             }
 
@@ -98,17 +109,25 @@ struct WatchView: View {
         .onExitCommand {
             if chromeVisible { chromeVisible = false } else { close() }
         }
-        .onMoveCommand { _ in if !chromeVisible { showChrome() } }
+        // Moving around the controls counts as using them: keep them up a while longer.
+        .onMoveCommand { _ in if chromeVisible { scheduleHide(after: 8) } else { showChrome() } }
         #endif
+        .sheet(isPresented: $showSources) {
+            let target = engine.target ?? request.target
+            let meta = engine.meta ?? request.meta
+            SourcePickerSheet(target: target, title: meta.title) { candidate in
+                Task { await engine.load(target: target, meta: meta, candidateId: candidate.id, startMs: request.startMs) }
+            }
+        }
         .sheet(isPresented: $showDetails) {
-            StreamDetailsPanel(session: engine.session).presentationDetents([.medium])
+            StreamDetailsPanel(session: engine.session, bytesRead: engine.remuxStats?.bytesFetched).presentationDetents([.medium])
         }
         #if os(iOS)
         .onAppear { PlayerOrientation.enterPlayer() }
         #endif
         .task {
             if let client = services.client { engine.configure(client: client) }
-            await engine.load(target: request.target, meta: request.meta, candidateId: request.candidateId, startMs: request.startMs)
+            await start()
             scheduleHide()
         }
         .onChange(of: engine.status) { _, status in
@@ -124,7 +143,7 @@ struct WatchView: View {
             hideTask?.cancel()
             Task {
                 await engine.unload()
-                await services.progressChanged()
+                await services.titles.progressSaved()
             }
         }
     }
@@ -172,7 +191,11 @@ struct WatchView: View {
                 GlassEffectContainer(spacing: Metrics.space2) {
                     HStack(spacing: Metrics.space2) {
                         PlayButton("Try Again", systemImage: "arrow.clockwise") {
-                            Task { await engine.load(target: request.target, meta: request.meta, candidateId: request.candidateId, startMs: request.startMs) }
+                            Task { await start() }
+                        }
+                        // The message often says to pick another source: offer the list here.
+                        if request.downloadID == nil {
+                            GlassButton("Choose Source", systemImage: "rectangle.stack") { showSources = true }
                         }
                         GlassButton("Close", action: close)
                     }
@@ -183,6 +206,20 @@ struct WatchView: View {
         default:
             EmptyView()
         }
+    }
+
+    /// Streams the title, or plays its download from the device.
+    private func start() async {
+        #if os(iOS)
+        if let id = request.downloadID {
+            let downloads = DownloadStore.shared
+            guard let item = downloads.item(id: id), let file = downloads.fileURL(for: item) else { close(); return }
+            await engine.load(offline: item.playResponse(fileURL: file, resumeMs: request.startMs ?? item.positionMs),
+                              target: request.target, meta: request.meta)
+            return
+        }
+        #endif
+        await engine.load(target: request.target, meta: request.meta, candidateId: request.candidateId, startMs: request.startMs)
     }
 
     private func playNext() {
@@ -196,6 +233,12 @@ struct WatchView: View {
         hideTask?.cancel()
         services.watching = nil
         dismiss()
+    }
+
+    /// C: off, or on with the first text track.
+    private func toggleCaptions() {
+        let track = engine.captionsEnabled ? nil : engine.subtitleTracks.first(where: \.isTextBased)
+        Task { await engine.selectSubtitle(track) }
     }
 
     private func toggleChrome() {
@@ -218,16 +261,18 @@ struct WatchView: View {
 }
 
 /// The video layer, with Picture in Picture attached once it's on screen.
+/// On Apple TV it also asks the TV to match the video's frame rate and dynamic range.
 private struct PlayerSurface: View {
-    let player: AVPlayer
-    let gravity: AVLayerVideoGravity
+    let engine: PlayerEngine
     let pip: PiPController
 
     var body: some View {
         #if os(iOS)
-        AVPlayerContainer(player: player, gravity: gravity) { layer in pip.attach(playerLayer: layer) }
+        AVPlayerContainer(player: engine.player, gravity: engine.videoGravity) { layer in pip.attach(playerLayer: layer) }
+        #elseif os(tvOS)
+        AVPlayerContainer(player: engine.player, gravity: engine.videoGravity).matchingDisplay(engine.displayCriteria)
         #else
-        AVPlayerContainer(player: player, gravity: gravity)
+        AVPlayerContainer(player: engine.player, gravity: engine.videoGravity)
         #endif
     }
 }
