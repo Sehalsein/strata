@@ -44,10 +44,11 @@ public enum ServerAddress {
         return [https, url]
     }
 
-    /// On this device or the local network: a private, link-local or loopback address, or
-    /// a `.local` or one-word name. Plain HTTP is expected there. Addresses are parsed, not
-    /// pattern-matched, so "10.1.2.3.example.com" isn't one; carrier-NAT space (100.64/10)
-    /// isn't local either, as other customers share it.
+    /// Certainly on this device or the local network: a private, link-local or loopback
+    /// address, or `localhost`. Addresses are parsed, not pattern-matched, so
+    /// "10.1.2.3.example.com" isn't one; carrier-NAT space (100.64/10) isn't either, as other
+    /// customers share it. Names aren't: a one-word name can be completed by the network's
+    /// search domain, and a `.local` one answered by anyone on the network.
     public static func isLocal(_ url: URL) -> Bool {
         guard var host = url.host()?.lowercased() else { return false }
         if host.hasPrefix("["), host.hasSuffix("]") { host = String(host.dropFirst().dropLast()) }
@@ -59,8 +60,7 @@ public enum ServerAddress {
             let b = [UInt8](v6.rawValue)
             return v6 == .loopback || (b[0] == 0xfe && b[1] & 0xc0 == 0x80) || b[0] & 0xfe == 0xfc // link-local, unique local
         }
-        // A name: this device, mDNS, or a one-word LAN name (an address can't be one).
-        return host == "localhost" || host.hasSuffix(".local") || !host.contains(".") && !host.contains(":")
+        return host == "localhost"
     }
 
     private static func isIPAddress(_ host: String) -> Bool {
