@@ -207,10 +207,18 @@ describe("content limits for AniList titles", () => {
   };
   const allowed = (maxAge: number, text: string) => filter(maxAge).allowed("u", ref(text) as TitleRef);
 
-  test("Kitsu's rating decides: PG fits a 7+ limit, R doesn't fit 13", async () => {
-    expect(await allowed(7, "anilist:show:154587")).toBe(true);
+  test("Kitsu's rating decides: PG (which takes in PG-13) fits 13, not 10; R needs 17", async () => {
+    expect(await allowed(13, "anilist:show:154587")).toBe(true);
+    expect(await allowed(10, "anilist:show:154587")).toBe(false);
     expect(await allowed(14, "anilist:show:777")).toBe(false);
     expect(await allowed(17, "anilist:show:777")).toBe(true);
+  });
+
+  test("when Kitsu can't answer, the title stays hidden under a limit (not TMDB's milder rating)", async () => {
+    const down = { ageRating: async () => Promise.reject(new Error("Kitsu down")) } as unknown as Kitsu;
+    const content = new ContentFilter({} as never, "org", tmdb, settings, { ids: ids(), kitsu: down });
+    content.maxAge = async () => 17;
+    expect(await content.allowed("u", ref("anilist:show:154587"))).toBe(false);
   });
 
   test("without a Kitsu id, TMDB's certification for the mapped title", async () => {
@@ -225,7 +233,8 @@ describe("content limits for AniList titles", () => {
 
   test("cards are filtered the same way", async () => {
     const cards = ["anilist:show:154587", "anilist:show:777", "anilist:show:999", "anilist:show:555"].map((r) => ({ ref: r }));
-    expect((await filter(10).filter("u", cards)).map((c) => c.ref)).toEqual(["anilist:show:154587", "anilist:show:555"]);
+    expect((await filter(13).filter("u", cards)).map((c) => c.ref)).toEqual(["anilist:show:154587", "anilist:show:555"]);
+    expect((await filter(10).filter("u", cards)).map((c) => c.ref)).toEqual(["anilist:show:555"]);
   });
 });
 

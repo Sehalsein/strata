@@ -90,10 +90,10 @@ async function tmdbRating(tmdb: Tmdb, type: TitleRef["type"], tmdbId: number, re
 }
 
 /**
- * Kitsu's age ratings, as the youngest age each allows (Kitsu's PG is "Children").
- * R18 is adult content: it never fits a limit.
+ * Kitsu's age ratings, as the youngest age each allows. Kitsu has no PG-13: its PG covers
+ * what MAL rates PG-13 too, so it counts as 13. R18 is adult content: it never fits a limit.
  */
-const KITSU_AGES: Record<string, number> = { G: 0, PG: 7, R: 17, R18: UNRECOGNISED };
+const KITSU_AGES: Record<string, number> = { G: 0, PG: 13, R: 17, R18: UNRECOGNISED };
 
 export interface AnimeRatingSources {
   ids: AnimeIds;
@@ -111,18 +111,16 @@ export async function animeRating(type: TitleRef["type"], anilistId: number, src
   await src.ids.ready().catch(() => {});
   const entry = src.ids.anilist(anilistId);
   if (!entry) return none;
-  let kitsuFailed: unknown;
   if (entry.kitsuId && src.kitsu) {
-    // Kitsu unreachable: TMDB's rating, if there is one, will do.
-    const rating = await src.kitsu.ageRating(entry.kitsuId).catch((err) => ((kitsuFailed = err), null));
+    // Kitsu unreachable: thrown, not answered from TMDB (often missing or milder for
+    // anime), so the title stays hidden under a limit and isn't remembered as rated.
+    const rating = await src.kitsu.ageRating(entry.kitsuId);
     if (rating) return { certification: rating, age: KITSU_AGES[rating.toUpperCase()] ?? UNRECOGNISED };
   }
   // Fribb sometimes maps a film to a TMDB show (or a special to a film): either will do.
   const tmdb: [TitleRef["type"], number | undefined] =
     type === "movie" ? (entry.tmdbMovie ? ["movie", entry.tmdbMovie] : ["show", entry.tmdbTv]) : entry.tmdbTv ? ["show", entry.tmdbTv] : ["movie", entry.tmdbMovie];
   const { certification } = tmdb[1] ? await tmdbRating(src.tmdb, tmdb[0], tmdb[1], src.region) : { certification: null };
-  // Not knowing because Kitsu failed isn't "unrated": thrown, so it isn't remembered.
-  if (!certification && kitsuFailed) throw kitsuFailed;
   return { certification, age: certification ? certificationAge(certification, src.region) : null };
 }
 
