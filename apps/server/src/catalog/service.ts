@@ -68,6 +68,18 @@ export interface ProgressDto {
 
 const progressDto = (row?: ProgressRow): ProgressDto | null => (row ? { positionMs: row.positionMs, durationMs: row.durationMs, completed: row.completed } : null);
 
+const PROFILE_SHELVES_TTL_MS = 60 * 60 * 1000;
+
+/** A Home rail that fails is left out rather than failing the page. */
+async function homeSafe<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (err) {
+    log.warn(`Home shelf ${label} failed`, err);
+    return null;
+  }
+}
+
 export class CatalogService {
   constructor(
     private readonly tmdb: Tmdb,
@@ -107,16 +119,47 @@ export class CatalogService {
     };
   }
 
+  /** Home in one answer, for apps that don't ask for its two parts: the hero, the profile's rails, then the catalog's. */
   async home(profileId: number): Promise<Shelf[]> {
+    const [catalog, mine] = await Promise.all([this.homeCatalog(), this.homeProfile(profileId)]);
+    const featured = catalog.filter((s) => s.id === "featured");
+    return [...featured, ...mine, ...catalog.filter((s) => s.id !== "featured")];
+  }
+
+  private readonly profileShelves = new Map<number, { revision: number; at: number; shelves: Promise<Shelf[]> }>();
+
+  /**
+   * Continue Watching, Next Up and My List. Kept per profile until its progress or list
+   * changes (the apps ask on every visit), and an hour at most: Next Up moves when a new
+   * episode airs.
+   */
+  homeProfile(profileId: number): Promise<Shelf[]> {
+    const revision = this.progress.revision(profileId);
+    const kept = this.profileShelves.get(profileId);
+    if (kept && kept.revision === revision && Date.now() - kept.at < PROFILE_SHELVES_TTL_MS) return kept.shelves;
+    const shelves = this.buildHomeProfile(profileId);
+    this.profileShelves.set(profileId, { revision, at: Date.now(), shelves });
+    shelves.catch(() => this.profileShelves.delete(profileId));
+    return shelves;
+  }
+
+  private async buildHomeProfile(profileId: number): Promise<Shelf[]> {
+    const [cont, nextUp, watchlist] = await Promise.all([
+      homeSafe("continue", () => this.continueWatching(profileId)),
+      homeSafe("nextUp", () => this.nextUp(profileId)),
+      homeSafe("watchlist", () => this.watchlist(profileId)),
+    ]);
     const shelves: Shelf[] = [];
-    const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
-      try {
-        return await fn();
-      } catch (err) {
-        log.warn(`Home shelf ${label} failed`, err);
-        return null;
-      }
-    };
+    if (cont?.length) shelves.push({ id: "continue", title: "Continue Watching", kind: "continue", items: cont });
+    if (nextUp?.length) shelves.push({ id: "nextUp", title: "Next Up", kind: "continue", items: nextUp });
+    if (watchlist?.length) shelves.push({ id: "watchlist", title: "My List", kind: "titles", items: watchlist });
+    return shelves;
+  }
+
+  /** Home's rails that are the same for everyone: the hero, recently added and trending. */
+  async homeCatalog(): Promise<Shelf[]> {
+    const shelves: Shelf[] = [];
+    const safe = homeSafe;
 
     // Anime gets rails of its own on Home: it's left out of the movie and show rails.
     // Usually instant (the list is cached); never hold Home up for long on a slow load.
@@ -125,10 +168,7 @@ export class CatalogService {
     clearTimeout(timer);
     const isAnimeShow = (i: TmdbListItem) => this.isAnimeItem("show", i);
     const isAnimeFilm = (i: TmdbListItem) => this.isAnimeItem("movie", i);
-    const [cont, nextUp, watchlist, trendingMovieList, trendingShows, trendingAnimeShows] = await Promise.all([
-      safe("continue", () => this.continueWatching(profileId)),
-      safe("nextUp", () => this.nextUp(profileId)),
-      safe("watchlist", () => this.watchlist(profileId)),
+    const [trendingMovieList, trendingShows, trendingAnimeShows] = await Promise.all([
       safe("trendingMovies", async () => (await this.tmdb.trending("movie")).results),
       safe("trendingShows", async () => this.cards((await this.tmdb.trending("tv")).results.filter((i) => !isAnimeShow(i)), "show")),
       safe("trendingAnime", () => this.trendingThisWeek("show", isAnimeShow, ANIME_DISCOVER)),
@@ -156,9 +196,6 @@ export class CatalogService {
       ]),
     );
     if (featured?.length) shelves.push({ id: "featured", title: "Featured", kind: "titles", items: featured });
-    if (cont?.length) shelves.push({ id: "continue", title: "Continue Watching", kind: "continue", items: cont });
-    if (nextUp?.length) shelves.push({ id: "nextUp", title: "Next Up", kind: "continue", items: nextUp });
-    if (watchlist?.length) shelves.push({ id: "watchlist", title: "My List", kind: "titles", items: watchlist });
     if (recentMovies.length) shelves.push({ id: "recentMovies", title: "Recently Added Movies", kind: "titles", items: recentMovies });
     if (recentShows.length) shelves.push({ id: "recentShows", title: "Recently Added Shows", kind: "titles", items: recentShows });
     if (recentAnime.length) shelves.push({ id: "recentAnime", title: "Recently Added Anime", kind: "titles", items: recentAnime });

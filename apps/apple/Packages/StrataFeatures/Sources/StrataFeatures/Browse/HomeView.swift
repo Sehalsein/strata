@@ -5,7 +5,16 @@ import StrataPlayerUI
 
 struct HomeView: View {
     @Environment(AppServices.self) private var services
-    @State private var shelves: Loadable<[Shelf]> = .loading
+    /// The rails that are the same for everyone, kept on this device (see `loadCached`).
+    @State private var catalog: Loadable<[Shelf]> = .loading
+    /// Continue Watching, Next Up and My List: asked for on every visit, never kept.
+    @State private var mine: [Shelf] = []
+
+    /// The hero, then the profile's rails, then the catalog's.
+    private var shelves: Loadable<[Shelf]> {
+        guard case .loaded(let list) = catalog else { return catalog }
+        return .loaded(list.filter { $0.id == "featured" } + mine + list.filter { $0.id != "featured" })
+    }
 
     var body: some View {
         ScrollView {
@@ -64,7 +73,7 @@ struct HomeView: View {
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
         .task { await load(force: false) }
-        .onChange(of: services.progressRevision) { Task { await load(force: false) } }
+        .onChange(of: services.progressRevision) { Task { await loadMine() } }
     }
 
     private var hasHero: Bool {
@@ -76,10 +85,13 @@ struct HomeView: View {
     }
 
     private func load(force: Bool) async {
-        if force { await services.client?.clearCache() }
-        let result = await services.load { try await $0.home() }
-        if case .loading = result { return }
-        shelves = result
+        async let profile: Void = loadMine()
+        await services.loadCached(force: force, { try await $0.homeCatalog($1) }) { catalog = $0 }
+        await profile
+    }
+
+    private func loadMine() async {
+        if let list = await services.load({ try await $0.homeProfile() }).value { mine = list }
     }
 }
 

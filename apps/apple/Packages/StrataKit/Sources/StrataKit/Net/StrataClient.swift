@@ -119,9 +119,33 @@ public final class StrataClient: Sendable {
 
     // MARK: - Catalog
 
-    public func home(_ policy: CachePolicy = .fresh) async throws -> [Shelf] {
-        let res: ShelvesResponse = try await get("/api/home", policy: policy)
+    /// Home in one answer (the hero, the profile's rails, then the catalog's). Not kept.
+    public func home() async throws -> [Shelf] {
+        let res: ShelvesResponse = try await get("/api/home", cached: false)
         return res.shelves
+    }
+
+    /// Home's rails that are the same for everyone: the hero, recently added, trending.
+    /// A server from before Home came in parts answers with all of Home.
+    public func homeCatalog(_ policy: CachePolicy = .fresh) async throws -> [Shelf] {
+        do {
+            let res: ShelvesResponse = try await get("/api/home/catalog", policy: policy)
+            return res.shelves
+        } catch let error as StrataError where error.isNotFound {
+            return try await home()
+        }
+    }
+
+    /// Continue Watching, Next Up and My List. Never kept here: they change as the profile
+    /// watches (on any device), so the server keeps them until they do. Empty from a server
+    /// from before Home came in parts (its `homeCatalog` has them).
+    public func homeProfile() async throws -> [Shelf] {
+        do {
+            let res: ShelvesResponse = try await get("/api/home/profile", cached: false)
+            return res.shelves
+        } catch let error as StrataError where error.isNotFound {
+            return []
+        }
     }
 
     public func browse(_ type: TitleType, list: BrowseList, _ policy: CachePolicy = .fresh) async throws -> [TitleCard] {
@@ -226,26 +250,25 @@ public final class StrataClient: Sendable {
         let body = ProgressBody(mediaType: target.mediaType, tmdbId: target.tmdbId, season: target.season, episode: target.episode,
                                 positionMs: max(0, positionMs), durationMs: max(0, durationMs), sessionId: sessionId)
         let res: WatchProgress = try await send("POST", "/api/progress", body: body)
-        await cache.remove(["/api/home", Self.titlePath(target.titleType, target.tmdbId)])
+        await cache.remove([Self.titlePath(target.titleType, target.tmdbId)])
         return res
     }
 
     public func setWatched(_ target: PlaybackTarget, _ watched: Bool) async throws {
         let body = WatchedBody(mediaType: target.mediaType, tmdbId: target.tmdbId, season: target.season, episode: target.episode, watched: watched)
         let _: OKResponse = try await send("POST", "/api/watched", body: body)
-        await cache.remove(["/api/home", Self.titlePath(target.titleType, target.tmdbId)])
+        await cache.remove([Self.titlePath(target.titleType, target.tmdbId)])
     }
 
     /// Takes a title off Continue Watching and Next Up (until it's watched again); its
     /// progress is kept.
     public func hideFromContinue(_ type: TitleType, tmdbId: Int) async throws {
         let _: OKResponse = try await send("DELETE", "/api/continue/\(type.rawValue)/\(tmdbId)")
-        await cache.remove(["/api/home"])
     }
 
     public func setWatchlist(_ type: TitleType, tmdbId: Int, _ on: Bool) async throws {
         let _: OKResponse = try await send("PUT", "/api/watchlist", body: WatchlistBody(type: type, tmdbId: tmdbId, on: on))
-        await cache.remove(["/api/home", "/api/calendar", Self.titlePath(type, tmdbId)])
+        await cache.remove(["/api/calendar", Self.titlePath(type, tmdbId)])
     }
 
     /// Fetches a WebVTT track. The server extracts embedded tracks on demand and answers

@@ -188,17 +188,87 @@ final class ClientTests: XCTestCase {
     func testCacheAndClear() async throws {
         StubProtocol.reset { _ in .fixture("home") }
         let c = client(ttl: 60)
-        _ = try await c.home()
-        _ = try await c.home()
+        _ = try await c.homeCatalog()
+        _ = try await c.homeCatalog()
         XCTAssertEqual(StubProtocol.recorded.count, 1)
+        XCTAssertEqual(StubProtocol.recorded[0].cachePolicy, .reloadIgnoringLocalCacheData)
         await c.clearCache()
-        _ = try await c.home()
+        _ = try await c.homeCatalog()
         XCTAssertEqual(StubProtocol.recorded.count, 2)
-        // Mutations invalidate.
-        StubProtocol.reset { req in req.url?.path == "/api/watchlist" ? .json(200, ["ok": true]) : .fixture("home") }
+        // The profile's rails are never kept.
+        _ = try await c.homeProfile()
+        _ = try await c.homeProfile()
+        XCTAssertEqual(StubProtocol.recorded.count, 4)
+        // Mutations drop what they change, and nothing else.
+        StubProtocol.reset { req in
+            switch req.url?.path {
+            case "/api/watchlist": .json(200, ["ok": true])
+            case "/api/calendar": .json(200, ["items": []])
+            default: .fixture("home")
+            }
+        }
+        _ = try await c.calendar()
         try await c.setWatchlist(.movie, tmdbId: 1, false)
-        _ = try await c.home()
-        XCTAssertEqual(StubProtocol.recorded.map(\.url!.path), ["/api/watchlist", "/api/home"])
+        _ = try await c.homeCatalog()
+        _ = try await c.calendar()
+        XCTAssertEqual(StubProtocol.recorded.map(\.url!.path), ["/api/calendar", "/api/watchlist", "/api/calendar"])
+    }
+
+    func testHomeFromAServerWithoutParts() async throws {
+        StubProtocol.reset { req in req.url?.path == "/api/home" ? .fixture("home") : .json(404, ["error": "Not found"]) }
+        let c = client(ttl: 60)
+        let catalog = try await c.homeCatalog()
+        let mine = try await c.homeProfile()
+        XCTAssertFalse(catalog.isEmpty)
+        XCTAssertTrue(mine.isEmpty)
+    }
+
+    func testServerMaxAgeAndStaleWhileRevalidate() async throws {
+        var maxAge = "0"
+        StubProtocol.reset { _ in
+            var reply = StubProtocol.Reply.fixture("home")
+            reply.headers["Cache-Control"] = "private, max-age=\(maxAge), stale-while-revalidate=604800"
+            return reply
+        }
+        let c = client(ttl: 60)
+        // Nothing kept yet.
+        do { _ = try await c.homeCatalog(.cachedOnly); XCTFail("expected notCached") } catch let e as StrataError { XCTAssertEqual(e.kind, .notCached) }
+        XCTAssertEqual(StubProtocol.recorded.count, 0)
+        // max-age=0 overrides the client's 60s: kept, but stale at once.
+        _ = try await c.homeCatalog()
+        _ = try await c.homeCatalog(.cachedOnly)
+        _ = try await c.homeCatalog()
+        XCTAssertEqual(StubProtocol.recorded.count, 2)
+        // A day's max-age: fresh until a reload asks anyway.
+        maxAge = "86400"
+        _ = try await c.homeCatalog(.reload)
+        _ = try await c.homeCatalog()
+        XCTAssertEqual(StubProtocol.recorded.count, 3)
+        _ = try await c.homeCatalog(.reload)
+        XCTAssertEqual(StubProtocol.recorded.count, 4)
+    }
+
+    func testPersistentCacheSurvivesANewClientAndTitlesDropTheirSeasons() async throws {
+        StubProtocol.reset { req in
+            if req.url?.path == "/api/progress" { return .json(200, ["positionMs": 1, "durationMs": 2, "completed": false]) }
+            var reply = StubProtocol.Reply.fixture(req.url!.path.contains("seasons") ? "season" : "show")
+            reply.headers["Cache-Control"] = "private, max-age=86400"
+            return reply
+        }
+        let token = "disk-\(UUID().uuidString)"
+        func make() -> StrataClient { StrataClient(baseURL: base, token: token, session: StubProtocol.session(), persistent: true) }
+        let first = make()
+        defer { Task { await first.clearCache() } }
+        _ = try await first.show(9001)
+        _ = try await first.season(show: 9001, 1)
+        _ = try await make().show(9001)
+        _ = try await make().season(show: 9001, 1)
+        XCTAssertEqual(StubProtocol.recorded.count, 2)
+
+        try await first.reportProgress(.episode(show: 9001, season: 1, episode: 2), positionMs: 1, durationMs: 2)
+        _ = try await make().show(9001)
+        _ = try await make().season(show: 9001, 1)
+        XCTAssertEqual(StubProtocol.recorded.map(\.url!.path).suffix(3), ["/api/progress", "/api/titles/show/9001", "/api/titles/show/9001/seasons/1"])
     }
 
     func testSubtitlesRetryOn202() async throws {

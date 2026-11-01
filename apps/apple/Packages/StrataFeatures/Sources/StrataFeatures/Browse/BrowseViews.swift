@@ -291,9 +291,6 @@ struct MyListView: View {
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
         .navigationTitle("My List")
-        .task {
-            await services.client?.clearCache()
-            items = await services.load { try await $0.home().first { $0.id == "watchlist" }?.items ?? [] }
-        }
+        .task { items = await services.load { try await $0.homeProfile().first { $0.id == "watchlist" }?.items ?? [] } }
     }
 }

@@ -36,9 +36,21 @@ export interface ProgressKey {
 }
 
 export class ProgressStore {
+  private readonly revisions = new Map<number, number>();
+
   constructor(private readonly db: Db) {}
 
+  /** Bumped by every change to a profile's progress, hidden titles or list (for caches). */
+  revision(profileId: number): number {
+    return this.revisions.get(profileId) ?? 0;
+  }
+
+  private changed(profileId: number) {
+    this.revisions.set(profileId, this.revision(profileId) + 1);
+  }
+
   record(profileId: number, key: ProgressKey, positionMs: number, durationMs: number): ProgressRow {
+    this.changed(profileId);
     const completed = isComplete(positionMs, durationMs);
     const values = {
       profileId,
@@ -64,6 +76,7 @@ export class ProgressStore {
 
   setWatched(profileId: number, key: ProgressKey, watched: boolean) {
     const where = this.where(profileId, key);
+    this.changed(profileId);
     if (!watched) {
       this.db.delete(progress).where(where).run();
       return;
@@ -89,6 +102,7 @@ export class ProgressStore {
   /** Partially watched items, most recent first. */
   /** Takes a title off Continue Watching and Next Up, keeping its progress. */
   hideFromContinue(profileId: number, type: "movie" | "show", tmdbId: number) {
+    this.changed(profileId);
     const hiddenAt = Date.now();
     this.db.insert(continueHidden).values({ profileId, type, tmdbId, hiddenAt }).onConflictDoUpdate({ target: [continueHidden.profileId, continueHidden.type, continueHidden.tmdbId], set: { hiddenAt } }).run();
   }
@@ -150,6 +164,7 @@ export class ProgressStore {
   }
 
   setWatchlist(profileId: number, type: "movie" | "show", tmdbId: number, on: boolean) {
+    this.changed(profileId);
     if (on) this.db.insert(watchlist).values({ profileId, type, tmdbId }).onConflictDoNothing().run();
     else this.db.delete(watchlist).where(and(eq(watchlist.profileId, profileId), eq(watchlist.type, type), eq(watchlist.tmdbId, tmdbId))).run();
   }

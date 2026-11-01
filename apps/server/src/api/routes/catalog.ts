@@ -26,13 +26,20 @@ async function allowedShelves(c: Context<Env>, shelves: Shelf[]): Promise<Shelf[
 
 // How long the apps keep each answer (see cacheFor). Catalog lists and title pages barely
 // change; the calendar follows the profile's list, which the apps drop themselves when they
-// change it. Home isn't kept: it has the profile's own rails.
+// change it. Home's own rails (Continue Watching, My List) aren't kept by the apps at all:
+// the server keeps them until they change.
 const TTL = { catalog: DAY, title: DAY, calendar: 6 * HOUR, search: HOUR } as const;
 
 export const catalogRoutes = new Hono<Env>()
   .use(requireAuth)
 
+  // Both parts at once, for apps that don't ask for them separately.
   .get("/home", async (c) => c.json({ shelves: await allowedShelves(c, await c.var.services.catalog.home(profileOf(c))) }))
+  .get("/home/catalog", cacheFor(TTL.catalog), async (c) => c.json({ shelves: await allowedShelves(c, await c.var.services.catalog.homeCatalog()) }))
+  .get("/home/profile", async (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json({ shelves: await allowedShelves(c, await c.var.services.catalog.homeProfile(profileOf(c))) });
+  })
 
   .get("/genres/:type", cacheFor(TTL.catalog), async (c) => {
     const type = z.enum(["movie", "show"]).parse(c.req.param("type"));

@@ -189,6 +189,8 @@ describe("library", () => {
   test("catalog answers say how long the apps may keep them; errors and the rest don't", async () => {
     const cacheControl = async (path: string) => (await server.request(path, { token })).headers.get("cache-control");
     expect(await cacheControl("/api/genres/movie")).toBe("private, max-age=86400, stale-while-revalidate=604800");
+    expect(await cacheControl("/api/home/catalog")).toBe("private, max-age=86400, stale-while-revalidate=604800");
+    expect(await cacheControl("/api/home/profile")).toBe("no-store");
     expect(await cacheControl("/api/home")).toBeNull();
     expect(await cacheControl("/api/genres/nope")).toBeNull();
     expect(await cacheControl("/api/me")).toBeNull();
@@ -246,9 +248,9 @@ describe("playback", () => {
     expect((await res.arrayBuffer()).byteLength).toBe(100);
   });
 
-  test("Continue Watching: removing a title hides it until it's watched again", async () => {
+  test("Continue Watching: removing a title hides it until it's watched again (the kept rails follow each change)", async () => {
     const watch = (positionMs: number) => server.request("/api/progress", { method: "POST", token, json: { mediaType: "movie", tmdbId: 666, positionMs, durationMs: 3_600_000 } });
-    const continuing = async () => ((await json(await server.request("/api/home", { token }))).shelves.find((s: any) => s.id === "continue")?.items ?? []).map((c: any) => c.tmdbId);
+    const continuing = async () => ((await json(await server.request("/api/home/profile", { token }))).shelves.find((s: any) => s.id === "continue")?.items ?? []).map((c: any) => c.tmdbId);
     await watch(600_000);
     expect(await continuing()).toContain(666);
     expect((await server.request("/api/continue/movie/666", { method: "DELETE", token })).status).toBe(200);
@@ -257,6 +259,12 @@ describe("playback", () => {
     await watch(700_000); // watched again: back, with its progress
     expect(await continuing()).toContain(666);
     expect((await server.request("/api/continue/album/1", { method: "DELETE", token })).status).toBe(400);
+    // Home in one answer still has them, after the hero.
+    const ids = (await json(await server.request("/api/home", { token }))).shelves.map((s: any) => s.id);
+    expect(ids.indexOf("continue")).toBeGreaterThan(-1);
+    expect(ids.slice(0, ids.indexOf("continue")).every((id: string) => id === "featured")).toBe(true);
+    const catalogIds = (await json(await server.request("/api/home/catalog", { token }))).shelves.map((s: any) => s.id);
+    expect(catalogIds).not.toContain("continue");
   });
 
   test("mkv remuxes to HLS from the resume point", async () => {
