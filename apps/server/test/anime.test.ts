@@ -394,7 +394,10 @@ describe("anime tab sections", () => {
     expect(plainDescription("A<br>B<br/><br />C <i>D</i> &quot;E&quot; &#039;F&#039;")).toBe("A\nB\n\nC D \"E\" 'F'");
     expect(plainDescription("<br>")).toBeUndefined();
     expect(plainDescription("A &amp;lt;b&amp;gt; tag")).toBe("A &lt;b&gt; tag");
-    expect(plainDescription("x<scr<b>ipt>alert(1)</scr</b>ipt>y")).toBe("xalert(1)y");
+    expect(plainDescription("x<scr<b>ipt>alert(1)</scr</b>ipt>y")).toBe("xiptalert(1)ipty");
+    expect(plainDescription("a<img src=x onerror=alert(1)<b>b")).toBe("ab");
+    expect(plainDescription("a<img src=x onerror=alert(1)")).toBe("a");
+    expect(plainDescription("<".repeat(100_000) + "x")).toBe(undefined);
     expect(plainDescription(null)).toBeUndefined();
   });
 

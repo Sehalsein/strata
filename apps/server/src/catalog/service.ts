@@ -125,17 +125,18 @@ function animeListTitle(list: { id: string; title: string }, season: AnilistSeas
 /** AniList's description as plain text: line breaks kept, its bits of HTML dropped. */
 export function plainDescription(text: string | null | undefined): string | undefined {
   if (!text) return undefined;
-  let plain = text.replace(/<br\s*\/?>/gi, "\n");
-  // Until nothing changes, so a tag hidden inside another ("<scr<b>ipt>") goes too.
-  for (let before = ""; before !== plain; ) {
-    before = plain;
-    plain = plain.replace(/<[^<>]*>/g, "");
-  }
+  // Linear, on a bounded length: tags out in one pass, then any bracket left over (a tag
+  // hidden inside another, or never closed), so no markup survives.
+  let plain = text.slice(0, MAX_DESCRIPTION).replace(/<br\s*\/?>/gi, "\n");
+  plain = plain.replace(/<[^>]*>/g, "").replace(/<[^>]*$/, "").replace(/[<>]/g, "");
   // One pass, so "&amp;lt;" is "&lt;" as written, not "<".
   plain = plain.replace(/&(quot|#0?39|apos|amp|lt|gt);/g, (_, name: string) => ENTITIES[name] ?? "");
   plain = plain.replace(/\n{3,}/g, "\n\n").trim();
   return plain || undefined;
 }
+
+/** Longer than any synopsis AniList has; what's past it isn't read. */
+const MAX_DESCRIPTION = 20_000;
 
 const ENTITIES: Record<string, string> = { quot: '"', "#039": "'", "#39": "'", apos: "'", amp: "&", lt: "<", gt: ">" };
 
