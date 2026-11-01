@@ -137,7 +137,7 @@ export const catalogRoutes = new Hono<Env>()
 
   .get("/browse/:type/:list", cacheFor(TTL.catalog), async (c) => {
     const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
-    const list = z.enum(["trending", "popular", "topRated", "library"]).parse(c.req.param("list"));
+    const list = z.enum(["trending", "popular", "topRated", "library", "latestReleases", "inTheaters"]).parse(c.req.param("list"));
     return c.json({ items: await viewer(c).browse(type, list) });
   })
 

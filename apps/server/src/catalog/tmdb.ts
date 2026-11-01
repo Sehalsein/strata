@@ -38,6 +38,7 @@ export interface TmdbListItem {
   poster_path?: string | null;
   backdrop_path?: string | null;
   vote_average?: number;
+  popularity?: number;
   genre_ids?: number[];
 }
 export interface TmdbPage<T = TmdbListItem> {
@@ -195,6 +196,10 @@ export class Tmdb {
   }
   topRated(type: "movie" | "tv") {
     return this.get<TmdbPage>(`/${type}/top_rated`, {}, DAY);
+  }
+  /** Films in cinemas in `region` now. */
+  nowPlaying(region: string, page = 1) {
+    return this.get<TmdbPage>("/movie/now_playing", { region, ...(page > 1 ? { page: String(page) } : {}) }, 6 * HOUR);
   }
 
   private async get<T>(path: string, params: Record<string, string>, ttl: number): Promise<T> {

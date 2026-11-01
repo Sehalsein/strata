@@ -17,7 +17,8 @@ struct BrowseView: View {
     /// The server's Shows page; `nil` before it loads, or from an older server.
     @State private var page: [Shelf]?
 
-    private let order: [BrowseList] = [.trending, .popular, .topRated]
+    /// Movies have what's newly out to rent or buy after Trending, and what's in cinemas last.
+    private var order: [BrowseList] { type == .movie ? [.trending, .latestReleases, .popular, .topRated, .inTheaters] : [.trending, .popular, .topRated] }
     private var title: String { type == .movie ? "Movies" : "Shows" }
 
     var body: some View {
@@ -141,9 +142,8 @@ struct BrowseView: View {
     private func railTitle(_ list: BrowseList) -> String {
         switch list {
         case .library: "In Your Library"
+        case .latestReleases, .inTheaters, .popular, .topRated: list.title
         case .trending: "Trending"
-        case .popular: "Popular"
-        case .topRated: "Top Rated"
         }
     }
 

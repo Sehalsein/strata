@@ -4,7 +4,7 @@ import type { MediaInfo } from "../media/probe";
 import type { PlayRequest } from "../playback/service";
 import type { DiscoveryTarget } from "../sources/discovery";
 import { targetRef, tmdbRef, type TitleRef, type TitleTarget } from "./ref";
-import type { Shelf, TitleType } from "./service";
+import type { BrowseList, Shelf, TitleType } from "./service";
 
 const notFound = () => new HTTPException(404, { message: "Title not found" });
 
@@ -74,7 +74,7 @@ export class Viewer {
     return { ...person, movies: await this.cards(person.movies), shows: await this.cards(person.shows) };
   }
 
-  async browse(type: TitleType, list: "trending" | "popular" | "topRated" | "library") {
+  async browse(type: TitleType, list: BrowseList) {
     return this.cards(await this.household.catalog.browse(type, list));
   }
 
