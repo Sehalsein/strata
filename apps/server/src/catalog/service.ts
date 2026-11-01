@@ -6,11 +6,14 @@ import type { Settings } from "../settings";
 import { findCandidates, type Candidate } from "../sources/resolver";
 import { imageUrl, yearOf, type Tmdb, type TmdbCredits, type TmdbListItem, type TmdbMovie, type TmdbShow } from "./tmdb";
 import { logger } from "../log";
-import { seasonOf, type Anilist, type AnilistHomeItem, type AnilistRankedList, type AnilistSeason } from "./anime/anilist";
+import { seasonOf, type Anilist, type AnilistDate, type AnilistHomeItem, type AnilistRankedList, type AnilistSeason, type AnilistTitle } from "./anime/anilist";
+import { resolveEpisode } from "./anime/match";
+import { animeRating } from "./contentRating";
 import type { AnimeIds } from "./anime/ids";
 import { ANIME_CATEGORIES, type Kitsu, type KitsuRail } from "./anime/kitsu";
 import type { Omdb, Ratings } from "./omdb";
 import { formatRef, targetRef, tmdbRef, type TitleRef, type TitleTarget } from "./ref";
+import type { TmdbEpisode } from "./tmdb";
 
 const log = logger("catalog");
 
@@ -569,6 +572,212 @@ export class CatalogService {
     );
   }
 
+  /**
+   * An AniList title's page, shaped like TMDB's (`movie`, `show`) so the apps show it the
+   * same way: AniList's data, TMDB's backdrop where Fribb's list maps the title to TMDB,
+   * Kitsu's rating. A show is one season, "Episodes"; other seasons are `related`. Null
+   * when AniList doesn't have it (or can't answer), it's for adults, or `ref` has the
+   * wrong type.
+   */
+  async anilistTitle(userId: string, ref: TitleRef) {
+    const media = await this.anilistMedia(ref);
+    if (!media) return null;
+    const ids = this.anime!.ids;
+    await ids.ready().catch(() => {});
+    const entry = ids.anilist(media.id);
+    const tmdbId = ref.type === "movie" ? entry?.tmdbMovie : entry?.tmdbTv;
+    const [backdropUrl, certification, recommendations, related] = await Promise.all([
+      this.tmdbBackdrop(ref.type, tmdbId).then((url) => url ?? media.bannerImage ?? null),
+      this.anilistCertification(ref),
+      this.anilistCards((media.recommendations?.nodes ?? []).map((n) => n.mediaRecommendation).filter((m) => !!m && m.type === "ANIME" && !m.isAdult) as AnilistHomeItem[], 20),
+      this.relatedCards(media),
+    ]);
+    const studios = media.studios?.nodes.filter((s) => s.isAnimationStudio).map((s) => s.name) ?? [];
+    const trailerKey = media.trailer?.site === "youtube" && media.trailer.id ? media.trailer.id : null;
+    const common = {
+      ref: formatRef(ref),
+      ...(tmdbId ? { tmdbId } : {}),
+      imdbId: null,
+      title: media.title.english?.trim() || media.title.romaji?.trim() || "",
+      tagline: null,
+      overview: plainDescription(media.description) ?? "",
+      year: media.seasonYear ?? media.startDate?.year ?? null,
+      genres: media.genres ?? [],
+      rating: media.averageScore ? media.averageScore / 10 : null,
+      ratings: null,
+      certification,
+      posterUrl: media.coverImage?.extraLarge ?? media.coverImage?.large ?? null,
+      backdropUrl,
+      cast: [] as ReturnType<typeof castOf>,
+      trailer: trailerKey ? { site: "youtube", key: trailerKey, name: "Trailer" } : null,
+      videos: trailerKey ? [youtubeVideo(trailerKey, "Trailer", "Trailer")] : [],
+      recommendations,
+      /** Other seasons, films and spin-offs: sequels first. */
+      related,
+      anime: {
+        anilistId: media.id,
+        romaji: media.title.romaji ?? null,
+        native: media.title.native ?? null,
+        studios,
+        score: media.averageScore ?? null,
+        nextEpisode: media.nextAiringEpisode ? { episode: media.nextAiringEpisode.episode, airsAt: media.nextAiringEpisode.airingAt * 1000 } : null,
+      },
+    };
+    if (ref.type === "movie") {
+      const target = { source: "anilist" as const, mediaType: "movie" as const, titleId: ref.id };
+      const sources = await findCandidates(this.library, this.settings(), target);
+      return {
+        type: "movie" as const,
+        ...common,
+        releaseDate: isoDate(media.startDate),
+        runtimeMinutes: media.duration ?? null,
+        directors: [] as string[],
+        collection: null,
+        available: [...new Set(sources.map((s) => s.provider))],
+        sources,
+        progress: progressDto(await this.progress.get(userId, target)),
+        inWatchlist: await this.progress.inWatchlist(userId, ref),
+      };
+    }
+    const [files, watched] = await Promise.all([this.library.filesFor(ref), this.progress.forShow(userId, ref)]);
+    const aired = airedEpisodes(media);
+    const episodeCount = media.episodes ?? aired;
+    return {
+      type: "show" as const,
+      ...common,
+      firstAirDate: isoDate(media.startDate),
+      lastAirDate: media.status === "FINISHED" ? isoDate(media.endDate) : null,
+      status: showStatus(media.status),
+      seasons:
+        episodeCount > 0
+          ? [
+              {
+                season: 1,
+                name: "Episodes",
+                episodeCount,
+                airDate: isoDate(media.startDate),
+                posterUrl: common.posterUrl,
+                availableEpisodes: new Set(files.filter((f) => f.season === 1).map((f) => f.episode)).size,
+              },
+            ]
+          : [],
+      available: [...new Set(files.map((f) => f.provider))],
+      /** Where the Play button should go: an in-progress episode, else the next unwatched one. */
+      upNext: anilistUpNext(files, watched, aired, episodeCount),
+      inWatchlist: await this.progress.inWatchlist(userId, ref),
+    };
+  }
+
+  /**
+   * An AniList show's one season, shaped like `season`. Episodes are AniList's numbers;
+   * where Fribb's list maps the title to TMDB, names, synopses, stills and air dates come
+   * from TMDB's matching episodes. Episodes still to come are listed up to the announced
+   * count. Null for any other season, or a title `anilistTitle` wouldn't show.
+   */
+  async anilistSeason(userId: string, ref: TitleRef, seasonNumber: number) {
+    if (ref.type !== "show" || seasonNumber !== 1) return null;
+    const media = await this.anilistMedia(ref);
+    if (!media) return null;
+    const aired = airedEpisodes(media);
+    const upcoming = new Map((media.airingSchedule?.nodes ?? []).map((n) => [n.episode, n.airingAt]));
+    const count = Math.max(aired, media.episodes ?? 0);
+    const numbers = Array.from({ length: count }, (_, i) => i + 1);
+    const [tmdbEpisodes, files, progress] = await Promise.all([
+      this.tmdbEpisodesFor(media.id, numbers).catch((err) => (log.warn(`TMDB episodes for AniList ${media.id} failed`, err), new Map<number, TmdbEpisode>())),
+      this.library.filesFor(ref, 1),
+      this.progress.forShow(userId, ref),
+    ]);
+    const watched = new Map(progress.filter((p) => p.season === 1).map((p) => [p.episode, p]));
+    return {
+      season: 1,
+      name: "Episodes",
+      overview: "",
+      airDate: isoDate(media.startDate),
+      posterUrl: media.coverImage?.extraLarge ?? media.coverImage?.large ?? null,
+      episodes: numbers.map((n) => {
+        const tmdb = tmdbEpisodes.get(n);
+        const airsAt = upcoming.get(n);
+        return {
+          season: 1,
+          episode: n,
+          name: tmdb?.name || `Episode ${n}`,
+          overview: tmdb?.overview ?? "",
+          airDate: airsAt ? new Date(airsAt * 1000).toISOString().slice(0, 10) : (tmdb?.air_date ?? null),
+          runtimeMinutes: media.duration ?? tmdb?.runtime ?? null,
+          stillUrl: imageUrl(tmdb?.still_path, "w780"),
+          rating: tmdb?.vote_average ?? null,
+          imdbRating: null,
+          available: [...new Set(files.filter((f) => f.episode === n).map((f) => f.provider))],
+          progress: progressDto(watched.get(n)),
+        };
+      }),
+    };
+  }
+
+  /** AniList's data for a title page, or null (see `anilistTitle`). */
+  private async anilistMedia(ref: TitleRef): Promise<AnilistTitle | null> {
+    if (ref.source !== "anilist" || !this.anime) return null;
+    const media = await this.anime.anilist.title(ref.id);
+    if (!media || media.isAdult) return null;
+    return (media.format === "MOVIE" ? "movie" : "show") === ref.type ? media : null;
+  }
+
+  /** The title's rating as text (Kitsu's, else TMDB's); like OMDb, the page waits at most 1.5s. */
+  private anilistCertification(ref: TitleRef): Promise<string | null> {
+    const { ids, kitsu } = this.anime!;
+    const lookup = animeRating(ref.type, ref.id, { ids, kitsu, tmdb: this.tmdb, region: this.settings().region }).then((r) => r.certification);
+    return Promise.race([lookup.catch(() => null), runtime.sleep(1_500).then(() => null)]);
+  }
+
+  /** TMDB's backdrop for a title, or null. */
+  private async tmdbBackdrop(type: TitleType, tmdbId: number | undefined): Promise<string | null> {
+    if (!tmdbId) return null;
+    const detail = await (type === "movie" ? this.tmdb.movie(tmdbId) : this.tmdb.show(tmdbId)).catch(() => null);
+    return imageUrl(detail?.backdrop_path, "w1280");
+  }
+
+  /** Cards for a title's other seasons, films and spin-offs, sequels first, each labelled. */
+  private async relatedCards(media: AnilistTitle): Promise<TitleCard[]> {
+    const edges = (media.relations?.edges ?? [])
+      .filter((e) => e.node && e.node.type === "ANIME" && !e.node.isAdult && e.node.format !== "MUSIC" && RELATION_LABELS[e.relationType ?? ""])
+      .sort((a, b) => RELATION_ORDER.indexOf(a.relationType!) - RELATION_ORDER.indexOf(b.relationType!));
+    const label = new Map(edges.map((e) => [e.node!.id, RELATION_LABELS[e.relationType!]]));
+    return this.anilistCards(
+      edges.map((e) => e.node!),
+      30,
+      (i) => label.get(i.id),
+    );
+  }
+
+  /**
+   * TMDB's episodes for an AniList show's episodes 1…n, where Fribb's list maps it: its
+   * TMDB season from its offset, or numbered across TMDB's seasons when it has none.
+   */
+  private async tmdbEpisodesFor(anilistId: number, numbers: number[]): Promise<Map<number, TmdbEpisode>> {
+    const entry = this.anime!.ids.anilist(anilistId);
+    const out = new Map<number, TmdbEpisode>();
+    if (!entry?.tmdbTv || !numbers.length) return out;
+    const showId = entry.tmdbTv;
+    let place: (n: number) => { season: number; episode: number };
+    if (entry.tmdbSeason !== undefined) {
+      place = (n) => ({ season: entry.tmdbSeason!, episode: entry.tmdbOffset + n });
+    } else {
+      const show = await this.tmdb.show(showId);
+      const seasons = show.seasons.filter((s) => s.season_number > 0).map((s) => ({ season: s.season_number, episodes: s.episode_count }));
+      place = (n) => resolveEpisode([entry], entry, undefined, entry.tmdbOffset + n, seasons);
+    }
+    const placed = numbers.map((n) => [n, place(n)] as const);
+    const seasonNumbers = [...new Set(placed.map(([, p]) => p.season))];
+    const seasons = new Map(
+      await Promise.all(seasonNumbers.map(async (s) => [s, await this.tmdb.season(showId, s).catch(() => null)] as const)),
+    );
+    for (const [n, p] of placed) {
+      const ep = seasons.get(p.season)?.episodes.find((e) => e.episode_number === p.episode);
+      if (ep) out.set(n, ep);
+    }
+    return out;
+  }
+
 
   /** Cards from TMDB details (cached), a few lookups at a time; ones that fail are left out. */
   private async detailCards(type: TitleType, tmdbIds: number[]): Promise<TitleCard[]> {
@@ -950,6 +1159,51 @@ function castOf(credits?: TmdbCredits) {
   return (credits?.cast ?? []).slice(0, 20).map((c) => ({ id: c.id, name: c.name, character: c.character ?? null, profileUrl: imageUrl(c.profile_path, "w185") }));
 }
 
+/** AniList relations shown as "Other seasons" on a title page, in order, with their labels. */
+const RELATION_LABELS: Record<string, string> = { SEQUEL: "Sequel", PREQUEL: "Prequel", SIDE_STORY: "Side Story", SPIN_OFF: "Spin-off", ALTERNATIVE: "Alternative" };
+const RELATION_ORDER = Object.keys(RELATION_LABELS);
+
+/** AniList's statuses in TMDB's words. */
+const SHOW_STATUS: Record<string, string> = {
+  RELEASING: "Returning Series",
+  FINISHED: "Ended",
+  NOT_YET_RELEASED: "Planned",
+  CANCELLED: "Canceled",
+  HIATUS: "On Hiatus",
+};
+
+function showStatus(status: string | null | undefined): string | null {
+  return status ? (SHOW_STATUS[status] ?? null) : null;
+}
+
+/** An AniList date as "YYYY-MM-DD", or null unless it's a whole date. */
+function isoDate(d: AnilistDate | null | undefined): string | null {
+  if (!d?.year || !d.month || !d.day) return null;
+  return `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+}
+
+/** How many of an AniList show's episodes are out: all of a finished one, else up to the next to air. */
+function airedEpisodes(media: AnilistTitle): number {
+  if (media.status === "NOT_YET_RELEASED") return 0;
+  if (media.nextAiringEpisode) return Math.max(0, media.nextAiringEpisode.episode - 1);
+  return media.episodes ?? 0;
+}
+
+/** `showUpNext` for an AniList show: its one season, numbered as AniList numbers it. */
+function anilistUpNext(files: { season: number | null; episode: number | null }[], watched: ProgressRow[], aired: number, episodeCount: number) {
+  const owned = files.filter((f) => f.season === 1 && f.episode !== null);
+  const at = (episode: number, positionMs = 0) => ({ season: 1, episode, positionMs, available: owned.some((f) => f.episode === episode) });
+  const mine = watched.filter((w) => w.season === 1);
+  const inProgress = mine.filter(isResumable).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  if (inProgress) return at(inProgress.episode!, inProgress.positionMs);
+  const furthest = mine.filter((w) => w.completed).sort((a, b) => b.episode! - a.episode!)[0];
+  if (furthest && furthest.episode! < aired) return at(furthest.episode! + 1);
+  // Nothing watched yet (or all of it): the first episode the library has, else the first.
+  const firstOwned = owned.sort((a, b) => a.episode! - b.episode!)[0];
+  if (firstOwned) return at(firstOwned.episode!);
+  return episodeCount > 0 ? at(1) : null;
+}
+
 const VIDEO_ORDER = ["Trailer", "Teaser", "Clip", "Featurette", "Behind the Scenes"];
 
 /** YouTube trailers and extras for a "Trailers & Extras" rail: trailers first, official first. */
@@ -958,13 +1212,17 @@ function videosOf(videos?: TmdbMovie["videos"]) {
     .filter((v) => v.site === "YouTube" && VIDEO_ORDER.includes(v.type))
     .sort((a, b) => VIDEO_ORDER.indexOf(a.type) - VIDEO_ORDER.indexOf(b.type) || Number(!!b.official) - Number(!!a.official))
     .slice(0, 12)
-    .map((v) => ({
-      key: v.key,
-      name: v.name,
-      type: v.type,
-      url: `https://www.youtube.com/watch?v=${encodeURIComponent(v.key)}`,
-      thumbnailUrl: `https://i.ytimg.com/vi/${encodeURIComponent(v.key)}/hqdefault.jpg`,
-    }));
+    .map((v) => youtubeVideo(v.key, v.name, v.type));
+}
+
+function youtubeVideo(key: string, name: string, type: string) {
+  return {
+    key,
+    name,
+    type,
+    url: `https://www.youtube.com/watch?v=${encodeURIComponent(key)}`,
+    thumbnailUrl: `https://i.ytimg.com/vi/${encodeURIComponent(key)}/hqdefault.jpg`,
+  };
 }
 
 function trailerOf(videos?: TmdbMovie["videos"]) {

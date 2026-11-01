@@ -7,6 +7,8 @@ import type { Settings } from "../settings";
 import { parseRef, type TitleRef } from "./ref";
 import type { Tmdb, TmdbMovie, TmdbShow } from "./tmdb";
 import { SharedWork } from "../inFlight";
+import type { AnimeIds } from "./anime/ids";
+import type { Kitsu } from "./anime/kitsu";
 
 const log = logger("ratings");
 
@@ -77,6 +79,53 @@ function showCertification(s: TmdbShow, region: string): string | null {
   return pick(region) ?? (region !== "US" ? pick("US") : null);
 }
 
+/** TMDB's certification for a title in `region` (else the US one), and its genres. */
+async function tmdbRating(tmdb: Tmdb, type: TitleRef["type"], tmdbId: number, region: string): Promise<{ certification: string | null; genres: number[] }> {
+  if (type === "movie") {
+    const m = await tmdb.movie(tmdbId);
+    return { certification: movieCertification(m, region), genres: m.genres.map((g) => g.id) };
+  }
+  const s = await tmdb.show(tmdbId);
+  return { certification: showCertification(s, region), genres: s.genres.map((g) => g.id) };
+}
+
+/**
+ * Kitsu's age ratings, as the youngest age each allows (Kitsu's PG is "Children").
+ * R18 is adult content: it never fits a limit.
+ */
+const KITSU_AGES: Record<string, number> = { G: 0, PG: 7, R: 17, R18: UNRECOGNISED };
+
+export interface AnimeRatingSources {
+  ids: AnimeIds;
+  kitsu?: Kitsu;
+  tmdb: Tmdb;
+  region: string;
+}
+
+/**
+ * An AniList title's rating: Kitsu's age rating, through Fribb's ids, else TMDB's
+ * certification for the title Fribb maps it to. `age` is null when neither knows.
+ */
+export async function animeRating(type: TitleRef["type"], anilistId: number, src: AnimeRatingSources): Promise<{ certification: string | null; age: number | null }> {
+  const none = { certification: null, age: null };
+  await src.ids.ready().catch(() => {});
+  const entry = src.ids.anilist(anilistId);
+  if (!entry) return none;
+  let kitsuFailed: unknown;
+  if (entry.kitsuId && src.kitsu) {
+    // Kitsu unreachable: TMDB's rating, if there is one, will do.
+    const rating = await src.kitsu.ageRating(entry.kitsuId).catch((err) => ((kitsuFailed = err), null));
+    if (rating) return { certification: rating, age: KITSU_AGES[rating.toUpperCase()] ?? UNRECOGNISED };
+  }
+  // Fribb sometimes maps a film to a TMDB show (or a special to a film): either will do.
+  const tmdb: [TitleRef["type"], number | undefined] =
+    type === "movie" ? (entry.tmdbMovie ? ["movie", entry.tmdbMovie] : ["show", entry.tmdbTv]) : entry.tmdbTv ? ["show", entry.tmdbTv] : ["movie", entry.tmdbMovie];
+  const { certification } = tmdb[1] ? await tmdbRating(src.tmdb, tmdb[0], tmdb[1], src.region) : { certification: null };
+  // Not knowing because Kitsu failed isn't "unrated": thrown, so it isn't remembered.
+  if (!certification && kitsuFailed) throw kitsuFailed;
+  return { certification, age: certification ? certificationAge(certification, src.region) : null };
+}
+
 /** Applies a profile's content limit to catalog lists, detail pages and playback. */
 export class ContentFilter {
   /** Ratings looked up, by title and region (failures aren't kept). */
@@ -88,6 +137,8 @@ export class ContentFilter {
     private readonly organizationId: string,
     private readonly tmdb: Tmdb,
     private readonly settings: () => Settings,
+    /** For AniList titles' ratings (see `animeRating`); without it they're hidden under a limit. */
+    private readonly anime?: { ids: AnimeIds; kitsu?: Kitsu },
   ) {}
 
   /** Max age for a profile, or null when it has no limit. */
@@ -130,35 +181,35 @@ export class ContentFilter {
   }
 
   private async fits(maxAge: number, ref: TitleRef): Promise<boolean> {
-    // Ratings come from TMDB's certifications. Other sources' titles count as unrated and
-    // unknown until AniList support brings their own ratings: only profiles without
-    // a limit see them.
-    if (ref.source !== "tmdb") return false;
-    const { type, id: tmdbId } = ref;
+    const { type, id } = ref;
     try {
-      const { age, genres } = await this.rating(type, tmdbId);
+      // AniList titles: Kitsu's or TMDB's rating (see `animeRating`); unknown is hidden.
+      if (ref.source === "anilist") {
+        const { age } = await this.rating(ref);
+        return age !== null && age <= maxAge;
+      }
+      const { age, genres } = await this.rating(ref);
       if (age !== null) return age <= maxAge;
       // Unrated: only family/kids/animation, and never horror.
       return genres.some((g) => FAMILY_GENRES.has(g)) && !genres.includes(HORROR);
     } catch (err) {
       // When in doubt under a limit, hide it.
-      log.warn(`Couldn't rate ${type} ${tmdbId}`, err);
+      log.warn(`Couldn't rate ${ref.source} ${type} ${id}`, err);
       return false;
     }
   }
 
-  private rating(type: TitleRef["type"], tmdbId: number) {
+  private rating(ref: TitleRef) {
     const region = this.settings().region;
-    const key = `${type}:${tmdbId}:${region}`;
+    const key = `${ref.source}:${ref.type}:${ref.id}:${region}`;
     return this.ages.get(key, async () => {
-      if (type === "movie") {
-        const m = await this.tmdb.movie(tmdbId);
-        const cert = movieCertification(m, region);
-        return { age: cert ? certificationAge(cert, region) : null, genres: m.genres.map((g) => g.id) };
+      if (ref.source === "anilist") {
+        if (!this.anime) return { age: null, genres: [] };
+        const { age } = await animeRating(ref.type, ref.id, { ...this.anime, tmdb: this.tmdb, region });
+        return { age, genres: [] };
       }
-      const s = await this.tmdb.show(tmdbId);
-      const cert = showCertification(s, region);
-      return { age: cert ? certificationAge(cert, region) : null, genres: s.genres.map((g) => g.id) };
+      const { certification, genres } = await tmdbRating(this.tmdb, ref.type, ref.id, region);
+      return { age: certification ? certificationAge(certification, region) : null, genres };
     });
   }
 }

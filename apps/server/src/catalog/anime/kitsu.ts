@@ -97,6 +97,23 @@ export class Kitsu {
     });
   }
 
+  /**
+   * Kitsu's age rating for an anime ("G", "PG", "R" or "R18"), or null when it has none.
+   * Cached 30 days. Throws when Kitsu can't be asked.
+   */
+  async ageRating(kitsuId: number): Promise<string | null> {
+    if (!Number.isInteger(kitsuId) || kitsuId <= 0) return null;
+    return this.cache.get<string | null>(`kitsu:age:${kitsuId}`, { ttl: 30 * 24 * HOUR, maxStale: MAX_STALE_MS, backoff: FAILURE_TTL_MS }, async () => {
+      const res = await this.fetchImpl(`${BASE}/anime/${kitsuId}?fields%5Banime%5D=ageRating`, { headers: { Accept: "application/vnd.api+json" }, signal: AbortSignal.timeout(15_000) });
+      // Kitsu doesn't have it: no rating (remembered like one).
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(`Kitsu HTTP ${res.status}`);
+      const body = (await res.json()) as { data?: { attributes?: { ageRating?: unknown } } };
+      const rating = body.data?.attributes?.ageRating;
+      return typeof rating === "string" && rating ? rating : null;
+    });
+  }
+
   private async request(path: string, cacheKey: string, ttl: number): Promise<KitsuAnime[] | null> {
     try {
       return await this.cache.get<KitsuAnime[]>(cacheKey, { ttl, maxStale: MAX_STALE_MS, backoff: FAILURE_TTL_MS }, async () => {

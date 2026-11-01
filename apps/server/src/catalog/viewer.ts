@@ -6,8 +6,7 @@ import type { DiscoveryTarget } from "../sources/discovery";
 import { targetRef, tmdbRef, type TitleRef, type TitleTarget } from "./ref";
 import type { Shelf, TitleType } from "./service";
 
-/** Detail pages for titles from a source the catalog can't show yet (AniList's). */
-const notYet = () => new HTTPException(404, { message: "Not available yet" });
+const notFound = () => new HTTPException(404, { message: "Title not found" });
 
 /**
  * One person's view of their household's catalog: pages, titles, sources, playback and
@@ -100,16 +99,26 @@ export class Viewer {
     return this.household.catalog.season(this.userId, showId, season);
   }
 
-  /** A title's page by its ref. Only TMDB's titles have pages so far (404 for others). */
+  /** A title's page by its ref: TMDB's or AniList's, in the same shape. */
   async title(ref: TitleRef) {
-    if (ref.source !== "tmdb") throw notYet();
+    if (ref.source === "anilist") {
+      await this.assertAllowed(ref);
+      const page = await this.household.catalog.anilistTitle(this.userId, ref);
+      if (!page) throw notFound();
+      return { ...page, recommendations: await this.cards(page.recommendations), related: await this.cards(page.related) };
+    }
     return ref.type === "movie" ? this.movie(ref.id) : this.show(ref.id);
   }
 
-  /** A season of a show by its ref, like `title`. */
+  /** A season of a show by its ref, like `title`. AniList's shows have one, season 1. */
   async titleSeason(ref: TitleRef, season: number) {
-    if (ref.source !== "tmdb") throw notYet();
     if (ref.type !== "show") throw new HTTPException(404, { message: "Movies have no seasons" });
+    if (ref.source === "anilist") {
+      await this.assertAllowed(ref);
+      const page = await this.household.catalog.anilistSeason(this.userId, ref, season);
+      if (!page) throw new HTTPException(404, { message: "Season not found" });
+      return page;
+    }
     return this.season(ref.id, season);
   }
 

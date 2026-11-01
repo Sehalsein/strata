@@ -83,7 +83,7 @@ describe("the API by ref", () => {
   });
   afterAll(() => server.services.shutdown());
 
-  test("title pages: the same as by type and id, 404 for a source without pages yet, 400 for a bad ref", async () => {
+  test("title pages: the same as by type and id, 404 for an AniList title it can't find, 400 for a bad ref", async () => {
     const byRef = await json(await server.request("/api/titles/tmdb:movie:10378", { token }));
     expect(byRef).toEqual(await json(await server.request("/api/titles/movie/10378", { token })));
     expect(byRef).toMatchObject({ ref: "tmdb:movie:10378", tmdbId: 10378 });
@@ -97,7 +97,7 @@ describe("the API by ref", () => {
 
     const anilist = await server.request("/api/titles/anilist:show:1", { token });
     expect(anilist.status).toBe(404);
-    expect(await anilist.text()).toContain("Not available yet");
+    expect(await anilist.text()).toContain("Title not found");
     expect((await server.request("/api/titles/anilist:show:1/seasons/1", { token })).status).toBe(404);
     expect((await server.request("/api/titles/tmdb:movie:10378/seasons/1", { token })).status).toBe(404);
     for (const bad of ["tmdb:movie:0", "imdb:movie:1", "tmdb:tv:1", "nonsense"]) {

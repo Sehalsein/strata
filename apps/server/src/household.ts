@@ -94,7 +94,7 @@ export class Household {
     const tmdb = this.tmdb;
     this.library = new Library(db, organizationId, tmdb, new Matcher(tmdb, new AnimeMatcher(shared.anime.anilist, shared.anime.ids, tmdb, shared.anime.kitsu)));
     this.catalog = new CatalogService(tmdb, this.library, shared.progress, settings, shared.anime, this.omdb);
-    this.content = new ContentFilter(db, organizationId, tmdb, settings);
+    this.content = new ContentFilter(db, organizationId, tmdb, settings, shared.anime);
     this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, id) => this.content.allowed(userId, tmdbRef("show", id)));
     this.housekeeping = new TorboxHousekeeping(db, organizationId, this.library);
     this.plays = new HouseholdPlays(shared.sessions, organizationId, this.library);
