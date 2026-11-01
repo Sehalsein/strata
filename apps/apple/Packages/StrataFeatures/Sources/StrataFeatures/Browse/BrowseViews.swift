@@ -90,14 +90,10 @@ struct BrowseView: View {
                 }
                 ForEach(order, id: \.self) { list in
                     if let items = lists[list], !items.isEmpty {
-                        Rail(railTitle(list), seeAll: nil) {
-                            ForEach(items.prefix(20)) { card in
+                        Rail(railTitle(list), link: items.count > Metrics.railLimit ? Route.browse(type, list) : nil) {
+                            ForEach(items.prefix(Metrics.railLimit)) { card in
                                 NavigationLink(value: card.route) { PosterCardLabel(card: card) }
                                     .buttonStyle(StrataCardStyle())
-                            }
-                            if items.count > 20 {
-                                NavigationLink(value: Route.browse(type, list)) { SeeAllTile() }
-                                .buttonStyle(StrataCardStyle())
                             }
                         }
                     }
@@ -173,25 +169,6 @@ extension GenreMenu where Item == Genre {
     }
 }
 
-/// The poster-sized "See all" card that ends a rail.
-struct SeeAllTile: View {
-    var body: some View {
-        // Poster-shaped: the shape sets the size, the label sits on it (a VStack given an
-        // aspect ratio shrinks to its content instead).
-        RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
-            .fill(Theme.surface1)
-            .aspectRatio(2 / 3, contentMode: .fit)
-            .frame(width: Metrics.posterWidth)
-            .overlay {
-                VStack {
-                    Image(systemName: "chevron.right").font(.title2)
-                    Text("See all").font(.stCallout)
-                }
-                .foregroundStyle(Theme.accentText)
-            }
-    }
-}
-
 /// A full grid of one list ("See all").
 struct BrowseListView: View {
     @Environment(AppServices.self) private var services
@@ -262,6 +239,25 @@ struct SearchView: View {
             let result = await services.load { try await $0.search(q) }
             if !Task.isCancelled { results = result }
         }
+    }
+}
+
+/// A shelf's every title ("See all"), as the server sent them.
+struct ShelfGridView: View {
+    let shelf: Shelf
+
+    var body: some View {
+        ScrollView {
+            PosterGrid {
+                ForEach(shelf.items) { card in
+                    NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.buttonStyle(StrataCardStyle())
+                }
+            }
+            .padding(.vertical, Metrics.space4)
+        }
+        .background(Theme.bg.ignoresSafeArea())
+        .fullBleedOnTV()
+        .navigationTitle(shelf.title)
     }
 }
 

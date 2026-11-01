@@ -96,3 +96,40 @@ struct AnimeView: View {
     }
 }
 
+/// One of the Anime tab's lists in full ("See all"), in the server's order.
+struct AnimeListView: View {
+    @Environment(AppServices.self) private var services
+    let id: String
+    let title: String
+    @State private var items: Loadable<[TitleCard]> = .loading
+
+    var body: some View {
+        ScrollView {
+            switch items {
+            case .loading: ProgressView().padding(Metrics.space12)
+            case .failed(let message):
+                MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load \(title)", message: message, actionTitle: "Try Again") {
+                    Task { await load(force: true) }
+                }
+            case .loaded(let cards):
+                PosterGrid {
+                    ForEach(cards) { card in
+                        NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.buttonStyle(StrataCardStyle())
+                    }
+                }
+                .padding(.vertical, Metrics.space4)
+            }
+        }
+        .background(Theme.bg.ignoresSafeArea())
+        .fullBleedOnTV()
+        .navigationTitle(title)
+        #if !os(tvOS)
+        .refreshable { await load(force: true) }
+        #endif
+        .task { await load() }
+    }
+
+    private func load(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.animeList(id, $1) }) { items = $0 }
+    }
+}

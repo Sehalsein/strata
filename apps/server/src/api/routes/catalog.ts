@@ -62,6 +62,13 @@ export const catalogRoutes = new Hono<Env>()
     return c.json({ shelves: await allowedShelves(c, await c.var.services.catalog.animePage(category)) });
   })
 
+  // One of the Anime tab's lists in full, for its rail's "See all".
+  .get("/anime/list/:id", cacheFor(TTL.catalog), async (c) => {
+    const list = await c.var.services.catalog.animeList(c.req.param("id"));
+    if (!list) throw new HTTPException(404, { message: "Unknown anime list" });
+    return c.json({ title: list.title, items: await c.var.services.content.filter(profileOf(c), list.items) });
+  })
+
   .get("/person/:id", cacheFor(TTL.catalog), async (c) => {
     const person = await c.var.services.catalog.person(intParam(c, "id"));
     const content = c.var.services.content;

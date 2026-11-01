@@ -176,6 +176,12 @@ public final class StrataClient: Sendable {
         return res.shelves
     }
 
+    /// One of the Anime tab's lists in full, for its rail's "See all".
+    public func animeList(_ id: String, _ policy: CachePolicy = .fresh) async throws -> [TitleCard] {
+        let res: ItemsResponse<TitleCard> = try await get("/api/anime/list/\(id)", policy: policy)
+        return res.items
+    }
+
     /// Episodes of the shows on this profile's list: the last week and the next month.
     public func calendar(_ policy: CachePolicy = .fresh) async throws -> [CalendarEpisode] {
         let res: ItemsResponse<CalendarEpisode> = try await get("/api/calendar", policy: policy)

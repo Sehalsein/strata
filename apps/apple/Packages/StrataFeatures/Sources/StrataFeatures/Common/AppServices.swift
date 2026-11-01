@@ -131,6 +131,10 @@ public enum Route: Hashable {
     case movie(Int)
     case show(Int)
     case browse(TitleType, BrowseList)
+    /// An Anime tab list in full: its id and title.
+    case animeList(String, String)
+    /// Every title of a shelf the server sent, past what its rail shows.
+    case shelf(Shelf)
     case person(Int)
     case myList
     case calendar

@@ -110,14 +110,15 @@ struct PageStack<Content: View>: View {
     }
 }
 
-/// One server shelf as a rail of the right card type.
+/// One server shelf as a rail of the right card type. A rail of titles shows the first
+/// `Metrics.railLimit`; the rest (or the bigger list behind it) are behind its title's "›".
 struct ShelfRail: View {
     @Environment(AppServices.self) private var services
     let shelf: Shelf
 
     var body: some View {
-        Rail(shelf.title) {
-            ForEach(shelf.items) { card in
+        Rail(shelf.title, link: seeAll) {
+            ForEach(shelf.kind == .continue ? shelf.items : Array(shelf.items.prefix(Metrics.railLimit))) { card in
                 if shelf.kind == .continue {
                     ContinueCard(id: card.id,
                                  overline: card.episode?.code ?? card.yearText,
@@ -147,11 +148,16 @@ struct ShelfRail: View {
                     .buttonStyle(StrataCardStyle())
                 }
             }
-            // My List lives on Home now: its rail ends in the full list.
-            if shelf.id == "watchlist" {
-                NavigationLink(value: Route.myList) { SeeAllTile() }.buttonStyle(StrataCardStyle())
-            }
         }
+    }
+
+    /// Where the title's "›" goes: My List (it lives on Home now), the server's full list, or a
+    /// grid of what this shelf has past the rail.
+    private var seeAll: Route? {
+        guard shelf.kind == .titles else { return nil }
+        if shelf.id == "watchlist" { return .myList }
+        if let more = shelf.more { return .animeList(more, shelf.title) }
+        return shelf.items.count > Metrics.railLimit ? .shelf(shelf) : nil
     }
 
     private func hide(_ card: TitleCard) {

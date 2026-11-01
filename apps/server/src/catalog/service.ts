@@ -5,7 +5,7 @@ import type { Settings } from "../settings";
 import { findCandidates, type Candidate } from "../sources/resolver";
 import { imageUrl, yearOf, type Tmdb, type TmdbCredits, type TmdbListItem, type TmdbMovie, type TmdbShow } from "./tmdb";
 import { logger } from "../log";
-import type { Anilist, AnilistHomeItem } from "./anime/anilist";
+import type { Anilist, AnilistHomeItem, AnilistRankedList } from "./anime/anilist";
 import type { AnimeIds } from "./anime/ids";
 import { ANIME_CATEGORIES, type Kitsu, type KitsuRail } from "./anime/kitsu";
 
@@ -58,6 +58,8 @@ export interface Shelf {
   /** "hero": the apps show it as a carousel at the top of the page. Absent: a rail. */
   style?: "hero";
   items: (TitleCard | ContinueCard)[];
+  /** The full list behind the rail ("See all"): an Anime tab list, `GET /api/anime/list/:more`. */
+  more?: string;
 }
 
 export interface ProgressDto {
@@ -79,6 +81,16 @@ async function homeSafe<T>(label: string, fn: () => Promise<T>): Promise<T | nul
     return null;
   }
 }
+
+/** The Anime tab's rails after Trending, in order: the AniList list, how many on the rail. */
+const ANIME_LISTS: { id: Exclude<AnilistRankedList, "trending"> | "latest"; slug: string; title: string; rail: number; badge?: (i: AnilistHomeItem, laterSeason: boolean) => string | undefined }[] = [
+  { id: "latest", slug: "latest-episodes", title: "Latest Episodes", rail: 20, badge: (i) => (i.aired ? `Episode ${i.aired.episode}` : undefined) },
+  { id: "airing", slug: "top-airing", title: "Top Airing", rail: 15 },
+  { id: "popular", slug: "most-popular", title: "Most Popular", rail: 15 },
+  { id: "favourites", slug: "most-favorite", title: "Most Favorite", rail: 15 },
+  { id: "completed", slug: "latest-completed", title: "Latest Completed", rail: 15 },
+  { id: "upcoming", slug: "upcoming", title: "Top Upcoming", rail: 15, badge: (_, laterSeason) => (laterSeason ? "New season" : undefined) },
+];
 
 export class CatalogService {
   constructor(
@@ -353,19 +365,18 @@ export class CatalogService {
   /**
    * The Anime tab from AniList's lists: a spotlight of what's trending, then rails of the
    * trending top 10, episodes aired in the last two days, top airing, most popular, most
-   * favourited, recently completed and the most anticipated upcoming titles.
+   * favourited, recently completed and the most anticipated upcoming titles. Each rail
+   * links to its full list.
    */
   private async animeSections(): Promise<Shelf[] | null> {
     const home = await this.anime?.anilist.home();
     if (!home) return null;
-    const [trending, latest, airing, popular, favourites, completed, upcoming] = await Promise.all([
+    const [trending, ...rails] = await Promise.all([
       this.anilistCards(home.trending, 20),
-      this.anilistCards(home.latest, 20, (i) => (i.aired ? `Episode ${i.aired.episode}` : undefined)),
-      this.anilistCards(home.airing, 15),
-      this.anilistCards(home.popular, 15),
-      this.anilistCards(home.favourites, 15),
-      this.anilistCards(home.completed, 15),
-      this.anilistCards(home.upcoming, 15, (_, laterSeason) => (laterSeason ? "New season" : undefined)),
+      ...ANIME_LISTS.map(async (list): Promise<Shelf> => {
+        const items = await this.anilistCards(home[list.id], list.rail, list.badge);
+        return { id: `anime-${list.slug}`, title: list.title, kind: "titles", items, more: list.id };
+      }),
     ]);
     const spotlight = trending
       .filter((c) => c.backdropUrl && c.overview)
@@ -373,15 +384,22 @@ export class CatalogService {
       .map((c, i) => ({ ...c, eyebrow: `#${i + 1} Spotlight` }));
     const shelves: Shelf[] = [
       { id: "anime-spotlight", title: "Spotlight", kind: "titles", style: "hero", items: spotlight },
-      { id: "anime-trending", title: "Trending", kind: "titles", items: trending.slice(0, 10) },
-      { id: "anime-latest-episodes", title: "Latest Episodes", kind: "titles", items: latest },
-      { id: "anime-top-airing", title: "Top Airing", kind: "titles", items: airing },
-      { id: "anime-most-popular", title: "Most Popular", kind: "titles", items: popular },
-      { id: "anime-most-favorite", title: "Most Favorite", kind: "titles", items: favourites },
-      { id: "anime-latest-completed", title: "Latest Completed", kind: "titles", items: completed },
-      { id: "anime-upcoming", title: "Top Upcoming", kind: "titles", items: upcoming },
+      { id: "anime-trending", title: "Trending", kind: "titles", items: trending.slice(0, 10), more: "trending" },
+      ...rails,
     ];
     return shelves.filter((s) => s.items.length >= 3);
+  }
+
+  /** One of the Anime tab's lists in full ("See all"), or null for one it doesn't have. */
+  async animeList(id: string): Promise<{ title: string; items: TitleCard[] } | null> {
+    const list = id === "trending" ? { id, title: "Trending", badge: undefined } : ANIME_LISTS.find((l) => l.id === id);
+    const anilist = this.anime?.anilist;
+    if (!list || !anilist) return null;
+    await this.anime!.ids.ready();
+    // Latest Episodes is already every episode of the last two days.
+    const items = list.id === "latest" ? (await anilist.home())?.latest : await anilist.list(list.id as AnilistRankedList);
+    if (!items) throw new Error("AniList is unavailable");
+    return { title: list.title, items: await this.anilistCards(items, 50, list.badge) };
   }
 
   /**

@@ -56,13 +56,21 @@ export type AnilistHome = Record<"trending" | "airing" | "popular" | "favourites
 
 const LIST = "id format episodes";
 const JP = "type: ANIME, isAdult: false, countryOfOrigin: JP";
+/** The Anime tab's ranked lists, as AniList media filters. */
+const RANKED = {
+  trending: "sort: TRENDING_DESC",
+  airing: "status: RELEASING, sort: POPULARITY_DESC",
+  popular: "sort: POPULARITY_DESC",
+  favourites: "sort: FAVOURITES_DESC",
+  completed: "status: FINISHED, popularity_greater: 15000, sort: END_DATE_DESC",
+  upcoming: "status: NOT_YET_RELEASED, sort: POPULARITY_DESC",
+} as const;
+export type AnilistRankedList = keyof typeof RANKED;
+export const ANILIST_RANKED_LISTS = Object.keys(RANKED) as AnilistRankedList[];
+
+const ranked = (name: AnilistRankedList, perPage: number) => `${name}: Page(perPage: ${perPage}) { media(${JP}, ${RANKED[name]}) { ${LIST} } }`;
 const HOME = `query ($since: Int, $now: Int) {
-  trending: Page(perPage: 20) { media(${JP}, sort: TRENDING_DESC) { ${LIST} } }
-  airing: Page(perPage: 20) { media(${JP}, status: RELEASING, sort: POPULARITY_DESC) { ${LIST} } }
-  popular: Page(perPage: 20) { media(${JP}, sort: POPULARITY_DESC) { ${LIST} } }
-  favourites: Page(perPage: 20) { media(${JP}, sort: FAVOURITES_DESC) { ${LIST} } }
-  completed: Page(perPage: 20) { media(${JP}, status: FINISHED, popularity_greater: 15000, sort: END_DATE_DESC) { ${LIST} } }
-  upcoming: Page(perPage: 15) { media(${JP}, status: NOT_YET_RELEASED, sort: POPULARITY_DESC) { ${LIST} } }
+  ${ANILIST_RANKED_LISTS.map((name) => ranked(name, name === "upcoming" ? 15 : 20)).join("\n  ")}
   latest: Page(perPage: 50) {
     airingSchedules(airingAt_greater: $since, airingAt_lesser: $now, sort: TIME_DESC) {
       episode airingAt media { ${LIST} isAdult countryOfOrigin popularity }
@@ -143,6 +151,12 @@ export class Anilist {
       upcoming: data.upcoming.media,
       latest,
     };
+  }
+
+  /** One of the Anime tab's ranked lists in full ("See all"): its top 50, cached an hour. */
+  async list(name: AnilistRankedList): Promise<AnilistHomeItem[] | null> {
+    const data = await this.request<Record<string, { media: AnilistHomeItem[] }>>(`query { ${ranked(name, 50)} }`, {}, `anilist:list:${name}`, 60 * 60_000);
+    return data?.[name]?.media ?? null;
   }
 
   /**

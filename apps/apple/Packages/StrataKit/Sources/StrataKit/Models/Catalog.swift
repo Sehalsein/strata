@@ -109,18 +109,21 @@ public struct Shelf: Codable, Sendable, Hashable, Identifiable {
     /// The server's word for the layout, kept as sent so unknown ones still decode.
     public var styleName: String?
     public var style: Style? { styleName.flatMap(Style.init(rawValue:)) }
+    /// The full list behind the rail ("See all"): an Anime tab list, for `StrataClient.animeList`.
+    public var more: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, kind, items
+        case id, title, kind, items, more
         case styleName = "style"
     }
 
-    public init(id: String, title: String, kind: Kind, items: [TitleCard], style: Style? = nil) {
+    public init(id: String, title: String, kind: Kind, items: [TitleCard], style: Style? = nil, more: String? = nil) {
         self.id = id
         self.title = title
         self.kind = kind
         self.items = items
         self.styleName = style?.rawValue
+        self.more = more
     }
 }
 

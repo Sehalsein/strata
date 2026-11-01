@@ -237,6 +237,22 @@ describe("anime tab sections", () => {
 
   });
 
+  test("each rail links to its full list, which has every title AniList ranks", async () => {
+    const home = { trending: all, airing: all, popular: all, favourites: all, completed: all, upcoming: [], latest: [] };
+    const service = catalog(home);
+    const shelves = await service.animePage();
+    expect(shelves.find((s) => s.id === "anime-trending")!.more).toBe("trending");
+    expect(shelves.find((s) => s.id === "anime-top-airing")!.more).toBe("airing");
+    const map = ids();
+    map.ready = async () => {};
+    const asked: string[] = [];
+    const anilist = { home: async () => home, list: async (name: string) => (asked.push(name), all) } as unknown as Anilist;
+    const full = new CatalogService(tmdb, library, {} as never, () => ({}) as never, { ids: map, anilist });
+    expect(await full.animeList("trending")).toMatchObject({ title: "Trending", items: [{ title: "Frieren" }, { title: "One Piece" }, { title: "Your Name." }] });
+    expect(asked).toEqual(["trending"]);
+    expect(await full.animeList("../evil")).toBeNull();
+  });
+
   test("when AniList can't answer, the tab falls back to Kitsu's rails (none here)", async () => {
     expect(await catalog(null).animePage()).toEqual([]);
   });

@@ -5,18 +5,43 @@ import SwiftUI
 public struct Rail<Content: View>: View {
     let title: String
     let seeAll: (() -> Void)?
+    /// The title as a link to the full list ("Trending ›"), pushing a navigation value.
+    let titleLink: AnyView?
     @ViewBuilder let content: () -> Content
 
     public init(_ title: String, seeAll: (() -> Void)? = nil, @ViewBuilder content: @escaping () -> Content) {
         self.title = title
         self.seeAll = seeAll
+        self.titleLink = nil
+        self.content = content
+    }
+
+    /// A rail whose title opens `link` (a value the enclosing stack navigates to); none, a plain title.
+    public init<Link: Hashable>(_ title: String, link: Link?, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.seeAll = nil
+        self.titleLink = link.map { link in
+            AnyView(NavigationLink(value: link) {
+                HStack(alignment: .firstTextBaseline, spacing: Metrics.space1) {
+                    Text(title).railHeaderStyle()
+                    Image(systemName: "chevron.right").font(.stCallout.weight(.semibold)).foregroundStyle(Theme.ink3)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityHint("Shows the full list"))
+        }
         self.content = content
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space4) {
             HStack(alignment: .firstTextBaseline) {
-                Text(title).railHeaderStyle().accessibilityAddTraits(.isHeader)
+                if let titleLink {
+                    titleLink
+                } else {
+                    Text(title).railHeaderStyle().accessibilityAddTraits(.isHeader)
+                }
                 Spacer()
                 #if !os(tvOS)
                 if let seeAll {
