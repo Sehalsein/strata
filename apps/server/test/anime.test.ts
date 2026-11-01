@@ -393,6 +393,8 @@ describe("anime tab sections", () => {
   test("AniList's descriptions are shown as plain text", () => {
     expect(plainDescription("A<br>B<br/><br />C <i>D</i> &quot;E&quot; &#039;F&#039;")).toBe("A\nB\n\nC D \"E\" 'F'");
     expect(plainDescription("<br>")).toBeUndefined();
+    expect(plainDescription("A &amp;lt;b&amp;gt; tag")).toBe("A &lt;b&gt; tag");
+    expect(plainDescription("x<scr<b>ipt>alert(1)</scr</b>ipt>y")).toBe("xalert(1)y");
     expect(plainDescription(null)).toBeUndefined();
   });
 

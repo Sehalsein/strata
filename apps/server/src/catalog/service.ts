@@ -125,18 +125,19 @@ function animeListTitle(list: { id: string; title: string }, season: AnilistSeas
 /** AniList's description as plain text: line breaks kept, its bits of HTML dropped. */
 export function plainDescription(text: string | null | undefined): string | undefined {
   if (!text) return undefined;
-  const plain = text
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&quot;/g, '"')
-    .replace(/&#039;|&apos;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  let plain = text.replace(/<br\s*\/?>/gi, "\n");
+  // Until nothing changes, so a tag hidden inside another ("<scr<b>ipt>") goes too.
+  for (let before = ""; before !== plain; ) {
+    before = plain;
+    plain = plain.replace(/<[^<>]*>/g, "");
+  }
+  // One pass, so "&amp;lt;" is "&lt;" as written, not "<".
+  plain = plain.replace(/&(quot|#0?39|apos|amp|lt|gt);/g, (_, name: string) => ENTITIES[name] ?? "");
+  plain = plain.replace(/\n{3,}/g, "\n\n").trim();
   return plain || undefined;
 }
+
+const ENTITIES: Record<string, string> = { quot: '"', "#039": "'", "#39": "'", apos: "'", amp: "&", lt: "<", gt: ">" };
 
 /** The Movies and Shows tabs' lists. Latest Releases and New in Theaters are films only. */
 export type BrowseList = "trending" | "popular" | "topRated" | "library" | "latestReleases" | "inTheaters";
