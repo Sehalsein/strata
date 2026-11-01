@@ -29,7 +29,7 @@ Workers Builds settings (Worker `strata` › Settings › Builds):
 | Root directory | `/` |
 | Build command | (none) |
 | Deploy command | `bash deploy/cloudflare/deploy.sh` |
-| Build watch paths | `apps/server/*`, `deploy/cloudflare/*`, `package.json`, `bun.lock` |
+| Build watch paths | `apps/server/**`, `deploy/cloudflare/**`, `package.json`, `bun.lock` |
 | Variables | `BUN_VERSION` = `1.2.20`; `DATABASE_URL` (secret) = Neon's pooled connection string |
 
 By hand, the first time:
