@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArrowRight, Download, Laptop, Play, Server, Sparkles } from "lucide-react";
+import { ArrowRight, Download, Laptop, Play, Server, Smartphone, Sparkles } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Poster, PosterWall } from "@/components/poster-wall";
@@ -12,6 +12,8 @@ const SOURCE_URL = "https://github.com/Sehalsein/strata";
 /** The Mac app (the server, in the menu bar), and how to install on Linux. */
 const MAC_DOWNLOAD = "https://github.com/Sehalsein/strata/releases/download/server-stable/Strata.dmg";
 const LINUX_INSTALL = "https://github.com/Sehalsein/strata/blob/main/apps/server/README.md#install";
+/** The apps for iPhone, iPad and Apple TV. */
+const APP_STORE_URL = "https://apps.apple.com/us/app/strata-tv/id6804102192";
 /** Some of the server's own profile pictures (this site passes /api through to it). */
 const AVATARS = ["fox", "panda", "robot", "owl", "dino", "penguin"];
 
@@ -44,6 +46,9 @@ function Nav() {
       <nav className="flex items-center gap-1 sm:gap-2">
         <a href="#install" className="hidden px-3 text-sm text-white/70 hover:text-white md:inline">
           Install
+        </a>
+        <a href={APP_STORE_URL} className="hidden px-3 text-sm text-white/70 hover:text-white md:inline">
+          Get the app
         </a>
         <a href={SOURCE_URL} className="hidden px-3 text-sm text-white/70 hover:text-white md:inline">
           Source
@@ -88,6 +93,11 @@ function Hero() {
               </a>
             </Button>
             <Button size="lg" variant="outline" asChild className="h-12 border-white/20 bg-white/5 px-6 text-base text-white hover:bg-white/10 hover:text-white">
+              <a href={APP_STORE_URL}>
+                <Smartphone /> Get the app
+              </a>
+            </Button>
+            <Button size="lg" variant="ghost" asChild className="h-12 px-4 text-base text-white/70 hover:bg-white/10 hover:text-white">
               <a href="#install">Other ways to install</a>
             </Button>
           </div>
@@ -240,6 +250,22 @@ brew install --cask strata`}</pre>
             </Button>
           </div>
         </div>
+        <div className="bg-card flex flex-col gap-5 rounded-3xl border p-7 md:col-span-2 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="bg-primary/12 text-brand-text flex size-11 shrink-0 items-center justify-center rounded-xl">
+              <Smartphone className="size-5" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold">Then get the app</h3>
+              <p className="text-muted-foreground text-sm">For iPhone, iPad and Apple TV. It finds your server on your home network.</p>
+            </div>
+          </div>
+          <Button asChild className="w-fit shrink-0">
+            <a href={APP_STORE_URL}>
+              Get it on the App Store <ArrowRight />
+            </a>
+          </Button>
+        </div>
       </div>
     </Section>
   );
@@ -256,11 +282,18 @@ function Closing() {
           <BrandMark size={44} />
           <h2 className="max-w-2xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl">Tonight's movie is one tap away.</h2>
           <p className="max-w-lg text-white/65">Install Strata, add your media, invite the people you watch with, and press play.</p>
-          <Button size="lg" asChild className="h-12 px-6 text-base shadow-[0_0_40px_-8px_var(--primary)]">
-            <a href={MAC_DOWNLOAD}>
-              <Download /> Download for macOS
-            </a>
-          </Button>
+          <div className="flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">
+            <Button size="lg" asChild className="h-12 px-6 text-base shadow-[0_0_40px_-8px_var(--primary)]">
+              <a href={MAC_DOWNLOAD}>
+                <Download /> Download for macOS
+              </a>
+            </Button>
+            <Button size="lg" variant="outline" asChild className="h-12 border-white/20 bg-white/5 px-6 text-base text-white hover:bg-white/10 hover:text-white">
+              <a href={APP_STORE_URL}>
+                <Smartphone /> Get the app
+              </a>
+            </Button>
+          </div>
         </div>
       </div>
     </section>
@@ -278,6 +311,9 @@ function Footer() {
         <nav className="flex gap-6">
           <a href="#install" className="hover:text-foreground">
             Install
+          </a>
+          <a href={APP_STORE_URL} className="hover:text-foreground">
+            App Store
           </a>
           <a href={SOURCE_URL} className="hover:text-foreground">
             Source
