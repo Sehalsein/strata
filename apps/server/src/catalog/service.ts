@@ -125,14 +125,26 @@ function animeListTitle(list: { id: string; title: string }, season: AnilistSeas
 /** AniList's description as plain text: line breaks kept, its bits of HTML dropped. */
 export function plainDescription(text: string | null | undefined): string | undefined {
   if (!text) return undefined;
-  // Linear, on a bounded length: tags out in one pass, then any bracket left over (a tag
-  // hidden inside another, or never closed), so no markup survives.
-  let plain = text.slice(0, MAX_DESCRIPTION).replace(/<br\s*\/?>/gi, "\n");
-  plain = plain.replace(/<[^>]*>/g, "").replace(/<[^>]*$/, "").replace(/[<>]/g, "");
+  let plain = withoutTags(text.slice(0, MAX_DESCRIPTION).replace(/<br\s*\/?>/gi, "\n"));
   // One pass, so "&amp;lt;" is "&lt;" as written, not "<".
   plain = plain.replace(/&(quot|#0?39|apos|amp|lt|gt);/g, (_, name: string) => ENTITIES[name] ?? "");
   plain = plain.replace(/\n{3,}/g, "\n\n").trim();
   return plain || undefined;
+}
+
+/**
+ * `text` with its markup gone, in one linear pass: what's between "<" and ">" is dropped
+ * (a tag never closed, to the end), and no bracket is kept, however tags are nested.
+ */
+function withoutTags(text: string): string {
+  let out = "";
+  let inTag = false;
+  for (const ch of text) {
+    if (ch === "<") inTag = true;
+    else if (ch === ">") inTag = false;
+    else if (!inTag) out += ch;
+  }
+  return out;
 }
 
 /** Longer than any synopsis AniList has; what's past it isn't read. */
