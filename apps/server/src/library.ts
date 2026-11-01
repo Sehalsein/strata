@@ -6,6 +6,7 @@ import type { Tmdb } from "./catalog/tmdb";
 import { yearOf } from "./catalog/tmdb";
 import type { ParsedName } from "./media/parse";
 import type { MediaInfo } from "./media/probe";
+import { formatRef, mediaTypeOf, type TitleRef, type TitleType } from "./catalog/ref";
 import { logger } from "./log";
 
 const log = logger("library");
@@ -124,7 +125,11 @@ export class Library {
     return { matched, unmatched };
   }
 
-  async setManualMatch(fileId: number, type: "movie" | "show", tmdbId: number, season?: number, episode?: number, status: MatchStatus = "manual") {
+  /** Matches a file to a title by hand (or to the title discovery fetched it for). */
+  async setManualMatch(fileId: number, ref: TitleRef, season?: number, episode?: number, status: MatchStatus = "manual") {
+    // Only TMDB titles can be matched for now; AniList matches come with AniList support.
+    if (ref.source !== "tmdb") throw new Error(`Can't match files to ${ref.source} titles yet`);
+    const { type, id: tmdbId } = ref;
     if (type === "movie") {
       const m = await this.tmdb.movie(tmdbId);
       await this.applyMatch(fileId, { type, tmdbId, title: m.title, year: yearOf(m.release_date), posterPath: m.poster_path ?? null, backdropPath: m.backdrop_path ?? null, genreIds: m.genres.map((g) => g.id) }, undefined, undefined, status);
@@ -136,15 +141,18 @@ export class Library {
   }
 
   async ignore(fileId: number) {
-    await this.db.update(files).set({ matchStatus: "ignored", mediaType: null, tmdbId: null, updatedAt: Date.now() }).where(and(this.mine(), eq(files.id, fileId)));
+    await this.db.update(files).set({ matchStatus: "ignored", mediaType: null, titleId: null, updatedAt: Date.now() }).where(and(this.mine(), eq(files.id, fileId)));
   }
 
+  /** Matcher results are TMDB titles (anime included, through the anime id list). */
   private async applyMatch(fileId: number, m: MatchResult, season: number | undefined, episode: number | undefined, status: MatchStatus) {
+    const source = "tmdb" as const;
     await this.db.transaction(async (tx) => {
       await tx.update(files)
         .set({
           mediaType: m.type === "movie" ? "movie" : "episode",
-          tmdbId: m.tmdbId,
+          source,
+          titleId: m.tmdbId,
           season: m.type === "show" ? (season ?? null) : null,
           episode: m.type === "show" ? (episode ?? null) : null,
           matchStatus: status,
@@ -152,12 +160,12 @@ export class Library {
         })
         .where(and(this.mine(), eq(files.id, fileId)));
       await tx.insert(mediaItems)
-        .values({ organizationId: this.organizationId, type: m.type, tmdbId: m.tmdbId, title: m.title, year: m.year, posterPath: m.posterPath, backdropPath: m.backdropPath, genreIds: m.genreIds ? JSON.stringify(m.genreIds) : null })
+        .values({ organizationId: this.organizationId, source, type: m.type, titleId: m.tmdbId, title: m.title, year: m.year, posterPath: m.posterPath, backdropPath: m.backdropPath, genreIds: m.genreIds ? JSON.stringify(m.genreIds) : null })
         .onConflictDoNothing();
       if (m.genreIds) {
         await tx.update(mediaItems)
           .set({ genreIds: JSON.stringify(m.genreIds) })
-          .where(and(this.mineItems(), eq(mediaItems.type, m.type), eq(mediaItems.tmdbId, m.tmdbId), isNull(mediaItems.genreIds)));
+          .where(and(this.mineItems(), eq(mediaItems.source, source), eq(mediaItems.type, m.type), eq(mediaItems.titleId, m.tmdbId), isNull(mediaItems.genreIds)));
       }
     });
   }
@@ -180,25 +188,47 @@ export class Library {
     return (await this.db.select().from(files).where(and(this.mine(), eq(files.id, fileId))))[0];
   }
 
-  filesFor(mediaType: "movie" | "episode", tmdbId: number, season?: number, episode?: number): Promise<FileRow[]> {
-    const conditions = [this.mine(), eq(files.mediaType, mediaType), eq(files.tmdbId, tmdbId), eq(files.missing, false), notInArray(files.matchStatus, ["ignored", "pending", "unmatched"])];
+  /** Playable files of a title: a movie's, or a show's (optionally one season or episode). */
+  filesFor(ref: TitleRef, season?: number, episode?: number): Promise<FileRow[]> {
+    const conditions = [
+      this.mine(),
+      eq(files.source, ref.source),
+      eq(files.mediaType, mediaTypeOf(ref.type)),
+      eq(files.titleId, ref.id),
+      eq(files.missing, false),
+      notInArray(files.matchStatus, ["ignored", "pending", "unmatched"]),
+    ];
     if (season !== undefined) conditions.push(eq(files.season, season));
     if (episode !== undefined) conditions.push(eq(files.episode, episode));
     return this.db.select().from(files).where(and(...conditions));
   }
 
-  /** Providers available per title, for badges on catalog cards. */
-  async availability(type: "movie" | "show", tmdbIds: number[]): Promise<Map<number, FileProvider[]>> {
-    const out = new Map<number, FileProvider[]>();
-    if (tmdbIds.length === 0) return out;
-    const rows = await this.db
-      .selectDistinct({ tmdbId: files.tmdbId, provider: files.provider })
-      .from(files)
-      .where(and(this.mine(), eq(files.mediaType, type === "movie" ? "movie" : "episode"), inArray(files.tmdbId, tmdbIds), eq(files.missing, false), inArray(files.matchStatus, ["matched", "manual"])));
-    for (const row of rows) {
-      const list = out.get(row.tmdbId!) ?? [];
-      list.push(row.provider);
-      out.set(row.tmdbId!, list);
+  /** Providers available per title, for badges on catalog cards, by `formatRef`. */
+  async availability(refs: TitleRef[]): Promise<Map<string, FileProvider[]>> {
+    const out = new Map<string, FileProvider[]>();
+    // One query per source and type (a list is nearly always one of each).
+    const groups = new Map<string, TitleRef[]>();
+    for (const ref of refs) {
+      const key = `${ref.source}:${ref.type}`;
+      groups.set(key, [...(groups.get(key) ?? []), ref]);
+    }
+    for (const group of groups.values()) {
+      const { source, type } = group[0]!;
+      const rows = await this.db
+        .selectDistinct({ titleId: files.titleId, provider: files.provider })
+        .from(files)
+        .where(and(
+          this.mine(),
+          eq(files.source, source),
+          eq(files.mediaType, mediaTypeOf(type)),
+          inArray(files.titleId, group.map((r) => r.id)),
+          eq(files.missing, false),
+          inArray(files.matchStatus, ["matched", "manual"]),
+        ));
+      for (const row of rows) {
+        const key = formatRef({ source, type, id: row.titleId! });
+        out.set(key, [...(out.get(key) ?? []), row.provider]);
+      }
     }
     return out;
   }
@@ -208,26 +238,27 @@ export class Library {
    * modified time (when Strata first saw it, failing both). A show moves up when
    * a new episode arrives.
    */
-  async recentlyAdded(type: "movie" | "show", limit = 20) {
+  async recentlyAdded(type: TitleType, limit = 20) {
     const at = sql<number>`max(coalesce(${files.mtime}, ${files.addedAt}))`.mapWith(Number);
-    const latest = await this.db
-      .select({ tmdbId: files.tmdbId, at })
+    const latest = (await this.db
+      .select({ source: files.source, titleId: files.titleId, at })
       .from(files)
-      .where(and(this.mine(), eq(files.mediaType, type === "movie" ? "movie" : "episode"), eq(files.missing, false), notInArray(files.matchStatus, ["ignored", "pending", "unmatched"])))
-      .groupBy(files.tmdbId)
+      .where(and(this.mine(), eq(files.mediaType, mediaTypeOf(type)), eq(files.missing, false), notInArray(files.matchStatus, ["ignored", "pending", "unmatched"])))
+      .groupBy(files.source, files.titleId)
       .orderBy(desc(at))
-      .limit(limit);
-    const ids = latest.map((r) => r.tmdbId).filter((id): id is number => id !== null);
-    if (!ids.length) return [];
-    const items = new Map((await this.db.select().from(mediaItems).where(and(this.mineItems(), eq(mediaItems.type, type), inArray(mediaItems.tmdbId, ids)))).map((m) => [m.tmdbId, m]));
-    return ids.map((id) => items.get(id)).filter((m): m is NonNullable<typeof m> => !!m);
+      .limit(limit)).filter((r): r is typeof r & { titleId: number } => r.titleId !== null);
+    if (!latest.length) return [];
+    const ids = [...new Set(latest.map((r) => r.titleId))];
+    const rows = await this.db.select().from(mediaItems).where(and(this.mineItems(), eq(mediaItems.type, type), inArray(mediaItems.titleId, ids)));
+    const items = new Map(rows.map((m) => [`${m.source}:${m.titleId}`, m]));
+    return latest.map((r) => items.get(`${r.source}:${r.titleId}`)).filter((m): m is NonNullable<typeof m> => !!m);
   }
 
 
   async list(opts: { status?: MatchStatus; provider?: FileProvider; q?: string; searchIn?: "all" | "title" | "filename"; mediaType?: "movie" | "episode"; accessed?: "yes" | "no"; sort?: "lastAccessed" | "added" | "title" | "name" | "size" | "year"; direction?: "asc" | "desc"; limit: number; offset: number }) {
     // Playback history is per title/episode and profile, not per physical file.
     const lastAccessedAt = sql<number | null>`(SELECT MAX(${progress.updatedAt}) FROM ${progress}
-      WHERE ${progress.mediaType} = ${files.mediaType} AND ${progress.tmdbId} = ${files.tmdbId}
+      WHERE ${progress.source} = ${files.source} AND ${progress.mediaType} = ${files.mediaType} AND ${progress.titleId} = ${files.titleId}
       AND ${progress.season} = COALESCE(${files.season}, 0) AND ${progress.episode} = COALESCE(${files.episode}, 0)
       AND ${progress.userId} IN (SELECT ${member.userId} FROM ${member} WHERE ${member.organizationId} = ${this.organizationId}))`.mapWith((v) => (v === null ? null : Number(v)));
     const addedAt = sql<number>`CASE WHEN ${files.provider} = 'torbox' THEN COALESCE(${files.mtime}, ${files.addedAt}) ELSE ${files.addedAt} END`.mapWith(Number);
@@ -244,7 +275,7 @@ export class Library {
       conditions.push(sql`strpos(lower(${haystack}), lower(${term})) > 0`);
     }
     const where = and(...conditions);
-    const join = and(eq(mediaItems.organizationId, files.organizationId), eq(mediaItems.tmdbId, files.tmdbId), eq(mediaItems.type, sql`CASE ${files.mediaType} WHEN 'movie' THEN 'movie' ELSE 'show' END`));
+    const join = and(eq(mediaItems.organizationId, files.organizationId), eq(mediaItems.source, files.source), eq(mediaItems.titleId, files.titleId), eq(mediaItems.type, sql`CASE ${files.mediaType} WHEN 'movie' THEN 'movie' ELSE 'show' END`));
     const sort = opts.sort ?? "lastAccessed";
     const key = { lastAccessed: lastAccessedAt, added: addedAt, title: sql`lower(${title})`, name: sql`lower(${files.name})`, size: files.size, year: mediaItems.year }[sort];
     const order = opts.direction === "asc" ? asc(key) : desc(key);
@@ -265,8 +296,8 @@ export class Library {
     await this.db.update(files).set({ matchStatus: "pending", updatedAt: Date.now() }).where(and(this.mine(), eq(files.id, fileId), eq(files.matchStatus, "ignored")));
   }
 
-  async titleOf(type: "movie" | "show", tmdbId: number): Promise<string | null> {
-    return (await this.db.select({ title: mediaItems.title }).from(mediaItems).where(and(this.mineItems(), eq(mediaItems.type, type), eq(mediaItems.tmdbId, tmdbId))))[0]?.title ?? null;
+  async titleOf(ref: TitleRef): Promise<string | null> {
+    return (await this.db.select({ title: mediaItems.title }).from(mediaItems).where(and(this.mineItems(), eq(mediaItems.source, ref.source), eq(mediaItems.type, ref.type), eq(mediaItems.titleId, ref.id))))[0]?.title ?? null;
   }
 
   async stats() {
@@ -283,7 +314,7 @@ export class Library {
   async pruneOrphans() {
     await this.db.execute(sql`
       DELETE FROM media_items WHERE organization_id = ${this.organizationId} AND NOT EXISTS (
-        SELECT 1 FROM files f WHERE f.organization_id = media_items.organization_id AND f.tmdb_id = media_items.tmdb_id AND NOT f.missing
+        SELECT 1 FROM files f WHERE f.organization_id = media_items.organization_id AND f.source = media_items.source AND f.title_id = media_items.title_id AND NOT f.missing
           AND f.match_status IN ('matched','manual')
           AND f.media_type = CASE media_items.type WHEN 'movie' THEN 'movie' ELSE 'episode' END
       )`);

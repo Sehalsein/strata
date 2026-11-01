@@ -10,6 +10,7 @@ import type { Anilist, AnilistHomeItem, AnilistRankedList } from "./anime/anilis
 import type { AnimeIds } from "./anime/ids";
 import { ANIME_CATEGORIES, type Kitsu, type KitsuRail } from "./anime/kitsu";
 import type { Omdb, Ratings } from "./omdb";
+import { formatRef, targetRef, tmdbRef, type TitleTarget } from "./ref";
 
 const log = logger("catalog");
 
@@ -26,6 +27,9 @@ export type TitleType = "movie" | "show";
 
 export interface TitleCard {
   type: TitleType;
+  /** The title's ref ("tmdb:movie:603", see `formatRef`): what newer apps key titles by. */
+  ref: string;
+  /** TMDB's id, for apps from before refs. */
   tmdbId: number;
   title: string;
   year: number | null;
@@ -249,8 +253,8 @@ export class CatalogService {
     for (let round = 0; picks.some((p) => p.length > round); round++) {
       for (const list of picks) {
         const card = list[round];
-        if (!card || seen.has(`${card.type}-${card.tmdbId}`)) continue;
-        seen.add(`${card.type}-${card.tmdbId}`);
+        if (!card || seen.has(card.ref)) continue;
+        seen.add(card.ref);
         out.push(card);
       }
     }
@@ -574,12 +578,14 @@ export class CatalogService {
     const m = await this.tmdb.movie(id);
     const imdbId = m.imdb_id ?? m.external_ids?.imdb_id ?? null;
     const [anime, ratings] = await Promise.all([this.animeInfo("movie", id).catch(() => null), this.ratings(imdbId)]);
-    const sources = await findCandidates(this.library, this.settings(), "movie", id);
+    const ref = tmdbRef("movie", id);
+    const sources = await findCandidates(this.library, this.settings(), { source: "tmdb", mediaType: "movie", titleId: id });
     const region = this.settings().region;
     const certification =
       m.release_dates?.results.find((r) => r.iso_3166_1 === region)?.release_dates.find((d) => d.certification)?.certification ?? null;
     return {
       type: "movie" as const,
+      ref: formatRef(ref),
       tmdbId: m.id,
       imdbId,
       title: m.title,
@@ -603,21 +609,23 @@ export class CatalogService {
       recommendations: await this.cards(m.recommendations?.results ?? [], "movie"),
       available: [...new Set(sources.map((s) => s.provider))],
       sources,
-      progress: progressDto(await this.progress.get(userId, { mediaType: "movie", tmdbId: id })),
-      inWatchlist: await this.progress.inWatchlist(userId, "movie", id),
+      progress: progressDto(await this.progress.get(userId, { source: "tmdb", mediaType: "movie", titleId: id })),
+      inWatchlist: await this.progress.inWatchlist(userId, ref),
       anime,
     };
   }
 
   async show(userId: string, id: number) {
+    const ref = tmdbRef("show", id);
     const s = await this.tmdb.show(id);
-    const watched = await this.progress.forShow(userId, id);
-    const available = await this.library.filesFor("episode", id);
+    const watched = await this.progress.forShow(userId, ref);
+    const available = await this.library.filesFor(ref);
     const region = this.settings().region;
     const imdbId = s.external_ids?.imdb_id ?? null;
     const [anime, ratings, upNext] = await Promise.all([this.animeInfo("show", id).catch(() => null), this.ratings(imdbId), this.showUpNext(s, watched)]);
     return {
       type: "show" as const,
+      ref: formatRef(ref),
       tmdbId: s.id,
       imdbId,
       title: s.name,
@@ -649,15 +657,16 @@ export class CatalogService {
       available: [...new Set(available.map((f) => f.provider))],
       /** Where the Play button should go: an in-progress episode, else the next unwatched one. */
       upNext,
-      inWatchlist: await this.progress.inWatchlist(userId, "show", id),
+      inWatchlist: await this.progress.inWatchlist(userId, ref),
       anime,
     };
   }
 
   async season(userId: string, showId: number, seasonNumber: number) {
     const [season, imdbRatings] = await Promise.all([this.tmdb.season(showId, seasonNumber), this.episodeRatings(showId, seasonNumber)]);
-    const files = await this.library.filesFor("episode", showId, seasonNumber);
-    const watched = new Map((await this.progress.forShow(userId, showId)).filter((p) => p.season === seasonNumber).map((p) => [p.episode, p]));
+    const show = tmdbRef("show", showId);
+    const files = await this.library.filesFor(show, seasonNumber);
+    const watched = new Map((await this.progress.forShow(userId, show)).filter((p) => p.season === seasonNumber).map((p) => [p.episode, p]));
     return {
       season: season.season_number,
       name: season.name,
@@ -680,8 +689,8 @@ export class CatalogService {
     };
   }
 
-  sources(type: "movie" | "episode", tmdbId: number, season?: number, episode?: number): Promise<Candidate[]> {
-    return findCandidates(this.library, this.settings(), type, tmdbId, season, episode);
+  sources(target: TitleTarget): Promise<Candidate[]> {
+    return findCandidates(this.library, this.settings(), target);
   }
 
   private async continueWatching(userId: string): Promise<ContinueCard[]> {
@@ -692,12 +701,14 @@ export class CatalogService {
   }
 
   private async continueCard(row: ProgressRow): Promise<ContinueCard> {
+    // Cards are filled out from TMDB; AniList titles get theirs with AniList support.
+    if (row.source !== "tmdb") throw new Error(`No cards for ${row.source} titles yet`);
     if (row.mediaType === "movie") {
-      const m = await this.tmdb.movie(row.tmdbId);
+      const m = await this.tmdb.movie(row.titleId);
       return { ...(await this.movieCard(m)), positionMs: row.positionMs, durationMs: row.durationMs };
     }
-    const show = await this.tmdb.show(row.tmdbId);
-    const season = await this.tmdb.season(row.tmdbId, row.season);
+    const show = await this.tmdb.show(row.titleId);
+    const season = await this.tmdb.season(row.titleId, row.season);
     const ep = season.episodes.find((e) => e.episode_number === row.episode);
     return {
       ...(await this.showCard(show)),
@@ -708,16 +719,19 @@ export class CatalogService {
   }
 
   private async nextUp(userId: string): Promise<ContinueCard[]> {
-    const inProgressShows = new Set((await this.progress.inProgress(userId, 100)).filter((r) => r.mediaType === "episode").map((r) => r.tmdbId));
+    const inProgressShows = new Set((await this.progress.inProgress(userId, 100)).filter((r) => r.mediaType === "episode").map((r) => formatRef(targetRef(r))));
     const hidden = await this.progress.hiddenFilter(userId);
-    const latest = (await this.progress.recentlyCompletedEpisodes(userId)).filter((r) => !inProgressShows.has(r.tmdbId) && !hidden(r));
+    // Next episodes come from TMDB's seasons (AniList shows: with AniList support).
+    const latest = (await this.progress.recentlyCompletedEpisodes(userId)).filter(
+      (r) => r.source === "tmdb" && !inProgressShows.has(formatRef(targetRef(r))) && !hidden(r),
+    );
     const cards = await Promise.all(
       latest.map(async (row) => {
         try {
-          const show = await this.tmdb.show(row.tmdbId);
+          const show = await this.tmdb.show(row.titleId);
           const next = await this.episodeAfter(show, row.season, row.episode);
           if (!next) return null;
-          const done = await this.progress.get(userId, { mediaType: "episode", tmdbId: row.tmdbId, season: next.season, episode: next.episode });
+          const done = await this.progress.get(userId, { source: row.source, mediaType: "episode", titleId: row.titleId, season: next.season, episode: next.episode });
           if (done?.completed) return null;
           return { ...(await this.showCard(show)), episode: next, positionMs: 0, durationMs: 0 } satisfies ContinueCard;
         } catch {
@@ -748,7 +762,7 @@ export class CatalogService {
 
   /** `available`: the episode is in the library, so Play plays it (apps offer nothing else). */
   private async showUpNext(show: TmdbShow, watched: ProgressRow[]) {
-    const files = (await this.library.filesFor("episode", show.id)).filter((f) => f.season !== null && f.episode !== null);
+    const files = (await this.library.filesFor(tmdbRef("show", show.id))).filter((f) => f.season !== null && f.episode !== null);
     const has = (season: number, episode: number) => files.some((f) => f.season === season && f.episode === episode);
     const at = (season: number, episode: number, positionMs = 0) => ({ season, episode, positionMs, available: has(season, episode) });
     const inProgress = watched.filter(isResumable).sort((a, b) => b.updatedAt - a.updatedAt)[0];
@@ -770,8 +784,10 @@ export class CatalogService {
     const rows = await this.progress.watchlist(userId);
     const cards = await Promise.all(
       rows.map(async (r) => {
+        // Cards are filled out from TMDB; AniList titles get theirs with AniList support.
+        if (r.source !== "tmdb") return null;
         try {
-          return r.type === "movie" ? await this.movieCard(await this.tmdb.movie(r.tmdbId)) : await this.showCard(await this.tmdb.show(r.tmdbId));
+          return r.type === "movie" ? await this.movieCard(await this.tmdb.movie(r.titleId)) : await this.showCard(await this.tmdb.show(r.titleId));
         } catch {
           return null;
         }
@@ -782,16 +798,19 @@ export class CatalogService {
 
   /** Library titles, newest first (by when their files were added). */
   private async libraryCards(type: TitleType, limit = 20): Promise<TitleCard[]> {
-    const items = await this.library.recentlyAdded(type, limit);
-    const avail = await this.library.availability(type, items.map((i) => i.tmdbId));
-    return items.map((i) => ({
+    // TMDB's titles only until AniList support gives other sources' titles cards.
+    const items = (await this.library.recentlyAdded(type, limit)).filter((i) => i.source === "tmdb");
+    const refs = items.map((i) => formatRef(tmdbRef(type, i.titleId)));
+    const avail = await this.library.availability(items.map((i) => tmdbRef(type, i.titleId)));
+    return items.map((i, n) => ({
       type,
-      tmdbId: i.tmdbId,
+      ref: refs[n]!,
+      tmdbId: i.titleId,
       title: i.title,
       year: i.year,
       posterUrl: imageUrl(i.posterPath, "w342"),
       backdropUrl: imageUrl(i.backdropPath, "w780"),
-      available: avail.get(i.tmdbId) ?? [],
+      available: avail.get(refs[n]!) ?? [],
     }));
   }
 
@@ -847,10 +866,13 @@ export class CatalogService {
   }
 
 
+  /** Cards for TMDB list items, with what the library has of each. */
   private async cards(items: TmdbListItem[], type: TitleType): Promise<TitleCard[]> {
-    const avail = await this.library.availability(type, items.map((i) => i.id));
-    return items.map((i) => ({
+    const refs = items.map((i) => tmdbRef(type, i.id));
+    const avail = await this.library.availability(refs);
+    return items.map((i, n) => ({
       type,
+      ref: formatRef(refs[n]!),
       tmdbId: i.id,
       title: i.title ?? i.name ?? "",
       year: yearOf(i.release_date ?? i.first_air_date),
@@ -858,7 +880,7 @@ export class CatalogService {
       posterUrl: imageUrl(i.poster_path, "w342"),
       backdropUrl: imageUrl(i.backdrop_path, "w780"),
       rating: i.vote_average,
-      available: avail.get(i.id) ?? [],
+      available: avail.get(formatRef(refs[n]!)) ?? [],
     }));
   }
 

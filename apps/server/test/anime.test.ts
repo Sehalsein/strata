@@ -97,7 +97,7 @@ describe("Torrentio anime ids", () => {
 
   test("Torrentio's anime picks count as the episode whatever their own numbering", () => {
     const release = (title: string, targeted: boolean): Release => ({ hash: "a".repeat(40), title, origin: "torrentio", cached: false, isPack: false, targeted, parsed: parseFileName(title) });
-    const target = { mediaType: "episode" as const, tmdbId: 209867, season: 1, episode: 30 };
+    const target = { source: "tmdb" as const, mediaType: "episode" as const, titleId: 209867, season: 1, episode: 30 };
     expect(relevant(release("[SubsPlease] Sousou no Frieren - 02 (1080p)", true), target)).toBe(true);
     expect(relevant(release("[SubsPlease] Sousou no Frieren - 02 (1080p)", false), target)).toBe(false);
   });

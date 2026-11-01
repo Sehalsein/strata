@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { CalendarService } from "../src/catalog/calendar";
+import type { TitleRef } from "../src/catalog/ref";
 import { AnimeIds, fileAnimeIdStore } from "../src/catalog/anime/ids";
 import type { Anilist, AiringEpisode } from "../src/catalog/anime/anilist";
 import type { Tmdb, TmdbSeason, TmdbShow } from "../src/catalog/tmdb";
@@ -37,8 +38,8 @@ function service(watchlist: number[], airing: AiringEpisode[], inLibrary: string
   ids.ready = async () => {};
   const asked: { ids: number[]; from: number; to: number }[] = [];
   const anilist = { airing: async (mediaIds: number[], from: number, to: number) => (asked.push({ ids: mediaIds, from, to }), airing) } as unknown as Anilist;
-  const library = { filesFor: (_: string, id: number, s: number, e: number) => (inLibrary.includes(`${id}:${s}:${e}`) ? [{}] : []) } as never;
-  const progress = { watchlist: () => watchlist.map((tmdbId) => ({ type: "show", tmdbId })) } as never;
+  const library = { filesFor: (show: TitleRef, s: number, e: number) => (inLibrary.includes(`${show.id}:${s}:${e}`) ? [{}] : []) } as never;
+  const progress = { watchlist: () => watchlist.map((titleId) => ({ source: "tmdb", type: "show", titleId })) } as never;
   return { calendar: new CalendarService(tmdb, library, progress, { ids, anilist }, async (_, id) => allowed(id)), asked };
 }
 

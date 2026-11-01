@@ -1,4 +1,5 @@
 import { bigint, boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import type { TitleSource } from "../catalog/ref";
 
 // Postgres: bundled (PGlite) on a home server, Neon or any Postgres in the cloud. Keep in
 // lockstep with migrations.ts — the SQL there is the source of truth for the shape on
@@ -257,7 +258,9 @@ export const files = pgTable(
     parsedJson: text("parsed_json"),
     probeJson: text("probe_json"),
     mediaType: text("media_type").$type<"movie" | "episode">(),
-    tmdbId: integer("tmdb_id"),
+    source: text("source").$type<TitleSource>().notNull().default("tmdb"),
+    /** The movie's or show's id at `source`. */
+    titleId: integer("title_id"),
     season: integer("season"),
     episode: integer("episode"),
     matchStatus: text("match_status").$type<MatchStatus>().notNull().default("pending"),
@@ -269,7 +272,7 @@ export const files = pgTable(
   },
   (t) => [
     uniqueIndex("files_provider_ref").on(t.organizationId, t.provider, t.ref),
-    index("files_tmdb").on(t.organizationId, t.mediaType, t.tmdbId, t.season, t.episode),
+    index("files_title").on(t.organizationId, t.source, t.mediaType, t.titleId, t.season, t.episode),
     index("files_source_hash").on(t.organizationId, t.sourceHash),
   ],
 );
@@ -298,7 +301,8 @@ export const mediaItems = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     type: text("type").$type<"movie" | "show">().notNull(),
-    tmdbId: integer("tmdb_id").notNull(),
+    source: text("source").$type<TitleSource>().notNull().default("tmdb"),
+    titleId: integer("title_id").notNull(),
     title: text("title").notNull(),
     year: integer("year"),
     posterPath: text("poster_path"),
@@ -307,7 +311,7 @@ export const mediaItems = pgTable(
     /** JSON array of TMDB genre ids, recorded when a file is matched (null for older rows). */
     genreIds: text("genre_ids"),
   },
-  (t) => [primaryKey({ columns: [t.organizationId, t.type, t.tmdbId] })],
+  (t) => [primaryKey({ columns: [t.organizationId, t.source, t.type, t.titleId] })],
 );
 
 export const progress = pgTable(
@@ -317,8 +321,9 @@ export const progress = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     mediaType: text("media_type").$type<"movie" | "episode">().notNull(),
-    /** Movie id, or the show id for episodes. */
-    tmdbId: integer("tmdb_id").notNull(),
+    source: text("source").$type<TitleSource>().notNull().default("tmdb"),
+    /** Movie id, or the show id for episodes, at `source`. */
+    titleId: integer("title_id").notNull(),
     season: integer("season").notNull().default(0),
     episode: integer("episode").notNull().default(0),
     positionMs: integer("position_ms").notNull(),
@@ -326,7 +331,7 @@ export const progress = pgTable(
     completed: boolean("completed").notNull().default(false),
     updatedAt: ms("updated_at").notNull().$defaultFn(now),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.mediaType, t.tmdbId, t.season, t.episode] })],
+  (t) => [primaryKey({ columns: [t.userId, t.source, t.mediaType, t.titleId, t.season, t.episode] })],
 );
 
 /** Titles taken off Continue Watching / Next Up; they come back when watched again. */
@@ -337,10 +342,11 @@ export const continueHidden = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     type: text("type").$type<"movie" | "show">().notNull(),
-    tmdbId: integer("tmdb_id").notNull(),
+    source: text("source").$type<TitleSource>().notNull().default("tmdb"),
+    titleId: integer("title_id").notNull(),
     hiddenAt: ms("hidden_at").notNull().$defaultFn(now),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.type, t.tmdbId] })],
+  (t) => [primaryKey({ columns: [t.userId, t.source, t.type, t.titleId] })],
 );
 
 export const watchlist = pgTable(
@@ -350,10 +356,11 @@ export const watchlist = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     type: text("type").$type<"movie" | "show">().notNull(),
-    tmdbId: integer("tmdb_id").notNull(),
+    source: text("source").$type<TitleSource>().notNull().default("tmdb"),
+    titleId: integer("title_id").notNull(),
     addedAt: ms("added_at").notNull().$defaultFn(now),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.type, t.tmdbId] })],
+  (t) => [primaryKey({ columns: [t.userId, t.source, t.type, t.titleId] })],
 );
 
 /**
@@ -372,7 +379,7 @@ export const playSessions = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     fileId: integer("file_id").notNull(),
-    /** { mediaType, tmdbId, season?, episode? } */
+    /** { source, mediaType, titleId, season?, episode? }; older rows: { mediaType, tmdbId, … } (TMDB). */
     targetJson: text("target_json").notNull(),
     /** The playback plan (mode, audio, reasons…). */
     planJson: text("plan_json").notNull(),

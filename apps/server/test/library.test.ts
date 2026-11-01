@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { setUp, startTestServer } from "./helpers";
 import { ingestItem } from "../src/sources/torbox/sync";
+import { tmdbRef } from "../src/catalog/ref";
 
 test("Recently Added follows when files were added to TorBox, not when Strata matched them", async () => {
   const server = await startTestServer();
@@ -10,8 +11,8 @@ test("Recently Added follows when files were added to TorBox, not when Strata ma
   // Synced before TorBox dates were kept: no time yet.
   const [older] = await ingestItem(library, "torrents", item(1, "Big.Buck.Bunny.2008.1080p"));
   const [newer] = await ingestItem(library, "torrents", item(2, "Evil.Movie.2020.1080p", "2026-10-20T10:00:00Z"));
-  await library.setManualMatch(older!.id, "movie", 10378, undefined, undefined, "matched");
-  await library.setManualMatch(newer!.id, "movie", 666, undefined, undefined, "matched");
+  await library.setManualMatch(older!.id, tmdbRef("movie", 10378), undefined, undefined, "matched");
+  await library.setManualMatch(newer!.id, tmdbRef("movie", 666), undefined, undefined, "matched");
 
   // The next sync brings the add date: recorded without unmatching or dropping the probe.
   await library.saveProbe(older!.id, { container: "mkv" } as never);
@@ -20,6 +21,6 @@ test("Recently Added follows when files were added to TorBox, not when Strata ma
   expect(again!.probeJson).not.toBeNull();
 
   // Matched first but added to TorBox last: it leads.
-  expect((await library.recentlyAdded("movie")).map((m) => m.tmdbId)).toEqual([10378, 666]);
+  expect((await library.recentlyAdded("movie")).map((m) => m.titleId)).toEqual([10378, 666]);
   server.services.shutdown();
 });

@@ -4,7 +4,7 @@ import type { Db } from "../db";
 import { member } from "../db/schema";
 import { logger } from "../log";
 import type { Settings } from "../settings";
-import type { TitleType } from "./service";
+import { parseRef, type TitleRef } from "./ref";
 import type { Tmdb, TmdbMovie, TmdbShow } from "./tmdb";
 import { SharedWork } from "../inFlight";
 
@@ -101,19 +101,19 @@ export class ContentFilter {
     return limit in MAX_AGE ? MAX_AGE[limit as ContentLimit] : MAX_AGE.little;
   }
 
-  async allowed(userId: string, type: TitleType, tmdbId: number): Promise<boolean> {
+  async allowed(userId: string, ref: TitleRef): Promise<boolean> {
     const maxAge = await this.maxAge(userId);
     if (maxAge === null) return true;
-    return this.fits(maxAge, type, tmdbId);
+    return this.fits(maxAge, ref);
   }
 
   /** Throws 403 for a title the profile can't see (opened by link or id). */
-  async assertAllowed(userId: string, type: TitleType, tmdbId: number) {
-    if (!(await this.allowed(userId, type, tmdbId))) throw new HTTPException(403, { message: "This title isn't available to this account." });
+  async assertAllowed(userId: string, ref: TitleRef) {
+    if (!(await this.allowed(userId, ref))) throw new HTTPException(403, { message: "This title isn't available to this account." });
   }
 
-  /** Keeps only cards the profile may see. Lookups are cached, a few at a time. */
-  async filter<T extends { type: TitleType; tmdbId: number }>(userId: string, cards: T[]): Promise<T[]> {
+  /** Keeps only cards the profile may see (by their `ref`). Lookups are cached, a few at a time. */
+  async filter<T extends { ref: string }>(userId: string, cards: T[]): Promise<T[]> {
     const maxAge = await this.maxAge(userId);
     if (maxAge === null || cards.length === 0) return cards;
     const keep = new Array<boolean>(cards.length).fill(false);
@@ -121,14 +121,20 @@ export class ContentFilter {
     const worker = async () => {
       while (next < cards.length) {
         const i = next++;
-        keep[i] = await this.fits(maxAge, cards[i]!.type, cards[i]!.tmdbId);
+        const ref = parseRef(cards[i]!.ref);
+        keep[i] = ref ? await this.fits(maxAge, ref) : false;
       }
     };
     await Promise.all(Array.from({ length: Math.min(8, cards.length) }, worker));
     return cards.filter((_, i) => keep[i]);
   }
 
-  private async fits(maxAge: number, type: TitleType, tmdbId: number): Promise<boolean> {
+  private async fits(maxAge: number, ref: TitleRef): Promise<boolean> {
+    // Ratings come from TMDB's certifications. Other sources' titles count as unrated and
+    // unknown until AniList support brings their own ratings: only profiles without
+    // a limit see them.
+    if (ref.source !== "tmdb") return false;
+    const { type, id: tmdbId } = ref;
     try {
       const { age, genres } = await this.rating(type, tmdbId);
       if (age !== null) return age <= maxAge;
@@ -141,7 +147,7 @@ export class ContentFilter {
     }
   }
 
-  private rating(type: TitleType, tmdbId: number) {
+  private rating(type: TitleRef["type"], tmdbId: number) {
     const region = this.settings().region;
     const key = `${type}:${tmdbId}:${region}`;
     return this.ages.get(key, async () => {

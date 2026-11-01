@@ -15,7 +15,7 @@ const release = (title: string, over: Partial<Release> = {}): Release => ({
 });
 
 describe("release filtering", () => {
-  const ep = { mediaType: "episode" as const, tmdbId: 1, season: 2, episode: 3 };
+  const ep = { source: "tmdb" as const, mediaType: "episode" as const, titleId: 1, season: 2, episode: 3 };
 
   test("episodes, packs and ranges", () => {
     expect(relevant(release("Show.S02E03.1080p.WEB"), ep)).toBe(true);
@@ -28,7 +28,7 @@ describe("release filtering", () => {
   });
 
   test("movies drop cams and episodes", () => {
-    const movie = { mediaType: "movie" as const, tmdbId: 1 };
+    const movie = { source: "tmdb" as const, mediaType: "movie" as const, titleId: 1 };
     expect(relevant(release("Film.2024.1080p.WEB-DL"), movie)).toBe(true);
     expect(relevant(release("Film.2024.HDCAM.x264"), movie)).toBe(false);
     expect(relevant(release("Film.S01E01.1080p"), movie)).toBe(false);
@@ -171,11 +171,11 @@ describe("discovery end to end", () => {
   });
 
   test("a library torrent can't be replayed as a different title", async () => {
-    const before = (await (await server.household()).library.byHash(CACHED)).map((f) => [f.id, f.mediaType, f.tmdbId]);
+    const before = (await (await server.household()).library.byHash(CACHED)).map((f) => [f.id, f.mediaType, f.titleId]);
     expect(before.length).toBeGreaterThan(0);
     const res = await server.request("/api/play", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 1, candidateId: `hash:${CACHED}` } });
     expect(res.status).toBe(404);
-    expect((await (await server.household()).library.byHash(CACHED)).map((f) => [f.id, f.mediaType, f.tmdbId])).toEqual(before);
+    expect((await (await server.household()).library.byHash(CACHED)).map((f) => [f.id, f.mediaType, f.titleId])).toEqual(before);
   });
 
   test("an uncached release reports download progress", async () => {

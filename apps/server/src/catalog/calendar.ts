@@ -3,6 +3,7 @@ import type { ProgressStore } from "../progress";
 import type { Anilist } from "./anime/anilist";
 import type { AnimeEntry, AnimeIds } from "./anime/ids";
 import { resolveEpisode } from "./anime/match";
+import { formatRef, tmdbRef } from "./ref";
 import { imageUrl, type Tmdb, type TmdbSeason, type TmdbShow } from "./tmdb";
 
 const DAY_S = 86_400;
@@ -12,6 +13,8 @@ export const CALENDAR_FUTURE_DAYS = 30;
 
 /** An episode of a show on a profile's list, aired recently or coming up. */
 export interface CalendarEpisode {
+  /** The show (`formatRef`). */
+  ref: string;
   tmdbId: number;
   title: string;
   posterUrl: string | null;
@@ -50,7 +53,9 @@ export class CalendarService {
     const today = Math.floor(now / 1000 / DAY_S) * DAY_S;
     const from = today - CALENDAR_PAST_DAYS * DAY_S;
     const to = today + (CALENDAR_FUTURE_DAYS + 1) * DAY_S;
-    const listed = (await this.progress.watchlist(userId)).filter((r) => r.type === "show").map((r) => r.tmdbId);
+    // TMDB shows only: their episodes come from TMDB (and AniList, through the anime id
+    // list). AniList shows get theirs with AniList support.
+    const listed = (await this.progress.watchlist(userId)).filter((r) => r.type === "show" && r.source === "tmdb").map((r) => r.titleId);
     const showIds = (await Promise.all(listed.map(async (id) => ((await this.allowed(userId, id).catch(() => false)) ? id : null)))).filter((id): id is number => id !== null);
     await this.anime?.ids.ready().catch(() => {});
 
@@ -67,7 +72,7 @@ export class CalendarService {
     const all = [...fromAnilist, ...fromTmdb];
     await Promise.all(
       all.map(async (e) => {
-        e.available = e.season !== null && (await this.library.filesFor("episode", e.tmdbId, e.season, e.episode)).length > 0;
+        e.available = e.season !== null && (await this.library.filesFor(tmdbRef("show", e.tmdbId), e.season, e.episode)).length > 0;
       }),
     );
     return all.sort((a, b) => key(a).localeCompare(key(b)) || a.title.localeCompare(b.title));
@@ -111,6 +116,7 @@ export class CalendarService {
 
   private entry(show: TmdbShow, season: number | null, episode: number, name: string | null, airsAt: string | null, airDate: string): CalendarEpisode {
     return {
+      ref: formatRef(tmdbRef("show", show.id)),
       tmdbId: show.id,
       title: show.name,
       posterUrl: imageUrl(show.poster_path, "w342"),

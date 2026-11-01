@@ -1,6 +1,7 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "./db";
 import { continueHidden, progress, watchlist } from "./db/schema";
+import { formatRef, targetRef, type TitleRef, type TitleTarget } from "./catalog/ref";
 
 export type ProgressRow = typeof progress.$inferSelect;
 
@@ -28,12 +29,8 @@ export function isResumable(row: Pick<ProgressRow, "positionMs" | "durationMs" |
   return row.positionMs >= RESUME_MIN_MS || (row.durationMs > 0 && row.positionMs >= row.durationMs * RESUME_MIN_RATIO);
 }
 
-export interface ProgressKey {
-  mediaType: "movie" | "episode";
-  tmdbId: number;
-  season?: number;
-  episode?: number;
-}
+/** A movie, or an episode of a show, at its source. */
+export type ProgressKey = TitleTarget;
 
 export class ProgressStore {
   constructor(private readonly db: Db) {}
@@ -43,7 +40,8 @@ export class ProgressStore {
     const values = {
       userId,
       mediaType: key.mediaType,
-      tmdbId: key.tmdbId,
+      source: key.source,
+      titleId: key.titleId,
       season: key.season ?? 0,
       episode: key.episode ?? 0,
       positionMs: Math.max(0, Math.round(positionMs)),
@@ -55,7 +53,7 @@ export class ProgressStore {
       .insert(progress)
       .values(values)
       .onConflictDoUpdate({
-        target: [progress.userId, progress.mediaType, progress.tmdbId, progress.season, progress.episode],
+        target: [progress.userId, progress.source, progress.mediaType, progress.titleId, progress.season, progress.episode],
         set: { positionMs: values.positionMs, durationMs: values.durationMs, completed, updatedAt: values.updatedAt },
       })
       .returning();
@@ -76,30 +74,31 @@ export class ProgressStore {
     return (await this.db.select().from(progress).where(this.where(userId, key)))[0];
   }
 
-  forShow(userId: string, showId: number): Promise<ProgressRow[]> {
-    return this.db.select().from(progress).where(and(eq(progress.userId, userId), eq(progress.mediaType, "episode"), eq(progress.tmdbId, showId)));
-  }
-
-  async forMovies(userId: string, ids: number[]): Promise<Map<number, ProgressRow>> {
-    if (!ids.length) return new Map();
-    const rows = await this.db.select().from(progress).where(and(eq(progress.userId, userId), eq(progress.mediaType, "movie"), inArray(progress.tmdbId, ids)));
-    return new Map(rows.map((r) => [r.tmdbId, r]));
+  /** Every episode of `show` this person has progress on. */
+  forShow(userId: string, show: TitleRef): Promise<ProgressRow[]> {
+    return this.db
+      .select()
+      .from(progress)
+      .where(and(eq(progress.userId, userId), eq(progress.source, show.source), eq(progress.mediaType, "episode"), eq(progress.titleId, show.id)));
   }
 
   /** Partially watched items, most recent first. */
   /** Takes a title off Continue Watching and Next Up, keeping its progress. */
-  async hideFromContinue(userId: string, type: "movie" | "show", tmdbId: number) {
+  async hideFromContinue(userId: string, ref: TitleRef) {
     const hiddenAt = Date.now();
-    await this.db.insert(continueHidden).values({ userId, type, tmdbId, hiddenAt }).onConflictDoUpdate({ target: [continueHidden.userId, continueHidden.type, continueHidden.tmdbId], set: { hiddenAt } });
+    await this.db
+      .insert(continueHidden)
+      .values({ userId, source: ref.source, type: ref.type, titleId: ref.id, hiddenAt })
+      .onConflictDoUpdate({ target: [continueHidden.userId, continueHidden.source, continueHidden.type, continueHidden.titleId], set: { hiddenAt } });
   }
 
   /** Whether a progress row was hidden (and not watched since). */
-  async hiddenFilter(userId: string): Promise<(row: Pick<ProgressRow, "mediaType" | "tmdbId" | "updatedAt">) => boolean> {
+  async hiddenFilter(userId: string): Promise<(row: Pick<ProgressRow, "source" | "mediaType" | "titleId" | "updatedAt">) => boolean> {
     const hidden = new Map(
-      (await this.db.select().from(continueHidden).where(eq(continueHidden.userId, userId))).map((h) => [`${h.type}-${h.tmdbId}`, h.hiddenAt]),
+      (await this.db.select().from(continueHidden).where(eq(continueHidden.userId, userId))).map((h) => [formatRef({ source: h.source, type: h.type, id: h.titleId }), h.hiddenAt]),
     );
     return (row) => {
-      const at = hidden.get(`${row.mediaType === "movie" ? "movie" : "show"}-${row.tmdbId}`);
+      const at = hidden.get(formatRef(targetRef(row)));
       return at !== undefined && row.updatedAt <= at;
     };
   }
@@ -128,12 +127,13 @@ export class ProgressStore {
       .where(and(eq(progress.userId, userId), eq(progress.mediaType, "episode"), eq(progress.completed, true)))
       .orderBy(desc(progress.updatedAt))
       .limit(500);
-    const latest = new Map<number, ProgressRow>();
+    const latest = new Map<string, ProgressRow>();
     for (const row of rows) {
-      const current = latest.get(row.tmdbId);
+      const show = formatRef(targetRef(row));
+      const current = latest.get(show);
       // The furthest episode wins, not the last one touched (rewatches of old episodes).
       if (!current || row.season > current.season || (row.season === current.season && row.episode > current.episode)) {
-        latest.set(row.tmdbId, row);
+        latest.set(show, row);
       }
     }
     return [...latest.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
@@ -143,20 +143,25 @@ export class ProgressStore {
     return this.db.select().from(watchlist).where(eq(watchlist.userId, userId)).orderBy(desc(watchlist.addedAt));
   }
 
-  async inWatchlist(userId: string, type: "movie" | "show", tmdbId: number): Promise<boolean> {
-    return (await this.db.select().from(watchlist).where(and(eq(watchlist.userId, userId), eq(watchlist.type, type), eq(watchlist.tmdbId, tmdbId)))).length > 0;
+  async inWatchlist(userId: string, ref: TitleRef): Promise<boolean> {
+    return (await this.db.select().from(watchlist).where(this.listed(userId, ref))).length > 0;
   }
 
-  async setWatchlist(userId: string, type: "movie" | "show", tmdbId: number, on: boolean) {
-    if (on) await this.db.insert(watchlist).values({ userId, type, tmdbId }).onConflictDoNothing();
-    else await this.db.delete(watchlist).where(and(eq(watchlist.userId, userId), eq(watchlist.type, type), eq(watchlist.tmdbId, tmdbId)));
+  async setWatchlist(userId: string, ref: TitleRef, on: boolean) {
+    if (on) await this.db.insert(watchlist).values({ userId, source: ref.source, type: ref.type, titleId: ref.id }).onConflictDoNothing();
+    else await this.db.delete(watchlist).where(this.listed(userId, ref));
+  }
+
+  private listed(userId: string, ref: TitleRef) {
+    return and(eq(watchlist.userId, userId), eq(watchlist.source, ref.source), eq(watchlist.type, ref.type), eq(watchlist.titleId, ref.id));
   }
 
   private where(userId: string, key: ProgressKey) {
     return and(
       eq(progress.userId, userId),
+      eq(progress.source, key.source),
       eq(progress.mediaType, key.mediaType),
-      eq(progress.tmdbId, key.tmdbId),
+      eq(progress.titleId, key.titleId),
       eq(progress.season, key.season ?? 0),
       eq(progress.episode, key.episode ?? 0),
     );

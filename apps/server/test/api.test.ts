@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { makeFixtures, noFfmpeg, startTestServer, type TestServer } from "./helpers";
+import { tmdbRef } from "../src/catalog/ref";
 
 let server: TestServer;
 let token: string;
@@ -235,7 +236,7 @@ describe("setup and auth", () => {
     expect(exported.headers.get("content-disposition")).toContain("strata-dora-data.json");
     const file = (await exported.json()) as any;
     expect(file.account).toMatchObject({ username: "dora", email: "dora@example.com" });
-    expect(file.myList).toEqual([expect.objectContaining({ tmdbId: 10378 })]);
+    expect(file.myList).toEqual([expect.objectContaining({ source: "tmdb", titleId: 10378 })]);
     expect((await json(await server.request("/api/watchlist", { token: dora }))).items).toEqual([expect.objectContaining({ type: "movie", tmdbId: 10378 })]);
     expect(file.devices.length).toBeGreaterThan(0);
     expect(JSON.stringify(file)).not.toContain(dora);
@@ -334,7 +335,7 @@ describe("setup and auth", () => {
     // Nor the files of those titles, by id.
     const h = await server.household();
     const file = await h.library.upsert({ provider: "local", ref: "/m/Night.mkv", name: "Night.mkv", size: 1, parsed: { title: "Night", kind: "movie" } as never });
-    await h.library.setManualMatch(file.id, "movie", 666);
+    await h.library.setManualMatch(file.id, tmdbRef("movie", 666));
     expect((await server.request(`/api/files/${file.id}/link`, { method: "POST", token: bob })).status).toBe(403);
     expect((await server.request(`/api/files/${file.id}/content`, { token: bob })).status).toBe(404);
     expect((await server.request(`/api/files/${file.id}/probe`, { method: "POST", token: bob, json: { durationMs: 1, video: [], audio: [], subtitles: [] } })).status).not.toBe(200);

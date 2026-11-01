@@ -30,7 +30,7 @@ function service() {
 }
 
 const caps = capsSchema.parse({ deviceRemux: true });
-const movie = { mediaType: "movie" as const, tmdbId: 42, caps };
+const movie = { source: "tmdb" as const, mediaType: "movie" as const, titleId: 42, caps };
 
 describe("downloads", () => {
   test("hand over the TorBox link and the device plan, with only embedded text subtitles", async () => {

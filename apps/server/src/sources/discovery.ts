@@ -10,6 +10,7 @@ import type { TorboxClient, TorboxItem } from "./torbox/client";
 import { ingestItem } from "./torbox/sync";
 import { SharedWork } from "../inFlight";
 import { globalFetch } from "../net";
+import { targetRef, type TitleTarget } from "../catalog/ref";
 
 const log = logger("discovery");
 const RELEASE_TTL_MS = 20 * 60_000;
@@ -19,12 +20,8 @@ const SCRAPER_TIMEOUT_MS = 12_000;
 const SCRAPER_BACKOFF_MS = 5 * 60_000;
 const READY_WAIT_MS = 20_000;
 
-export interface DiscoveryTarget {
-  mediaType: "movie" | "episode";
-  tmdbId: number;
-  season?: number;
-  episode?: number;
-}
+/** The movie or episode releases are looked for. */
+export type DiscoveryTarget = TitleTarget;
 
 /** A torrent release found by a scraper, not (yet) in the library. */
 export interface Release {
@@ -113,7 +110,10 @@ export class Discovery {
   }
 
   releases(target: DiscoveryTarget): Promise<Release[]> {
-    const key = `${target.mediaType}:${target.tmdbId}:${target.season ?? ""}:${target.episode ?? ""}`;
+    // Scrapers are asked by IMDb id, looked up on TMDB: nothing to find for other sources
+    // until AniList support maps their titles.
+    if (target.source !== "tmdb") return Promise.resolve([]);
+    const key = `${target.source}:${target.mediaType}:${target.titleId}:${target.season ?? ""}:${target.episode ?? ""}`;
     return this.cache.get(key, () => this.search(target));
   }
 
@@ -126,6 +126,8 @@ export class Discovery {
     if (!isInfoHash(hash)) throw new Error("Invalid info-hash");
     const existing = this.pickFile(await this.library.byHash(hash), target);
     if (existing) return { status: "ready", fileId: existing.id };
+    // Imported files are matched to TMDB titles; AniList ones come with AniList support.
+    if (target.source !== "tmdb") throw new Error(`Can't add releases for ${target.source} titles yet`);
 
     const client = this.torbox();
     if (!client) throw new Error("TorBox is not configured");
@@ -182,32 +184,34 @@ export class Discovery {
    */
   private async assignMatches(rows: FileRow[], target: DiscoveryTarget, fileName?: string) {
     // Never relabel a file that's already matched (or hand-matched) to another title.
-    rows = rows.filter((r) => !((r.matchStatus === "matched" || r.matchStatus === "manual") && r.tmdbId !== null && r.tmdbId !== target.tmdbId));
+    rows = rows.filter((r) => !((r.matchStatus === "matched" || r.matchStatus === "manual") && r.titleId !== null && (r.source !== target.source || r.titleId !== target.titleId)));
     if (target.mediaType === "movie") {
       const movies = rows.filter((r) => (JSON.parse(r.parsedJson ?? "{}") as ParsedName).kind !== "episode");
       const pick = (fileName && movies.find((r) => r.name === fileName)) || movies.sort((a, b) => b.size - a.size)[0];
-      if (pick) await this.library.setManualMatch(pick.id, "movie", target.tmdbId, undefined, undefined, "matched");
+      if (pick) await this.library.setManualMatch(pick.id, targetRef(target), undefined, undefined, "matched");
       return;
     }
     // The file the scraper pointed at is this episode, whatever its own numbering says
     // ("[Group] Frieren - 30.mkv" is TMDB S1E30); the rest match as usual.
+    const show = targetRef(target);
     const pointed = fileName ? rows.find((r) => r.name === fileName) : undefined;
-    if (pointed) await this.library.setManualMatch(pointed.id, "show", target.tmdbId, target.season, target.episode, "matched");
+    if (pointed) await this.library.setManualMatch(pointed.id, show, target.season, target.episode, "matched");
     for (const row of rows) {
       if (row === pointed) continue;
       const parsed = JSON.parse(row.parsedJson ?? "{}") as ParsedName;
       if (parsed.anime) continue; // anime numbering: left to the anime matcher (matchPending)
       if (parsed.season !== undefined && parsed.episode !== undefined) {
-        await this.library.setManualMatch(row.id, "show", target.tmdbId, parsed.season, parsed.episode, "matched");
+        await this.library.setManualMatch(row.id, show, parsed.season, parsed.episode, "matched");
       }
     }
   }
 
   private pickFile(rows: FileRow[], target: DiscoveryTarget): FileRow | undefined {
-    const matching = rows.filter((r) =>
-      target.mediaType === "movie"
-        ? r.mediaType === "movie" && r.tmdbId === target.tmdbId
-        : r.mediaType === "episode" && r.tmdbId === target.tmdbId && r.season === target.season && r.episode === target.episode,
+    const matching = rows.filter(
+      (r) =>
+        r.source === target.source &&
+        r.titleId === target.titleId &&
+        (target.mediaType === "movie" ? r.mediaType === "movie" : r.mediaType === "episode" && r.season === target.season && r.episode === target.episode),
     );
     return matching.sort((a, b) => b.size - a.size)[0];
   }
@@ -277,24 +281,26 @@ export class Discovery {
   }
 
   private async imdbId(target: DiscoveryTarget): Promise<string | null> {
+    if (target.source !== "tmdb") return null;
     if (target.mediaType === "movie") {
-      const m = await this.tmdb.movie(target.tmdbId);
+      const m = await this.tmdb.movie(target.titleId);
       return m.imdb_id ?? m.external_ids?.imdb_id ?? null;
     }
-    return (await this.tmdb.show(target.tmdbId)).external_ids?.imdb_id ?? null;
+    return (await this.tmdb.show(target.titleId)).external_ids?.imdb_id ?? null;
   }
 
   /** "kitsu:<id>" / "kitsu:<id>:<episode>" for anime titles, else null. */
   private async kitsuId(target: DiscoveryTarget): Promise<string | null> {
-    if (!this.animeIds) return null;
+    // The anime id list maps TMDB ids.
+    if (!this.animeIds || target.source !== "tmdb") return null;
     await this.animeIds.ready();
     if (target.mediaType === "movie") {
-      const id = this.animeIds.movie(target.tmdbId)?.kitsuId;
+      const id = this.animeIds.movie(target.titleId)?.kitsuId;
       return id ? `kitsu:${id}` : null;
     }
-    const entries = this.animeIds.show(target.tmdbId);
+    const entries = this.animeIds.show(target.titleId);
     if (!entries.length) return null;
-    const show = await this.tmdb.show(target.tmdbId);
+    const show = await this.tmdb.show(target.titleId);
     const seasons = show.seasons.map((s) => ({ season: s.season_number, episodes: s.episode_count }));
     const at = kitsuEpisode(entries, target.season!, target.episode!, seasons);
     return at ? `kitsu:${at.kitsuId}:${at.episode}` : null;

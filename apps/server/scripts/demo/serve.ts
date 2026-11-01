@@ -18,6 +18,7 @@ import { createApp } from "../../src/api/app";
 import { sameSecret } from "../../src/secrets";
 import type { Shelf, TitleCard } from "../../src/catalog/service";
 import { imageUrl, type TmdbListItem } from "../../src/catalog/tmdb";
+import { formatRef, tmdbRef } from "../../src/catalog/ref";
 import { createServices, type Services } from "../../src/services";
 import type { Household } from "../../src/household";
 import { member, session, user } from "../../src/db/schema";
@@ -39,7 +40,7 @@ let home: Household | undefined;
 async function libraryItems(type: "movie" | "tv"): Promise<unknown[]> {
   if (!home) return [];
   const rows = await home.library.recentlyAdded(type === "movie" ? "movie" : "show", 50);
-  const details = await Promise.all(rows.map((r) => (type === "movie" ? home!.tmdb.movie(r.tmdbId) : home!.tmdb.show(r.tmdbId)).catch(() => null)));
+  const details = await Promise.all(rows.map((r) => (type === "movie" ? home!.tmdb.movie(r.titleId) : home!.tmdb.show(r.titleId)).catch(() => null)));
   return details
     .filter((d): d is NonNullable<typeof d> => d !== null)
     .map((d) => ({ ...d, media_type: type, genre_ids: d.genres.map((g) => g.id) }));
@@ -75,7 +76,7 @@ const demoFetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit
       const body = (await res.json()) as { recommendations?: { results: { id: number }[] } };
       if (body.recommendations && services) {
         const type = url.pathname.includes("/tv/") ? "show" : "movie";
-        const ids = new Set((await home!.library.recentlyAdded(type, 100)).map((r) => r.tmdbId));
+        const ids = new Set((await home!.library.recentlyAdded(type, 100)).map((r) => r.titleId));
         body.recommendations.results = body.recommendations.results.filter((r) => ids.has(r.id));
       }
       return Response.json(body);
@@ -133,17 +134,17 @@ await home.library.matchPending();
 // Something to continue, something next up, and a few saved for later (Alex's account).
 // The anime keeps to its own rails, so these stay the same as the screenshots show.
 const anime = new Set(((await libraryItems("movie")) as TmdbListItem[]).filter(isJapanese).map((f) => f.id));
-const movies = (await home.library.recentlyAdded("movie", 20)).map((m) => m.tmdbId).filter((id) => !anime.has(id));
-const shows = (await home.library.recentlyAdded("show", 20)).map((s) => s.tmdbId);
+const movies = (await home.library.recentlyAdded("movie", 20)).map((m) => m.titleId).filter((id) => !anime.has(id));
+const shows = (await home.library.recentlyAdded("show", 20)).map((s) => s.titleId);
 const minutes = (n: number) => n * 60_000;
 // Positions inside the clips, which are 3 minutes long (fetch-media.ts), so resuming plays.
-if (movies[0]) await services.progress.record(alex!.id, { mediaType: "movie", tmdbId: movies[0] }, minutes(1.3), minutes(3));
-if (movies[2]) await services.progress.record(alex!.id, { mediaType: "movie", tmdbId: movies[2] }, minutes(0.6), minutes(3));
+if (movies[0]) await services.progress.record(alex!.id, { source: "tmdb", mediaType: "movie", titleId: movies[0] }, minutes(1.3), minutes(3));
+if (movies[2]) await services.progress.record(alex!.id, { source: "tmdb", mediaType: "movie", titleId: movies[2] }, minutes(0.6), minutes(3));
 // An episode the library actually has (the demo carries a few per show, not whole seasons).
-const episode = shows[0] ? (await home.library.filesFor("episode", shows[0])).sort((a, b) => (a.season! - b.season!) || (a.episode! - b.episode!))[0] : undefined;
-if (episode) await services.progress.record(alex!.id, { mediaType: "episode", tmdbId: shows[0]!, season: episode.season!, episode: episode.episode! }, minutes(1), minutes(3));
-for (const id of movies.slice(3, 6)) await services.progress.setWatchlist(alex!.id, "movie", id, true);
-if (shows[1]) await services.progress.setWatchlist(alex!.id, "show", shows[1], true);
+const episode = shows[0] ? (await home.library.filesFor(tmdbRef("show", shows[0]))).sort((a, b) => (a.season! - b.season!) || (a.episode! - b.episode!))[0] : undefined;
+if (episode) await services.progress.record(alex!.id, { source: "tmdb", mediaType: "episode", titleId: shows[0]!, season: episode.season!, episode: episode.episode! }, minutes(1), minutes(3));
+for (const id of movies.slice(3, 6)) await services.progress.setWatchlist(alex!.id, tmdbRef("movie", id), true);
+if (shows[1]) await services.progress.setWatchlist(alex!.id, tmdbRef("show", shows[1]), true);
 
 // The Anime tab ranks titles with Kitsu, which the demo can't reach: here it's the
 // library's Japanese animation, with no categories to filter by.
@@ -151,9 +152,10 @@ home.catalog.animeCategories = () => [];
 home.catalog.animePage = async (category?: string): Promise<Shelf[]> => {
   if (category) return [];
   const films = ((await libraryItems("movie")) as TmdbListItem[]).filter(isJapanese);
-  const available = await home!.library.availability("movie", films.map((f) => f.id));
+  const available = await home!.library.availability(films.map((f) => tmdbRef("movie", f.id)));
   const items: TitleCard[] = films.map((f) => ({
     type: "movie",
+    ref: formatRef(tmdbRef("movie", f.id)),
     tmdbId: f.id,
     title: f.title ?? "",
     year: f.release_date ? Number(f.release_date.slice(0, 4)) : null,
@@ -161,7 +163,7 @@ home.catalog.animePage = async (category?: string): Promise<Shelf[]> => {
     posterUrl: imageUrl(f.poster_path, "w342"),
     backdropUrl: imageUrl(f.backdrop_path, "w780"),
     rating: f.vote_average,
-    available: available.get(f.id) ?? [],
+    available: available.get(formatRef(tmdbRef("movie", f.id))) ?? [],
   }));
   return items.length ? [{ id: "anime-demo-classics", title: "Classic Anime", kind: "titles", items }] : [];
 };

@@ -25,6 +25,9 @@ export class PlaybackError extends Error {
   }
 }
 
+/** Just the title of a request (no play options), as sessions and discovery keep it. */
+const targetOf = (t: SessionTarget): SessionTarget => ({ source: t.source, mediaType: t.mediaType, titleId: t.titleId, season: t.season, episode: t.episode });
+
 export interface PlayRequest extends SessionTarget {
   candidateId?: string;
   /** Start position; omitted means resume from saved progress. */
@@ -136,7 +139,9 @@ export class PlaybackService {
 
   async play(user: { userId: string }, req: PlayRequest): Promise<PlayResponse> {
     // Started now so the (possibly uncached) season lookup overlaps the probe and link.
-    const nextLookup = req.mediaType === "episode" ? this.findNextEpisode(req.tmdbId, req.season!, req.episode!).catch(() => null) : Promise.resolve(null);
+    // Next episodes come from TMDB's seasons; AniList shows get theirs with AniList support.
+    const nextLookup =
+      req.mediaType === "episode" && req.source === "tmdb" ? this.findNextEpisode(req.titleId, req.season!, req.episode!).catch(() => null) : Promise.resolve(null);
     const { file, info, input, inputKind, plan, remux, audioTracks, candidate } = await this.prepare(req);
     refuseServerStream(plan, inputKind, req.caps);
 
@@ -161,7 +166,7 @@ export class PlaybackService {
         organizationId: this.library.organizationId,
         userId: user.userId,
         fileId: file.id,
-        target: { mediaType: req.mediaType, tmdbId: req.tmdbId, season: req.season, episode: req.episode },
+        target: targetOf(req),
         plan,
         info,
         input,
@@ -175,8 +180,9 @@ export class PlaybackService {
     }
 
     const next = await nextLookup;
-    const nextInLibrary = next ? await findCandidates(this.library, this.settings(), "episode", req.tmdbId, next.season, next.episode) : [];
-    if (next) runtime.background(this.prewarm({ mediaType: "episode", tmdbId: req.tmdbId, season: next.season, episode: next.episode }, nextInLibrary).catch((err) => log.debug("Pre-warm failed", err)));
+    const nextTarget: SessionTarget | null = next ? { source: req.source, mediaType: "episode", titleId: req.titleId, season: next.season, episode: next.episode } : null;
+    const nextInLibrary = nextTarget ? await findCandidates(this.library, this.settings(), nextTarget) : [];
+    if (nextTarget) runtime.background(this.prewarm(nextTarget, nextInLibrary).catch((err) => log.debug("Pre-warm failed", err)));
 
     return {
       sessionId: session.id,
@@ -295,14 +301,14 @@ export class PlaybackService {
    * best cached release discovery can find (added to TorBox on the fly).
    */
   private async chooseFile(req: PlayRequest): Promise<FileRow> {
-    const target = { mediaType: req.mediaType, tmdbId: req.tmdbId, season: req.season, episode: req.episode };
+    const target = targetOf(req);
     let hash: string | undefined;
     if (req.candidateId?.startsWith("hash:")) {
       hash = req.candidateId.slice(5).toLowerCase();
       if (!isInfoHash(hash)) throw new PlaybackError("Unknown source", 404);
       // Only hashes already in the library, or ones discovery offered for this exact
       // title, may be added to the owner's TorBox — never an arbitrary torrent.
-      const inLibraryForTarget = (await this.library.byHash(hash)).some((r) => r.mediaType === req.mediaType && r.tmdbId === req.tmdbId && (req.mediaType === "movie" || (r.season === req.season && r.episode === req.episode)));
+      const inLibraryForTarget = (await this.library.byHash(hash)).some((r) => r.source === req.source && r.mediaType === req.mediaType && r.titleId === req.titleId && (req.mediaType === "movie" || (r.season === req.season && r.episode === req.episode)));
       if (!inLibraryForTarget) {
         if (!this.discovery.available) throw new PlaybackError("Discovery is turned off", 403);
         const offered = (await this.discovery.releases(target)).find((r) => r.hash === hash);
@@ -310,7 +316,7 @@ export class PlaybackService {
         if (!offered.cached && !this.settings().showUncached) throw new PlaybackError("That release isn't cached on TorBox", 409);
       }
     } else {
-      const candidates = await findCandidates(this.library, this.settings(), req.mediaType, req.tmdbId, req.season, req.episode);
+      const candidates = await findCandidates(this.library, this.settings(), target);
       const limit = req.preferMaxHeight;
       const candidate = req.candidateId
         ? candidates.find((c) => c.id === req.candidateId)

@@ -9,6 +9,7 @@ import { dashboardUrls } from "../../platform/network";
 import { householdSettingsSchema, SECRET_KEYS, serverSettingsSchema, settingsSchema, type SecretKey } from "../../settings";
 import { toCandidate } from "../../sources/resolver";
 import { imageUrl, yearOf } from "../../catalog/tmdb";
+import { formatRef, targetRef, tmdbRef } from "../../catalog/ref";
 import { API_VERSION, VERSION } from "../../version";
 import { member, session as authSession, user } from "../../db/schema";
 import { and, desc, eq, gt } from "drizzle-orm";
@@ -194,7 +195,12 @@ export const adminRoutes = new Hono<Env>()
         ref: f.provider === "local" ? f.ref : undefined,
         matchStatus: f.matchStatus,
         mediaType: f.mediaType,
-        tmdbId: f.tmdbId,
+        // `ref` and `source` are the file's own (its path, its release type: web, bluray…);
+        // the title's are `titleRef` and `titleSource`.
+        titleSource: f.source,
+        titleRef: f.mediaType && f.titleId !== null ? formatRef(targetRef({ source: f.source, mediaType: f.mediaType, titleId: f.titleId })) : null,
+        // TMDB's id, for TMDB titles (what the admin pages show and match by).
+        tmdbId: f.source === "tmdb" ? f.titleId : null,
         season: f.season,
         episode: f.episode,
         title,
@@ -210,7 +216,7 @@ export const adminRoutes = new Hono<Env>()
     const input = await body(c, z.object({ type: z.enum(["movie", "show"]), tmdbId: z.number().int(), season: z.number().int().optional(), episode: z.number().int().optional() }));
     const id = intParam(c, "id");
     if (!await c.var.household.library.get(id)) throw new HTTPException(404, { message: "No such file" });
-    await c.var.household.library.setManualMatch(id, input.type, input.tmdbId, input.season, input.episode);
+    await c.var.household.library.setManualMatch(id, tmdbRef(input.type, input.tmdbId), input.season, input.episode);
     return c.json({ ok: true });
   })
 
@@ -279,8 +285,16 @@ async function sessionDtoFor(services: Services, h: Household) {
     userId: s.userId,
     userName: names.get(s.userId) ?? null,
     fileId: s.fileId,
-    title: await h.library.titleOf(s.target.mediaType === "movie" ? "movie" : "show", s.target.tmdbId),
-    target: s.target,
+    title: await h.library.titleOf(targetRef(s.target)),
+    // As before sources (the web admin reads tmdbId: TMDB titles only), with source and ref.
+    target: {
+      source: s.target.source,
+      ref: formatRef(targetRef(s.target)),
+      mediaType: s.target.mediaType,
+      tmdbId: s.target.source === "tmdb" ? s.target.titleId : null,
+      season: s.target.season,
+      episode: s.target.episode,
+    },
     mode: s.plan.mode,
     reasons: s.plan.reasons,
     source: s.inputKind === "url" ? "torbox" : "local",

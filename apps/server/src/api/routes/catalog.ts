@@ -6,18 +6,51 @@ import { body, cacheFor, DAY, HOUR, intParam, optionalInt, requireAuth, requireH
 import { capsSchema } from "../../playback/decide";
 import { NeedsProbeError } from "../../playback/service";
 import { mediaInfoSchema } from "../../media/probe";
+import { parseRef, tmdbRef, type TitleRef, type TitleTarget } from "../../catalog/ref";
 
-const target = z.object({
-  mediaType: z.enum(["movie", "episode"]),
-  tmdbId: z.number().int(),
+/** A title by its ref ("tmdb:show:1399"), for path and query params; 400 when it isn't one. */
+function refParam(text: string | undefined): TitleRef {
+  const ref = parseRef(text ?? "");
+  if (!ref) throw new HTTPException(400, { message: "Invalid title ref" });
+  return ref;
+}
+
+/**
+ * A movie or episode in a request body: `{ ref, season?, episode? }`, or as older apps send
+ * it, `{ mediaType, tmdbId, season?, episode? }` (TMDB's). See `toTarget`.
+ */
+const targetFields = {
+  ref: z.string().optional(),
+  mediaType: z.enum(["movie", "episode"]).optional(),
+  tmdbId: z.number().int().optional(),
   season: z.number().int().min(0).optional(),
   episode: z.number().int().min(0).optional(),
-});
+};
 
-const episodeRule = [
-  (t: { mediaType: string; season?: number; episode?: number }) => t.mediaType === "movie" || (t.season !== undefined && t.episode !== undefined),
-  { message: "season and episode are required for episodes" },
-] as const;
+type TargetInput = { ref?: string; mediaType?: "movie" | "episode"; tmdbId?: number; season?: number; episode?: number };
+
+/** The title a body with `targetFields` names, with the rest of the body; 400 when it names none. */
+function toTarget<T extends TargetInput>(input: T): Omit<T, keyof TargetInput> & TitleTarget {
+  const { ref: text, mediaType, tmdbId, season, episode, ...rest } = input;
+  let title: Pick<TitleTarget, "source" | "mediaType" | "titleId">;
+  if (text !== undefined) {
+    const ref = refParam(text);
+    title = { source: ref.source, mediaType: ref.type === "movie" ? "movie" : "episode", titleId: ref.id };
+  } else if (mediaType !== undefined && tmdbId !== undefined) {
+    title = { source: "tmdb", mediaType, titleId: tmdbId };
+  } else {
+    throw new HTTPException(400, { message: "ref, or mediaType and tmdbId, is required" });
+  }
+  if (title.mediaType === "episode" && (season === undefined || episode === undefined)) throw new HTTPException(400, { message: "season and episode are required for episodes" });
+  return { ...rest, ...title, season, episode };
+}
+
+/** A title on its own (My List): `{ ref }`, or as older apps send it, `{ type, tmdbId }`. */
+function toTitle(input: { ref?: string; type?: "movie" | "show"; tmdbId?: number }): TitleRef {
+  if (input.ref !== undefined) return refParam(input.ref);
+  if (input.type !== undefined && input.tmdbId !== undefined) return tmdbRef(input.type, input.tmdbId);
+  throw new HTTPException(400, { message: "ref, or type and tmdbId, is required" });
+}
 
 /** What play and download both take, besides the title. */
 const prepareFields = {
@@ -102,16 +135,28 @@ export const catalogRoutes = new Hono<Env>()
   .get("/titles/movie/:id", cacheFor(TTL.title), async (c) => c.json(await viewer(c).movie(intParam(c, "id"))))
   .get("/titles/show/:id", cacheFor(TTL.title), async (c) => c.json(await viewer(c).show(intParam(c, "id"))))
   .get("/titles/show/:id/seasons/:season", cacheFor(TTL.title), async (c) => c.json(await viewer(c).season(intParam(c, "id"), intParam(c, "season"))))
+  // The same pages by ref ("tmdb:show:1399"); one segment fewer, so they never clash with the above.
+  .get("/titles/:ref", cacheFor(TTL.title), async (c) => c.json(await viewer(c).title(refParam(c.req.param("ref")))))
+  .get("/titles/:ref/seasons/:season", cacheFor(TTL.title), async (c) => c.json(await viewer(c).titleSeason(refParam(c.req.param("ref")), intParam(c, "season"))))
 
   // Library sources are instant; `discover=1` adds releases from scrapers (a few seconds).
+  // The title is `ref`, or as older apps send it, `mediaType` and `tmdbId`.
   .get("/sources", async (c) => {
-    const mediaType = z.enum(["movie", "episode"]).parse(c.req.query("mediaType"));
-    const tmdbId = optionalInt(c.req.query("tmdbId"));
-    if (tmdbId === undefined) throw new HTTPException(400, { message: "tmdbId is required" });
+    const refText = c.req.query("ref");
+    let title: Pick<TitleTarget, "source" | "mediaType" | "titleId">;
+    if (refText !== undefined) {
+      const ref = refParam(refText);
+      title = { source: ref.source, mediaType: ref.type === "movie" ? "movie" : "episode", titleId: ref.id };
+    } else {
+      const mediaType = z.enum(["movie", "episode"]).parse(c.req.query("mediaType"));
+      const tmdbId = optionalInt(c.req.query("tmdbId"));
+      if (tmdbId === undefined) throw new HTTPException(400, { message: "tmdbId is required" });
+      title = { source: "tmdb", mediaType, titleId: tmdbId };
+    }
     const season = optionalInt(c.req.query("season"));
     const episode = optionalInt(c.req.query("episode"));
-    if (mediaType === "episode" && (season === undefined || episode === undefined)) throw new HTTPException(400, { message: "season and episode are required for episodes" });
-    const target = { mediaType, tmdbId, season, episode };
+    if (title.mediaType === "episode" && (season === undefined || episode === undefined)) throw new HTTPException(400, { message: "season and episode are required for episodes" });
+    const target: TitleTarget = { ...title, season, episode };
     const items = await viewer(c).sources(target);
     if (c.req.query("discover") === "1") {
       items.push(...(await viewer(c).discover(target)));
@@ -120,13 +165,13 @@ export const catalogRoutes = new Hono<Env>()
   })
 
   .post("/play", async (c) => {
-    const req = await body(c, target.extend({ ...prepareFields, startMs: z.number().min(0).optional() }).refine(...episodeRule));
+    const req = toTarget(await body(c, z.object({ ...targetFields, ...prepareFields, startMs: z.number().min(0).optional() })));
     return needsProbe(c, () => viewer(c).play(req));
   })
 
   // A file to download and watch offline (iPhone and iPad): its link and how to play it.
   .post("/downloads", async (c) => {
-    const req = await body(c, target.extend(prepareFields).refine(...episodeRule));
+    const req = toTarget(await body(c, z.object({ ...targetFields, ...prepareFields })));
     return needsProbe(c, () => viewer(c).prepareDownload(req));
   })
 
@@ -164,22 +209,27 @@ export const catalogRoutes = new Hono<Env>()
   })
 
   .post("/progress", async (c) => {
-    const input = await body(c, target.extend({ positionMs: z.number().min(0), durationMs: z.number().min(0), sessionId: z.string().optional() }).refine(...episodeRule));
+    const input = toTarget(await body(c, z.object({ ...targetFields, positionMs: z.number().min(0), durationMs: z.number().min(0), sessionId: z.string().optional() })));
     if (input.sessionId) await viewer(c).touchPlay(input.sessionId);
     const row = await c.var.services.progress.record(userOf(c), input, input.positionMs, input.durationMs);
     return c.json({ positionMs: row.positionMs, durationMs: row.durationMs, completed: row.completed });
   })
 
   .post("/watched", async (c) => {
-    const input = await body(c, target.extend({ watched: z.boolean() }).refine(...episodeRule));
+    const input = toTarget(await body(c, z.object({ ...targetFields, watched: z.boolean() })));
     await c.var.services.progress.setWatched(userOf(c), input, input.watched);
     return c.json({ ok: true });
   })
 
   // Off Continue Watching / Next Up until it's watched again; progress is kept.
+  .delete("/continue/:ref", async (c) => {
+    await c.var.services.progress.hideFromContinue(userOf(c), refParam(c.req.param("ref")));
+    return c.json({ ok: true });
+  })
+  // The same, as older apps ask (TMDB's id).
   .delete("/continue/:type/:tmdbId", async (c) => {
     const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
-    await c.var.services.progress.hideFromContinue(userOf(c), type, intParam(c, "tmdbId"));
+    await c.var.services.progress.hideFromContinue(userOf(c), tmdbRef(type, intParam(c, "tmdbId")));
     return c.json({ ok: true });
   })
 
@@ -187,9 +237,10 @@ export const catalogRoutes = new Hono<Env>()
   .get("/watchlist", async (c) => c.json({ items: await viewer(c).watchlist() }))
 
   .put("/watchlist", async (c) => {
-    const input = await body(c, z.object({ type: z.enum(["movie", "show"]), tmdbId: z.number().int(), on: z.boolean() }));
+    const input = await body(c, z.object({ ref: z.string().optional(), type: z.enum(["movie", "show"]).optional(), tmdbId: z.number().int().optional(), on: z.boolean() }));
+    const ref = toTitle(input);
     // Nothing above the profile's content limit goes on its list (taking it off is fine).
-    await viewer(c).assertMayList(input.type, input.tmdbId, input.on);
-    await c.var.services.progress.setWatchlist(userOf(c), input.type, input.tmdbId, input.on);
+    await viewer(c).assertMayList(ref, input.on);
+    await c.var.services.progress.setWatchlist(userOf(c), ref, input.on);
     return c.json({ ok: true });
   });

@@ -9,6 +9,7 @@ import type { AnimeIds } from "./catalog/anime/ids";
 import type { Kitsu } from "./catalog/anime/kitsu";
 import { Omdb } from "./catalog/omdb";
 import { Tmdb } from "./catalog/tmdb";
+import { tmdbRef } from "./catalog/ref";
 import type { ApiCache } from "./catalog/apiCache";
 import { ADDS_PER_HOUSEHOLD, SEARCHES_PER_HOUSEHOLD, type Throttle } from "./throttle";
 import type { Db } from "./db";
@@ -94,7 +95,7 @@ export class Household {
     this.library = new Library(db, organizationId, tmdb, new Matcher(tmdb, new AnimeMatcher(shared.anime.anilist, shared.anime.ids, tmdb, shared.anime.kitsu)));
     this.catalog = new CatalogService(tmdb, this.library, shared.progress, settings, shared.anime, this.omdb);
     this.content = new ContentFilter(db, organizationId, tmdb, settings);
-    this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, id) => this.content.allowed(userId, "show", id));
+    this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, id) => this.content.allowed(userId, tmdbRef("show", id)));
     this.housekeeping = new TorboxHousekeeping(db, organizationId, this.library);
     this.plays = new HouseholdPlays(shared.sessions, organizationId, this.library);
     const torbox = () => this.torbox();

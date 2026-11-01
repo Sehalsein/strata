@@ -238,4 +238,26 @@ export const migrations: string[] = [
   /* 5: the cloud confirms new accounts' email; accounts from before count as confirmed */ `
   UPDATE "user" SET email_verified = TRUE WHERE email_verified = FALSE;
   `,
+  /* 6: titles by source (TMDB for movies and TV, AniList for anime); everything so far is TMDB's */ `
+  ALTER TABLE files ADD COLUMN source TEXT NOT NULL DEFAULT 'tmdb';
+  ALTER TABLE files RENAME COLUMN tmdb_id TO title_id;
+  DROP INDEX files_tmdb;
+  CREATE INDEX files_title ON files(organization_id, source, media_type, title_id, season, episode);
+  ALTER TABLE media_items ADD COLUMN source TEXT NOT NULL DEFAULT 'tmdb';
+  ALTER TABLE media_items RENAME COLUMN tmdb_id TO title_id;
+  ALTER TABLE media_items DROP CONSTRAINT media_items_pkey;
+  ALTER TABLE media_items ADD PRIMARY KEY (organization_id, source, type, title_id);
+  ALTER TABLE progress ADD COLUMN source TEXT NOT NULL DEFAULT 'tmdb';
+  ALTER TABLE progress RENAME COLUMN tmdb_id TO title_id;
+  ALTER TABLE progress DROP CONSTRAINT progress_pkey;
+  ALTER TABLE progress ADD PRIMARY KEY (user_id, source, media_type, title_id, season, episode);
+  ALTER TABLE continue_hidden ADD COLUMN source TEXT NOT NULL DEFAULT 'tmdb';
+  ALTER TABLE continue_hidden RENAME COLUMN tmdb_id TO title_id;
+  ALTER TABLE continue_hidden DROP CONSTRAINT continue_hidden_pkey;
+  ALTER TABLE continue_hidden ADD PRIMARY KEY (user_id, source, type, title_id);
+  ALTER TABLE watchlist ADD COLUMN source TEXT NOT NULL DEFAULT 'tmdb';
+  ALTER TABLE watchlist RENAME COLUMN tmdb_id TO title_id;
+  ALTER TABLE watchlist DROP CONSTRAINT watchlist_pkey;
+  ALTER TABLE watchlist ADD PRIMARY KEY (user_id, source, type, title_id);
+  `,
 ];

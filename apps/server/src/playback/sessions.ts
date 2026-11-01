@@ -12,6 +12,7 @@ import { logger, redactSecrets } from "../log";
 import type { PlaybackPlan } from "./decide";
 import { buildHlsArgs } from "./ffmpegArgs";
 import type { SubtitleTrack } from "./subtitles";
+import type { TitleSource, TitleTarget } from "../catalog/ref";
 
 const log = logger("playback");
 
@@ -27,12 +28,8 @@ const WAIT_TIMEOUT_MS = 45_000;
 const HW_STALL_MS = 12_000;
 const HW_COOLDOWN_MS = 10 * 60_000;
 
-export interface SessionTarget {
-  mediaType: "movie" | "episode";
-  tmdbId: number;
-  season?: number;
-  episode?: number;
-}
+/** What a session plays. */
+export type SessionTarget = TitleTarget;
 
 export interface PlaybackSession {
   id: string;
@@ -118,7 +115,7 @@ export class SessionManager {
         organizationId: init.organizationId,
         userId: init.userId,
         fileId: init.fileId,
-        targetJson: JSON.stringify(init.target),
+        targetJson: storedTarget(init.target),
         planJson: JSON.stringify(init.plan),
         input: init.input,
         createdAt: now,
@@ -193,7 +190,7 @@ export class SessionManager {
   /** Stops the user's other sessions for the same title (e.g. a restart at a new offset). */
   async stopForTarget(userId: string, target: SessionTarget) {
     const same = (s: PlaybackSession) =>
-      s.userId === userId && s.target.mediaType === target.mediaType && s.target.tmdbId === target.tmdbId && s.target.season === target.season && s.target.episode === target.episode;
+      s.userId === userId && s.target.source === target.source && s.target.mediaType === target.mediaType && s.target.titleId === target.titleId && s.target.season === target.season && s.target.episode === target.episode;
     for (const s of await this.list()) if (same(s)) await this.stop(s.id);
   }
 
@@ -310,7 +307,7 @@ function fromRow(row: typeof playSessions.$inferSelect): PlaybackSession {
     organizationId: row.organizationId,
     userId: row.userId,
     fileId: row.fileId,
-    target: JSON.parse(row.targetJson) as SessionTarget,
+    target: loadTarget(row.targetJson),
     plan: JSON.parse(row.planJson) as PlaybackPlan,
     // Not kept for link sessions: nothing that uses them needs the details again.
     info: { container: "", durationMs: 0, audio: [], subtitles: [], chapters: [] },
@@ -322,4 +319,15 @@ function fromRow(row: typeof playSessions.$inferSelect): PlaybackSession {
     lastAccessAt: row.lastAccessAt,
     lastSegmentRequested: 0,
   };
+}
+
+/** A target as play_sessions keeps it: `{ source, mediaType, titleId, season?, episode? }`. */
+function storedTarget(t: SessionTarget): string {
+  return JSON.stringify({ source: t.source, mediaType: t.mediaType, titleId: t.titleId, season: t.season, episode: t.episode });
+}
+
+/** Rows from before sources have no `source` (TMDB) and the id as `tmdbId`. */
+function loadTarget(json: string): SessionTarget {
+  const t = JSON.parse(json) as { source?: TitleSource; mediaType: "movie" | "episode"; titleId?: number; tmdbId?: number; season?: number; episode?: number };
+  return { source: t.source ?? "tmdb", mediaType: t.mediaType, titleId: (t.titleId ?? t.tmdbId)!, season: t.season, episode: t.episode };
 }

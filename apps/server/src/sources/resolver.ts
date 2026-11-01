@@ -3,6 +3,7 @@ import type { ParsedName } from "../media/parse";
 import type { MediaInfo } from "../media/probe";
 import type { Settings } from "../settings";
 import type { FileProvider } from "../db/schema";
+import { targetRef, type TitleTarget } from "../catalog/ref";
 
 export interface Candidate {
   id: string;
@@ -97,6 +98,7 @@ export function rankCandidates(candidates: Candidate[], settings: Pick<Settings,
   );
 }
 
-export async function findCandidates(library: Library, settings: Settings, mediaType: "movie" | "episode", tmdbId: number, season?: number, episode?: number): Promise<Candidate[]> {
-  return rankCandidates((await library.filesFor(mediaType, tmdbId, season, episode)).map(toCandidate), settings);
+/** The library's copies of a movie or an episode, best first. */
+export async function findCandidates(library: Library, settings: Settings, target: TitleTarget): Promise<Candidate[]> {
+  return rankCandidates((await library.filesFor(targetRef(target), target.season, target.episode)).map(toCandidate), settings);
 }
