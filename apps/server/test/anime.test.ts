@@ -4,7 +4,7 @@ import { relevant, type Release } from "../src/sources/discovery";
 import { AnimeMatcher, pickAnime, resolveEpisode } from "../src/catalog/anime/match";
 import type { Anilist } from "../src/catalog/anime/anilist";
 import type { Tmdb } from "../src/catalog/tmdb";
-import { CatalogService } from "../src/catalog/service";
+import { CatalogService, legacyCards, plainDescription } from "../src/catalog/service";
 import { parseFileName } from "../src/media/parse";
 
 // Real entries from Fribb/anime-lists (trimmed).
@@ -222,57 +222,109 @@ describe("anime tab sections", () => {
     map.ready = async () => {};
     return new CatalogService(tmdb, library, {} as never, () => ({}) as never, { ids: map, anilist: { home: async () => home } as unknown as Anilist });
   };
-  const all = [{ id: 154587, format: "TV", episodes: 28 }, { id: 182255, format: "TV", episodes: 10 }, { id: 21, format: "TV" }, { id: 21519, format: "MOVIE", episodes: 1 }, { id: 999, format: "TV" }];
+  const card = (id: number, format: string, english: string | null, extra: object = {}) => ({
+    id,
+    format,
+    title: { english, romaji: `${english ?? "Romaji"} (romaji)` },
+    coverImage: { extraLarge: `https://img.anili.st/${id}.jpg` },
+    description: `${english ?? "Romaji"}<br><br>An <i>anime</i> &amp; more.`,
+    averageScore: 85,
+    seasonYear: 2023,
+    ...extra,
+  });
+  // Frieren's two seasons are one TMDB show; 999 is on AniList only (nothing in Fribb's list).
+  const all = [
+    card(154587, "TV", "Frieren", { episodes: 28 }),
+    card(182255, "TV", "Frieren Season 2", { episodes: 10, description: null }),
+    card(21, "TV", "One Piece"),
+    card(21519, "MOVIE", "Your Name.", { episodes: 1 }),
+    card(999, "TV", null, { bannerImage: "https://img.anili.st/banner/999.jpg" }),
+  ];
+  const fall = { season: "FALL", year: 2026 };
 
-  test("AniList's lists become the hero, a ranking, short lists and rails, matched to TMDB", async () => {
+  test("AniList's lists become the hero and rails, every entry its own card, from AniList's data", async () => {
     const shelves = await catalog({
+      currentSeason: fall,
       trending: all,
+      season: all,
       airing: all,
       popular: all,
       favourites: all,
       completed: all,
       upcoming: [],
-      latest: [{ id: 182255, format: "TV", aired: { episode: 4, airingAt: 0 } }, { id: 21, format: "TV", aired: { episode: 1150, airingAt: 0 } }, { id: 21519, format: "MOVIE" }],
+      latest: [{ ...all[1]!, aired: { episode: 4, airingAt: 0 } }, { ...all[2]!, aired: { episode: 1150, airingAt: 0 } }, all[3]!],
     }).animePage();
-    expect(shelves.map((s) => [s.id, s.style ?? null])).toEqual([
-      ["anime-spotlight", "hero"],
-      ["anime-trending", null],
-      ["anime-latest-episodes", null],
-      ["anime-top-airing", null],
-      ["anime-most-popular", null],
-      ["anime-most-favorite", null],
-      ["anime-latest-completed", null],
-    ]); // Top Upcoming has nothing, so it's left out
-    // Frieren's two seasons are one card; the title AniList has but TMDB doesn't is skipped.
-    expect(shelves[1]!.items.map((c) => c.title)).toEqual(["Frieren", "One Piece", "Your Name."]);
-    expect(shelves[0]!.items.map((c) => c.eyebrow)).toEqual(["#1 in Anime", "#2 in Anime", "#3 in Anime"]);
-    expect(shelves[2]!.items.map((c) => c.badge)).toEqual(["Episode 4", "Episode 1150", undefined]);
-    expect(shelves[3]!.items.map((c) => c.badge)).toEqual([undefined, undefined, undefined]);
+    expect(shelves.map((s) => [s.id, s.title, s.style ?? null])).toEqual([
+      ["anime-spotlight", "Spotlight", "hero"],
+      ["anime-trending", "Trending", null],
+      ["anime-this-season", "Fall 2026 Anime", null],
+      ["anime-latest-episodes", "Latest Episodes", null],
+      ["anime-top-airing", "Airing Now", null],
+      ["anime-most-popular", "Popular", null],
+      ["anime-most-favorite", "Fan Favorites", null],
+      ["anime-latest-completed", "Recently Finished", null],
+    ]); // Coming Soon has nothing, so it's left out
+    const trending = shelves[1]!.items;
+    // Nothing left out: both Frieren seasons, and the title only AniList has.
+    expect(trending.map((c) => c.ref)).toEqual(["anilist:show:154587", "anilist:show:182255", "anilist:show:21", "anilist:movie:21519", "anilist:show:999"]);
+    expect(trending.map((c) => c.title)).toEqual(["Frieren", "Frieren Season 2", "One Piece", "Your Name.", "Romaji (romaji)"]);
+    expect(trending.map((c) => c.tmdbId)).toEqual([209867, 209867, 37854, 372058, undefined]);
+    expect(trending[0]).toMatchObject({ overview: "Frieren\n\nAn anime & more.", posterUrl: "https://img.anili.st/154587.jpg", rating: 8.5, year: 2023 });
+    // The hero: titles with a synopsis, on TMDB's backdrop where TMDB has them, else AniList's banner.
+    const hero = shelves[0]!.items;
+    expect(hero.map((c) => c.ref)).toEqual(["anilist:show:154587", "anilist:show:21", "anilist:movie:21519", "anilist:show:999"]);
+    expect(hero.map((c) => c.backdropUrl)).toEqual([
+      "https://image.tmdb.org/t/p/original/b.jpg",
+      "https://image.tmdb.org/t/p/original/b.jpg",
+      "https://image.tmdb.org/t/p/original/b.jpg",
+      "https://img.anili.st/banner/999.jpg",
+    ]);
+    expect(hero.map((c) => c.eyebrow)).toEqual(["#1 in Anime", "#2 in Anime", "#3 in Anime", "#4 in Anime"]);
+    expect(shelves[3]!.items.map((c) => c.badge)).toEqual(["Episode 4", "Episode 1150", undefined]);
   });
 
   test("an upcoming later season is labelled \"New season\"", async () => {
-    // Frieren S2 alone (TMDB S1 E29+): a new season of a show TMDB already has.
+    // Frieren S2 (TMDB S1 E29+): a new season of a show TMDB already has.
     const later = [all[1]!, all[2]!, all[3]!];
-    const shelves = await catalog({ trending: [], airing: [], popular: [], favourites: [], completed: [], upcoming: later, latest: [] }).animePage();
+    const shelves = await catalog({ currentSeason: fall, trending: [], season: [], airing: [], popular: [], favourites: [], completed: [], upcoming: later, latest: [] }).animePage();
     const badges = (id: string) => shelves.find((s) => s.id === id)!.items.map((c) => c.badge);
     expect(badges("anime-upcoming")).toEqual(["New season", undefined, undefined]);
-
   });
 
   test("each rail links to its full list, which has every title AniList ranks", async () => {
-    const home = { trending: all, airing: all, popular: all, favourites: all, completed: all, upcoming: [], latest: [] };
-    const service = catalog(home);
-    const shelves = await service.animePage();
+    const home = { currentSeason: fall, trending: all, season: all, airing: all, popular: all, favourites: all, completed: all, upcoming: [], latest: [] };
+    const shelves = await catalog(home).animePage();
     expect(shelves.find((s) => s.id === "anime-trending")!.more).toBe("trending");
+    expect(shelves.find((s) => s.id === "anime-this-season")!.more).toBe("season");
     expect(shelves.find((s) => s.id === "anime-top-airing")!.more).toBe("airing");
     const map = ids();
     map.ready = async () => {};
     const asked: string[] = [];
     const anilist = { home: async () => home, list: async (name: string) => (asked.push(name), all) } as unknown as Anilist;
     const full = new CatalogService(tmdb, library, {} as never, () => ({}) as never, { ids: map, anilist });
-    expect(await full.animeList("trending")).toMatchObject({ title: "Trending", items: [{ title: "Frieren" }, { title: "One Piece" }, { title: "Your Name." }] });
-    expect(asked).toEqual(["trending"]);
+    const trending = await full.animeList("trending");
+    expect(trending!.title).toBe("Trending");
+    expect(trending!.items.length).toBe(5);
+    expect((await full.animeList("season"))!.title).toMatch(/^(Winter|Spring|Summer|Fall) \d{4} Anime$/);
+    expect(asked).toEqual(["trending", "season"]);
     expect(await full.animeList("../evil")).toBeNull();
+  });
+
+  test("apps from before refs get only titles TMDB has, once each", () => {
+    const cards = [
+      { type: "show", ref: "anilist:show:154587", tmdbId: 209867 },
+      { type: "show", ref: "anilist:show:182255", tmdbId: 209867 },
+      { type: "show", ref: "anilist:show:999" },
+      { type: "movie", ref: "anilist:movie:21519", tmdbId: 372058 },
+      { type: "show", ref: "tmdb:show:372058", tmdbId: 372058 },
+    ];
+    expect(legacyCards(cards).map((c) => c.ref)).toEqual(["anilist:show:154587", "anilist:movie:21519", "tmdb:show:372058"]);
+  });
+
+  test("AniList's descriptions are shown as plain text", () => {
+    expect(plainDescription("A<br>B<br/><br />C <i>D</i> &quot;E&quot; &#039;F&#039;")).toBe("A\nB\n\nC D \"E\" 'F'");
+    expect(plainDescription("<br>")).toBeUndefined();
+    expect(plainDescription(null)).toBeUndefined();
   });
 
   test("when AniList can't answer, the tab falls back to Kitsu's rails (none here)", async () => {

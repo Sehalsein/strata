@@ -6,11 +6,11 @@ import type { Settings } from "../settings";
 import { findCandidates, type Candidate } from "../sources/resolver";
 import { imageUrl, yearOf, type Tmdb, type TmdbCredits, type TmdbListItem, type TmdbMovie, type TmdbShow } from "./tmdb";
 import { logger } from "../log";
-import type { Anilist, AnilistHomeItem, AnilistRankedList } from "./anime/anilist";
+import { seasonOf, type Anilist, type AnilistHomeItem, type AnilistRankedList, type AnilistSeason } from "./anime/anilist";
 import type { AnimeIds } from "./anime/ids";
 import { ANIME_CATEGORIES, type Kitsu, type KitsuRail } from "./anime/kitsu";
 import type { Omdb, Ratings } from "./omdb";
-import { formatRef, targetRef, tmdbRef, type TitleTarget } from "./ref";
+import { formatRef, targetRef, tmdbRef, type TitleRef, type TitleTarget } from "./ref";
 
 const log = logger("catalog");
 
@@ -29,8 +29,11 @@ export interface TitleCard {
   type: TitleType;
   /** The title's ref ("tmdb:movie:603", see `formatRef`): what newer apps key titles by. */
   ref: string;
-  /** TMDB's id, for apps from before refs. */
-  tmdbId: number;
+  /**
+   * TMDB's id, for apps from before refs: always on TMDB titles, and on AniList titles
+   * TMDB also has (see `legacyCards` for what those apps get).
+   */
+  tmdbId?: number;
   title: string;
   year: number | null;
   overview?: string;
@@ -88,6 +91,8 @@ async function homeSafe<T>(label: string, fn: () => Promise<T>): Promise<T | nul
 
 /** The Anime tab's rails after Trending, in order: the AniList list, how many on the rail. */
 const ANIME_LISTS: { id: Exclude<AnilistRankedList, "trending"> | "latest"; slug: string; title: string; rail: number; badge?: (i: AnilistHomeItem, laterSeason: boolean) => string | undefined }[] = [
+  // Titled with the season itself ("Fall 2026 Anime"): see `animeListTitle`.
+  { id: "season", slug: "this-season", title: "This Season", rail: 20 },
   { id: "latest", slug: "latest-episodes", title: "Latest Episodes", rail: 20, badge: (i) => (i.aired ? `Episode ${i.aired.episode}` : undefined) },
   { id: "airing", slug: "top-airing", title: "Airing Now", rail: 15 },
   { id: "popular", slug: "most-popular", title: "Popular", rail: 15 },
@@ -95,6 +100,41 @@ const ANIME_LISTS: { id: Exclude<AnilistRankedList, "trending"> | "latest"; slug
   { id: "completed", slug: "latest-completed", title: "Recently Finished", rail: 15 },
   { id: "upcoming", slug: "upcoming", title: "Coming Soon", rail: 15, badge: (_, laterSeason) => (laterSeason ? "New season" : undefined) },
 ];
+
+/**
+ * Cards for apps from before refs, which key titles by TMDB id: only titles TMDB has,
+ * each once (two AniList seasons of one TMDB show would be the same card to them).
+ */
+export function legacyCards<T extends { type: string; tmdbId?: number }>(cards: T[]): T[] {
+  const seen = new Set<string>();
+  return cards.filter((card) => {
+    if (card.tmdbId === undefined) return false;
+    const key = `${card.type}-${card.tmdbId}`;
+    return !seen.has(key) && !!seen.add(key);
+  });
+}
+
+/** A list's name on the Anime tab; this season's is the season itself ("Fall 2026 Anime"). */
+function animeListTitle(list: { id: string; title: string }, season: AnilistSeason): string {
+  if (list.id !== "season") return list.title;
+  return `${season.season[0]}${season.season.slice(1).toLowerCase()} ${season.year} Anime`;
+}
+
+/** AniList's description as plain text: line breaks kept, its bits of HTML dropped. */
+export function plainDescription(text: string | null | undefined): string | undefined {
+  if (!text) return undefined;
+  const plain = text
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;|&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return plain || undefined;
+}
 
 export class CatalogService {
   constructor(
@@ -240,7 +280,7 @@ export class CatalogService {
         // Each card is filled out by its own type: a source can mix series and films,
         // and a TMDB id means a different title in each.
         const full = await Promise.all(
-          candidates.map(async (c) => (c.overview ? c : ((await this.detailCards(c.type, [c.tmdbId]))[0] ?? null))),
+          candidates.map(async (c) => (c.overview || !c.tmdbId ? c : ((await this.detailCards(c.type, [c.tmdbId]))[0] ?? null))),
         );
         // The hero fills the screen: list cards carry a w780 backdrop, too soft at that size.
         return full
@@ -386,7 +426,7 @@ export class CatalogService {
       if (show && last?.air_date && last.air_date >= day(7)) label.set(show.id, `S${last.season_number} · E${last.episode_number}`);
     }
     return (await this.cards(shows.filter((s): s is TmdbShow => !!s && label.has(s.id)), "show"))
-      .map((c) => ({ ...c, badge: label.get(c.tmdbId) }))
+      .map((c) => ({ ...c, badge: label.get(c.tmdbId!) }))
       .slice(0, 20);
   }
 
@@ -455,11 +495,11 @@ export class CatalogService {
       this.anilistCards(home.trending, 20),
       ...ANIME_LISTS.map(async (list): Promise<Shelf> => {
         const items = await this.anilistCards(home[list.id], list.rail, list.badge);
-        return { id: `anime-${list.slug}`, title: list.title, kind: "titles", items, more: list.id };
+        return { id: `anime-${list.slug}`, title: animeListTitle(list, home.currentSeason), kind: "titles", items, more: list.id };
       }),
     ]);
-    const spotlight = trending
-      .filter((c) => c.backdropUrl && c.overview)
+    const spotlight = (await this.withTmdbBackdrops(trending.filter((c) => c.overview).slice(0, 12)))
+      .filter((c) => c.backdropUrl)
       .slice(0, 8)
       .map((c, i) => ({ ...c, eyebrow: `#${i + 1} in Anime` }));
     const shelves: Shelf[] = [
@@ -479,43 +519,56 @@ export class CatalogService {
     // Latest Episodes is already every episode of the last two days.
     const items = list.id === "latest" ? (await anilist.home())?.latest : await anilist.list(list.id as AnilistRankedList);
     if (!items) throw new Error("AniList is unavailable");
-    return { title: list.title, items: await this.anilistCards(items, 50, list.badge) };
+    return { title: animeListTitle(list, seasonOf(new Date())), items: await this.anilistCards(items, 50, list.badge) };
   }
 
   /**
-   * Cards for AniList titles that have a TMDB match, in AniList's order, one per TMDB
-   * title (seasons and cours of one show are one card), at most `limit`.
+   * Cards for AniList titles, from AniList's own data, in its order: every entry is its
+   * own title (a sequel or a later cour too), none left out for want of a TMDB match.
+   * `tmdbId` is there when Fribb's list maps the entry to TMDB.
    */
   private async anilistCards(items: AnilistHomeItem[], limit: number, badge?: (i: AnilistHomeItem, laterSeason: boolean) => string | undefined): Promise<TitleCard[]> {
     const ids = this.anime!.ids;
-    const seen = new Set<string>();
-    const wanted: { type: TitleType; tmdbId: number; item: AnilistHomeItem; laterSeason: boolean }[] = [];
-    for (const item of items) {
+    const picked = items.slice(0, limit);
+    const refs = picked.map((i): TitleRef => ({ source: "anilist", type: i.format === "MOVIE" ? "movie" : "show", id: i.id }));
+    const avail = await this.library.availability(refs);
+    return picked.map((item, n) => {
+      const ref = refs[n]!;
       const entry = ids.anilist(item.id);
-      const type: TitleType = item.format === "MOVIE" ? "movie" : "show";
-      const tmdbId = type === "movie" ? entry?.tmdbMovie : entry?.tmdbTv;
-      if (!tmdbId || seen.has(`${type}-${tmdbId}`)) continue;
-      seen.add(`${type}-${tmdbId}`);
-      // A sequel or a later cour: AniList counts it on its own, TMDB as part of the show.
-      const laterSeason = type === "show" && !!entry && ((entry.tmdbSeason ?? 1) > 1 || entry.tmdbOffset > 0);
-      wanted.push({ type, tmdbId, item, laterSeason });
-      // A few spare: some TMDB lookups fail.
-      if (wanted.length >= limit + 3) break;
-    }
-    const byType = async (type: TitleType) => {
-      const cards = await this.detailCards(type, wanted.filter((w) => w.type === type).map((w) => w.tmdbId));
-      return new Map(cards.map((c) => [c.tmdbId, c]));
-    };
-    const [shows, movies] = await Promise.all([byType("show"), byType("movie")]);
-    return wanted
-      .map(({ type, tmdbId, item, laterSeason }) => {
-        const card = (type === "movie" ? movies : shows).get(tmdbId);
-        const label = badge?.(item, laterSeason);
-        return card && label ? { ...card, badge: label } : card;
-      })
-      .filter((c): c is TitleCard => !!c)
-      .slice(0, limit);
+      const tmdbId = ref.type === "movie" ? entry?.tmdbMovie : entry?.tmdbTv;
+      // A sequel or a later cour: TMDB counts it as part of the show.
+      const laterSeason = ref.type === "show" && !!entry && ((entry.tmdbSeason ?? 1) > 1 || entry.tmdbOffset > 0);
+      const label = badge?.(item, laterSeason);
+      return {
+        type: ref.type,
+        ref: formatRef(ref),
+        ...(tmdbId ? { tmdbId } : {}),
+        title: item.title?.english?.trim() || item.title?.romaji?.trim() || "",
+        year: item.seasonYear ?? null,
+        overview: plainDescription(item.description),
+        posterUrl: item.coverImage?.extraLarge ?? item.coverImage?.large ?? null,
+        backdropUrl: item.bannerImage ?? null,
+        ...(item.averageScore ? { rating: item.averageScore / 10 } : {}),
+        available: avail.get(formatRef(ref)) ?? [],
+        ...(label ? { badge: label } : {}),
+      };
+    });
   }
+
+  /**
+   * TMDB's backdrop, where it has the title, in place of AniList's banner: the hero fills
+   * the screen, and AniList's banners are a thin strip.
+   */
+  private async withTmdbBackdrops(cards: TitleCard[]): Promise<TitleCard[]> {
+    return Promise.all(
+      cards.map(async (card) => {
+        if (!card.tmdbId) return card;
+        const detail = await (card.type === "movie" ? this.tmdb.movie(card.tmdbId) : this.tmdb.show(card.tmdbId)).catch(() => null);
+        return detail?.backdrop_path ? { ...card, backdropUrl: imageUrl(detail.backdrop_path, "original") } : card;
+      }),
+    );
+  }
+
 
   /** Cards from TMDB details (cached), a few lookups at a time; ones that fail are left out. */
   private async detailCards(type: TitleType, tmdbIds: number[]): Promise<TitleCard[]> {

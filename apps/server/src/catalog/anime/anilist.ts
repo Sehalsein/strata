@@ -44,22 +44,48 @@ const DETAILS = `query ($id: Int) {
   }
 }`;
 
-/** A ranked list on the Anime tab: AniList media, with the episode that aired for schedules. */
+/**
+ * An anime in one of the Anime tab's lists: enough of AniList's media for a card, and
+ * for Latest Episodes, the episode that aired.
+ */
 export interface AnilistHomeItem {
   id: number;
   format?: string | null;
   episodes?: number | null;
+  seasonYear?: number | null;
+  title?: { english?: string | null; romaji?: string | null };
+  coverImage?: { extraLarge?: string | null; large?: string | null };
+  /** Wide artwork; many titles have none. */
+  bannerImage?: string | null;
+  /** Plain text, with the odd <br> or <i> AniList keeps. */
+  description?: string | null;
+  /** Out of 100. */
+  averageScore?: number | null;
   /** Latest Episodes: the episode that aired. */
   aired?: { episode: number; airingAt: number };
 }
 
-export type AnilistHome = Record<"trending" | "airing" | "popular" | "favourites" | "completed" | "upcoming" | "latest", AnilistHomeItem[]>;
+export type AnilistSeasonName = "WINTER" | "SPRING" | "SUMMER" | "FALL";
+export interface AnilistSeason {
+  season: AnilistSeasonName;
+  year: number;
+}
 
-const LIST = "id format episodes";
+/** The anime season `date` is in: Winter is January to March, and so on. */
+export function seasonOf(date: Date): AnilistSeason {
+  const names: AnilistSeasonName[] = ["WINTER", "SPRING", "SUMMER", "FALL"];
+  return { season: names[Math.floor(date.getUTCMonth() / 3)]!, year: date.getUTCFullYear() };
+}
+
+export type AnilistHome = Record<AnilistRankedList | "latest", AnilistHomeItem[]> & { currentSeason: AnilistSeason };
+
+const LIST = "id format episodes seasonYear title { english romaji } coverImage { extraLarge large } bannerImage description(asHtml: false) averageScore";
 const JP = "type: ANIME, isAdult: false, countryOfOrigin: JP";
 /** The Anime tab's ranked lists, as AniList media filters. */
 const RANKED = {
   trending: "sort: TRENDING_DESC",
+  /** This season's anime, most popular first (needs $season and $seasonYear). */
+  season: "season: $season, seasonYear: $seasonYear, sort: POPULARITY_DESC",
   airing: "status: RELEASING, sort: POPULARITY_DESC",
   popular: "sort: POPULARITY_DESC",
   favourites: "sort: FAVOURITES_DESC",
@@ -70,7 +96,8 @@ export type AnilistRankedList = keyof typeof RANKED;
 export const ANILIST_RANKED_LISTS = Object.keys(RANKED) as AnilistRankedList[];
 
 const ranked = (name: AnilistRankedList, perPage: number) => `${name}: Page(perPage: ${perPage}) { media(${JP}, ${RANKED[name]}) { ${LIST} } }`;
-const HOME = `query ($since: Int, $now: Int) {
+const SEASON_VARS = "$season: MediaSeason, $seasonYear: Int";
+const HOME = `query ($since: Int, $now: Int, ${SEASON_VARS}) {
   ${ANILIST_RANKED_LISTS.map((name) => ranked(name, name === "upcoming" ? 15 : 20)).join("\n  ")}
   latest: Page(perPage: 50) {
     airingSchedules(airingAt_greater: $since, airingAt_lesser: $now, sort: TIME_DESC) {
@@ -79,7 +106,7 @@ const HOME = `query ($since: Int, $now: Int) {
   }
 }`;
 
-type HomeResponse = Record<Exclude<keyof AnilistHome, "latest">, { media: AnilistHomeItem[] }> & {
+type HomeResponse = Record<AnilistRankedList, { media: AnilistHomeItem[] }> & {
   latest: {
     airingSchedules: { episode: number; airingAt: number; media: AnilistHomeItem & { isAdult?: boolean; countryOfOrigin?: string; popularity?: number } }[];
   };
@@ -133,16 +160,20 @@ export class Anilist {
   async home(): Promise<AnilistHome | null> {
     // Rounded to the hour, so the variables (and the cache key) are stable within it.
     const now = Math.floor(Date.now() / 3_600_000) * 3_600;
-    const data = await this.request<HomeResponse>(HOME, { since: now - 2 * 86_400, now }, "anilist:home", 60 * 60_000);
+    const currentSeason = seasonOf(new Date(now * 1000));
+    const vars = { since: now - 2 * 86_400, now, season: currentSeason.season, seasonYear: currentSeason.year };
+    const data = await this.request<HomeResponse>(HOME, vars, "anilist:home", 60 * 60_000);
     if (!data) return null;
     const seen = new Set<number>();
     const latest = data.latest.airingSchedules
       .filter((s) => !s.media.isAdult && s.media.countryOfOrigin === "JP" && (s.media.popularity ?? 0) >= LATEST_MIN_POPULARITY)
       // Newest first: a show that aired twice keeps its latest episode.
       .filter((s) => !seen.has(s.media.id) && !!seen.add(s.media.id))
-      .map((s) => ({ id: s.media.id, format: s.media.format, episodes: s.media.episodes, aired: { episode: s.episode, airingAt: s.airingAt } }));
+      .map(({ media: { isAdult: _, countryOfOrigin: __, popularity: ___, ...media }, episode, airingAt }) => ({ ...media, aired: { episode, airingAt } }));
     return {
+      currentSeason,
       trending: data.trending.media,
+      season: data.season.media,
       airing: data.airing.media,
       popular: data.popular.media,
       favourites: data.favourites.media,
@@ -154,7 +185,13 @@ export class Anilist {
 
   /** One of the Anime tab's ranked lists in full ("See all"): its top 50, cached an hour. */
   async list(name: AnilistRankedList): Promise<AnilistHomeItem[] | null> {
-    const data = await this.request<Record<string, { media: AnilistHomeItem[] }>>(`query { ${ranked(name, 50)} }`, {}, `anilist:list:${name}`, 60 * 60_000);
+    // Only the season list takes variables (GraphQL refuses ones a query doesn't use).
+    const current = seasonOf(new Date());
+    const [query, vars, key] =
+      name === "season"
+        ? [`query (${SEASON_VARS}) { ${ranked(name, 50)} }`, { season: current.season, seasonYear: current.year }, `anilist:list:season:${current.season}:${current.year}`]
+        : [`query { ${ranked(name, 50)} }`, {}, `anilist:list:${name}`];
+    const data = await this.request<Record<string, { media: AnilistHomeItem[] }>>(query, vars, key, 60 * 60_000);
     return data?.[name]?.media ?? null;
   }
 

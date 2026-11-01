@@ -7,6 +7,7 @@ import { capsSchema } from "../../playback/decide";
 import { NeedsProbeError } from "../../playback/service";
 import { mediaInfoSchema } from "../../media/probe";
 import { parseRef, tmdbRef, type TitleRef, type TitleTarget } from "../../catalog/ref";
+import { legacyCards, type Shelf } from "../../catalog/service";
 
 /** A title by its ref ("tmdb:show:1399"), for path and query params; 400 when it isn't one. */
 function refParam(text: string | undefined): TitleRef {
@@ -52,6 +53,20 @@ function toTitle(input: { ref?: string; type?: "movie" | "show"; tmdbId?: number
   throw new HTTPException(400, { message: "ref, or type and tmdbId, is required" });
 }
 
+/**
+ * Cards as the asking app can use them. Apps that key titles by ref say so with
+ * `X-Strata-Refs: 1`; older ones key them by TMDB id, so they get only titles TMDB has,
+ * once each (two AniList seasons of one TMDB show would be the same card to them).
+ */
+function forApp<T extends { type: string; tmdbId?: number }>(c: Context<Env>, cards: T[]): T[] {
+  c.header("Vary", "X-Strata-Refs");
+  return c.req.header("X-Strata-Refs") === "1" ? cards : legacyCards(cards);
+}
+
+function shelvesForApp(c: Context<Env>, shelves: Shelf[]): Shelf[] {
+  return shelves.map((shelf) => ({ ...shelf, items: forApp(c, shelf.items) })).filter((shelf) => shelf.items.length > 0);
+}
+
 /** What play and download both take, besides the title. */
 const prepareFields = {
   candidateId: z.string().optional(),
@@ -82,11 +97,11 @@ export const catalogRoutes = new Hono<Env>()
   .use(requireAuth, requireHousehold)
 
   // Both parts at once, for apps that don't ask for them separately.
-  .get("/home", async (c) => c.json({ shelves: await viewer(c).home() }))
-  .get("/home/catalog", cacheFor(TTL.catalog), async (c) => c.json({ shelves: await viewer(c).homeCatalog() }))
+  .get("/home", async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).home()) }))
+  .get("/home/catalog", cacheFor(TTL.catalog), async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).homeCatalog()) }))
   .get("/home/profile", async (c) => {
     c.header("Cache-Control", "no-store");
-    return c.json({ shelves: await viewer(c).homeProfile() });
+    return c.json({ shelves: shelvesForApp(c, await viewer(c).homeProfile()) });
   })
 
   .get("/genres/:type", cacheFor(TTL.catalog), async (c) => {
@@ -108,14 +123,14 @@ export const catalogRoutes = new Hono<Env>()
   .get("/anime", cacheFor(TTL.catalog), async (c) => {
     const category = c.req.query("category") || undefined;
     if (category && !viewer(c).animeCategories().some((x) => x.id === category)) throw new HTTPException(400, { message: "Unknown anime category" });
-    return c.json({ shelves: await viewer(c).animePage(category) });
+    return c.json({ shelves: shelvesForApp(c, await viewer(c).animePage(category)) });
   })
 
   // One of the Anime tab's lists in full, for its rail's "›".
   .get("/anime/list/:id", cacheFor(TTL.catalog), async (c) => {
     const list = await viewer(c).animeList(c.req.param("id"));
     if (!list) throw new HTTPException(404, { message: "Unknown anime list" });
-    return c.json(list);
+    return c.json({ ...list, items: forApp(c, list.items) });
   })
 
   .get("/person/:id", cacheFor(TTL.catalog), async (c) => c.json(await viewer(c).person(intParam(c, "id"))))
@@ -234,7 +249,7 @@ export const catalogRoutes = new Hono<Env>()
   })
 
   // My List on its own (it's also a shelf on /home).
-  .get("/watchlist", async (c) => c.json({ items: await viewer(c).watchlist() }))
+  .get("/watchlist", async (c) => c.json({ items: forApp(c, await viewer(c).watchlist()) }))
 
   .put("/watchlist", async (c) => {
     const input = await body(c, z.object({ ref: z.string().optional(), type: z.enum(["movie", "show"]).optional(), tmdbId: z.number().int().optional(), on: z.boolean() }));
