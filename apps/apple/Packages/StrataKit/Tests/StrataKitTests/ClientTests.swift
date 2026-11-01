@@ -25,6 +25,23 @@ final class ServerAddressTests: XCTestCase {
         }
     }
 
+    func testCandidatesTryHTTPSFirstForABareDomain() {
+        let cases: [(String, [String])] = [
+            ("strata-demo.example.workers.dev", ["https://strata-demo.example.workers.dev", "http://strata-demo.example.workers.dev:8420"]),
+            ("192.168.1.20", ["http://192.168.1.20:8420"]),
+            ("nas.local", ["http://nas.local:8420"]),
+            ("nas", ["http://nas:8420"]),
+            ("box.example.com:9000", ["http://box.example.com:9000"]),
+            ("http://box.example.com", ["http://box.example.com:8420"]),
+            ("https://box.example.com", ["https://box.example.com"]),
+            ("[fd7a:115c::1]", ["http://[fd7a:115c::1]:8420"]),
+            ("not a host", []),
+        ]
+        for (input, expected) in cases {
+            XCTAssertEqual(ServerAddress.candidates(input).map(\.absoluteString), expected, "input: \(input)")
+        }
+    }
+
     func testResolveRelative() {
         let base = URL(string: "http://192.168.1.20:8420")!
         XCTAssertEqual(ServerAddress.resolve(URL(string: "/api/stream/abc/stream.m3u8")!, against: base).absoluteString,

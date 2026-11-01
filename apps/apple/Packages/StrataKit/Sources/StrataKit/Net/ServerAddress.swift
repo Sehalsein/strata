@@ -28,6 +28,25 @@ public enum ServerAddress {
         return comps.url
     }
 
+    /// The URLs to try for what the user typed, in order. A bare domain name ("strata.example.com",
+    /// no scheme, no port) is usually a hosted server behind HTTPS, so that's tried first, then a
+    /// home server at the default port. IP addresses, `.local` and one-word names, and anything
+    /// with a scheme or port mean just what `normalize` makes of them.
+    public static func candidates(_ input: String) -> [URL] {
+        guard let url = normalize(input) else { return [] }
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.contains("://"), let host = url.host,
+              URLComponents(string: "http://" + text)?.port == nil,
+              host.contains("."), !host.hasSuffix(".local"), !isIPAddress(host),
+              let https = normalize("https://" + text)
+        else { return [url] }
+        return [https, url]
+    }
+
+    private static func isIPAddress(_ host: String) -> Bool {
+        host.contains(":") || host.split(separator: ".").allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
+    }
+
     /// "host:port" for messages.
     public static func display(_ url: URL) -> String {
         guard let host = url.host else { return url.absoluteString }

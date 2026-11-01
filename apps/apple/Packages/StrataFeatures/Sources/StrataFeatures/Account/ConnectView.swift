@@ -156,12 +156,13 @@ struct ConnectView: View {
         var isCompatible = true
     }
 
+    /// Saved servers, then ones found on the network, without those taken off the list.
     private var rows: [Row] {
         let saved = services.store.servers.map { Row(id: $0.id, name: $0.name, url: $0.url) }
         let found = services.browser.servers
             .filter { found in !saved.contains { $0.id == found.id } }
             .map { Row(id: $0.id, name: $0.name, url: $0.url, isCompatible: $0.isCompatible) }
-        return saved + found
+        return (saved + found).filter { !services.store.hiddenServerIDs.contains($0.id) }
     }
 
     @ViewBuilder private var serverList: some View {
@@ -195,7 +196,36 @@ struct ConnectView: View {
                 .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
                 #endif
                 .disabled(probing != nil)
+                .contextMenu {
+                    // Off this list on this device; signing in to it again brings it back.
+                    Button(role: .destructive) { services.store.hideServer(server.id) } label: {
+                        Label("Remove from List", systemImage: "minus.circle")
+                    }
+                }
             }
+            listActions
+        }
+    }
+
+    /// "Clear List" takes every server shown off the list; hidden ones can come back.
+    @ViewBuilder private var listActions: some View {
+        let hidden = services.store.hiddenServerIDs.count
+        if !rows.isEmpty || hidden > 0 {
+            HStack(spacing: Metrics.space6) {
+                if !rows.isEmpty {
+                    Button("Clear List") { services.store.hideServers(rows.map(\.id)) }
+                }
+                if hidden > 0 {
+                    Button(hidden == 1 ? "Show 1 Hidden Server" : "Show \(hidden) Hidden Servers") { services.store.showHiddenServers() }
+                }
+            }
+            .font(.stCallout)
+            #if !os(tvOS)
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.accentText)
+            #endif
+            .frame(maxWidth: .infinity, alignment: Self.frameAlignment)
+            .padding(.top, Metrics.space1)
         }
     }
 

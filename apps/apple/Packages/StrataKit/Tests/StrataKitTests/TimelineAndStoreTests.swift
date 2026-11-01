@@ -65,6 +65,45 @@ final class ServerStoreTests: XCTestCase {
         XCTAssertEqual(StubProtocol.recorded.first?.url?.absoluteString, "http://192.168.1.20:8420/api/info")
     }
 
+    func testProbeTriesHTTPSFirstThenAHomeServer() async throws {
+        StubProtocol.reset { req in req.url?.scheme == "https" ? .json(503, ["error": "down"]) : self.info() }
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let store = ServerStore(defaults: defaults, tokens: .inMemory(), session: StubProtocol.session())
+        let (url, _) = try await store.probeServer("strata.example.com")
+        XCTAssertEqual(url.absoluteString, "http://strata.example.com:8420")
+        XCTAssertEqual(StubProtocol.recorded.map { $0.url!.scheme! }, ["https", "http"])
+
+        StubProtocol.reset { _ in self.info() }
+        let (secure, _) = try await store.probeServer("strata.example.com")
+        XCTAssertEqual(secure.absoluteString, "https://strata.example.com")
+        XCTAssertEqual(StubProtocol.recorded.count, 1)
+    }
+
+    func testHiddenServersStayHiddenUntilShownOrSignedInTo() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let tokens = TokenStorage.inMemory()
+        let store = ServerStore(defaults: defaults, tokens: tokens, session: StubProtocol.session())
+        store.hideServers(["srv-1", "srv-2"])
+        XCTAssertEqual(ServerStore(defaults: defaults, tokens: tokens, session: StubProtocol.session()).hiddenServerIDs, ["srv-1", "srv-2"])
+        store.showHiddenServers("srv-2")
+        XCTAssertEqual(store.hiddenServerIDs, ["srv-1"])
+
+        // Signing in to a hidden server brings it back.
+        StubProtocol.reset { req in
+            switch req.url?.path {
+            case "/api/info": return self.info()
+            case "/api/auth/sign-in/username": return .json(200, ["token": "t1"])
+            case "/api/me": return self.me("sehal")
+            default: return .json(200, ["success": true])
+            }
+        }
+        _ = await store.signIn(address: "den.local", login: "sehal", password: "pw")
+        XCTAssertEqual(store.hiddenServerIDs, [])
+        store.hideServer("srv-9")
+        store.showHiddenServers()
+        XCTAssertTrue(store.hiddenServerIDs.isEmpty)
+    }
+
     func testProbeRejectsOtherServers() async throws {
         StubProtocol.reset { _ in .json(200, ["name": "jellyfin", "serverName": "x", "id": "x", "version": "1", "apiVersion": 1, "setupRequired": false]) }
         let store = ServerStore(defaults: defaults, tokens: .inMemory(), session: StubProtocol.session())
