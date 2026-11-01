@@ -2,7 +2,7 @@
 //   cd deploy/cloudflare
 //   npx wrangler secret put DATABASE_URL        # Neon's connection string
 //   npx wrangler secret put STRATA_SECRET_KEY   # openssl rand -base64 32 (keep it safe)
-//   npx wrangler deploy
+//   DATABASE_URL=… bash deploy.sh                # migrates Neon, then deploys
 // Optional secrets: RESEND_API_KEY (password-reset email), GOOGLE_CLIENT_ID and
 // GOOGLE_CLIENT_SECRET (Sign in with Google), STRATA_ADMIN_EMAILS (system admins),
 // STRATA_OPERATOR and STRATA_PRIVACY_CONTACT (the privacy page), SENTRY_DSN (error reports).
