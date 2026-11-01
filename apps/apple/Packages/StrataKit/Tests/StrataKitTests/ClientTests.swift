@@ -271,6 +271,32 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(StubProtocol.recorded.map(\.url!.path).suffix(3), ["/api/progress", "/api/titles/show/9001", "/api/titles/show/9001/seasons/1"])
     }
 
+    func testAnswerTheServerTurnsDownIsNoLongerKept() async throws {
+        var denied = false
+        StubProtocol.reset { req in
+            if denied { return .json(403, ["error": "Not allowed for this profile"]) }
+            var reply = StubProtocol.Reply.fixture("show")
+            reply.headers["Cache-Control"] = "private, max-age=0"
+            return reply
+        }
+        let token = "deny-\(UUID().uuidString)"
+        let c = StrataClient(baseURL: base, token: token, session: StubProtocol.session(), persistent: true)
+        _ = try await c.show(9001)
+        _ = try await c.show(9001, .cachedOnly)
+        denied = true
+        do { _ = try await c.show(9001); XCTFail("expected 403") } catch let e as StrataError { XCTAssertEqual(e.status, 403) }
+        // Gone from memory and disk: a new client (a cold launch) has nothing to show either.
+        for client in [c, StrataClient(baseURL: base, token: token, session: StubProtocol.session(), persistent: true)] {
+            do { _ = try await client.show(9001, .cachedOnly); XCTFail("expected notCached") } catch let e as StrataError { XCTAssertEqual(e.kind, .notCached) }
+        }
+
+        denied = false
+        _ = try await c.show(9001)
+        StrataClient.purgeCache(token: token)
+        let fresh = StrataClient(baseURL: base, token: token, session: StubProtocol.session(), persistent: true)
+        do { _ = try await fresh.show(9001, .cachedOnly); XCTFail("expected notCached") } catch let e as StrataError { XCTAssertEqual(e.kind, .notCached) }
+    }
+
     func testSubtitlesRetryOn202() async throws {
         var calls = 0
         StubProtocol.reset { _ in

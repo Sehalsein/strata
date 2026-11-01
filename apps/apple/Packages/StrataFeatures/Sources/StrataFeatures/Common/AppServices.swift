@@ -72,7 +72,8 @@ public final class AppServices {
 
     /// Stale-while-revalidate: hands `show` what this device kept, however old, at once,
     /// then the server's answer when the kept one is stale or missing (each catalog answer
-    /// says how long it stays fresh). A failed refresh leaves the kept answer up.
+    /// says how long it stays fresh). A failed refresh leaves the kept answer up, unless the
+    /// server turned it down (the client then drops what it kept).
     /// `force` (pull to refresh) goes straight to the server.
     public func loadCached<T>(force: Bool = false, _ work: (StrataClient, CachePolicy) async throws -> T,
                               show: (Loadable<T>) -> Void) async {
@@ -84,7 +85,9 @@ public final class AppServices {
         let result = await load { try await work($0, force ? .reload : .fresh) }
         switch result {
         case .loading: return
-        case .failed where showingKept: return
+        case .failed where showingKept:
+            if let client, (try? await work(client, .cachedOnly)) != nil { return }
+            show(result)
         default: show(result)
         }
     }

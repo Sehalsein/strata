@@ -44,6 +44,12 @@ public final class StrataClient: Sendable {
     /// Drops every cached answer, on disk too (sign-out, profile switch).
     public func clearCache() async { await cache.clear() }
 
+    /// Erases what was kept on disk for a token that's no longer used (a forgotten server,
+    /// a replaced session), without needing a client for it.
+    public static func purgeCache(token: String) {
+        if let directory = ResponseCache.directory(for: token) { try? FileManager.default.removeItem(at: directory) }
+    }
+
     /// Server-relative URL → absolute.
     public func resolve(_ url: URL) -> URL { ServerAddress.resolve(url, against: baseURL) }
 
@@ -336,6 +342,9 @@ public final class StrataClient: Sendable {
             result = try await task.value
         } catch {
             await cache.finished(key, task, result: nil)
+            // The server turned it down (signed out, now off limits for this profile, gone):
+            // what was kept mustn't be shown in its place.
+            if let e = error as? StrataError, [401, 403, 404].contains(e.status) { await cache.remove([key]) }
             throw error
         }
         await cache.finished(key, task, result: result)
@@ -544,7 +553,8 @@ actor ResponseCache {
         for key in entries.keys where matches(key) { entries[key] = nil }
         for key in running.keys where matches(key) { running[key] = nil }
         guard let directory, let files = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else { return }
-        let prefixes = paths.map { Self.fileStem($0) + "-" }
+        // Files are named by path alone: a key with a query takes every query of its path.
+        let prefixes = paths.map { Self.fileStem(String($0.split(separator: "?", maxSplits: 1).first ?? "")) + "-" }
         for name in files where prefixes.contains(where: name.hasPrefix) {
             try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
         }

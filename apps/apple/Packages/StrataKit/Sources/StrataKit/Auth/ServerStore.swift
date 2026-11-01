@@ -246,6 +246,7 @@ public final class ServerStore {
             // Replace the previous session on that server (best-effort).
             let previous = StrataClient(baseURL: oldURL, token: old, session: session, cacheTTL: 0)
             Task { try? await previous.logout() }
+            StrataClient.purgeCache(token: old)
         }
         server.name = info.serverName
         server.version = info.version
@@ -433,6 +434,7 @@ public final class ServerStore {
     }
 
     private func forget(_ id: String) {
+        if let token = tokens.read(id) { StrataClient.purgeCache(token: token) }
         tokens.write(nil, id)
         servers.removeAll { $0.id == id }
         persist()
