@@ -3,6 +3,8 @@ import type { Db } from "./db";
 import { files, mediaItems, member, progress, type FileProvider, type MatchStatus } from "./db/schema";
 import type { Matcher, MatchResult } from "./catalog/matcher";
 import type { Tmdb } from "./catalog/tmdb";
+import type { Anilist } from "./catalog/anime/anilist";
+import { anilistMatch } from "./catalog/anime/match";
 import { yearOf } from "./catalog/tmdb";
 import type { ParsedName } from "./media/parse";
 import type { MediaInfo } from "./media/probe";
@@ -32,6 +34,8 @@ export class Library {
     readonly organizationId: string,
     private readonly tmdb: Tmdb,
     private readonly matcher: Matcher,
+    /** AniList, for matching files to AniList titles by hand. */
+    private readonly anilist?: Anilist,
   ) {}
 
   private mine() {
@@ -93,7 +97,7 @@ export class Library {
     return gone.length;
   }
 
-  /** Matches every pending file against TMDB. Returns counts for status reporting. */
+  /** Matches every pending file (anime to AniList, the rest to TMDB). Returns counts for status reporting. */
   async matchPending(onProgress?: (done: number, total: number) => void): Promise<{ matched: number; unmatched: number }> {
     if (!this.tmdb.configured) return { matched: 0, unmatched: 0 };
     // Unmatched files get another try daily: lookups that failed (an anime site down,
@@ -125,18 +129,25 @@ export class Library {
     return { matched, unmatched };
   }
 
-  /** Matches a file to a title by hand (or to the title discovery fetched it for). */
+  /**
+   * Matches a file to a title by hand (or to the title discovery fetched it for). Shows
+   * need the episode; an AniList show has one season, 1.
+   */
   async setManualMatch(fileId: number, ref: TitleRef, season?: number, episode?: number, status: MatchStatus = "manual") {
-    // Only TMDB titles can be matched for now; AniList matches come with AniList support.
-    if (ref.source !== "tmdb") throw new Error(`Can't match files to ${ref.source} titles yet`);
-    const { type, id: tmdbId } = ref;
-    if (type === "movie") {
-      const m = await this.tmdb.movie(tmdbId);
-      await this.applyMatch(fileId, { type, tmdbId, title: m.title, year: yearOf(m.release_date), posterPath: m.poster_path ?? null, backdropPath: m.backdrop_path ?? null, genreIds: m.genres.map((g) => g.id) }, undefined, undefined, status);
+    const { type, id } = ref;
+    if (type === "show" && (episode === undefined || (season === undefined && ref.source !== "anilist"))) throw new Error("season and episode are required for shows");
+    if (ref.source === "anilist") {
+      if (type === "show" && season !== undefined && season !== 1) throw new Error("AniList shows have one season (1)");
+      if (!this.anilist) throw new Error("AniList isn't available");
+      const m = await anilistMatch(this.anilist, type, id);
+      if (!m) throw new Error(`AniList ${id} isn't a ${type}`);
+      await this.applyMatch(fileId, m, type === "show" ? 1 : undefined, episode, status);
+    } else if (type === "movie") {
+      const m = await this.tmdb.movie(id);
+      await this.applyMatch(fileId, { source: "tmdb", type, titleId: id, title: m.title, year: yearOf(m.release_date), posterPath: m.poster_path ?? null, backdropPath: m.backdrop_path ?? null, genreIds: m.genres.map((g) => g.id) }, undefined, undefined, status);
     } else {
-      if (season === undefined || episode === undefined) throw new Error("season and episode are required for shows");
-      const s = await this.tmdb.show(tmdbId);
-      await this.applyMatch(fileId, { type, tmdbId, title: s.name, year: yearOf(s.first_air_date), posterPath: s.poster_path ?? null, backdropPath: s.backdrop_path ?? null, genreIds: s.genres.map((g) => g.id) }, season, episode, status);
+      const s = await this.tmdb.show(id);
+      await this.applyMatch(fileId, { source: "tmdb", type, titleId: id, title: s.name, year: yearOf(s.first_air_date), posterPath: s.poster_path ?? null, backdropPath: s.backdrop_path ?? null, genreIds: s.genres.map((g) => g.id) }, season, episode, status);
     }
   }
 
@@ -144,15 +155,14 @@ export class Library {
     await this.db.update(files).set({ matchStatus: "ignored", mediaType: null, titleId: null, updatedAt: Date.now() }).where(and(this.mine(), eq(files.id, fileId)));
   }
 
-  /** Matcher results are TMDB titles (anime included, through the anime id list). */
   private async applyMatch(fileId: number, m: MatchResult, season: number | undefined, episode: number | undefined, status: MatchStatus) {
-    const source = "tmdb" as const;
+    const { source, titleId } = m;
     await this.db.transaction(async (tx) => {
       await tx.update(files)
         .set({
           mediaType: m.type === "movie" ? "movie" : "episode",
           source,
-          titleId: m.tmdbId,
+          titleId,
           season: m.type === "show" ? (season ?? null) : null,
           episode: m.type === "show" ? (episode ?? null) : null,
           matchStatus: status,
@@ -160,12 +170,12 @@ export class Library {
         })
         .where(and(this.mine(), eq(files.id, fileId)));
       await tx.insert(mediaItems)
-        .values({ organizationId: this.organizationId, source, type: m.type, titleId: m.tmdbId, title: m.title, year: m.year, posterPath: m.posterPath, backdropPath: m.backdropPath, genreIds: m.genreIds ? JSON.stringify(m.genreIds) : null })
+        .values({ organizationId: this.organizationId, source, type: m.type, titleId, title: m.title, year: m.year, posterPath: m.posterPath, backdropPath: m.backdropPath, genreIds: m.genreIds ? JSON.stringify(m.genreIds) : null })
         .onConflictDoNothing();
       if (m.genreIds) {
         await tx.update(mediaItems)
           .set({ genreIds: JSON.stringify(m.genreIds) })
-          .where(and(this.mineItems(), eq(mediaItems.source, source), eq(mediaItems.type, m.type), eq(mediaItems.titleId, m.tmdbId), isNull(mediaItems.genreIds)));
+          .where(and(this.mineItems(), eq(mediaItems.source, source), eq(mediaItems.type, m.type), eq(mediaItems.titleId, titleId), isNull(mediaItems.genreIds)));
       }
     });
   }

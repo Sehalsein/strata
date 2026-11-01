@@ -197,6 +197,56 @@ describe("AniList title pages", () => {
     expect(await service.anilistTitle("u", ref("anilist:show:12345"))).toBeNull();
     expect(await service.anilistTitle("u", ref("anilist:movie:182255"))).toBeNull();
   });
+  test("an absurd episode count from AniList is capped, and only TMDB's seasons are asked for", async () => {
+    const asked: number[] = [];
+    // One Piece is numbered across TMDB's seasons; AniList "says" it has ten million episodes.
+    const huge = { ...linked(21, "TV", "One Piece"), status: "FINISHED", episodes: 10_000_000 } as AnilistTitle;
+    const onePieceTmdb = {
+      show: async () => ({ id: 37854, name: "One Piece", genres: [], seasons: [{ season_number: 1, episode_count: 61 }, { season_number: 2, episode_count: 16 }] }),
+      season: async (_: number, season: number) => (asked.push(season), { season_number: season, episodes: [] }),
+    } as unknown as Tmdb;
+    const service = new CatalogService(onePieceTmdb, library, progress, settings, { ids: ids(), anilist: { title: async () => huge } as unknown as Anilist, kitsu });
+    const page = await service.anilistSeason("u", ref("anilist:show:21"), 1);
+    expect(page!.episodes.length).toBe(2_000);
+    expect(asked.sort()).toEqual([1, 2]);
+    const title = await service.anilistTitle("u", ref("anilist:show:21"));
+    expect(title!.type === "show" && title!.seasons[0]!.episodeCount).toBe(2_000);
+  });
+});
+
+describe("AniList titles in the person's rows", () => {
+  const row = (titleId: number, episode: number, extra: object = {}) => ({ userId: "u", source: "anilist", mediaType: "episode", titleId, season: 1, episode, positionMs: 600_000, durationMs: 1_440_000, completed: false, updatedAt: 1, ...extra });
+  const rows = (opts: { inProgress?: object[]; completed?: object[]; watchlist?: object[] }) =>
+    ({
+      inProgress: async () => opts.inProgress ?? [],
+      recentlyCompletedEpisodes: async () => opts.completed ?? [],
+      watchlist: async () => opts.watchlist ?? [],
+      hiddenFilter: async () => () => false,
+      get: async () => undefined,
+    }) as never;
+  const service = (p: never) => new CatalogService(tmdb, library, p, settings, { ids: ids(), anilist: { title: async (id: number) => MEDIA[id] ?? null } as unknown as Anilist, kitsu });
+
+  test("Continue Watching, Up Next and My List show AniList titles with AniList's artwork and TMDB's episode names", async () => {
+    const shelves = await service(rows({
+      inProgress: [row(182255, 2)],
+      completed: [row(182255, 3, { completed: true }), row(999, 3, { completed: true })],
+      watchlist: [{ userId: "u", source: "anilist", type: "movie", titleId: 21519 }, { userId: "u", source: "anilist", type: "show", titleId: 999 }],
+    })).homeProfile("u");
+    const byId = Object.fromEntries(shelves.map((s) => [s.id, s.items]));
+    expect(byId.continue).toMatchObject([{ ref: "anilist:show:182255", title: "Frieren Season 2", posterUrl: "https://img.anili.st/182255.jpg", episode: { season: 1, episode: 2, name: "TMDB E30", stillUrl: "https://image.tmdb.org/t/p/w780/s30.jpg" } }]);
+    // Frieren S2 is in progress (not Up Next); 999's episode 3 is its last.
+    expect(byId.nextUp).toBeUndefined();
+    expect(byId.watchlist).toMatchObject([{ ref: "anilist:movie:21519", tmdbId: 372058 }, { ref: "anilist:show:999", title: "Only On AniList" }]);
+  });
+
+  test("Up Next is the next AniList episode once it's out; the next episode for autoplay too", async () => {
+    const shelves = await service(rows({ completed: [row(999, 1, { completed: true })] })).homeProfile("u");
+    expect(shelves.find((s) => s.id === "nextUp")!.items).toMatchObject([{ ref: "anilist:show:999", episode: { season: 1, episode: 2, name: "Episode 2" } }]);
+    const catalog = service(rows({}));
+    expect(await catalog.nextEpisode(ref("anilist:show:182255"), 1, 2)).toMatchObject({ season: 1, episode: 3, name: "TMDB E31" });
+    // Episode 4 hasn't aired.
+    expect(await catalog.nextEpisode(ref("anilist:show:182255"), 1, 3)).toBeNull();
+  });
 });
 
 describe("content limits for AniList titles", () => {

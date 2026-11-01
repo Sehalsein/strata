@@ -226,22 +226,60 @@ export function cachedAnimeIdStore(cache: ApiCache): AnimeIdStore {
 }
 
 /**
- * The Kitsu id and episode for a TMDB episode, as Torrentio's anime streams want them
- * ("kitsu:<id>:<episode>"; Kitsu has one entry per season or cour).
+ * The entry a TMDB episode belongs to, among `entries` that have `key` (an AniList or
+ * Kitsu id), and its episode number within that entry. Both sites have one entry per
+ * season or cour, numbered from 1:
+ * - an entry in the episode's TMDB season: the one with the largest offset before it
+ *   (Frieren S2 is TMDB S1 from episode 29: S1E30 is its episode 2);
+ * - else an entry numbered absolutely across TMDB's seasons (One Piece): the episode's
+ *   absolute number, less the episodes before that entry's first.
+ * Null when no entry covers it.
  */
-export function kitsuEpisode(
+export function entryEpisode(
   entries: AnimeEntry[],
+  key: "anilistId" | "kitsuId",
   season: number,
   episode: number,
   tmdbSeasons: { season: number; episodes: number }[],
-): { kitsuId: number; episode: number } | null {
+): { id: number; episode: number } | null {
   const inSeason = entries
-    .filter((e) => e.kitsuId && e.tmdbSeason === season && e.tmdbOffset < episode)
+    .filter((e) => e[key] && e.tmdbSeason === season && e.tmdbOffset < episode)
     .sort((a, b) => b.tmdbOffset - a.tmdbOffset)[0];
-  if (inSeason) return { kitsuId: inSeason.kitsuId!, episode: episode - inSeason.tmdbOffset };
-  // One entry numbered absolutely across TMDB's seasons (One Piece).
-  const absolute = entries.find((e) => e.kitsuId && e.tmdbSeason === undefined);
-  if (!absolute) return null;
+  if (inSeason) return { id: inSeason[key]!, episode: episode - inSeason.tmdbOffset };
   const before = tmdbSeasons.filter((s) => s.season > 0 && s.season < season).reduce((sum, s) => sum + s.episodes, 0);
-  return { kitsuId: absolute.kitsuId!, episode: before + episode };
+  const absolute = before + episode;
+  const entry = entries
+    .filter((e) => e[key] && e.tmdbSeason === undefined && e.tmdbOffset < absolute)
+    .sort((a, b) => b.tmdbOffset - a.tmdbOffset)[0];
+  return entry ? { id: entry[key]!, episode: absolute - entry.tmdbOffset } : null;
+}
+
+/** The AniList entry and its own episode number for a TMDB episode (see `entryEpisode`). */
+export function anilistEpisode(entries: AnimeEntry[], season: number, episode: number, tmdbSeasons: { season: number; episodes: number }[]): { anilistId: number; episode: number } | null {
+  const at = entryEpisode(entries, "anilistId", season, episode, tmdbSeasons);
+  return at && { anilistId: at.id, episode: at.episode };
+}
+
+/**
+ * The Kitsu id and episode for a TMDB episode, as Torrentio's anime streams want them
+ * ("kitsu:<id>:<episode>"; Kitsu has one entry per season or cour).
+ */
+export function kitsuEpisode(entries: AnimeEntry[], season: number, episode: number, tmdbSeasons: { season: number; episodes: number }[]): { kitsuId: number; episode: number } | null {
+  const at = entryEpisode(entries, "kitsuId", season, episode, tmdbSeasons);
+  return at && { kitsuId: at.id, episode: at.episode };
+}
+
+/**
+ * Where an AniList entry's episode `n` sits on TMDB: its season from its offset, or
+ * counted across TMDB's seasons when it's numbered absolutely. Null without a TMDB show.
+ */
+export function tmdbEpisodeOf(entry: AnimeEntry, n: number, tmdbSeasons: { season: number; episodes: number }[]): { season: number; episode: number } | null {
+  if (!entry.tmdbTv) return null;
+  if (entry.tmdbSeason !== undefined) return { season: entry.tmdbSeason, episode: entry.tmdbOffset + n };
+  let remaining = entry.tmdbOffset + n;
+  for (const s of [...tmdbSeasons].filter((x) => x.season > 0).sort((a, b) => a.season - b.season)) {
+    if (s.episodes > 0 && remaining <= s.episodes) return { season: s.season, episode: remaining };
+    remaining -= s.episodes;
+  }
+  return null;
 }

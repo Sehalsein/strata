@@ -74,13 +74,13 @@ describe("matching titles", () => {
 
   test("a non-Latin name found through a translation takes TMDB's top hit of that year", async () => {
     const tmdb = { searchMovie: async () => ({ results: [{ id: 799882, title: "The Bluff", original_title: "The Bluff", release_date: "2026-02-25" }] }) };
-    expect((await new Matcher(tmdb as never).match(parseFileName("Утёс.2026.WEB-DLRip-AVC.x264.seleZen.mkv")))?.tmdbId).toBe(799882);
+    expect((await new Matcher(tmdb as never).match(parseFileName("Утёс.2026.WEB-DLRip-AVC.x264.seleZen.mkv")))?.titleId).toBe(799882);
   });
 
   test("a studio name before the title is dropped when the year confirms it", async () => {
     const ironMan = { id: 1726, title: "Iron Man", release_date: "2008-04-30" };
     const tmdb = { searchMovie: async (q: string) => ({ results: q === "Iron Man" ? [ironMan] : [] }) };
     const matcher = new Matcher(tmdb as never);
-    expect((await matcher.match(parseFileName("Marvel Studios Iron Man 2008 1080p MA WEB-DL DDP5 1 H 264-SARVO.mkv")))?.tmdbId).toBe(1726);
+    expect((await matcher.match(parseFileName("Marvel Studios Iron Man 2008 1080p MA WEB-DL DDP5 1 H 264-SARVO.mkv")))?.titleId).toBe(1726);
   });
 });

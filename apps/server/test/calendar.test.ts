@@ -40,7 +40,7 @@ function service(watchlist: number[], airing: AiringEpisode[], inLibrary: string
   const anilist = { airing: async (mediaIds: number[], from: number, to: number) => (asked.push({ ids: mediaIds, from, to }), airing) } as unknown as Anilist;
   const library = { filesFor: (show: TitleRef, s: number, e: number) => (inLibrary.includes(`${show.id}:${s}:${e}`) ? [{}] : []) } as never;
   const progress = { watchlist: () => watchlist.map((titleId) => ({ source: "tmdb", type: "show", titleId })) } as never;
-  return { calendar: new CalendarService(tmdb, library, progress, { ids, anilist }, async (_, id) => allowed(id)), asked };
+  return { calendar: new CalendarService(tmdb, library, progress, { ids, anilist }, async (_, show) => allowed(show.id)), asked };
 }
 
 describe("calendar", () => {
@@ -77,4 +77,26 @@ describe("calendar", () => {
     expect(await service([], []).calendar.episodes("u1", NOW)).toEqual([]);
     expect(await service([404], []).calendar.episodes("u1", NOW)).toEqual([]);
   });
+});
+
+test("AniList shows on the list come from AniList's schedule, numbered as AniList numbers them", async () => {
+  const ids = new AnimeIds(fileAnimeIdStore("/nonexistent"));
+  ids.index([{ type: "TV", anilist_id: 182255, themoviedb_id: { tv: 209867 }, season: { tmdb: 1 }, episode_offset: { tmdb: 28 } }]);
+  ids.ready = async () => {};
+  const asked: number[][] = [];
+  const anilist = {
+    airing: async (mediaIds: number[]) => (asked.push(mediaIds), [{ mediaId: 182255, episode: 3, airingAt: at("2026-10-31T15:00:00Z") }, { mediaId: 888, episode: 9, airingAt: at("2026-11-01T15:00:00Z") }]),
+    title: async (id: number) => ({ id, title: { romaji: id === 888 ? "Adult Thing" : "Sousou no Frieren 2nd Season" }, isAdult: id === 888, coverImage: { large: `https://img.anili.st/${id}.jpg` }, bannerImage: null }),
+  } as unknown as Anilist;
+  const library = { filesFor: (show: TitleRef, s: number, e: number) => (show.source === "anilist" && show.id === 182255 && s === 1 && e === 3 ? [{}] : []) } as never;
+  const progress = { watchlist: () => [{ source: "anilist", type: "show", titleId: 182255 }, { source: "anilist", type: "show", titleId: 888 }, { source: "anilist", type: "show", titleId: 4 }] } as never;
+  const allowed: TitleRef[] = [];
+  const calendar = new CalendarService(tmdb, library, progress, { ids, anilist }, async (_, show) => (allowed.push(show), show.id !== 4));
+  const items = await calendar.episodes("u1", NOW);
+  expect(items).toEqual([
+    { ref: "anilist:show:182255", tmdbId: 209867, title: "Sousou no Frieren 2nd Season", posterUrl: "https://img.anili.st/182255.jpg", backdropUrl: null, season: 1, episode: 3, name: null, airsAt: "2026-10-31T15:00:00.000Z", airDate: "2026-10-31", available: true },
+  ]);
+  // The profile's limit is asked by ref; titles above it aren't looked up.
+  expect(allowed.map((r) => r.id)).toEqual([182255, 888, 4]);
+  expect(asked).toEqual([[182255, 888]]);
 });

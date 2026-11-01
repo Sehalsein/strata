@@ -2,21 +2,30 @@ import type { ParsedName } from "../media/parse";
 import type { AnimeMatcher } from "./anime/match";
 import { type Tmdb, type TmdbListItem, yearOf } from "./tmdb";
 import { SharedWork } from "../inFlight";
+import type { TitleSource } from "./ref";
 
 export interface MatchResult {
+  /** TMDB for movies and TV, AniList for anime. */
+  source: TitleSource;
   type: "movie" | "show";
-  tmdbId: number;
+  /** The title's id at `source`. */
+  titleId: number;
   title: string;
   year: number | null;
+  /** TMDB's image path, or a full URL (AniList's cover). */
   posterPath: string | null;
   backdropPath: string | null;
+  /** TMDB's genre ids (TMDB titles only). */
   genreIds?: number[] | null;
-  /** TMDB numbering when it differs from the file's (anime: absolute episodes, cours). */
+  /** The source's numbering when it differs from the file's (anime: the AniList entry's own episode). */
   season?: number;
   episode?: number;
 }
 
-/** Maps parsed file names to TMDB ids. Results are memoized per (kind, title, year). */
+/**
+ * Maps parsed file names to titles: anime to AniList, everything else to TMDB. TMDB
+ * results are memoized per (kind, title, year).
+ */
 export class Matcher {
   private memo = new SharedWork<string, MatchResult | null>({ remember: true, max: 5_000 });
 
@@ -26,10 +35,11 @@ export class Matcher {
   ) {}
 
   async match(parsed: ParsedName): Promise<MatchResult | null> {
-    // Anime names go through AniList and the id list first (their titles are usually
-    // romaji and their episodes may be absolute), then fall back to a TMDB title search.
+    // Anime names go to AniList (their titles are usually romaji, their episodes may be
+    // absolute), and to a TMDB title search only when AniList finds nothing. AniList being
+    // down throws, so the file waits for the next run instead of matching to TMDB.
     if (parsed.anime && this.anime) {
-      const anime = await this.anime.match(parsed).catch(() => null);
+      const anime = await this.anime.match(parsed);
       if (anime) return anime;
     }
     return this.matchTitle(parsed);
@@ -65,8 +75,9 @@ export class Matcher {
     }
     if (!best) return null;
     return {
+      source: "tmdb",
       type,
-      tmdbId: best.id,
+      titleId: best.id,
       title: best.title ?? best.name ?? title,
       year: yearOf(best.release_date ?? best.first_air_date),
       posterPath: best.poster_path ?? null,

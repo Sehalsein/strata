@@ -1,4 +1,5 @@
 import type {
+  AnilistResult,
   AdminStatus,
   FsListing,
   LibraryFile,
@@ -105,11 +106,13 @@ export const api = {
 
   files: (params: LibraryFilters) =>
     request<{ items: LibraryFile[]; total: number }>("GET", `/admin/files${q({ ...params })}`),
-  matchFile: (fileId: number, input: { type: "movie" | "show"; tmdbId: number; season?: number; episode?: number }) =>
+  /** By the title's ref (AniList titles; an AniList show's season is 1), or TMDB's id and type. */
+  matchFile: (fileId: number, input: { ref: string; season?: number; episode?: number } | { type: "movie" | "show"; tmdbId: number; season?: number; episode?: number }) =>
     request<{ ok: true }>("POST", `/admin/files/${fileId}/match`, input),
   ignoreFile: (fileId: number) => request<{ ok: true }>("POST", `/admin/files/${fileId}/ignore`),
   unignoreFile: (fileId: number) => request<{ ok: true }>("POST", `/admin/files/${fileId}/unignore`),
   tmdbSearch: (query: string, type: "movie" | "show") => request<{ items: TmdbResult[] }>("GET", `/admin/tmdb/search${q({ q: query, type })}`),
+  anilistSearch: (query: string) => request<{ items: AnilistResult[] }>("GET", `/admin/anilist/search${q({ q: query })}`),
 
   updateStatus: () => request<UpdateStatus>("GET", "/admin/update"),
   checkUpdate: () => request<UpdateStatus>("POST", "/admin/update/check"),

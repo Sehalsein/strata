@@ -9,7 +9,6 @@ import type { AnimeIds } from "./catalog/anime/ids";
 import type { Kitsu } from "./catalog/anime/kitsu";
 import { Omdb } from "./catalog/omdb";
 import { Tmdb } from "./catalog/tmdb";
-import { tmdbRef } from "./catalog/ref";
 import type { ApiCache } from "./catalog/apiCache";
 import { ADDS_PER_HOUSEHOLD, SEARCHES_PER_HOUSEHOLD, type Throttle } from "./throttle";
 import type { Db } from "./db";
@@ -28,6 +27,7 @@ import { syncTorbox } from "./sources/torbox/sync";
 import { scanLocal } from "./sources/local/scanner";
 import type { SecretKey } from "./settings";
 import { runtime } from "#runtime";
+import { AnimeMove } from "./jobs/anilistMove";
 
 const MINUTE = 60_000;
 
@@ -92,16 +92,16 @@ export class Household {
     this.tmdb = new Tmdb(shared.cache, () => settingsStore.getSecret("tmdbApiKey"), () => settingsStore.get().language, shared.fetch);
     this.omdb = new Omdb(shared.cache, () => settingsStore.getSecret("omdbApiKey"), shared.fetch);
     const tmdb = this.tmdb;
-    this.library = new Library(db, organizationId, tmdb, new Matcher(tmdb, new AnimeMatcher(shared.anime.anilist, shared.anime.ids, tmdb, shared.anime.kitsu)));
+    this.library = new Library(db, organizationId, tmdb, new Matcher(tmdb, new AnimeMatcher(shared.anime.anilist, shared.anime.ids, tmdb, shared.anime.kitsu)), shared.anime.anilist);
     this.catalog = new CatalogService(tmdb, this.library, shared.progress, settings, shared.anime, this.omdb);
     this.content = new ContentFilter(db, organizationId, tmdb, settings, shared.anime);
-    this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, id) => this.content.allowed(userId, tmdbRef("show", id)));
+    this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, show) => this.content.allowed(userId, show));
     this.housekeeping = new TorboxHousekeeping(db, organizationId, this.library);
     this.plays = new HouseholdPlays(shared.sessions, organizationId, this.library);
     const torbox = () => this.torbox();
     this.discovery = new Discovery(tmdb, this.library, settings, torbox, shared.fetch, (id, hash, name) => this.housekeeping.recordAdded(id, hash, name), shared.anime.ids,
       () => shared.throttle.spend(`adds:${organizationId}`, ADDS_PER_HOUSEHOLD, "This household has added a lot of releases to TorBox today."));
-    this.playback = new PlaybackService(this.library, shared.sessions, shared.progress, settings, shared.ffmpeg, torbox, this.discovery, (id, s, e) => this.catalog.nextEpisode(id, s, e), (id) => this.housekeeping.recordPlayed(id));
+    this.playback = new PlaybackService(this.library, shared.sessions, shared.progress, settings, shared.ffmpeg, torbox, this.discovery, (show, s, e) => this.catalog.nextEpisode(show, s, e), (id) => this.housekeeping.recordPlayed(id));
   }
 
   /** One person's view of the catalog, with their content limit applied (see Viewer). */
@@ -137,6 +137,16 @@ export class Household {
     const client = this.torbox();
     if (!client) return;
     await this.housekeeping.clean(client, this.settings().torboxCleanupDays, (id) => this.plays.streaming(id));
+  }
+
+  /** Moves the household's anime from TMDB titles to AniList's, once (see AnimeMove). */
+  moveAnimeToAnilist() {
+    return new AnimeMove(this.shared.db, this.organizationId, this.library, this.shared.anime, this.tmdb).run();
+  }
+
+  /** AniList, for the dashboard's Fix Match search. */
+  get anilist(): Anilist {
+    return this.shared.anime.anilist;
   }
 
   /** Scans the household's media folders on this server's disk. */

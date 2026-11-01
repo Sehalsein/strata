@@ -27,12 +27,15 @@ export interface AnilistMedia {
   studios?: { nodes: { name: string; isAnimationStudio?: boolean }[] };
   nextAiringEpisode?: { episode: number; airingAt: number } | null;
   status?: string | null;
+  coverImage?: { extraLarge?: string | null; large?: string | null };
+  bannerImage?: string | null;
+  isAdult?: boolean | null;
 }
 
 const SEARCH = `query ($q: String) {
   Page(perPage: 8) {
     media(search: $q, type: ANIME, sort: SEARCH_MATCH) {
-      id format episodes seasonYear title { romaji english native } synonyms
+      id format episodes seasonYear title { romaji english native } synonyms coverImage { extraLarge large } bannerImage isAdult
     }
   }
 }`;
@@ -200,6 +203,13 @@ const TITLE = `query ($id: Int) {
 /** A title page's lifetime: a week once the title is finished, else 12 hours. */
 const titleTtl = (data: { Media?: { status?: string | null } | null } | null) => (FINISHED.has(data?.Media?.status ?? "") ? TTL.finishedTitle : TTL.title);
 
+/** AniList couldn't answer (down, rate limited): not the same as finding nothing. */
+export class AnilistUnavailableError extends Error {
+  constructor() {
+    super("AniList is unavailable");
+  }
+}
+
 /**
  * Minimal AniList client: title search (for matching fansub names), the Anime tab's lists
  * and title pages. Responses are cached (see TTL) and requests spaced to the rate limit.
@@ -214,9 +224,11 @@ export class Anilist {
     private readonly fetchImpl: typeof fetch = globalFetch,
   ) {}
 
+  /** Anime whose titles match `query`, best first. Throws when AniList can't answer (rather than finding nothing). */
   async search(query: string): Promise<AnilistMedia[]> {
-    const data = await this.request<{ Page: { media: AnilistMedia[] } }>(SEARCH, { q: query }, `anilist:search:${query.toLowerCase()}`, TTL.search);
-    return data?.Page.media ?? [];
+    const data = await this.request<{ Page: { media: AnilistMedia[] } }>(SEARCH, { q: query }, `anilist:search:v2:${query.toLowerCase()}`, TTL.search);
+    if (!data) throw new AnilistUnavailableError();
+    return data.Page.media;
   }
 
   async media(id: number): Promise<AnilistMedia | null> {

@@ -11,6 +11,7 @@ import { decide, type ClientCaps, type PlaybackPlan } from "./decide";
 import { NotReadyError, isInfoHash, type Discovery } from "../sources/discovery";
 import { embeddedTracks, findSidecars } from "./subtitles";
 import type { EpisodeRef } from "../catalog/service";
+import { targetRef, type TitleRef } from "../catalog/ref";
 import type { SessionManager, SessionTarget, PlaybackSession } from "./sessions";
 import { runtime } from "#runtime";
 
@@ -132,16 +133,14 @@ export class PlaybackService {
     private readonly ffmpeg: () => FfmpegInfo | null,
     private readonly torbox: () => TorboxClient | null,
     private readonly discovery: Discovery,
-    private readonly findNextEpisode: (showId: number, season: number, episode: number) => Promise<EpisodeRef | null>,
+    private readonly findNextEpisode: (show: TitleRef, season: number, episode: number) => Promise<EpisodeRef | null>,
     /** Told when a TorBox torrent is played, so housekeeping keeps it. */
     private readonly onPlayedTorrent: (torrentId: number) => void = () => {},
   ) {}
 
   async play(user: { userId: string }, req: PlayRequest): Promise<PlayResponse> {
     // Started now so the (possibly uncached) season lookup overlaps the probe and link.
-    // Next episodes come from TMDB's seasons; AniList shows get theirs with AniList support.
-    const nextLookup =
-      req.mediaType === "episode" && req.source === "tmdb" ? this.findNextEpisode(req.titleId, req.season!, req.episode!).catch(() => null) : Promise.resolve(null);
+    const nextLookup = req.mediaType === "episode" ? this.findNextEpisode(targetRef(req), req.season!, req.episode!).catch(() => null) : Promise.resolve(null);
     const { file, info, input, inputKind, plan, remux, audioTracks, candidate } = await this.prepare(req);
     refuseServerStream(plan, inputKind, req.caps);
 

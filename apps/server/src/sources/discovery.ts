@@ -1,4 +1,4 @@
-import { type AnimeIds, kitsuEpisode } from "../catalog/anime/ids";
+import { type AnimeIds, kitsuEpisode, tmdbEpisodeOf } from "../catalog/anime/ids";
 import { runtime } from "#runtime";
 import type { Tmdb } from "../catalog/tmdb";
 import type { FileRow, Library } from "../library";
@@ -110,9 +110,6 @@ export class Discovery {
   }
 
   releases(target: DiscoveryTarget): Promise<Release[]> {
-    // Scrapers are asked by IMDb id, looked up on TMDB: nothing to find for other sources
-    // until AniList support maps their titles.
-    if (target.source !== "tmdb") return Promise.resolve([]);
     const key = `${target.source}:${target.mediaType}:${target.titleId}:${target.season ?? ""}:${target.episode ?? ""}`;
     return this.cache.get(key, () => this.search(target));
   }
@@ -126,8 +123,6 @@ export class Discovery {
     if (!isInfoHash(hash)) throw new Error("Invalid info-hash");
     const existing = this.pickFile(await this.library.byHash(hash), target);
     if (existing) return { status: "ready", fileId: existing.id };
-    // Imported files are matched to TMDB titles; AniList ones come with AniList support.
-    if (target.source !== "tmdb") throw new Error(`Can't add releases for ${target.source} titles yet`);
 
     const client = this.torbox();
     if (!client) throw new Error("TorBox is not configured");
@@ -194,7 +189,14 @@ export class Discovery {
     // The file the scraper pointed at is this episode, whatever its own numbering says
     // ("[Group] Frieren - 30.mkv" is TMDB S1E30); the rest match as usual.
     const show = targetRef(target);
-    const pointed = fileName ? rows.find((r) => r.name === fileName) : undefined;
+    let pointed = fileName ? rows.find((r) => r.name === fileName) : undefined;
+    // An AniList episode's release: the scraper's file, or the torrent's only video. The
+    // rest are left to the anime matcher (their numbering may not be AniList's).
+    if (target.source === "anilist") {
+      pointed ??= rows.length === 1 ? rows[0] : undefined;
+      if (pointed) await this.library.setManualMatch(pointed.id, show, 1, target.episode, "matched");
+      return;
+    }
     if (pointed) await this.library.setManualMatch(pointed.id, show, target.season, target.episode, "matched");
     for (const row of rows) {
       if (row === pointed) continue;
@@ -241,18 +243,20 @@ export class Discovery {
   }
 
   private async search(target: DiscoveryTarget): Promise<Release[]> {
-    const imdbId = await this.imdbId(target);
-    if (!imdbId) return [];
+    // Scrapers are asked by IMDb id (looked up on TMDB) and, for anime, by Kitsu id. An
+    // AniList title's TMDB title and numbering come from the anime id list.
+    const tmdbTarget = target.source === "anilist" ? await this.tmdbTargetOf(target).catch(() => null) : target;
+    const [imdbId, kitsu] = await Promise.all([tmdbTarget ? this.imdbId(tmdbTarget) : null, this.kitsuId(target).catch(() => null)]);
+    if (!imdbId && !kitsu) return [];
     const settings = this.settings();
     const client = this.torbox();
     const jobs: Promise<Release[]>[] = [];
     if (settings.torrentioUrl) {
       const base = settings.torrentioUrl;
-      jobs.push(this.scrape("Torrentio", () => this.torrentio(base, imdbId, target)));
-      const kitsu = await this.kitsuId(target).catch(() => null);
+      if (imdbId && tmdbTarget) jobs.push(this.scrape("Torrentio", () => this.torrentio(base, imdbId, tmdbTarget)));
       if (kitsu) jobs.push(this.scrape("Torrentio", () => this.torrentio(base, kitsu, target, true)));
     }
-    if (settings.useTorboxSearch && client) jobs.push(this.scrape("TorBox search", () => this.torboxSearch(client, imdbId, target)));
+    if (imdbId && tmdbTarget && settings.useTorboxSearch && client) jobs.push(this.scrape("TorBox search", () => this.torboxSearch(client, imdbId, tmdbTarget)));
 
     const byHash = new Map<string, Release>();
     for (const result of await Promise.allSettled(jobs)) {
@@ -266,7 +270,8 @@ export class Discovery {
       }
     }
 
-    let releases = [...byHash.values()].filter((r) => relevant(r, target));
+    // Releases found by IMDb id are checked against TMDB's numbering; Kitsu's are the episode.
+    let releases = [...byHash.values()].filter((r) => relevant(r, tmdbTarget ?? target));
     // Fill in cache state for releases TorBox's search didn't report on.
     const unknown = releases.filter((r) => r.origin === "torrentio" && !r.cached).map((r) => r.hash);
     if (client && unknown.length) {
@@ -289,11 +294,31 @@ export class Discovery {
     return (await this.tmdb.show(target.titleId)).external_ids?.imdb_id ?? null;
   }
 
+  /**
+   * An AniList target as TMDB's title and numbering, where the anime id list maps it
+   * (Frieren S2's episode 2 is TMDB S1E30), else null.
+   */
+  private async tmdbTargetOf(target: DiscoveryTarget): Promise<DiscoveryTarget | null> {
+    if (!this.animeIds) return null;
+    await this.animeIds.ready();
+    const entry = this.animeIds.anilist(target.titleId);
+    if (target.mediaType === "movie") return entry?.tmdbMovie ? { source: "tmdb", mediaType: "movie", titleId: entry.tmdbMovie } : null;
+    if (!entry?.tmdbTv || target.episode === undefined) return null;
+    const seasons = entry.tmdbSeason === undefined ? (await this.tmdb.show(entry.tmdbTv)).seasons.map((s) => ({ season: s.season_number, episodes: s.episode_count })) : [];
+    const at = tmdbEpisodeOf(entry, target.episode, seasons);
+    return at ? { source: "tmdb", mediaType: "episode", titleId: entry.tmdbTv, season: at.season, episode: at.episode } : null;
+  }
+
   /** "kitsu:<id>" / "kitsu:<id>:<episode>" for anime titles, else null. */
   private async kitsuId(target: DiscoveryTarget): Promise<string | null> {
-    // The anime id list maps TMDB ids.
-    if (!this.animeIds || target.source !== "tmdb") return null;
+    if (!this.animeIds) return null;
     await this.animeIds.ready();
+    // Kitsu, like AniList, has an entry per season or cour: the episode number carries over.
+    if (target.source === "anilist") {
+      const id = this.animeIds.anilist(target.titleId)?.kitsuId;
+      if (!id) return null;
+      return target.mediaType === "movie" ? `kitsu:${id}` : `kitsu:${id}:${target.episode}`;
+    }
     if (target.mediaType === "movie") {
       const id = this.animeIds.movie(target.titleId)?.kitsuId;
       return id ? `kitsu:${id}` : null;

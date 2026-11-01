@@ -212,11 +212,12 @@ export default function LibraryPage() {
                       <Badge variant={STATUS_VARIANT[f.matchStatus]} className="capitalize">
                         {f.matchStatus}
                       </Badge>
-                      {f.tmdbId !== null && (
+                      {f.titleRef !== null && (
                         <span className="text-muted-foreground text-xs">
-                          {f.title ?? `${f.mediaType === "episode" ? "tv" : "movie"}/${f.tmdbId}`}
+                          {f.title ?? f.titleRef}
                           {f.year !== null && ` (${f.year})`}
-                          {f.season !== null && <span className="font-mono">{` S${pad(f.season)}E${pad(f.episode ?? 0)}`}</span>}
+                          {f.season !== null && <span className="font-mono">{f.titleSource === "anilist" ? ` E${pad(f.episode ?? 0)}` : ` S${pad(f.season)}E${pad(f.episode ?? 0)}`}</span>}
+                          <span className="ml-1 font-mono text-[0.7rem] uppercase opacity-70">{f.titleSource === "anilist" ? "AniList" : "TMDB"}</span>
                         </span>
                       )}
                     </div>

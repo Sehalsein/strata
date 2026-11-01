@@ -257,8 +257,10 @@ const normalizeQuery = (query: string) => query.trim().replace(/\s+/g, " ").toLo
 /** v4 read-access tokens are JWTs; v3 keys are 32-char hex. */
 const isBearer = (key: string) => key.startsWith("eyJ");
 
+/** TMDB's image at `size`; a full URL (an AniList title's artwork in media_items) is kept as is. */
 export function imageUrl(path: string | null | undefined, size: "w185" | "w342" | "w500" | "w780" | "w1280" | "original" = "w500") {
-  return path ? `https://image.tmdb.org/t/p/${size}${path}` : null;
+  if (!path) return null;
+  return /^https?:\/\//.test(path) ? path : `https://image.tmdb.org/t/p/${size}${path}`;
 }
 
 export const yearOf = (date?: string | null) => (date && /^\d{4}/.test(date) ? Number(date.slice(0, 4)) : null);

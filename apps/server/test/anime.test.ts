@@ -65,17 +65,86 @@ describe("picking the AniList result", () => {
   });
 });
 
+/** AniList's title pages for the matcher's artwork: Frieren, its S2, One Piece and Your Name. */
+const TITLES: Record<number, object> = {
+  154587: { id: 154587, format: "TV", seasonYear: 2023, title: { romaji: "Sousou no Frieren", english: "Frieren: Beyond Journey's End" }, coverImage: { extraLarge: "https://img.anili.st/154587.jpg" }, bannerImage: "https://img.anili.st/b154587.jpg" },
+  182255: { id: 182255, format: "TV", seasonYear: 2026, title: { romaji: "Sousou no Frieren 2nd Season" }, coverImage: { large: "https://img.anili.st/182255.jpg" } },
+  21: { id: 21, format: "TV", seasonYear: 1999, title: { romaji: "ONE PIECE" } },
+  21519: { id: 21519, format: "MOVIE", seasonYear: 2016, title: { romaji: "Kimi no Na wa.", english: "Your Name." } },
+};
+const anilistTitle = async (id: number) => TITLES[id] ?? null;
+
 describe("AnimeMatcher", () => {
-  test("a fansub file becomes the TMDB show, season and episode", async () => {
-    const anilist = { search: async () => [{ id: 182255, format: "TV", title: { romaji: "Sousou no Frieren 2nd Season" } }, { id: 154587, format: "TV", title: { romaji: "Sousou no Frieren" } }] } as unknown as Anilist;
+  test("a fansub file becomes the AniList entry it belongs to and that entry's own episode", async () => {
+    const anilist = {
+      search: async () => [{ id: 182255, format: "TV", title: { romaji: "Sousou no Frieren 2nd Season" } }, { id: 154587, format: "TV", title: { romaji: "Sousou no Frieren" } }],
+      title: anilistTitle,
+    } as unknown as Anilist;
     const tmdb = {
       show: async () => ({ id: 209867, name: "Frieren: Beyond Journey's End", first_air_date: "2023-09-29", genres: [{ id: 16, name: "Animation" }], seasons: [{ season_number: 0, episode_count: 4 }, { season_number: 1, episode_count: 38 }] }),
     } as unknown as Tmdb;
     const map = ids();
     map.ready = async () => {};
     const matcher = new AnimeMatcher(anilist, map, tmdb);
-    expect(await matcher.match(parseFileName("[SubsPlease] Sousou no Frieren S2 - 02 (1080p) [ABCD1234].mkv"))).toMatchObject({ type: "show", tmdbId: 209867, season: 1, episode: 30 });
-    expect(await matcher.match(parseFileName("[SubsPlease] Sousou no Frieren - 12 (1080p).mkv"))).toMatchObject({ tmdbId: 209867, season: 1, episode: 12 });
+    // "S2 - 02" picks Frieren, which the id list places on TMDB S1E30: the S2 entry's episode 2.
+    expect(await matcher.match(parseFileName("[SubsPlease] Sousou no Frieren S2 - 02 (1080p) [ABCD1234].mkv"))).toEqual({
+      source: "anilist", type: "show", titleId: 182255, title: "Sousou no Frieren 2nd Season", year: 2026, posterPath: "https://img.anili.st/182255.jpg", backdropPath: null, genreIds: null, season: 1, episode: 2,
+    });
+    expect(await matcher.match(parseFileName("[SubsPlease] Sousou no Frieren - 12 (1080p).mkv"))).toMatchObject({ source: "anilist", titleId: 154587, title: "Frieren: Beyond Journey's End", backdropPath: "https://img.anili.st/b154587.jpg", season: 1, episode: 12 });
+    // Numbered on from S1 ("- 30"): still the S2 entry's episode 2.
+    expect(await matcher.match(parseFileName("[SubsPlease] Sousou no Frieren - 30 (1080p).mkv"))).toMatchObject({ titleId: 182255, season: 1, episode: 2 });
+  });
+
+  test("titles the id list doesn't know yet keep the file's episode; films are AniList movies", async () => {
+    const anilist = {
+      search: async (q: string) => (q.includes("Kimi") ? [{ id: 21519, format: "MOVIE", title: { romaji: "Kimi no Na wa." } }] : [{ id: 999, format: "TV", title: { romaji: "Brand New Anime" } }]),
+      title: async (id: number) => TITLES[id] ?? { id, format: "TV", title: { romaji: "Brand New Anime" } },
+    } as unknown as Anilist;
+    const map = ids();
+    map.ready = async () => {};
+    const matcher = new AnimeMatcher(anilist, map, {} as Tmdb);
+    expect(await matcher.match(parseFileName("[SubsPlease] Brand New Anime - 07 (1080p).mkv"))).toMatchObject({ source: "anilist", type: "show", titleId: 999, season: 1, episode: 7 });
+    expect(await matcher.match(parseFileName("[Group] Kimi no Na wa. (2016) (1080p).mkv"))).toMatchObject({ source: "anilist", type: "movie", titleId: 21519, title: "Your Name." });
+  });
+
+  test("AniList being down leaves the file for later rather than matching it to TMDB", async () => {
+    const { AnilistUnavailableError } = await import("../src/catalog/anime/anilist");
+    const anilist = { search: async () => Promise.reject(new AnilistUnavailableError()) } as unknown as Anilist;
+    const map = ids();
+    map.ready = async () => {};
+    const { Matcher } = await import("../src/catalog/matcher");
+    const tmdb = { searchShow: async () => ({ results: [{ id: 209867, name: "Sousou no Frieren" }] }) } as unknown as Tmdb;
+    const matcher = new Matcher(tmdb, new AnimeMatcher(anilist, map, tmdb));
+    await expect(matcher.match(parseFileName("[SubsPlease] Sousou no Frieren - 12 (1080p).mkv"))).rejects.toThrow("AniList");
+  });
+});
+
+describe("TMDB episodes on AniList entries", () => {
+  test("a season's later cour, absolute numbering across cours, and a one-season show", async () => {
+    const { anilistEpisode, tmdbEpisodeOf } = await import("../src/catalog/anime/ids");
+    const map = new AnimeIds(fileAnimeIdStore("/nonexistent"));
+    map.index([
+      ...RAW,
+      // A show numbered absolutely in two AniList cours (the second from absolute episode 13).
+      { anilist_id: 501, themoviedb_id: { tv: 7000 } },
+      { anilist_id: 502, themoviedb_id: { tv: 7000 }, episode_offset: { tmdb: 12 } },
+      // A TMDB S2 that's its own AniList entry.
+      { anilist_id: 601, themoviedb_id: { tv: 8000 }, season: { tmdb: 1 } },
+      { anilist_id: 602, themoviedb_id: { tv: 8000 }, season: { tmdb: 2 } },
+    ]);
+    const frieren = [{ season: 1, episodes: 38 }];
+    expect(anilistEpisode(map.show(209867), 1, 12, frieren)).toEqual({ anilistId: 154587, episode: 12 });
+    expect(anilistEpisode(map.show(209867), 1, 30, frieren)).toEqual({ anilistId: 182255, episode: 2 });
+    const twoCours = [{ season: 0, episodes: 3 }, { season: 1, episodes: 10 }, { season: 2, episodes: 14 }];
+    expect(anilistEpisode(map.show(7000), 1, 5, twoCours)).toEqual({ anilistId: 501, episode: 5 });
+    expect(anilistEpisode(map.show(7000), 2, 2, twoCours)).toEqual({ anilistId: 501, episode: 12 });
+    expect(anilistEpisode(map.show(7000), 2, 3, twoCours)).toEqual({ anilistId: 502, episode: 1 });
+    expect(anilistEpisode(map.show(8000), 2, 4, [])).toEqual({ anilistId: 602, episode: 4 });
+    expect(anilistEpisode(map.show(8000), 3, 1, [])).toBeNull();
+    expect(anilistEpisode(map.show(37854), 2, 9, [{ season: 1, episodes: 61 }, { season: 2, episodes: 16 }])).toEqual({ anilistId: 21, episode: 70 });
+    // And back: an entry's episode on TMDB.
+    expect(tmdbEpisodeOf(map.anilist(182255)!, 2, frieren)).toEqual({ season: 1, episode: 30 });
+    expect(tmdbEpisodeOf(map.anilist(502)!, 1, twoCours)).toEqual({ season: 2, episode: 3 });
   });
 });
 
@@ -157,15 +226,15 @@ describe("Kitsu", () => {
     server.services.shutdown();
   });
 
-  test("a file AniList can't place is matched through Kitsu's search", async () => {
+  test("a file AniList can't place is matched through Kitsu's search, to the AniList entry", async () => {
     const seen: string[] = [];
     const { kitsu, server } = await kitsuWith({ data: [{ id: "46474", attributes: { canonicalTitle: "Sousou no Frieren", titles: { en_jp: "Sousou no Frieren" }, subtype: "TV", startDate: "2023-09-29" } }] }, seen);
-    const anilist = { search: async () => [] } as unknown as Anilist;
+    const anilist = { search: async () => [], title: anilistTitle } as unknown as Anilist;
     const tmdb = { show: async () => ({ id: 209867, name: "Frieren", first_air_date: "2023-09-29", genres: [], seasons: [{ season_number: 1, episode_count: 38 }] }) } as unknown as Tmdb;
     const map = ids();
     map.ready = async () => {};
     const matcher = new AnimeMatcher(anilist, map, tmdb, kitsu);
-    expect(await matcher.match(parseFileName("[SubsPlease] Sousou no Frieren - 12 (1080p).mkv"))).toMatchObject({ tmdbId: 209867, season: 1, episode: 12 });
+    expect(await matcher.match(parseFileName("[SubsPlease] Sousou no Frieren - 12 (1080p).mkv"))).toMatchObject({ source: "anilist", titleId: 154587, season: 1, episode: 12 });
     server.services.shutdown();
   });
 });

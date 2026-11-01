@@ -9,7 +9,7 @@ import { dashboardUrls } from "../../platform/network";
 import { householdSettingsSchema, SECRET_KEYS, serverSettingsSchema, settingsSchema, type SecretKey } from "../../settings";
 import { toCandidate } from "../../sources/resolver";
 import { imageUrl, yearOf } from "../../catalog/tmdb";
-import { formatRef, targetRef, tmdbRef } from "../../catalog/ref";
+import { formatRef, parseRef, targetRef, tmdbRef } from "../../catalog/ref";
 import { API_VERSION, VERSION } from "../../version";
 import { member, session as authSession, user } from "../../db/schema";
 import { and, desc, eq, gt } from "drizzle-orm";
@@ -212,11 +212,22 @@ export const adminRoutes = new Hono<Env>()
     });
   })
 
+  // A title by its ref ("anilist:show:154587"), or a TMDB id and type (older dashboards).
   .post("/files/:id/match", async (c) => {
-    const input = await body(c, z.object({ type: z.enum(["movie", "show"]), tmdbId: z.number().int(), season: z.number().int().optional(), episode: z.number().int().optional() }));
+    const episodeFields = { season: z.number().int().min(0).optional(), episode: z.number().int().min(0).optional() };
+    const input = await body(c, z.union([
+      z.object({ ref: z.string().max(64), ...episodeFields }),
+      z.object({ type: z.enum(["movie", "show"]), tmdbId: z.number().int(), ...episodeFields }),
+    ]));
+    const ref = "ref" in input ? parseRef(input.ref) : tmdbRef(input.type, input.tmdbId);
+    if (!ref) throw new HTTPException(400, { message: "Not a title ref" });
     const id = intParam(c, "id");
     if (!await c.var.household.library.get(id)) throw new HTTPException(404, { message: "No such file" });
-    await c.var.household.library.setManualMatch(id, tmdbRef(input.type, input.tmdbId), input.season, input.episode);
+    try {
+      await c.var.household.library.setManualMatch(id, ref, input.season, input.episode);
+    } catch (err) {
+      throw new HTTPException(400, { message: err instanceof Error ? err.message : String(err) });
+    }
     return c.json({ ok: true });
   })
 
@@ -239,6 +250,29 @@ export const adminRoutes = new Hono<Env>()
     const page = type === "movie" ? await tmdb.searchMovie(q) : await tmdb.searchShow(q);
     return c.json({
       items: page.results.slice(0, 20).map((r) => ({ tmdbId: r.id, title: r.title ?? r.name ?? "", year: yearOf(r.release_date ?? r.first_air_date), posterUrl: imageUrl(r.poster_path, "w185") })),
+    });
+  })
+
+  // AniList's anime for Fix Match (not adult titles).
+  .get("/anilist/search", async (c) => {
+    const q = c.req.query("q")?.trim().slice(0, 200);
+    if (!q) return c.json({ items: [] });
+    const results = await c.var.household.anilist.search(q).catch(() => {
+      throw new HTTPException(502, { message: "AniList didn't answer; try again in a minute" });
+    });
+    return c.json({
+      items: results.filter((m) => !m.isAdult).map((m) => {
+        const ref = { source: "anilist" as const, type: m.format === "MOVIE" ? ("movie" as const) : ("show" as const), id: m.id };
+        return {
+          ref: formatRef(ref),
+          anilistId: m.id,
+          title: m.title.english?.trim() || m.title.romaji?.trim() || "",
+          year: m.seasonYear ?? null,
+          format: m.format ?? null,
+          posterUrl: m.coverImage?.large ?? m.coverImage?.extraLarge ?? null,
+          episodes: m.episodes ?? null,
+        };
+      }),
     });
   })
 

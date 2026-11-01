@@ -30,6 +30,8 @@ export const JOB_SCHEDULE: Record<string, JobSchedule> = {
   cleanTorbox: { everyMs: DAY, firstAfterMs: 10 * MINUTE, cron: "17 4 * * *" },
   pruneCatalogCache: { everyMs: DAY, firstAfterMs: 15 * MINUTE, cron: "17 4 * * *" },
   refreshAnimeIds: { everyMs: DAY, firstAfterMs: 30_000, cron: "17 4 * * *" },
+  // Once per household (a no-op after that), once the anime id list has loaded.
+  moveAnimeToAnilist: { everyMs: DAY, firstAfterMs: 2 * MINUTE, cron: "17 4 * * *" },
 };
 
 /** Which jobs each Cron Trigger runs (src/worker.ts). */

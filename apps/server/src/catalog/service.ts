@@ -7,9 +7,8 @@ import { findCandidates, type Candidate } from "../sources/resolver";
 import { imageUrl, yearOf, type Tmdb, type TmdbCredits, type TmdbListItem, type TmdbMovie, type TmdbShow } from "./tmdb";
 import { logger } from "../log";
 import { seasonOf, type Anilist, type AnilistDate, type AnilistHomeItem, type AnilistRankedList, type AnilistSeason, type AnilistTitle } from "./anime/anilist";
-import { resolveEpisode } from "./anime/match";
 import { animeRating } from "./contentRating";
-import type { AnimeIds } from "./anime/ids";
+import { tmdbEpisodeOf, type AnimeIds } from "./anime/ids";
 import { ANIME_CATEGORIES, type Kitsu, type KitsuRail } from "./anime/kitsu";
 import type { Omdb, Ratings } from "./omdb";
 import { formatRef, targetRef, tmdbRef, type TitleRef, type TitleTarget } from "./ref";
@@ -641,7 +640,7 @@ export class CatalogService {
     }
     const [files, watched] = await Promise.all([this.library.filesFor(ref), this.progress.forShow(userId, ref)]);
     const aired = airedEpisodes(media);
-    const episodeCount = media.episodes ?? aired;
+    const episodeCount = Math.min(MAX_ANILIST_EPISODES, media.episodes ?? aired);
     return {
       type: "show" as const,
       ...common,
@@ -680,7 +679,7 @@ export class CatalogService {
     if (!media) return null;
     const aired = airedEpisodes(media);
     const upcoming = new Map((media.airingSchedule?.nodes ?? []).map((n) => [n.episode, n.airingAt]));
-    const count = Math.max(aired, media.episodes ?? 0);
+    const count = Math.min(MAX_ANILIST_EPISODES, Math.max(aired, media.episodes ?? 0));
     const numbers = Array.from({ length: count }, (_, i) => i + 1);
     const [tmdbEpisodes, files, progress] = await Promise.all([
       this.tmdbEpisodesFor(media.id, numbers).catch((err) => (log.warn(`TMDB episodes for AniList ${media.id} failed`, err), new Map<number, TmdbEpisode>())),
@@ -758,15 +757,14 @@ export class CatalogService {
     const out = new Map<number, TmdbEpisode>();
     if (!entry?.tmdbTv || !numbers.length) return out;
     const showId = entry.tmdbTv;
-    let place: (n: number) => { season: number; episode: number };
-    if (entry.tmdbSeason !== undefined) {
-      place = (n) => ({ season: entry.tmdbSeason!, episode: entry.tmdbOffset + n });
-    } else {
-      const show = await this.tmdb.show(showId);
-      const seasons = show.seasons.filter((s) => s.season_number > 0).map((s) => ({ season: s.season_number, episodes: s.episode_count }));
-      place = (n) => resolveEpisode([entry], entry, undefined, entry.tmdbOffset + n, seasons);
-    }
-    const placed = numbers.map((n) => [n, place(n)] as const);
+    // One TMDB season, or (numbered absolutely) only the seasons TMDB's show has: episodes
+    // past its last aren't looked for.
+    const tmdbSeasons =
+      entry.tmdbSeason !== undefined ? [] : (await this.tmdb.show(showId)).seasons.filter((s) => s.season_number > 0).map((s) => ({ season: s.season_number, episodes: s.episode_count }));
+    const placed = numbers.slice(0, MAX_ANILIST_EPISODES).flatMap((n) => {
+      const at = tmdbEpisodeOf(entry, n, tmdbSeasons);
+      return at ? [[n, at] as const] : [];
+    });
     const seasonNumbers = [...new Set(placed.map(([, p]) => p.season))];
     const seasons = new Map(
       await Promise.all(seasonNumbers.map(async (s) => [s, await this.tmdb.season(showId, s).catch(() => null)] as const)),
@@ -963,8 +961,13 @@ export class CatalogService {
   }
 
   private async continueCard(row: ProgressRow): Promise<ContinueCard> {
-    // Cards are filled out from TMDB; AniList titles get theirs with AniList support.
-    if (row.source !== "tmdb") throw new Error(`No cards for ${row.source} titles yet`);
+    if (row.source === "anilist") {
+      const ref = targetRef(row);
+      const card = (await this.anilistRefCards([ref])).get(formatRef(ref));
+      if (!card) throw new Error(`AniList has no ${ref.type} ${ref.id}`);
+      const episode = row.mediaType === "episode" ? { episode: await this.anilistEpisodeRef(row.titleId, row.episode) } : {};
+      return { ...card, ...episode, positionMs: row.positionMs, durationMs: row.durationMs };
+    }
     if (row.mediaType === "movie") {
       const m = await this.tmdb.movie(row.titleId);
       return { ...(await this.movieCard(m)), positionMs: row.positionMs, durationMs: row.durationMs };
@@ -983,13 +986,11 @@ export class CatalogService {
   private async nextUp(userId: string): Promise<ContinueCard[]> {
     const inProgressShows = new Set((await this.progress.inProgress(userId, 100)).filter((r) => r.mediaType === "episode").map((r) => formatRef(targetRef(r))));
     const hidden = await this.progress.hiddenFilter(userId);
-    // Next episodes come from TMDB's seasons (AniList shows: with AniList support).
-    const latest = (await this.progress.recentlyCompletedEpisodes(userId)).filter(
-      (r) => r.source === "tmdb" && !inProgressShows.has(formatRef(targetRef(r))) && !hidden(r),
-    );
+    const latest = (await this.progress.recentlyCompletedEpisodes(userId)).filter((r) => !inProgressShows.has(formatRef(targetRef(r))) && !hidden(r));
     const cards = await Promise.all(
       latest.map(async (row) => {
         try {
+          if (row.source === "anilist") return await this.anilistNextUp(userId, row);
           const show = await this.tmdb.show(row.titleId);
           const next = await this.episodeAfter(show, row.season, row.episode);
           if (!next) return null;
@@ -1004,9 +1005,45 @@ export class CatalogService {
     return cards.filter((c) => c !== null) as ContinueCard[];
   }
 
-  /** The aired episode after S{season}E{episode}, crossing into the next season. */
-  async nextEpisode(showId: number, season: number, episode: number): Promise<EpisodeRef | null> {
-    return this.episodeAfter(await this.tmdb.show(showId), season, episode);
+  /**
+   * The aired episode after S{season}E{episode}: TMDB's, crossing into the next season;
+   * an AniList show's next episode in its one season.
+   */
+  async nextEpisode(show: TitleRef, season: number, episode: number): Promise<EpisodeRef | null> {
+    if (show.source === "anilist") {
+      const media = await this.anilistMedia(show);
+      if (!media || season !== 1 || episode + 1 > airedEpisodes(media)) return null;
+      return this.anilistEpisodeRef(show.id, episode + 1);
+    }
+    return this.episodeAfter(await this.tmdb.show(show.id), season, episode);
+  }
+
+  /** Up Next for an AniList show: the episode after the furthest one watched, once it's out. */
+  private async anilistNextUp(userId: string, row: ProgressRow): Promise<ContinueCard | null> {
+    const ref = targetRef(row);
+    const media = await this.anilistMedia(ref);
+    if (!media || row.season !== 1 || row.episode + 1 > airedEpisodes(media)) return null;
+    const next = row.episode + 1;
+    const done = await this.progress.get(userId, { source: "anilist", mediaType: "episode", titleId: row.titleId, season: 1, episode: next });
+    if (done?.completed) return null;
+    const [card] = await this.anilistCards([media], 1);
+    if (!card) return null;
+    return { ...card, episode: await this.anilistEpisodeRef(row.titleId, next), positionMs: 0, durationMs: 0 };
+  }
+
+  /** An AniList show's episode, named (and pictured) from TMDB's where the id list maps it. */
+  private async anilistEpisodeRef(anilistId: number, episode: number): Promise<EpisodeRef> {
+    const tmdb = (await this.tmdbEpisodesFor(anilistId, [episode]).catch(() => null))?.get(episode);
+    return { season: 1, episode, name: tmdb?.name || `Episode ${episode}`, stillUrl: imageUrl(tmdb?.still_path, "w780") };
+  }
+
+  /** Cards for AniList titles, by `formatRef`, from AniList's (cached) data; ones it can't answer for are left out. */
+  private async anilistRefCards(refs: TitleRef[]): Promise<Map<string, TitleCard>> {
+    if (!this.anime || !refs.length) return new Map();
+    await this.anime.ids.ready().catch(() => {});
+    const media = (await Promise.all(refs.map((r) => this.anilistMedia(r).catch(() => null)))).filter((m): m is AnilistTitle => !!m);
+    const cards = await this.anilistCards(media, media.length);
+    return new Map(cards.map((c) => [c.ref, c]));
   }
 
   private async episodeAfter(show: TmdbShow, season: number, episode: number): Promise<EpisodeRef | null> {
@@ -1044,10 +1081,10 @@ export class CatalogService {
   /** The titles on this person's list (My List), newest first. */
   async watchlist(userId: string): Promise<TitleCard[]> {
     const rows = await this.progress.watchlist(userId);
+    const anilist = await this.anilistRefCards(rows.filter((r) => r.source === "anilist").map((r) => ({ source: r.source, type: r.type, id: r.titleId })));
     const cards = await Promise.all(
       rows.map(async (r) => {
-        // Cards are filled out from TMDB; AniList titles get theirs with AniList support.
-        if (r.source !== "tmdb") return null;
+        if (r.source === "anilist") return anilist.get(formatRef({ source: r.source, type: r.type, id: r.titleId })) ?? null;
         try {
           return r.type === "movie" ? await this.movieCard(await this.tmdb.movie(r.titleId)) : await this.showCard(await this.tmdb.show(r.titleId));
         } catch {
@@ -1060,14 +1097,23 @@ export class CatalogService {
 
   /** Library titles, newest first (by when their files were added). */
   private async libraryCards(type: TitleType, limit = 20): Promise<TitleCard[]> {
-    // TMDB's titles only until AniList support gives other sources' titles cards.
-    const items = (await this.library.recentlyAdded(type, limit)).filter((i) => i.source === "tmdb");
-    const refs = items.map((i) => formatRef(tmdbRef(type, i.titleId)));
-    const avail = await this.library.availability(items.map((i) => tmdbRef(type, i.titleId)));
+    // AniList titles carry their artwork as full URLs (see imageUrl), and TMDB's id where
+    // the anime id list maps them, for apps from before refs.
+    const items = await this.library.recentlyAdded(type, limit);
+    const ids = this.anime?.ids;
+    if (ids && items.some((i) => i.source === "anilist")) await ids.ready().catch(() => {});
+    const tmdbIdOf = (i: (typeof items)[number]) => {
+      if (i.source === "tmdb") return i.titleId;
+      const entry = ids?.anilist(i.titleId);
+      return type === "movie" ? entry?.tmdbMovie : entry?.tmdbTv;
+    };
+    const titleRefs = items.map((i): TitleRef => ({ source: i.source, type, id: i.titleId }));
+    const refs = titleRefs.map(formatRef);
+    const avail = await this.library.availability(titleRefs);
     return items.map((i, n) => ({
       type,
       ref: refs[n]!,
-      tmdbId: i.titleId,
+      ...(tmdbIdOf(i) ? { tmdbId: tmdbIdOf(i) } : {}),
       title: i.title,
       year: i.year,
       posterUrl: imageUrl(i.posterPath, "w342"),
@@ -1182,11 +1228,14 @@ function isoDate(d: AnilistDate | null | undefined): string | null {
   return `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
 }
 
-/** How many of an AniList show's episodes are out: all of a finished one, else up to the next to air. */
+/** The most episodes listed for an AniList show (One Piece has about 1,150); AniList's counts are data, not trusted. */
+const MAX_ANILIST_EPISODES = 2_000;
+
+/** How many of an AniList show's episodes are out: all of a finished one, else up to the next to air (at most MAX_ANILIST_EPISODES). */
 function airedEpisodes(media: AnilistTitle): number {
   if (media.status === "NOT_YET_RELEASED") return 0;
-  if (media.nextAiringEpisode) return Math.max(0, media.nextAiringEpisode.episode - 1);
-  return media.episodes ?? 0;
+  const aired = media.nextAiringEpisode ? media.nextAiringEpisode.episode - 1 : (media.episodes ?? 0);
+  return Math.max(0, Math.min(MAX_ANILIST_EPISODES, aired));
 }
 
 /** `showUpNext` for an AniList show: its one season, numbered as AniList numbers it. */
