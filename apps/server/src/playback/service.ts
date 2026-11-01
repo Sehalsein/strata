@@ -8,7 +8,7 @@ import { findCandidates, toCandidate, type Candidate } from "../sources/resolver
 import type { TorboxClient } from "../sources/torbox/client";
 import { parseTorboxRef } from "../sources/torbox/sync";
 import { decide, type ClientCaps, type PlaybackPlan } from "./decide";
-import { NotReadyError, isInfoHash, type Discovery } from "../sources/discovery";
+import { NoPlayableFileError, NotReadyError, isInfoHash, type Discovery } from "../sources/discovery";
 import { embeddedTracks, findSidecars } from "./subtitles";
 import type { EpisodeRef } from "../catalog/service";
 import { targetRef, type TitleRef } from "../catalog/ref";
@@ -85,6 +85,10 @@ export interface PlayResponse {
 }
 
 const LINK_TTL_MS = 30 * 60_000;
+/** Ready releases Play tries in turn when the library has nothing. */
+const AUTO_TRIES = 3;
+/** A source the app named that isn't there any more. */
+const GONE = "That source isn't available any more. Pick another one.";
 const PROBE_FAILURE_TTL_MS = 60_000;
 
 /** A read timeout or dropped connection, as opposed to a file ffprobe can't make sense of. */
@@ -99,15 +103,37 @@ function isNetworkStall(err: unknown): boolean {
  * server's own disk still stream from it, as their bytes are only here.
  */
 export function refuseServerStream(plan: PlaybackPlan, inputKind: "path" | "url", caps: ClientCaps): void {
-  if (inputKind !== "url" || plan.mode === "direct" || plan.mode === "device") return;
+  if (playsAsIs(plan, inputKind)) return;
   if (!caps.deviceRemux) throw new PlaybackError("Update the Strata app to play this.", 422);
-  throw new PlaybackError(`This source can't play on this device (${plan.reasons.join("; ")}). Pick another source.`, 422);
+  throw new PlaybackError(cantPlayHere(plan), 422);
 }
+
+/** Whether a plan needs nothing from the server it can't give (TorBox files never stream through it). */
+const playsAsIs = (plan: PlaybackPlan, inputKind: "path" | "url") => inputKind !== "url" || plan.mode === "direct" || plan.mode === "device";
 
 /** A download plays on the device as it is or repackaged there, never through the server. */
 export function playsOnDevice(plan: PlaybackPlan): "direct" | "device" {
   if (plan.mode === "direct" || plan.mode === "device") return plan.mode;
-  throw new PlaybackError(`This source can't play on this device (${plan.reasons.join("; ")}). Pick another source.`, 422);
+  throw new PlaybackError(cantPlayHere(plan), 422);
+}
+
+const resolutionName = (height: number) => (height >= 2000 ? "4K" : `${height}p`);
+
+/**
+ * Why a copy won't play on this device, in words: only what the device can't do (audio
+ * and containers it fixes itself).
+ */
+export function cantPlayHere(plan: PlaybackPlan): string {
+  const why = plan.reasons.flatMap((reason) => {
+    let m: RegExpExecArray | null;
+    if ((m = /^(\d+)p exceeds (\d+)p$/.exec(reason))) return [`it's ${resolutionName(Number(m[1]))}, and this device plays up to ${resolutionName(Number(m[2]))}`];
+    if ((m = /^video codec (\S+) unsupported$/.exec(reason))) return [`this device can't decode its ${m[1]!.toUpperCase()} video`];
+    if (reason === "10-bit H.264 unsupported") return ["this device can't decode its 10-bit H.264 video"];
+    if (reason.startsWith("Dolby Vision profile 5")) return ["its Dolby Vision needs an HDR display"];
+    if (reason === "no video stream") return ["it has no video"];
+    return [];
+  });
+  return why.length ? `This copy won't play here: ${why.join(", and ")}. Choose another source.` : "This copy won't play on this device. Choose another source.";
 }
 
 /** The server has no media info for this TorBox file: the app reads it from `url` and sends it. */
@@ -141,7 +167,23 @@ export class PlaybackService {
   async play(user: { userId: string }, req: PlayRequest): Promise<PlayResponse> {
     // Started now so the (possibly uncached) season lookup overlaps the probe and link.
     const nextLookup = req.mediaType === "episode" ? this.findNextEpisode(targetRef(req), req.season!, req.episode!).catch(() => null) : Promise.resolve(null);
-    const { file, info, input, inputKind, plan, remux, audioTracks, candidate } = await this.prepare(req);
+    let prepared = await this.prepare(req);
+    // Picked for the person (not chosen): a copy this device can't play gives way to the
+    // next library copy that it can, among those whose details are already known.
+    if (!req.candidateId && !playsAsIs(prepared.plan, prepared.inputKind)) {
+      const others = (await findCandidates(this.library, this.settings(), targetOf(req))).filter((c) => c.fileId !== prepared.file.id).slice(0, 5);
+      for (const other of others) {
+        const next = await this.prepare({ ...req, candidateId: other.id }).catch((err) => {
+          if (err instanceof NeedsProbeError) return null;
+          throw err;
+        });
+        if (next && playsAsIs(next.plan, next.inputKind)) {
+          prepared = next;
+          break;
+        }
+      }
+    }
+    const { file, info, input, inputKind, plan, remux, audioTracks, candidate } = prepared;
     refuseServerStream(plan, inputKind, req.caps);
 
     let startMs = req.startMs;
@@ -263,7 +305,7 @@ export class PlaybackService {
   /** A fresh link to a library file (a download whose link expired), or null for a file on disk. */
   async fileLink(fileId: number): Promise<string | null> {
     const file = await this.library.get(fileId);
-    if (!file) throw new PlaybackError("File no longer exists", 410);
+    if (!file) throw new PlaybackError("That file is gone from the library. Pick another source.", 410);
     if (file.provider === "local") return null;
     this.links.delete(file.id);
     return (await this.resolveInput(file)).input;
@@ -301,34 +343,65 @@ export class PlaybackService {
    */
   private async chooseFile(req: PlayRequest): Promise<FileRow> {
     const target = targetOf(req);
-    let hash: string | undefined;
     if (req.candidateId?.startsWith("hash:")) {
-      hash = req.candidateId.slice(5).toLowerCase();
-      if (!isInfoHash(hash)) throw new PlaybackError("Unknown source", 404);
+      const hash = req.candidateId.slice(5).toLowerCase();
+      if (!isInfoHash(hash)) throw new PlaybackError(GONE, 404);
       // Only hashes already in the library, or ones discovery offered for this exact
       // title, may be added to the owner's TorBox — never an arbitrary torrent.
       const inLibraryForTarget = (await this.library.byHash(hash)).some((r) => r.source === req.source && r.mediaType === req.mediaType && r.titleId === req.titleId && (req.mediaType === "movie" || (r.season === req.season && r.episode === req.episode)));
       if (!inLibraryForTarget) {
-        if (!this.discovery.available) throw new PlaybackError("Discovery is turned off", 403);
+        if (!this.discovery.available) throw new PlaybackError("Looking beyond the library is turned off on this server.", 403);
         const offered = (await this.discovery.releases(target)).find((r) => r.hash === hash);
-        if (!offered) throw new PlaybackError("Unknown source", 404);
-        if (!offered.cached && !this.settings().showUncached) throw new PlaybackError("That release isn't cached on TorBox", 409);
+        if (!offered) throw new PlaybackError(GONE, 404);
+        if (!offered.cached && !this.settings().showUncached) throw new PlaybackError("That copy isn't ready on TorBox yet. Pick another source.", 409);
       }
-    } else {
-      const candidates = await findCandidates(this.library, this.settings(), target);
-      const limit = req.preferMaxHeight;
-      const candidate = req.candidateId
-        ? candidates.find((c) => c.id === req.candidateId)
-        : ((limit ? candidates.find((c) => c.resolution !== undefined && c.resolution <= limit) : undefined) ?? candidates[0]);
-      if (candidate) return (await this.library.get(candidate.fileId))!;
-      if (req.candidateId) throw new PlaybackError("Unknown source", 404);
-      if (this.discovery.available) hash = (await this.discovery.bestCached(target))?.hash;
-      if (!hash) throw new PlaybackError("No source available for this title", 404);
+      try {
+        return await this.acquired(target, hash);
+      } catch (err) {
+        if (err instanceof NoPlayableFileError) throw new PlaybackError("That copy doesn't have this in it. Pick another source.", 422);
+        throw err;
+      }
     }
-    const result = await this.discovery.acquire(target, hash);
+    const candidates = await findCandidates(this.library, this.settings(), target);
+    const limit = req.preferMaxHeight;
+    const candidate = req.candidateId
+      ? candidates.find((c) => c.id === req.candidateId)
+      : ((limit ? candidates.find((c) => c.resolution !== undefined && c.resolution <= limit) : undefined) ?? candidates[0]);
+    if (candidate) return (await this.library.get(candidate.fileId))!;
+    if (req.candidateId) throw new PlaybackError(GONE, 404);
+    // Nothing in the library: the best ready releases, in turn, past any that turn out
+    // not to have it (a pack of other seasons, say).
+    const releases = this.discovery.available ? (await this.discovery.cachedReleases(target)).slice(0, AUTO_TRIES) : [];
+    for (const release of releases) {
+      try {
+        return await this.acquired(target, release.hash);
+      } catch (err) {
+        if (!(err instanceof NoPlayableFileError)) throw err;
+        log.info(`${release.title} has no file for this; trying the next release`);
+      }
+    }
+    throw new PlaybackError(
+      releases.length
+        ? "None of the ready copies had this in it. Sources can look further."
+        : "There's no copy of this to play yet: it isn't in your library, and nothing ready turned up. Sources can look further.",
+      404,
+    );
+  }
+
+  /** `discovery.acquire`, as playback's answers: downloading is "not ready yet", and a failure says so plainly. */
+  private async acquired(target: SessionTarget, hash: string): Promise<FileRow> {
+    let result;
+    try {
+      result = await this.discovery.acquire(target, hash);
+    } catch (err) {
+      if (err instanceof NoPlayableFileError || err instanceof PlaybackError) throw err;
+      log.warn("Getting a release ready failed", err);
+      throw new PlaybackError("TorBox couldn't get this ready just now. Try again, or pick another source.", 502);
+    }
     if (result.status === "downloading") throw new NotReadyError(result);
     return (await this.library.get(result.fileId))!;
   }
+
 
   /**
    * Where the app fetches a direct or device-mode file: the TorBox link itself, so the
@@ -344,7 +417,7 @@ export class PlaybackService {
   async refreshLink(session: PlaybackSession): Promise<string> {
     this.links.delete(session.fileId);
     const file = await this.library.get(session.fileId);
-    if (!file) throw new PlaybackError("File no longer exists", 410);
+    if (!file) throw new PlaybackError("That file is gone from the library. Pick another source.", 410);
     const { input } = await this.resolveInput(file);
     await this.sessions.updateLink(session, input);
     return input;

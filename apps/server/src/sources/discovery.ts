@@ -45,7 +45,14 @@ export type AcquireResult =
 
 export class NotReadyError extends Error {
   constructor(readonly info: Extract<AcquireResult, { status: "downloading" }>) {
-    super("This release is still downloading on TorBox");
+    super("TorBox is fetching it. It starts playing as soon as it's ready.");
+  }
+}
+
+/** A release that turned out not to have the title in it (a pack of other seasons, say). */
+export class NoPlayableFileError extends Error {
+  constructor() {
+    super("That release doesn't have this in it");
   }
 }
 
@@ -104,9 +111,15 @@ export class Discovery {
 
   /** The release discovery would play automatically, if any is cached. */
   async bestCached(target: DiscoveryTarget): Promise<Release | undefined> {
+    return (await this.cachedReleases(target))[0];
+  }
+
+  /** Cached releases in the order Play tries them: within the size limit first, best first. */
+  async cachedReleases(target: DiscoveryTarget): Promise<Release[]> {
     const maxBytes = this.settings().maxReleaseSizeGb * 1024 ** 3;
     const releases = (await this.releases(target)).filter((r) => r.cached);
-    return releases.find((r) => !maxBytes || !r.size || r.size <= maxBytes) ?? releases[0];
+    const fits = (r: Release) => !maxBytes || !r.size || r.size <= maxBytes;
+    return [...releases.filter(fits), ...releases.filter((r) => !fits(r))];
   }
 
   releases(target: DiscoveryTarget): Promise<Release[]> {
@@ -127,6 +140,7 @@ export class Discovery {
     const client = this.torbox();
     if (!client) throw new Error("TorBox is not configured");
     let torrentId = this.pending.get(hash);
+    let addedNow = false;
     // Cached torrents turn ready within seconds of being added; real downloads take minutes,
     // so those return progress immediately and the client polls.
     let waitMs = 0;
@@ -144,6 +158,7 @@ export class Discovery {
         ({ torrentId } = await client.createTorrent(`magnet:?${magnet.toString().replace("urn%3Abtih%3A", "urn:btih:")}`));
         log.info(`Added ${release?.title ?? hash} to TorBox (#${torrentId})`);
         this.onAdded(torrentId, hash, release?.title);
+        addedNow = true;
       }
       if (release?.cached) waitMs = READY_WAIT_MS;
     }
@@ -168,7 +183,14 @@ export class Discovery {
     // Anything else in the torrent (collections, extras) goes through normal matching.
     runtime.background(this.library.matchPending().catch((err) => log.warn("Matching after import failed", err)));
     const file = this.pickFile(await this.library.byHash(hash), target);
-    if (!file) throw new Error("The release has no playable file for this title");
+    if (!file) {
+      // Added just now for this and of no use: out of the owner's TorBox again.
+      if (addedNow) {
+        await client.deleteTorrent(torrentId).catch((err) => log.warn(`Couldn't remove TorBox #${torrentId}`, err));
+        log.info(`Removed TorBox #${torrentId}: no file for this title in it`);
+      }
+      throw new NoPlayableFileError();
+    }
     return { status: "ready", fileId: file.id };
   }
 

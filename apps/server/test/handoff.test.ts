@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { capsSchema, type PlaybackPlan } from "../src/playback/decide";
-import { PlaybackService, refuseServerStream } from "../src/playback/service";
+import { cantPlayHere, PlaybackService, refuseServerStream } from "../src/playback/service";
 import type { PlaybackSession } from "../src/playback/sessions";
 
 describe("handing a file to the app", () => {
@@ -28,8 +28,14 @@ describe("no video through the server", () => {
   });
 
   test("a TorBox file the device can't play isn't streamed by the server instead", () => {
-    expect(() => refuseServerStream(plan("transcode"), "url", caps(true))).toThrow(/can't play on this device.*Pick another source/);
+    expect(() => refuseServerStream(plan("transcode"), "url", caps(true))).toThrow("This copy won't play here: this device can't decode its VC1 video. Choose another source.");
     expect(() => refuseServerStream(plan("remux"), "url", caps(false))).toThrow(/Update the Strata app/);
+  });
+
+  test("why a copy won't play is said in words, leaving out what the device fixes itself", () => {
+    const why = (reasons: string[]) => cantPlayHere({ mode: "transcode", video: "transcode", audio: "aac", stripDolbyVision: false, reasons });
+    expect(why(["2160p exceeds 1080p", "audio opus → aac"])).toBe("This copy won't play here: it's 4K, and this device plays up to 1080p. Choose another source.");
+    expect(why(["container mkv → HLS"])).toBe("This copy won't play on this device. Choose another source.");
   });
 
   test("files on the server's disk still stream from it", () => {

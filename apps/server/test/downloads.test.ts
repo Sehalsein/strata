@@ -69,3 +69,44 @@ describe("preferMaxHeight (the app on cellular data)", () => {
     expect((await service().prepareDownload({ ...movie, candidateId: "file:1", preferMaxHeight: 720 })).fileId).toBe(1);
   });
 });
+
+describe("playing with nothing in the library", () => {
+  const release = (hash: string) => ({ hash: hash.repeat(40), title: `Release ${hash}` });
+  const withReleases = (acquire: (hash: string) => Promise<unknown>) => {
+    const library = { organizationId: "h1", filesFor: async () => [], get: async (id: number) => files.find((f) => f.id === id) ?? null };
+    const tried: string[] = [];
+    const discovery = {
+      available: true,
+      cachedReleases: async () => [release("a"), release("b"), release("c"), release("d")],
+      acquire: async (_target: unknown, hash: string) => (tried.push(hash[0]!), acquire(hash[0]!)),
+    };
+    const playback = new PlaybackService(library as never, {} as never, {} as never, () => settingsSchema.parse({ sourcePriority: ["torbox", "local"] }), () => null, () => ({ requestLink: async () => "https://cdn.torbox.test/2" }) as never, discovery as never, async () => null);
+    return { playback, tried };
+  };
+
+  test("a release without this in it (a pack of other seasons) is passed over for the next", async () => {
+    const { NoPlayableFileError } = await import("../src/sources/discovery");
+    const { playback, tried } = withReleases(async (hash) => {
+      if (hash === "a") throw new NoPlayableFileError();
+      return { status: "ready", fileId: 2 };
+    });
+    expect((await playback.prepareDownload(movie)).fileId).toBe(2);
+    expect(tried).toEqual(["a", "b"]);
+  });
+
+  test("when none of the first few has it, the answer says so plainly", async () => {
+    const { NoPlayableFileError } = await import("../src/sources/discovery");
+    const { playback, tried } = withReleases(async () => {
+      throw new NoPlayableFileError();
+    });
+    await expect(playback.prepareDownload(movie)).rejects.toMatchObject({ status: 404, message: expect.stringContaining("None of the ready copies") });
+    expect(tried).toEqual(["a", "b", "c"]);
+  });
+
+  test("TorBox failing is a plain message, not an internal error", async () => {
+    const { playback } = withReleases(async () => {
+      throw new Error("socket hang up");
+    });
+    await expect(playback.prepareDownload(movie)).rejects.toMatchObject({ status: 502, message: expect.stringContaining("TorBox couldn't get this ready") });
+  });
+});

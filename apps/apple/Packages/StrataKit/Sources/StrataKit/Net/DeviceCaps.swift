@@ -12,7 +12,13 @@ extension ClientCaps {
     public static let current: ClientCaps = {
         var video = ["h264", "hevc"]
         if VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1) { video.append("av1") }
+        #if targetEnvironment(simulator)
+        // The simulator reports no hardware decoder, but the Mac it runs on decodes HEVC:
+        // test 4K there as on the devices it stands in for.
+        let hwHEVC = true
+        #else
         let hwHEVC = VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
+        #endif
         let hdrCapable = AVPlayer.eligibleForHDRPlayback
         return ClientCaps(
             containers: ["mp4", "mov", "m4v"],
