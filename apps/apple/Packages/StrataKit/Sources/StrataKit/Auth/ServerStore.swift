@@ -227,23 +227,24 @@ public final class ServerStore {
     }
 
     /// `probe`, also returning the normalised URL that answered. A bare domain name is tried
-    /// over HTTPS first, then as a home server (see `ServerAddress.candidates`).
+    /// over HTTPS first, then as a home server (see `ServerAddress.candidates`) — but only
+    /// when nothing at all listens for HTTPS there. A certificate error, a timeout or any
+    /// answer means something is there, and falling back to plain HTTP then could hand a
+    /// password to whoever is in the way.
     public func probeServer(_ address: String) async throws -> (url: URL, info: ServerInfo) {
         let candidates = ServerAddress.candidates(address)
         guard !candidates.isEmpty else {
             throw StrataError(kind: .invalidInput, message: "That doesn't look like a valid server address.")
         }
-        var firstError: Error?
-        for url in candidates {
+        for (i, url) in candidates.enumerated() {
             do {
                 return try await probeServer(at: url)
-            } catch let e as StrataError where e.kind == .incompatible {
-                throw e
             } catch {
-                firstError = firstError ?? error
+                let failure = StrataError.wrap(error)
+                guard i < candidates.count - 1, failure.nothingListening else { throw failure }
             }
         }
-        throw firstError!
+        throw StrataError(kind: .invalidInput, message: "That doesn't look like a valid server address.")
     }
 
     private func probeServer(at url: URL) async throws -> (url: URL, info: ServerInfo) {
@@ -561,6 +562,11 @@ public final class ServerStore {
         let (url, info) = try await probeServer(address)
         guard info.id == server.id else {
             throw StrataError(kind: .invalidInput, message: "That address belongs to a different server (\(info.serverName)).")
+        }
+        // The app tries a server's other addresses with its sign-in: a server it reaches over
+        // HTTPS mustn't gain a plain-HTTP address on the internet that could be listened in on.
+        if url.scheme == "http", !ServerAddress.isLocal(url), server.addresses.contains(where: { $0.scheme == "https" }) {
+            throw StrataError(kind: .invalidInput, message: "\(server.name) is reached over HTTPS, so its other addresses must be too (or on your local network).")
         }
         if !server.addresses.contains(url) { server.addresses.append(url) }
         upsert(server)

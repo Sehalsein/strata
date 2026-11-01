@@ -43,6 +43,21 @@ public enum ServerAddress {
         return [https, url]
     }
 
+    /// On this device or the local network: a private, link-local or loopback address, or
+    /// a `.local` or one-word name. Plain HTTP is expected there.
+    public static func isLocal(_ url: URL) -> Bool {
+        guard let host = url.host()?.lowercased() else { return false }
+        if host == "localhost" || host.hasSuffix(".local") || !host.contains(".") && !host.contains(":") { return true }
+        if host.contains(":") { return host == "::1" || host.hasPrefix("fe80:") || host.hasPrefix("fd") || host.hasPrefix("fc") }
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else { return false }
+        switch (parts[0], parts[1]) {
+        case (10, _), (127, _), (192, 168), (169, 254): return true
+        case (172, 16...31), (100, 64...127): return true // private, and CGNAT (Tailscale)
+        default: return false
+        }
+    }
+
     private static func isIPAddress(_ host: String) -> Bool {
         host.contains(":") || host.split(separator: ".").allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
     }

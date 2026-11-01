@@ -27,6 +27,9 @@ public struct StrataError: Error, LocalizedError, Sendable, Equatable {
     /// The server's machine-readable code when it sent one (Better Auth's `code`, e.g.
     /// "INVALID_USERNAME_OR_PASSWORD", or an OAuth `error` like "expired_token").
     public var code: String?
+    /// Nothing answered at the address (connection refused), as opposed to something that
+    /// answered badly (a certificate, a timeout, an HTTP error).
+    public var nothingListening = false
 
     public init(kind: Kind, status: Int? = nil, message: String, code: String? = nil) {
         self.kind = kind
@@ -102,6 +105,8 @@ public struct StrataError: Error, LocalizedError, Sendable, Equatable {
         default:
             message = "Couldn't reach the server\(at). (\(error.localizedDescription))"
         }
-        return StrataError(kind: .network, message: message)
+        var failure = StrataError(kind: .network, message: message)
+        failure.nothingListening = error.code == .cannotConnectToHost
+        return failure
     }
 }
