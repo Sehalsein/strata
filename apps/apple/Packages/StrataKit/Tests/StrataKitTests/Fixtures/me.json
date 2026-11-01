@@ -1,12 +1,17 @@
 {
-  "user": {
-    "id": 1,
-    "username": "sehal",
-    "isAdmin": true
-  },
-  "profile": {
-    "id": 1,
-    "name": "sehal",
-    "avatar": null
-  }
+    "user": {
+        "id": "3c53118d-39eb-45da-a048-346839d1cd79",
+        "username": "owner",
+        "name": "owner",
+        "email": "owner@users.strata",
+        "isServerAdmin": true
+    },
+    "viewerOnly": false,
+    "household": {
+        "id": "9e895efb-9561-47a1-b771-e7444228ae25",
+        "name": "owner's home",
+        "role": "owner",
+        "contentLimit": "none",
+        "isKids": false
+    }
 }

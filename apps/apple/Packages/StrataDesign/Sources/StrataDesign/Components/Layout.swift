@@ -22,10 +22,13 @@ public struct Rail<Content: View>: View {
         self.seeAll = nil
         self.titleLink = link.map { link in
             AnyView(NavigationLink(value: link) {
-                HStack(alignment: .firstTextBaseline, spacing: Metrics.space1) {
+                HStack(spacing: 4) {
                     Text(title).railHeaderStyle()
-                    Image(systemName: "chevron.right").font(.stCallout.weight(.semibold)).foregroundStyle(Theme.ink3)
+                    Image(systemName: "chevron.right")
+                        .font(.stCallout.weight(.bold))
+                        .foregroundStyle(Theme.ink3)
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityAddTraits(.isHeader)
@@ -36,23 +39,7 @@ public struct Rail<Content: View>: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space4) {
-            HStack(alignment: .firstTextBaseline) {
-                if let titleLink {
-                    titleLink
-                } else {
-                    Text(title).railHeaderStyle().accessibilityAddTraits(.isHeader)
-                }
-                Spacer()
-                #if !os(tvOS)
-                if let seeAll {
-                    Button("See all", action: seeAll)
-                        .font(.stCallout)
-                        .foregroundStyle(Theme.accentText)
-                        .buttonStyle(.plain)
-                }
-                #endif
-            }
-            .padding(.horizontal, Metrics.gutter)
+            header.padding(.horizontal, Metrics.gutter)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: Metrics.cardGap) {
@@ -64,17 +51,71 @@ public struct Rail<Content: View>: View {
                 #endif
             }
             .scrollClipDisabled()
+            #if os(tvOS)
+            // Down from a card with nothing straight below it (the end of a long rail over a
+            // short one) still lands on the next rail.
+            .focusSection()
+            #endif
         }
+    }
+}
+
+extension Rail {
+    /// The title; with `link` or `seeAll`, a link to the full list with a chevron, like
+    /// the TV app's ("Trending Movies ›"). A `link` title is a navigation link, which takes
+    /// focus on tvOS too.
+    @ViewBuilder private var header: some View {
+        if let titleLink {
+            titleLink
+        } else {
+            actionHeader
+        }
+    }
+
+    @ViewBuilder private var actionHeader: some View {
+        #if os(tvOS)
+        Text(title).railHeaderStyle().accessibilityAddTraits(.isHeader)
+        #else
+        if let seeAll {
+            Button(action: seeAll) {
+                HStack(spacing: 4) {
+                    Text(title).railHeaderStyle()
+                    Image(systemName: "chevron.right")
+                        .font(.stCallout.weight(.bold))
+                        .foregroundStyle(Theme.ink3)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityHint("Shows all")
+        } else {
+            Text(title).railHeaderStyle().accessibilityAddTraits(.isHeader)
+        }
+        #endif
     }
 }
 
 /// A responsive grid of poster cards (Movies, Shows, search results, My List).
 public struct PosterGrid<Content: View>: View {
     @ViewBuilder let content: () -> Content
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
     public init(@ViewBuilder content: @escaping () -> Content) { self.content = content }
 
+    /// Three columns on an iPhone and in a narrow iPad window, rather than two (or one)
+    /// oversized ones; the rails' poster size elsewhere.
+    private var minimum: CGFloat {
+        #if os(iOS)
+        sizeClass == .compact ? 100 : Metrics.posterWidth
+        #else
+        Metrics.posterWidth
+        #endif
+    }
+
     public var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: Metrics.posterWidth), spacing: Metrics.cardGap, alignment: .top)],
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: minimum), spacing: Metrics.cardGap, alignment: .top)],
                   alignment: .leading, spacing: Metrics.space8) {
             content()
         }
@@ -86,31 +127,101 @@ public struct PosterGrid<Content: View>: View {
 public struct SkeletonRail: View {
     let aspectRatio: CGFloat
     let width: CGFloat
-    @State private var dim = false
+    let circle: Bool
 
-    public init(aspectRatio: CGFloat = 2 / 3, width: CGFloat) {
+    /// `circle` for avatar rails (Cast).
+    public init(aspectRatio: CGFloat = 2 / 3, width: CGFloat, circle: Bool = false) {
         self.aspectRatio = aspectRatio
         self.width = width
+        self.circle = circle
     }
+
+    private var cardHeight: CGFloat { circle ? width : width / aspectRatio }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space4) {
-            RoundedRectangle(cornerRadius: 6).fill(Theme.surface2).frame(width: 160, height: 18)
+            SkeletonBar(width: 160, height: 18)
                 .padding(.horizontal, Metrics.gutter)
-            HStack(spacing: Metrics.cardGap) {
-                ForEach(0..<6, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
-                        .fill(Theme.surface1)
-                        .frame(width: width)
-                        .aspectRatio(aspectRatio, contentMode: .fit)
+            // More cards than fit, drawn over a row of the cards' height so the
+            // overflow is cut off rather than widening the page.
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: cardHeight)
+                .overlay(alignment: .leading) {
+                    HStack(spacing: Metrics.cardGap) {
+                        ForEach(0..<6, id: \.self) { _ in
+                            RoundedRectangle(cornerRadius: circle ? width / 2 : Metrics.cardRadius, style: .continuous)
+                                .fill(Theme.surface1)
+                                .frame(width: width, height: cardHeight)
+                        }
+                    }
+                    .padding(.horizontal, Metrics.gutter)
                 }
-            }
-            .padding(.horizontal, Metrics.gutter)
+                .clipped()
         }
-        .opacity(dim ? 0.5 : 1)
-        .animation(.easeInOut(duration: 0.9).repeatForever(), value: dim)
-        .onAppear { dim = true }
+        .skeletonPulse()
+        .accessibilityElement()
         .accessibilityLabel("Loading")
+    }
+}
+
+/// A rounded bar standing in for a line of text. Without a width, it fills the line.
+public struct SkeletonBar: View {
+    let width: CGFloat?
+    let height: CGFloat
+
+    public init(width: CGFloat? = nil, height: CGFloat) {
+        self.width = width
+        self.height = height
+    }
+
+    public var body: some View {
+        RoundedRectangle(cornerRadius: min(Metrics.radiusXS, height / 2), style: .continuous)
+            .fill(Theme.surface2)
+            .frame(width: width, height: height)
+            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+    }
+}
+
+private struct SkeletonPulse: ViewModifier {
+    @State private var dim = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            // Scoped to the opacity: an `.animation(_:value:)` here would also catch the
+            // page's own layout as it settles and repeat that forever.
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever()) {
+                $0.opacity(dim ? 0.5 : 1)
+            }
+            .onAppear { dim = true }
+    }
+}
+
+public extension View {
+    /// The slow fade placeholders breathe with while their content loads.
+    func skeletonPulse() -> some View { modifier(SkeletonPulse()) }
+
+    /// For a scroll view whose hero art runs up under the navigation bar. On iOS the
+    /// bar's scroll edge effect is hidden while the page sits at the top (it cuts a hard
+    /// band across the art; the hero shades the top itself) and comes back once the
+    /// page scrolls, so the bar still reads over rails. Apply it to the ScrollView.
+    func heroUnderBar(_ enabled: Bool = true) -> some View { modifier(HeroUnderBar(enabled: enabled)) }
+}
+
+private struct HeroUnderBar: ViewModifier {
+    let enabled: Bool
+    @State private var atTop = true
+
+    func body(content: Content) -> some View {
+        content
+            #if os(iOS)
+            .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top < 4 } action: { _, top in
+                atTop = top
+            }
+            .scrollEdgeEffectHidden(enabled && atTop, for: .top)
+            #endif
+            .ignoresSafeArea(edges: enabled ? .top : [])
     }
 }
 

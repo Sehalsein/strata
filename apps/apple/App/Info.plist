@@ -46,6 +46,8 @@
 	<array>
 		<string>_strata._tcp</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Strata uses the camera to scan sign-in and server QR codes from your server's dashboard.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Strata looks for your Strata servers on the local network.</string>
 	<key>NSSupportsLiveActivities</key>

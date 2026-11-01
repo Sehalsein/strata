@@ -9,14 +9,21 @@ export const capsSchema = z.object({
   hdr: z.array(z.enum(["hdr10", "hlg", "dv"])).default(["hdr10", "hlg", "dv"]),
   /** Dolby Vision profiles the device decodes natively. Apple devices handle 5 and 8. */
   dvProfiles: z.array(z.number().int()).default([5, 8]),
+  /**
+   * The app repackages files itself (Strata 0.4+): anything whose video it can copy is
+   * handed over as a link, with the plan, instead of being remuxed here.
+   */
+  deviceRemux: z.boolean().default(false),
 });
 export type ClientCaps = z.infer<typeof capsSchema>;
 export const DEFAULT_CAPS: ClientCaps = capsSchema.parse({});
 
 export interface PlaybackPlan {
-  mode: "direct" | "remux" | "transcode";
+  /** `device`: the app fetches the file and repackages it itself; nothing runs here. */
+  mode: "direct" | "device" | "remux" | "transcode";
   video: "copy" | "transcode";
-  audio: "copy" | "aac" | "eac3";
+  /** `lossless`: the app decodes it and re-encodes losslessly (FLAC/ALAC), in device mode. */
+  audio: "copy" | "aac" | "eac3" | "lossless";
   audioStreamIndex?: number;
   videoStreamIndex?: number;
   /** Drop the Dolby Vision enhancement layer (profile 7) and play the HDR10 base. */
@@ -76,7 +83,11 @@ export function decide(info: MediaInfo, caps: ClientCaps, audioIndex?: number, p
   }
 
   let audioAction: PlaybackPlan["audio"] = "copy";
-  if (audio && !caps.audioCodecs.includes(audio.codec)) {
+  if (audio && !caps.audioCodecs.includes(audio.codec) && caps.deviceRemux && video === "copy") {
+    // DTS, TrueHD: the app decodes them and keeps every channel, without loss.
+    audioAction = "lossless";
+    reasons.push(`audio ${audio.codec} → lossless on device`);
+  } else if (audio && !caps.audioCodecs.includes(audio.codec)) {
     audioAction = audio.channels > 2 && caps.audioCodecs.includes("eac3") ? "eac3" : "aac";
     reasons.push(`audio ${audio.codec} → ${audioAction}`);
   }
@@ -88,7 +99,10 @@ export function decide(info: MediaInfo, caps: ClientCaps, audioIndex?: number, p
   let mode: PlaybackPlan["mode"];
   if (video === "transcode") mode = "transcode";
   else if (containerOk && audioAction === "copy" && !stripDolbyVision && audioIsDefault) mode = "direct";
-  else {
+  else if (caps.deviceRemux) {
+    mode = "device";
+    if (!containerOk) reasons.push(`container ${info.container} → repackaged on device`);
+  } else {
     mode = "remux";
     if (!containerOk) reasons.push(`container ${info.container} → HLS`);
   }
@@ -96,7 +110,8 @@ export function decide(info: MediaInfo, caps: ClientCaps, audioIndex?: number, p
   // Copying Dolby audio into HLS fMP4 needs its first packet to describe the track; when a
   // file stores audio well after the video (common in MKV WEBRips) the init segment gets an
   // empty audio track and Apple's player refuses the stream. Re-encoding knows it up front.
-  if (mode !== "direct" && audioAction === "copy" && audio && (audio.codec === "eac3" || audio.codec === "ac3")) {
+  // The app reads the track's description from the container, so device mode copies it.
+  if (mode !== "direct" && mode !== "device" && audioAction === "copy" && audio && (audio.codec === "eac3" || audio.codec === "ac3")) {
     audioAction = "eac3";
     reasons.push(`audio ${audio.codec} re-encoded for HLS`);
   }

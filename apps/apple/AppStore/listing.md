@@ -18,9 +18,9 @@ description 4000.
 
 ## URLs
 
-- **Privacy policy:** https://github.com/Sehalsein/strata/blob/main/PRIVACY.md
+- **Privacy policy:** https://github.com/Sehalsein/strata/blob/main/PRIVACY.md *(the app's own policy; strata.sehalsein.com/privacy is the server's)*
 - **Support:** https://github.com/Sehalsein/strata/issues
-- **Marketing:** https://github.com/Sehalsein/strata
+- **Marketing:** https://strata.sehalsein.com
 
 ## Promotional text
 
@@ -55,7 +55,7 @@ library, and any other sources its owner has set it up with. It doesn't collect 
 about you, and it doesn't provide, sell or stream any movies or shows of its own.
 
 Strata requires a Strata server, which is free and open source:
-github.com/Sehalsein/strata.
+strata.sehalsein.com.
 
 ## Keywords
 

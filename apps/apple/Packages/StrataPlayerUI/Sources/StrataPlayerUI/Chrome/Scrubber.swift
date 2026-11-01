@@ -10,16 +10,20 @@ public struct Scrubber: View {
     let duration: TimeInterval
     let chapters: [Chapter]
     let onScrub: (TimeInterval) -> Void
+    /// True while someone is dragging or scrubbing, so the controls can stay up.
+    let onScrubbing: (Bool) -> Void
 
     @State private var scrubValue: TimeInterval?
     #if os(tvOS)
     @FocusState private var focused: Bool
     #endif
 
-    public init(position: TimeInterval, duration: TimeInterval, chapters: [Chapter] = [], onScrub: @escaping (TimeInterval) -> Void) {
+    public init(position: TimeInterval, duration: TimeInterval, chapters: [Chapter] = [],
+                onScrubbing: @escaping (Bool) -> Void = { _ in }, onScrub: @escaping (TimeInterval) -> Void) {
         self.position = position
         self.duration = duration
         self.chapters = chapters
+        self.onScrubbing = onScrubbing
         self.onScrub = onScrub
     }
 
@@ -101,6 +105,8 @@ public struct Scrubber: View {
             }
             .onChange(of: focused) { _, isFocused in if !isFocused { scrubValue = nil } }
             #endif
+
+            .onChange(of: scrubValue != nil) { _, scrubbing in onScrubbing(scrubbing) }
 
             HStack {
                 Text(Self.format(shown))

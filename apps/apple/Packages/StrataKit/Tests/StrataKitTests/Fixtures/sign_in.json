@@ -1,0 +1,19 @@
+{
+    "redirect": false,
+    "token": "ckKMkx9x4y1bMdUJgg0hvdQ3Ki05Z6CF",
+    "user": {
+        "name": "owner",
+        "email": "owner@users.strata",
+        "emailVerified": false,
+        "image": null,
+        "createdAt": "2026-10-31T12:26:18.547Z",
+        "updatedAt": "2026-10-31T12:26:18.547Z",
+        "username": "owner",
+        "displayUsername": "owner",
+        "role": "admin",
+        "banned": false,
+        "banReason": null,
+        "banExpires": null,
+        "id": "3c53118d-39eb-45da-a048-346839d1cd79"
+    }
+}

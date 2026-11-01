@@ -1,0 +1,56 @@
+// The cloud Strata server on Cloudflare Workers (see README.md here).
+//   cd deploy/cloudflare
+//   npx wrangler secret put DATABASE_URL        # Neon's connection string
+//   npx wrangler secret put STRATA_SECRET_KEY   # openssl rand -base64 32 (keep it safe)
+//   npx wrangler deploy
+// Optional secrets: RESEND_API_KEY (password-reset email), GOOGLE_CLIENT_ID and
+// GOOGLE_CLIENT_SECRET (Sign in with Google), STRATA_ADMIN_EMAILS (system admins),
+// STRATA_OPERATOR and STRATA_PRIVACY_CONTACT (the privacy page), SENTRY_DSN (error reports).
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "strata",
+  "main": "../../apps/server/src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  // node:crypto, node:async_hooks and process.env, which the server uses.
+  "compatibility_flags": ["nodejs_compat"],
+  // Cloud (multi-tenant) mode, fixed at build time: nothing at run time can change it
+  // (src/mode.ts).
+  "define": { "STRATA_BUILD_MODE": "\"cloud\"" },
+  // The dashboard, built by `bun run build` in apps/server/web; only /api/* runs the Worker.
+  "assets": {
+    "directory": "../../apps/server/web/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  // TorBox sync every 15 minutes; cleanup and pruning once a day. Which jobs each runs is in
+  // apps/server/src/cloudSchedule.ts, which must list the same expressions.
+  // A cheap first filter per client at the edge, before a request opens a database
+  // connection (src/worker.ts); Better Auth's own limits on sign-in stay the strict ones.
+  "ratelimits": [{ "name": "EDGE_LIMIT", "namespace_id": "4102", "simple": { "limit": 600, "period": 60 } }],
+  "triggers": { "crons": ["*/15 * * * *", "17 4 * * *"] },
+  "limits": { "cpu_ms": 30000 },
+  // Logs and traces (traces show each request's database round trips). Query strings are
+  // left out of them: sign-in and reset links carry their tokens there.
+  "observability": { "enabled": true, "redact_query_string": true, "logs": { "enabled": true }, "traces": { "enabled": true, "head_sampling_rate": 0.1 } },
+  // Runs near Neon rather than near each visitor: every request makes several database
+  // round trips one after another. Smart Placement picks the spot from measured latency.
+  "placement": { "mode": "smart" },
+  // Checked by `wrangler dev`; the optional ones are listed at the top.
+  "secrets": { "required": ["DATABASE_URL", "STRATA_SECRET_KEY"] },
+  // The Worker answers at this address (Cloudflare makes the DNS record and certificate;
+  // sehalsein.com must be a zone in the same Cloudflare account). The landing site at
+  // strata.sehalsein.com (deploy/landing) passes its /api/* here too.
+  "routes": [{ "pattern": "app.strata.sehalsein.com", "custom_domain": true }],
+  "vars": {
+    // Password-reset email, through Resend (RESEND_API_KEY is a secret).
+    "STRATA_EMAIL_FROM": "Strata <no-reply@sehalsein.com>",
+    // Who runs the server and how to reach them, for the privacy page: STRATA_OPERATOR and
+    // STRATA_PRIVACY_CONTACT are secrets, so the contact address stays out of this repo.
+    // Passkeys, Google's callback, email links and the apps' QR codes all use this address.
+    "STRATA_PUBLIC_URL": "https://app.strata.sehalsein.com",
+    // The landing site, which has the privacy page.
+    "STRATA_SITE_URL": "https://strata.sehalsein.com",
+    // Passkeys made before the server moved to app. belong to strata.sehalsein.com.
+    "STRATA_PASSKEY_RP_ID": "strata.sehalsein.com"
+  }
+}

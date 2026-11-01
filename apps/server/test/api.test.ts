@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { makeFixtures, startTestServer, type TestServer } from "./helpers";
+import { makeFixtures, noFfmpeg, startTestServer, type TestServer } from "./helpers";
 
 let server: TestServer;
 let token: string;
@@ -15,9 +15,22 @@ beforeAll(async () => {
 afterAll(() => server.services.shutdown());
 
 describe("setup and auth", () => {
+  // Each from its own address: sign-ins are rate-limited per client.
+  let signIns = 0;
+  const signIn = async (username: string, password: string) => {
+    const res = await server.request("/api/auth/sign-in/username", { method: "POST", json: { username, password }, ip: `198.51.100.${++signIns}` });
+    return { status: res.status, token: res.headers.get("set-auth-token") };
+  };
+
+  test("a server without Google keys or an HTTPS address offers only passwords", async () => {
+    expect((await json(await server.request("/api/info"))).signIn).toEqual({ google: false, passkey: false, passwordReset: false, signUp: false, confirmEmail: false });
+    expect((await server.request("/api/auth/sign-in/social", { method: "POST", json: { provider: "google" } })).status).not.toBe(200);
+    expect((await server.request("/api/auth/passkey/generate-authenticate-options")).status).toBe(404);
+  });
+
   test("info reports setup required", async () => {
     const info = await json(await server.request("/api/info"));
-    expect(info).toMatchObject({ name: "strata", setupRequired: true, apiVersion: 1 });
+    expect(info).toMatchObject({ name: "strata", setupRequired: true, apiVersion: 1, mode: "home" });
   });
 
   test("protected routes need a token", async () => {
@@ -25,74 +38,308 @@ describe("setup and auth", () => {
     expect((await server.request("/api/admin/status")).status).toBe(401);
   });
 
-  test("first admin is created once", async () => {
-    const res = await server.request("/api/setup/admin", { method: "POST", json: { username: "sehal", password: "correct-horse" } });
+  test("first admin is created once, with their household", async () => {
+    const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "sehal", password: "correct-horse" } });
     expect(res.status).toBe(200);
     token = (await json(res)).token;
-    const again = await server.request("/api/setup/admin", { method: "POST", json: { username: "x", password: "another-pass" } });
+    const again = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "other", password: "another-pass" } });
     expect(again.status).toBe(409);
   });
 
-  test("login, and the single profile is auto-selected", async () => {
-    expect((await server.request("/api/auth/login", { method: "POST", json: { username: "sehal", password: "nope" } })).status).toBe(401);
-    const res = await server.request("/api/auth/login", { method: "POST", json: { username: "sehal", password: "correct-horse" } });
-    token = (await json(res)).token;
+  test("sign in by username; the account's only household opens by itself", async () => {
+    expect((await signIn("sehal", "nope")).status).toBe(401);
+    const ok = await signIn("sehal", "correct-horse");
+    expect(ok.status).toBe(200);
+    token = ok.token!;
     const me = await json(await server.request("/api/me", { token }));
-    expect(me.user).toMatchObject({ username: "sehal", isAdmin: true });
-    expect(me.profile.name).toBe("sehal");
+    expect(me.user).toMatchObject({ username: "sehal", isServerAdmin: true });
+    expect(me.household).toMatchObject({ name: "sehal's home", role: "owner" });
   });
 
-  test("a TV signs in by code once a signed-in phone approves it", async () => {
-    const start = await json(await server.request("/api/auth/device", { method: "POST", json: { deviceName: "Living Room Apple TV" } }));
-    expect(start.code).toMatch(/^[A-Z2-9]{8}$/);
-    const poll = () => server.request("/api/auth/device/poll", { method: "POST", json: { pollToken: start.pollToken } }).then(json);
-    expect(await poll()).toEqual({ status: "pending" });
-
-    // Looking up and approving need a signed-in phone; lower-case and dashes are fine.
-    const typed = `${start.code.slice(0, 4)}-${start.code.slice(4)}`.toLowerCase();
-    expect((await server.request(`/api/auth/device/${typed}`)).status).toBe(401);
-    expect(await json(await server.request(`/api/auth/device/${typed}`, { token }))).toMatchObject({ deviceName: "Living Room Apple TV" });
-    expect((await server.request(`/api/auth/device/${typed}/approve`, { method: "POST", token })).status).toBe(200);
-
-    const approved = await poll();
-    expect(approved.status).toBe("approved");
-    expect((await server.request("/api/me", { token: approved.token })).status).toBe(200);
-
-    // Single use: the token is handed over once and the code is gone.
-    expect(await poll()).toEqual({ status: "expired" });
-    expect((await server.request(`/api/auth/device/${start.code}/approve`, { method: "POST", token })).status).toBe(404);
+  test("people join a household by invitation only", async () => {
+    // Nobody signs up without an invitation.
+    const signUp = (email: string, username: string, invitationId?: string) =>
+      server.request("/api/auth/sign-up/email", { method: "POST", json: { email, password: "bobs-password", name: username, username, invitationId } });
+    expect((await signUp("bob@example.com", "bob")).status).toBe(403);
+    const invited = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "bob@example.com", role: "member" } }));
+    expect(invited.id).toBeTruthy();
+    // Knowing the email isn't enough: the invitation's id (from its link) is.
+    expect((await signUp("bob@example.com", "bob")).status).toBe(403);
+    expect((await signUp("bob@example.com", "bob", invited.id)).status).toBe(200);
+    const bob = (await signIn("bob", "bobs-password")).token!;
+    expect((await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: bob, json: { invitationId: invited.id } })).status).toBe(200);
+    const me = await json(await server.request("/api/me", { token: bob }));
+    expect(me.household).toMatchObject({ role: "member" });
+    // Members watch; they don't run the household.
+    expect((await server.request("/api/home", { token: bob })).status).toBe(200);
+    expect((await server.request("/api/admin/settings", { token: bob })).status).toBe(403);
   });
 
-  test("admin lists devices and signs one out", async () => {
-    const other = (await json(await server.request("/api/auth/join", { method: "POST", ip: "192.168.2.50", json: { deviceName: "Bedroom TV" } }))).token;
-    const { items } = await json(await server.request("/api/admin/devices", { token }));
-    const tv = items.find((d: any) => d.deviceName === "Bedroom TV");
-    expect(tv).toMatchObject({ viewerOnly: true, isCurrent: false });
-    expect(items.find((d: any) => d.isCurrent)).toBeTruthy();
-    // Viewers can't see or manage devices.
-    expect((await server.request("/api/admin/devices", { token: other })).status).toBe(403);
-    // The admin can't sign out its own browser here, but can sign out the TV.
-    const self = items.find((d: any) => d.isCurrent);
-    expect((await server.request(`/api/admin/devices/${self.id}`, { method: "DELETE", token })).status).toBe(409);
-    expect((await server.request(`/api/admin/devices/${tv.id}`, { method: "DELETE", token })).status).toBe(200);
-    expect((await server.request("/api/me", { token: other })).status).toBe(401);
+  test("a member's QR sign-in code signs a device in as them, once, to watch", async () => {
+    const full = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const bob = full.members.find((m: any) => m.user.email === "bob@example.com");
+    const bobsPhone = (await signIn("bob", "bobs-password")).token!;
+    const issued = await json(await server.request(`/api/household/members/${bob.id}/sign-in-code`, { method: "POST", token }));
+    expect(issued.link).toStartWith("strata://sign-in?");
+    const code = new URL(issued.link).searchParams.get("code")!;
+    const verify = () => server.request(`/api/auth/magic-link/verify?token=${encodeURIComponent(code)}`);
+    const signedIn = await json(await verify());
+    const me = await json(await server.request("/api/me", { token: signedIn.token }));
+    expect(me).toMatchObject({ viewerOnly: true, user: { username: "bob" }, household: { id: full.id } });
+    // Once only.
+    const again = await verify();
+    expect(again.status).not.toBe(200);
+    expect(again.headers.get("set-auth-token")).toBeNull();
+    // Nobody asks for a code from outside; members can't show someone else's.
+    expect((await server.request("/api/auth/sign-in/magic-link", { method: "POST", json: { email: "bob@example.com" } })).status).toBe(404);
+    const admin = full.members.find((m: any) => m.user.id !== bob.user.id);
+    expect((await server.request(`/api/household/members/${admin.id}/sign-in-code`, { method: "POST", token: signedIn.token })).status).toBe(403);
+    // Bob's password and other sign-ins still work (Better Auth wipes both for an
+    // account whose email isn't marked confirmed).
+    expect((await server.request("/api/me", { token: bobsPhone })).status).toBe(200);
+    expect((await signIn("bob", "bobs-password")).status).toBe(200);
   });
 
-  test("a Kids profile hides and refuses titles above its limit", async () => {
-    const kids = await json(await server.request("/api/profiles", { method: "POST", token, json: { name: "Little Ones", isKids: true } }));
-    expect(kids).toMatchObject({ isKids: true, contentLimit: "kids" });
-    // A separate device on the Kids profile.
-    const kidToken = (await json(await server.request("/api/auth/login", { method: "POST", json: { username: "sehal", password: "correct-horse" } }))).token;
-    await server.request(`/api/profiles/${kids.id}/select`, { method: "POST", token: kidToken, json: {} });
+  test("the household's admins rename a member; members can't", async () => {
+    const full = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const bob = full.members.find((m: any) => m.user.email === "bob@example.com");
+    const renamed = await json(await server.request(`/api/household/members/${bob.id}`, { method: "PATCH", token, json: { name: "Bobby" } }));
+    expect(renamed.name).toBe("Bobby");
+    const bobs = (await signIn("bob", "bobs-password")).token!;
+    expect((await json(await server.request("/api/me", { token: bobs }))).user.name).toBe("Bobby");
+    expect((await server.request(`/api/household/members/${bob.id}`, { method: "PATCH", token: bobs, json: { name: "Hacker" } })).status).toBe(403);
+    await server.request(`/api/household/members/${bob.id}`, { method: "PATCH", token, json: { name: "bob" } });
+  });
 
+  test("profile pictures come from the server's own set, in groups", async () => {
+    const { groups } = await json(await server.request("/api/avatars"));
+    expect(groups.map((g: any) => g.title)).toEqual(["Animals", "Creatures", "Adventurers", "Snacks & Plants"]);
+    const fox = groups[0].avatars.find((a: any) => a.id === "fox");
+    expect(fox.url).toBe("/api/avatars/fox.png");
+    const png = await server.request(fox.url);
+    expect(png.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await png.arrayBuffer()).slice(1, 4)).toEqual(new Uint8Array([0x50, 0x4e, 0x47]));
+    expect((await server.request("/api/avatars/nope.png")).status).toBe(404);
+
+    const bobs = (await signIn("bob", "bobs-password")).token!;
+    expect((await server.request("/api/auth/update-user", { method: "POST", token: bobs, json: { image: fox.url } })).status).toBe(200);
+    expect((await json(await server.request("/api/me", { token: bobs }))).user.image).toBe(fox.url);
+    expect((await server.request("/api/auth/update-user", { method: "POST", token: bobs, json: { image: "https://example.com/x.png" } })).status).toBe(400);
+    expect((await server.request("/api/auth/update-user", { method: "POST", token: bobs, json: { image: null } })).status).toBe(200);
+  });
+
+  test("a household's provider keys are its own: never another's, nor the server's", async () => {
+    const h = await server.household();
+    process.env.TMDB_API_KEY = "from-the-server";
+    await h.settingsStore.setSecret("omdbApiKey", null);
+    expect(h.settingsStore.getSecret("omdbApiKey")).toBeUndefined();
+    expect(h.settingsStore.getSecret("tmdbApiKey")).toBe("test-key");
+    expect((await json(await server.request("/api/admin/settings", { token }))).secrets).toEqual({ tmdbApiKey: true, omdbApiKey: false, torboxApiKey: false });
+    delete process.env.TMDB_API_KEY;
+  });
+
+  test("forgot password: an emailed link (Resend) sets a new one, only when email is set up", async () => {
+    const ask = () => server.request("/api/auth/request-password-reset", { method: "POST", json: { email: "bob@example.com", redirectTo: "/reset-password" } });
+    expect((await ask()).status).toBe(404);
+    expect((await json(await server.request("/api/info"))).signIn.passwordReset).toBe(false);
+
+    process.env.RESEND_API_KEY = "re_test";
+    process.env.STRATA_EMAIL_FROM = "Strata <no-reply@example.com>";
+    const realFetch = globalThis.fetch;
+    const sent: any[] = [];
+    globalThis.fetch = (async (input: any, init?: any) => {
+      if (String(input).startsWith("https://api.resend.com/")) {
+        sent.push(JSON.parse(init.body));
+        return new Response(JSON.stringify({ id: "email-1" }), { status: 200 });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+    try {
+      expect((await json(await server.request("/api/info"))).signIn.passwordReset).toBe(true);
+      expect((await ask()).status).toBe(200);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({ to: ["bob@example.com"], subject: "Reset your Strata password" });
+      const link = /https?:\/\/\S+reset-password\/(\w+)/.exec(sent[0].text)!;
+      const reset = await server.request("/api/auth/reset-password", { method: "POST", json: { newPassword: "bobs-new-password", token: link[1] } });
+      expect(reset.status).toBe(200);
+      expect((await signIn("bob", "bobs-password")).status).toBe(401);
+      expect((await signIn("bob", "bobs-new-password")).status).toBe(200);
+      // Accounts without a real address get nothing (and nobody learns which exist).
+      await server.request("/api/auth/request-password-reset", { method: "POST", json: { email: "nobody@users.strata", redirectTo: "/reset-password" } });
+      expect(sent).toHaveLength(1);
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.RESEND_API_KEY;
+      delete process.env.STRATA_EMAIL_FROM;
+    }
+    // Put Bob's password back for the tests after this one.
+    const bobsToken = (await signIn("bob", "bobs-new-password")).token!;
+    await server.request("/api/auth/change-password", { method: "POST", token: bobsToken, json: { currentPassword: "bobs-new-password", newPassword: "bobs-password" } });
+  });
+
+  test("an admin resets a member to a temporary password; they choose a new one before anything else", async () => {
+    const full = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const bob = full.members.find((m: any) => m.user.email === "bob@example.com");
+    const owner = full.members.find((m: any) => m.user.email !== "bob@example.com" && m.role.includes("owner"));
+    const bobsPhone = (await signIn("bob", "bobs-password")).token!;
+    // A member can't reset the owner's (or anyone's).
+    const refused = await server.request("/api/auth/admin/set-user-password", { method: "POST", token: bobsPhone, json: { userId: owner.userId, newPassword: "hijacked-password" } });
+    expect(refused.status).toBe(403);
+    // The owner sets a temporary one: every device of Bob's is signed out.
+    const reset = await server.request("/api/auth/admin/set-user-password", { method: "POST", token, json: { userId: bob.userId, newPassword: "TEMP-2345-WXYZ" } });
+    expect(reset.status).toBe(200);
+    expect((await server.request("/api/me", { token: bobsPhone })).status).toBe(401);
+    // Signed in with it, only /me answers until he picks a new password.
+    const temp = (await signIn("bob", "TEMP-2345-WXYZ")).token!;
+    expect((await json(await server.request("/api/me", { token: temp }))).mustChangePassword).toBe(true);
+    const blocked = await server.request("/api/home", { token: temp });
+    expect(blocked.status).toBe(403);
+    expect((await json(blocked)).code).toBe("PASSWORD_CHANGE_REQUIRED");
+    const changed = await server.request("/api/auth/change-password", { method: "POST", token: temp, json: { currentPassword: "TEMP-2345-WXYZ", newPassword: "bobs-password" } });
+    expect(changed.status).toBe(200);
+    const fresh = (await signIn("bob", "bobs-password")).token!;
+    expect((await json(await server.request("/api/me", { token: fresh }))).mustChangePassword).toBe(false);
+    expect((await server.request("/api/home", { token: fresh })).status).toBe(200);
+  });
+
+  test("a household's owner downloads a member's data and deletes their account; a member can't", async () => {
+    const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "eve@example.com", role: "member" } }));
+    await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "eve@example.com", password: "eves-password", name: "eve", username: "eve", invitationId: invite.id } });
+    const eve = (await signIn("eve", "eves-password")).token!;
+    await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: eve, json: { invitationId: invite.id } });
+    const full = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const eveMember = full.members.find((m: any) => m.user.email === "eve@example.com");
+    const owner = full.members.find((m: any) => m.role.includes("owner"));
+
+    // Eve can't touch the owner's account.
+    expect((await server.request(`/api/household/members/${owner.id}/export`, { token: eve })).status).toBe(403);
+    expect((await server.request("/api/auth/admin/remove-user", { method: "POST", token: eve, json: { userId: owner.userId } })).status).toBe(403);
+
+    const exported = await server.request(`/api/household/members/${eveMember.id}/export`, { token });
+    expect(exported.status).toBe(200);
+    expect(((await exported.json()) as any).account).toMatchObject({ username: "eve" });
+
+    expect((await server.request("/api/auth/admin/remove-user", { method: "POST", token, json: { userId: eveMember.userId } })).status).toBe(200);
+    expect((await server.request("/api/me", { token: eve })).status).toBe(401);
+    expect((await signIn("eve", "eves-password")).status).toBe(401);
+  });
+
+  test("people can download everything kept about them, and delete their account", async () => {
+    const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "dora@example.com", role: "member" } }));
+    await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "dora@example.com", password: "doras-password", name: "dora", username: "dora", invitationId: invite.id } });
+    const dora = (await signIn("dora", "doras-password")).token!;
+    await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: dora, json: { invitationId: invite.id } });
+    await server.request("/api/watchlist", { method: "PUT", token: dora, json: { type: "movie", tmdbId: 10378, on: true } });
+
+    const exported = await server.request("/api/me/export", { token: dora });
+    expect(exported.headers.get("content-disposition")).toContain("strata-dora-data.json");
+    const file = (await exported.json()) as any;
+    expect(file.account).toMatchObject({ username: "dora", email: "dora@example.com" });
+    expect(file.myList).toEqual([expect.objectContaining({ tmdbId: 10378 })]);
+    expect((await json(await server.request("/api/watchlist", { token: dora }))).items).toEqual([expect.objectContaining({ type: "movie", tmdbId: 10378 })]);
+    expect(file.devices.length).toBeGreaterThan(0);
+    expect(JSON.stringify(file)).not.toContain(dora);
+
+    expect((await server.request("/api/auth/delete-user", { method: "POST", token: dora, json: { password: "wrong-password" } })).status).not.toBe(200);
+    expect((await server.request("/api/auth/delete-user", { method: "POST", token: dora, json: { password: "doras-password" } })).status).toBe(200);
+    expect((await server.request("/api/me", { token: dora })).status).toBe(401);
+    expect((await signIn("dora", "doras-password")).status).toBe(401);
+    // The server's only admin, who also owns a household with others in it, can't.
+    const refused = await server.request("/api/auth/delete-user", { method: "POST", token, json: { password: "test-password" } });
+    expect(refused.status).toBe(400);
+  });
+
+  test("households don't see each other's library", async () => {
+    const mine = await server.services.households.get((await json(await server.request("/api/me", { token }))).household.id);
+    await mine.library.upsert({ provider: "local", ref: "/m/Only.Mine.2020.mkv", name: "Only.Mine.2020.mkv", size: 1, parsed: { title: "Only Mine", kind: "movie" } as never });
+    // The server admin opens a second household and invites its owner.
+    const other = await json(await server.request("/api/auth/organization/create", { method: "POST", token, json: { name: "The Neighbours", slug: "neighbours" } }));
+    await server.request("/api/auth/organization/set-active", { method: "POST", token, json: { organizationId: other.id } });
+    const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "carol@example.com", role: "owner", organizationId: other.id } }));
+    await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "carol@example.com", password: "carols-password", name: "carol", username: "carol", invitationId: invite.id } });
+    const carol = (await signIn("carol", "carols-password")).token!;
+    await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: carol, json: { invitationId: invite.id } });
+    await server.request("/api/auth/organization/set-active", { method: "POST", token: carol, json: { organizationId: other.id } });
+    const files = async (t: string) => (await json(await server.request("/api/admin/files", { token: t }))).items.map((f: any) => f.name);
+    expect(await files(carol)).toEqual([]);
+    // Back to the first household for the rest of the suite.
+    await server.request("/api/auth/organization/set-active", { method: "POST", token, json: { organizationId: mine.organizationId } });
+    expect(await files(token)).toContain("Only.Mine.2020.mkv");
+    await mine.library.markMissing("local", []);
+  });
+
+  test("a household's admin manages only people below them, and only in this household", async () => {
+    const full = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const bobMember = full.members.find((m: any) => m.user.name === "bob");
+    const owner = full.members.find((m: any) => m.role.includes("owner"));
+    // Carol owns the neighbours' household and joins this one too.
+    const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "carol@example.com", role: "member" } }));
+    const carol = (await signIn("carol", "carols-password")).token!;
+    expect((await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: carol, json: { invitationId: invite.id } })).status).toBe(200);
+    const carolId = (await json(await server.request("/api/me", { token: carol }))).user.id;
+    // As a member, Bob sees nobody's pending invitations.
+    const bobAsMember = (await signIn("bob", "bobs-password")).token!;
+    expect((await json(await server.request("/api/auth/organization/get-full-organization", { token: bobAsMember }))).invitations).toEqual([]);
+    expect((await server.request("/api/auth/organization/update-member-role", { method: "POST", token, json: { memberId: bobMember.id, role: "admin" } })).status).toBe(200);
+    const bob = (await signIn("bob", "bobs-password")).token!;
+    // An admin, he still can't point the household at folders on the server's disk…
+    expect((await server.request("/api/admin/settings", { method: "PATCH", token: bob, json: { mediaFolders: [{ path: "/etc", kind: "movies" }] } })).status).toBe(403);
+    // …or sign the owner's own devices out.
+    const ownersDevice = (await json(await server.request("/api/admin/devices", { token }))).items.find((d: any) => d.userId === owner.userId && !d.viewerOnly);
+    expect((await server.request(`/api/admin/devices/${ownersDevice.id}`, { method: "DELETE", token: bob })).status).toBe(403);
+    // No sign-in code for the owner above him…
+    expect((await server.request(`/api/household/members/${owner.id}/sign-in-code`, { method: "POST", token: bob })).status).toBe(403);
+    // …and Carol's account isn't this household's alone to reset.
+    const reset = await server.request("/api/auth/admin/set-user-password", { method: "POST", token: bob, json: { userId: carolId, newPassword: "hijacked-password" } });
+    expect(reset.status).toBe(403);
+    expect((await signIn("carol", "carols-password")).status).toBe(200);
+    // The server's admin still can.
+    const carolMember = (await json(await server.request("/api/auth/organization/get-full-organization", { token }))).members.find((m: any) => m.userId === carolId);
+    expect((await server.request(`/api/household/members/${carolMember.id}/sign-in-code`, { method: "POST", token })).status).toBe(200);
+    await server.request("/api/auth/organization/update-member-role", { method: "POST", token, json: { memberId: bobMember.id, role: "member" } });
+    await server.request("/api/auth/organization/remove-member", { method: "POST", token, json: { memberIdOrEmail: carolMember.id } });
+  });
+
+  test("a TV signs in by code once a signed-in phone approves it, and can only watch", async () => {
+    const code = await json(await server.request("/api/auth/device/code", { method: "POST", json: { client_id: "strata-apple-tv" } }));
+    expect(code.user_code).toBeTruthy();
+    const poll = () => server.request("/api/auth/device/token", { method: "POST", json: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: code.device_code, client_id: "strata-apple-tv" } });
+    expect((await json(await poll())).error).toBe("authorization_pending");
+    // Only known apps may ask for a code.
+    expect((await server.request("/api/auth/device/code", { method: "POST", json: { client_id: "someone-else" } })).status).toBe(400);
+    // The phone opens the code (signed in), then approves it.
+    expect((await server.request(`/api/auth/device?user_code=${code.user_code}`, { token })).status).toBe(200);
+    expect((await server.request("/api/auth/device/approve", { method: "POST", token, json: { userCode: code.user_code } })).status).toBe(200);
+    await Bun.sleep(2_100); // the poll interval
+    const tv = (await json(await poll())).access_token;
+    expect(tv).toBeTruthy();
+    const me = await json(await server.request("/api/me", { token: tv }));
+    expect(me).toMatchObject({ viewerOnly: true, household: { role: "owner" } });
+    expect((await server.request("/api/home", { token: tv })).status).toBe(200);
+    expect((await server.request("/api/admin/settings", { token: tv })).status).toBe(403);
+  });
+
+  test("a kids' account hides and refuses titles above its limit", async () => {
+    const { members } = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const bobMember = members.find((m: any) => m.user.name === "bob");
+    expect((await json(await server.request(`/api/household/members/${bobMember.id}`, { method: "PATCH", token, json: { isKids: true } })))).toMatchObject({ isKids: true, contentLimit: "kids" });
+    const bob = (await signIn("bob", "bobs-password")).token!;
     const titles = async (t: string) => (await json(await server.request("/api/search?q=night", { token: t }))).items.map((i: any) => i.tmdbId);
-    expect(await titles(kidToken)).toEqual([10378]); // R-rated horror is gone; unrated family animation stays
-    expect((await server.request("/api/titles/movie/666", { token: kidToken })).status).toBe(403);
-    expect((await server.request("/api/play", { method: "POST", token: kidToken, json: { mediaType: "movie", tmdbId: 666 } })).status).toBe(403);
-    expect((await server.request("/api/titles/movie/10378", { token: kidToken })).status).toBe(200);
-    // Other profiles are unaffected.
+    expect(await titles(bob)).toEqual([10378]); // R-rated horror is gone; unrated family animation stays
+    expect((await server.request("/api/titles/movie/666", { token: bob })).status).toBe(403);
+    expect((await server.request("/api/play", { method: "POST", token: bob, json: { mediaType: "movie", tmdbId: 666 } })).status).toBe(403);
+    expect((await server.request("/api/titles/movie/10378", { token: bob })).status).toBe(200);
+    // Other accounts are unaffected.
     expect(await titles(token)).toEqual([666, 10378]);
-    await server.request(`/api/profiles/${kids.id}`, { method: "DELETE", token });
+    // Nor the files of those titles, by id.
+    const h = await server.household();
+    const file = await h.library.upsert({ provider: "local", ref: "/m/Night.mkv", name: "Night.mkv", size: 1, parsed: { title: "Night", kind: "movie" } as never });
+    await h.library.setManualMatch(file.id, "movie", 666);
+    expect((await server.request(`/api/files/${file.id}/link`, { method: "POST", token: bob })).status).toBe(403);
+    expect((await server.request(`/api/files/${file.id}/content`, { token: bob })).status).toBe(404);
+    expect((await server.request(`/api/files/${file.id}/probe`, { method: "POST", token: bob, json: { durationMs: 1, video: [], audio: [], subtitles: [] } })).status).not.toBe(200);
+    expect((await server.request(`/api/files/${file.id}/link`, { method: "POST", token })).status).toBe(200);
+    await h.library.markMissing("local", []);
   });
 
   test("launcher proof: only with the launch secret, only from loopback", async () => {
@@ -104,18 +351,7 @@ describe("setup and auth", () => {
     expect((await ask("192.168.2.40")).status).toBe(404);
   });
 
-  test("PIN-protected profile", async () => {
-    const created = await json(await server.request("/api/profiles", { method: "POST", token, json: { name: "Kids", pin: "1234" } }));
-    expect(created.hasPin).toBe(true);
-    const wrong = await server.request(`/api/profiles/${created.id}/select`, { method: "POST", token, json: { pin: "0000" } });
-    expect(wrong.status).toBe(403);
-    const right = await server.request(`/api/profiles/${created.id}/select`, { method: "POST", token, json: { pin: "1234" } });
-    expect(right.status).toBe(200);
-    // Back to the main profile for the rest of the suite.
-    await server.request(`/api/profiles/1/select`, { method: "POST", token, json: {} });
-  });
-
-  test("home-network devices join without a password, as viewers", async () => {
+  test("home-network devices join without a password, as a member they pick, to watch", async () => {
     const info = async (init: { ip?: string; headers?: Record<string, string> }) => (await json(await server.request("/api/info", init))).localJoin;
     expect(await info({ ip: "192.168.2.40" })).toBe(true);
     expect(await info({ ip: "::ffff:10.0.0.7" })).toBe(true);
@@ -128,31 +364,79 @@ describe("setup and auth", () => {
     expect(await info({ ip: "192.168.2.40", headers: { Host: "rebind.evil.example:8420" } })).toBe(false);
     expect(await info({ ip: "192.168.2.40", headers: { Host: "strata.local:8420" } })).toBe(true);
 
-    expect((await server.request("/api/auth/join", { method: "POST", ip: "203.0.113.9", json: {} })).status).toBe(403);
-    const joined = await server.request("/api/auth/join", { method: "POST", ip: "192.168.2.40", json: { deviceName: "Living Room" } });
-    expect(joined.status).toBe(200);
-    const viewer = (await json(joined)).token;
+    expect((await server.request("/api/join", { method: "POST", ip: "203.0.113.9", json: {} })).status).toBe(403);
+    const choices = await json(await server.request("/api/join", { method: "POST", ip: "192.168.2.40", json: {} }));
+    expect(choices.members.map((m: any) => m.name)).toEqual(["sehal", "bob"]);
+    const bobId = choices.members.find((m: any) => m.name === "bob").id;
+    const joined = await json(await server.request("/api/join", { method: "POST", ip: "192.168.2.40", json: { userId: bobId } }));
+    const me = await json(await server.request("/api/me", { token: joined.token }));
+    expect(me).toMatchObject({ viewerOnly: true, user: { username: "bob" } });
+    expect((await server.request("/api/home", { token: joined.token })).status).toBe(200);
+    // Someone outside the household can't be picked.
+    expect((await server.request("/api/join", { method: "POST", ip: "192.168.2.40", json: { userId: "not-a-member" } })).status).toBe(404);
+  });
 
-    // Two profiles now, one with a PIN: the device picks, and the PIN still applies.
-    expect((await json(await server.request("/api/me", { token: viewer }))).profile).toBeNull();
-    const kids = (await json(await server.request("/api/profiles", { token: viewer }))).find((p: any) => p.name === "Kids");
-    expect((await server.request(`/api/profiles/${kids.id}/select`, { method: "POST", token: viewer, json: {} })).status).toBe(403);
-    expect((await server.request(`/api/profiles/${kids.id}/select`, { method: "POST", token: viewer, json: { pin: "1234" } })).status).toBe(200);
+  test("a device that joined without a password can't administer through Better Auth either", async () => {
+    const choices = await json(await server.request("/api/join", { method: "POST", ip: "192.168.2.42", json: {} }));
+    const adminId = choices.members.find((m: any) => m.name === "sehal").id;
+    const joined = (await json(await server.request("/api/join", { method: "POST", ip: "192.168.2.42", json: { userId: adminId } }))).token;
+    const call = (path: string, init: { method?: string; json?: unknown } = {}) => server.request(`/api/auth${path}`, { ...init, token: joined });
+    // Watching and its own sign-in still work.
+    expect((await server.request("/api/me", { token: joined })).status).toBe(200);
+    expect((await call("/organization/list")).status).toBe(200);
+    // The server admin's account, from a joined device: no admin plugin, no household changes,
+    // no new way in.
+    expect((await call("/admin/create-user", { method: "POST", json: { email: "x@example.com", password: "x-password-1", name: "x", role: "admin" } })).status).toBe(403);
+    expect((await call("/admin/list-users")).status).toBe(403);
+    expect((await call("/admin/set-role", { method: "POST", json: { userId: adminId, role: "admin" } })).status).toBe(403);
+    expect((await call("/admin/impersonate-user", { method: "POST", json: { userId: adminId } })).status).toBe(403);
+    expect((await call("/organization/invite-member", { method: "POST", json: { email: "x@example.com", role: "owner" } })).status).toBe(403);
+    expect((await call("/link-social", { method: "POST", json: { provider: "google" } })).status).toBe(403);
+    // Nor the account's other sessions, whose tokens would be full sign-ins.
+    expect((await call("/list-sessions")).status).toBe(403);
+    expect((await call("/revoke-session", { method: "POST", json: { token: "x" } })).status).toBe(403);
+    // Nor the household's pending invitations (an invitation's id signs someone up into its role).
+    await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "pending@example.com", role: "admin" } });
+    expect((await json(await call("/organization/get-full-organization"))).invitations).toEqual([]);
+    expect((await call("/organization/list-invitations")).status).toBe(403);
+    expect((await json(await server.request("/api/auth/organization/get-full-organization", { token }))).invitations.length).toBeGreaterThan(0);
+    // The same account signed in with its password still can.
+    expect((await server.request("/api/auth/admin/list-users", { token })).status).toBe(200);
+  });
 
-    // Watching yes, administering no.
-    expect((await server.request("/api/home", { token: viewer })).status).toBe(200);
-    expect((await server.request("/api/admin/settings", { token: viewer })).status).toBe(403);
-    expect((await json(await server.request("/api/me", { token: viewer }))).user.isAdmin).toBe(false);
-
-    // Rate limited per address.
-    let last = 200;
-    for (let i = 0; i < 12; i++) last = (await server.request("/api/auth/join", { method: "POST", ip: "192.168.2.77", json: {} })).status;
-    expect(last).toBe(429);
-
-    // The admin can switch it off.
-    await server.request("/api/admin/settings", { method: "PATCH", token, json: { localJoin: false } });
-    expect((await server.request("/api/auth/join", { method: "POST", ip: "192.168.2.40", json: {} })).status).toBe(403);
-    await server.request("/api/admin/settings", { method: "PATCH", token, json: { localJoin: true } });
+  test("the household's admins see every device, whose it is, and can sign it out", async () => {
+    const choices = await json(await server.request("/api/join", { method: "POST", ip: "192.168.2.41", json: {} }));
+    const bobId = choices.members.find((m: any) => m.name === "bob").id;
+    const joined = await json(
+      await server.request("/api/join", {
+        method: "POST",
+        ip: "192.168.2.41",
+        json: { userId: bobId },
+        headers: { "User-Agent": "Strata/1.0 (AppleTV; tvOS 26)", "X-Strata-Device-Name": "Living Room", "X-Strata-Device-Model": "AppleTV14,1" },
+      }),
+    );
+    let devices = (await json(await server.request("/api/admin/devices", { token }))).items;
+    let bobs = devices.find((d: any) => d.userId === bobId && d.userAgent?.includes("AppleTV"));
+    expect(bobs).toMatchObject({
+      userName: "bob",
+      viewerOnly: true,
+      isCurrent: false,
+      ipAddress: "192.168.2.41",
+      location: "Home network",
+      deviceName: "Living Room",
+      deviceModel: "AppleTV14,1",
+    });
+    // The device moves (a new address on the network): the list follows it.
+    expect((await server.request("/api/me", { token: joined.token, ip: "192.168.2.77" })).status).toBe(200);
+    devices = (await json(await server.request("/api/admin/devices", { token }))).items;
+    bobs = devices.find((d: any) => d.id === bobs.id);
+    expect(bobs).toMatchObject({ ipAddress: "192.168.2.77", location: "Home network", deviceName: "Living Room" });
+    expect(devices.some((d: any) => d.isCurrent && d.userName === "sehal")).toBe(true);
+    expect(devices.every((d: any) => d.token === undefined)).toBe(true);
+    // Members don't see the household's devices.
+    expect((await server.request("/api/admin/devices", { token: joined.token })).status).toBe(403);
+    expect((await server.request(`/api/admin/devices/${bobs.id}`, { method: "DELETE", token })).status).toBe(200);
+    expect((await server.request("/api/me", { token: joined.token })).status).toBe(401);
   });
 });
 
@@ -232,7 +516,7 @@ describe("library", () => {
 });
 
 describe("playback", () => {
-  test("mp4 + aac direct plays with byte ranges", async () => {
+  test.skipIf(noFfmpeg)("mp4 + aac direct plays with byte ranges", async () => {
     const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 1 } }));
     expect(play.mode).toBe("direct");
     expect(play.nextEpisode).toMatchObject({ season: 1, episode: 2, name: "Second", available: true });
@@ -240,8 +524,8 @@ describe("playback", () => {
     const nextFile = (await json(await server.request("/api/sources?mediaType=episode&tmdbId=9001&season=1&episode=2", { token }))).items[0];
     // Sources carry the labels the apps show as they are.
     expect(nextFile).toMatchObject({ availability: "ready", originLabel: "Library", label: expect.any(String) });
-    for (let i = 0; i < 50 && !server.services.library.get(nextFile.fileId)?.probeJson; i++) await Bun.sleep(100);
-    expect(server.services.library.get(nextFile.fileId)?.probeJson).toBeTruthy();
+    for (let i = 0; i < 50 && !(await (await server.household()).library.get(nextFile.fileId))?.probeJson; i++) await Bun.sleep(100);
+    expect((await (await server.household()).library.get(nextFile.fileId))?.probeJson).toBeTruthy();
     const res = await server.request(play.url, { headers: { Range: "bytes=0-99" } });
     expect(res.status).toBe(206);
     expect(res.headers.get("content-range")).toMatch(/^bytes 0-99\//);
@@ -267,7 +551,7 @@ describe("playback", () => {
     expect(catalogIds).not.toContain("continue");
   });
 
-  test("mkv remuxes to HLS from the resume point", async () => {
+  test.skipIf(noFfmpeg)("mkv remuxes to HLS from the resume point", async () => {
     await server.request("/api/progress", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, positionMs: 90_000, durationMs: 3_600_000 } });
     const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378 } }));
     expect(play.mode).toBe("remux");
@@ -283,7 +567,7 @@ describe("playback", () => {
     expect((await server.request(`/api/play/${play.sessionId}`, { method: "DELETE", token })).status).toBe(200);
   }, 30_000);
 
-  test("embedded and sidecar subtitles are served as WebVTT", async () => {
+  test.skipIf(noFfmpeg)("embedded and sidecar subtitles are served as WebVTT", async () => {
     const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, startMs: 0 } }));
     const tracks = play.subtitleTracks;
     expect(tracks.map((t: any) => [t.external, t.language, t.forced])).toEqual([
@@ -300,7 +584,7 @@ describe("playback", () => {
     server.services.sessions.stop(play.sessionId);
   }, 30_000);
 
-  test("DTS audio is transcoded", async () => {
+  test.skipIf(noFfmpeg)("DTS audio is transcoded", async () => {
     const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 2 } }));
     expect(play.mode).toBe("remux");
     expect(play.reasons.join(" ")).toContain("audio dts");
@@ -310,6 +594,7 @@ describe("playback", () => {
   }, 30_000);
 
   test("progress feeds continue watching and next up", async () => {
+    await server.request("/api/progress", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, positionMs: 90_000, durationMs: 3_600_000 } });
     await server.request("/api/progress", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 1, positionMs: 29_000, durationMs: 30_000 } });
     const { shelves } = await json(await server.request("/api/home", { token }));
     const cont = shelves.find((s: any) => s.id === "continue");

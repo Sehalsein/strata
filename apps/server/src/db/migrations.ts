@@ -1,45 +1,142 @@
-// Append-only. Each entry runs once, in order, inside a transaction. Never edit a
-// migration that has shipped; add a new one instead.
+// Postgres (bundled PGlite at home, Neon or any Postgres in the cloud). Append-only:
+// each entry runs once, in order, in a transaction. Never edit one that has shipped;
+// add a new one. Times are milliseconds (BIGINT) set by the app, except Better Auth's
+// own tables, which use TIMESTAMPTZ. Keep in lockstep with schema.ts.
 export const migrations: string[] = [
   /* 1 */ `
-  CREATE TABLE users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    is_admin INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-  CREATE TABLE profiles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+  CREATE TABLE "user" (
+    id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    avatar TEXT,
-    pin_hash TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    email TEXT NOT NULL UNIQUE,
+    email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    image TEXT,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    username TEXT UNIQUE,
+    display_username TEXT,
+    role TEXT,
+    banned BOOLEAN,
+    ban_reason TEXT,
+    ban_expires TIMESTAMPTZ
   );
-  CREATE TABLE sessions (
-    token_hash TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    profile_id INTEGER REFERENCES profiles(id) ON DELETE SET NULL,
-    device_name TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    last_seen_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  CREATE TABLE session (
+    id TEXT PRIMARY KEY,
+    expires_at TIMESTAMPTZ NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    ip_address TEXT,
+    user_agent TEXT,
+    user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+    impersonated_by TEXT,
+    active_organization_id TEXT,
+    viewer_only BOOLEAN DEFAULT FALSE
   );
+  CREATE INDEX session_user_id ON session(user_id);
+  CREATE TABLE account (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+    access_token TEXT,
+    refresh_token TEXT,
+    id_token TEXT,
+    access_token_expires_at TIMESTAMPTZ,
+    refresh_token_expires_at TIMESTAMPTZ,
+    scope TEXT,
+    password TEXT,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+  );
+  CREATE INDEX account_user ON account(user_id);
+  CREATE TABLE verification (
+    id TEXT PRIMARY KEY,
+    identifier TEXT NOT NULL,
+    value TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+  );
+  CREATE INDEX verification_identifier ON verification(identifier);
+  CREATE TABLE organization (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    logo TEXT,
+    created_at TIMESTAMPTZ NOT NULL,
+    metadata TEXT
+  );
+  CREATE TABLE member (
+    id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    content_limit TEXT NOT NULL DEFAULT 'none',
+    is_kids BOOLEAN NOT NULL DEFAULT FALSE
+  );
+  CREATE INDEX member_organization ON member(organization_id);
+  CREATE INDEX member_user ON member(user_id);
+  CREATE TABLE invitation (
+    id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    role TEXT,
+    status TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    inviter_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE
+  );
+  CREATE INDEX invitation_organization ON invitation(organization_id);
+  CREATE INDEX invitation_email ON invitation(email);
+  CREATE TABLE device_code (
+    id TEXT PRIMARY KEY,
+    device_code TEXT NOT NULL UNIQUE,
+    user_code TEXT NOT NULL UNIQUE,
+    user_id TEXT,
+    expires_at TIMESTAMPTZ NOT NULL,
+    status TEXT NOT NULL,
+    last_polled_at TIMESTAMPTZ,
+    polling_interval INTEGER,
+    client_id TEXT,
+    scope TEXT
+  );
+  CREATE TABLE rate_limit (
+    id TEXT PRIMARY KEY,
+    key TEXT NOT NULL UNIQUE,
+    count INTEGER NOT NULL,
+    last_request BIGINT NOT NULL
+  );
+
   CREATE TABLE settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
-  CREATE TABLE tmdb_cache (
+  CREATE TABLE api_cache (
     key TEXT PRIMARY KEY,
     json TEXT NOT NULL,
-    fetched_at INTEGER NOT NULL
+    fetched_at BIGINT NOT NULL
+  );
+  CREATE TABLE auth_attempts (
+    key TEXT PRIMARY KEY,
+    failures INTEGER NOT NULL,
+    window_start BIGINT NOT NULL,
+    locked_until BIGINT
+  );
+  CREATE TABLE household_settings (
+    organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (organization_id, key)
   );
   CREATE TABLE files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
     provider TEXT NOT NULL,
     ref TEXT NOT NULL,
     name TEXT NOT NULL,
-    size INTEGER NOT NULL,
-    mtime INTEGER,
+    size BIGINT NOT NULL,
+    mtime BIGINT,
     parsed_json TEXT,
     probe_json TEXT,
     media_type TEXT,
@@ -47,72 +144,98 @@ export const migrations: string[] = [
     season INTEGER,
     episode INTEGER,
     match_status TEXT NOT NULL DEFAULT 'pending',
-    missing INTEGER NOT NULL DEFAULT 0,
-    added_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    source_hash TEXT,
+    missing BOOLEAN NOT NULL DEFAULT FALSE,
+    added_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL
   );
-  CREATE UNIQUE INDEX files_provider_ref ON files(provider, ref);
-  CREATE INDEX files_tmdb ON files(media_type, tmdb_id, season, episode);
+  CREATE UNIQUE INDEX files_provider_ref ON files(organization_id, provider, ref);
+  CREATE INDEX files_tmdb ON files(organization_id, media_type, tmdb_id, season, episode);
+  CREATE INDEX files_source_hash ON files(organization_id, source_hash);
+  CREATE TABLE torbox_added (
+    organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+    torrent_id BIGINT NOT NULL,
+    hash TEXT NOT NULL,
+    name TEXT,
+    added_at BIGINT NOT NULL,
+    last_played_at BIGINT,
+    PRIMARY KEY (organization_id, torrent_id)
+  );
   CREATE TABLE media_items (
+    organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
     type TEXT NOT NULL,
     tmdb_id INTEGER NOT NULL,
     title TEXT NOT NULL,
     year INTEGER,
     poster_path TEXT,
     backdrop_path TEXT,
-    added_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    PRIMARY KEY (type, tmdb_id)
+    added_at BIGINT NOT NULL,
+    genre_ids TEXT,
+    PRIMARY KEY (organization_id, type, tmdb_id)
   );
   CREATE TABLE progress (
-    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
     media_type TEXT NOT NULL,
     tmdb_id INTEGER NOT NULL,
     season INTEGER NOT NULL DEFAULT 0,
     episode INTEGER NOT NULL DEFAULT 0,
     position_ms INTEGER NOT NULL,
     duration_ms INTEGER NOT NULL,
-    completed INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    PRIMARY KEY (profile_id, media_type, tmdb_id, season, episode)
+    completed BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at BIGINT NOT NULL,
+    PRIMARY KEY (user_id, media_type, tmdb_id, season, episode)
+  );
+  CREATE TABLE continue_hidden (
+    user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    tmdb_id INTEGER NOT NULL,
+    hidden_at BIGINT NOT NULL,
+    PRIMARY KEY (user_id, type, tmdb_id)
   );
   CREATE TABLE watchlist (
-    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
     type TEXT NOT NULL,
     tmdb_id INTEGER NOT NULL,
-    added_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    PRIMARY KEY (profile_id, type, tmdb_id)
+    added_at BIGINT NOT NULL,
+    PRIMARY KEY (user_id, type, tmdb_id)
   );
+  CREATE TABLE play_sessions (
+    id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+    file_id INTEGER NOT NULL,
+    target_json TEXT NOT NULL,
+    plan_json TEXT NOT NULL,
+    input TEXT NOT NULL,
+    created_at BIGINT NOT NULL,
+    last_access_at BIGINT NOT NULL
+  );
+  CREATE INDEX play_sessions_organization ON play_sessions(organization_id);
   `,
-  /* 2 */ `
-  ALTER TABLE files ADD COLUMN source_hash TEXT;
-  CREATE INDEX files_source_hash ON files(source_hash);
-  `,
-  /* 3 */ `
-  ALTER TABLE sessions ADD COLUMN viewer_only INTEGER NOT NULL DEFAULT 0;
-  `,
-  /* 4 */ `
-  ALTER TABLE media_items ADD COLUMN genre_ids TEXT;
-  `,
-  /* 5 */ `
-  CREATE TABLE torbox_added (
-    torrent_id INTEGER PRIMARY KEY,
-    hash TEXT NOT NULL,
+  /* 2: passkeys */ `
+  CREATE TABLE passkey (
+    id TEXT PRIMARY KEY,
     name TEXT,
-    added_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    last_played_at INTEGER
+    public_key TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+    credential_id TEXT NOT NULL,
+    counter INTEGER NOT NULL,
+    device_type TEXT NOT NULL,
+    backed_up BOOLEAN NOT NULL,
+    transports TEXT,
+    created_at TIMESTAMPTZ,
+    aaguid TEXT
   );
+  CREATE INDEX passkey_user_id ON passkey(user_id);
+  CREATE INDEX passkey_credential_id ON passkey(credential_id);
   `,
-  /* 6 */ `
-  ALTER TABLE profiles ADD COLUMN content_limit TEXT NOT NULL DEFAULT 'none';
-  ALTER TABLE profiles ADD COLUMN is_kids INTEGER NOT NULL DEFAULT 0;
+  /* 3: what each signed-in device is and where it was last seen */ `
+  ALTER TABLE session ADD COLUMN location TEXT, ADD COLUMN device_name TEXT, ADD COLUMN device_model TEXT;
   `,
-  /* 7 */ `
-  CREATE TABLE continue_hidden (
-    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-    type TEXT NOT NULL,
-    tmdb_id INTEGER NOT NULL,
-    hidden_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    PRIMARY KEY (profile_id, type, tmdb_id)
-  );
+  /* 4: a temporary password from an admin, to be replaced at the next sign-in */ `
+  ALTER TABLE "user" ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+  `,
+  /* 5: the cloud confirms new accounts' email; accounts from before count as confirmed */ `
+  UPDATE "user" SET email_verified = TRUE WHERE email_verified = FALSE;
   `,
 ];

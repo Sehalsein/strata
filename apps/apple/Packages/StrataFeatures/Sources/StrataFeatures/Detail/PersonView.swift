@@ -42,10 +42,8 @@ struct PersonView: View {
 
     private func header(_ p: PersonDetail) -> some View {
         HStack(alignment: .top, spacing: Metrics.space6) {
-            AsyncImage(url: p.profileUrl) { phase in
-                if case .success(let image) = phase { image.resizable().scaledToFill() } else {
-                    Theme.surface2.overlay { Text(p.name.prefix(1)).font(.stDisplay).foregroundStyle(Theme.ink3) }
-                }
+            RemoteImage(url: p.profileUrl, maxPixel: Int(photo * 1.5 * 3)) {
+                Theme.surface2.overlay { Text(p.name.prefix(1)).font(.stDisplay).foregroundStyle(Theme.ink3) }
             }
             .frame(width: photo, height: photo * 1.5)
             .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))

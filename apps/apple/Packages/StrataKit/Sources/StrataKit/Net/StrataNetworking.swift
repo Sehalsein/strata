@@ -26,6 +26,11 @@ public enum StrataNetworking {
         cfg.timeoutIntervalForResource = 60
         cfg.urlCache = nil
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
+        // Signed in by bearer token only: never keep the server's session cookies (see
+        // `StrataClient.request`).
+        cfg.httpCookieAcceptPolicy = .never
+        cfg.httpShouldSetCookies = false
+        cfg.httpCookieStorage = nil
         return URLSession(configuration: cfg)
     }()
 }

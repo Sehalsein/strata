@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHash, generateKeyPairSync } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPrivateKey, loadPublicKey, manifestUrlFor, parseManifest, resolveManifestUrl, signManifest, verifyManifestSignature, type Manifest } from "../src/update/manifest";
@@ -103,7 +103,7 @@ describe("signatures", () => {
   });
 
   test("refuses non-Ed25519 keys", () => {
-    const rsa = generateKeyPairSync("rsa", { modulusLength: 1024 });
+    const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
     expect(() => loadPrivateKey(rsa.privateKey.export({ format: "pem", type: "pkcs8" }).toString())).toThrow(/Ed25519/);
   });
 
@@ -170,8 +170,8 @@ describe("rollback marker", () => {
   test("rolls back binary and database after repeated failed boots", () => {
     writeFileSync(join(dir, "strata-server"), "new-binary");
     writeFileSync(join(dir, "strata-server.old"), "old-binary");
-    writeFileSync(join(dir, "strata.db"), "migrated-db");
-    writeFileSync(join(dir, "strata.db-wal"), "wal");
+    mkdirSync(join(dir, "strata.db"));
+    writeFileSync(join(dir, "strata.db", "PG_VERSION"), "migrated-db");
     writeFileSync(join(dir, "backup.db"), "original-db");
     writeMarker(dir, marker());
 
@@ -181,8 +181,9 @@ describe("rollback marker", () => {
 
     expect(readFileSync(join(dir, "strata-server"), "utf8")).toBe("old-binary");
     expect(existsSync(join(dir, "strata-server.old"))).toBe(false);
-    expect(readFileSync(join(dir, "strata.db"), "utf8")).toBe("original-db");
-    expect(existsSync(join(dir, "strata.db-wal"))).toBe(false);
+    // The migrated database is gone; the snapshot waits for the next start to restore.
+    expect(existsSync(join(dir, "strata.db"))).toBe(false);
+    expect(readFileSync(join(dir, "strata.db.restore.tar.gz"), "utf8")).toBe("original-db");
     expect(readMarker(dir)).toBeNull();
     expect(readLastUpdate(dir)).toMatchObject({ result: "rolled-back", toVersion: "0.2.0" });
     // The restored old version boots normally.
@@ -238,7 +239,7 @@ describe("Updater", () => {
       feedBaseUrl: "https://u.test",
       settings: () => ({ updateChannel: "stable", autoUpdate: false, updateManifestUrl: "" }),
       activeSessions: opts.sessions ?? (() => 0),
-      backupDb: () => null,
+      backupDb: async () => null,
       fetch: fake,
       idlePollMs: 5,
       probeVersion: async () => opts.manifest.version,
@@ -322,7 +323,7 @@ describe("Updater without a feed", () => {
       feedBaseUrl: "",
       settings: () => ({ updateChannel: "stable", autoUpdate: false, updateManifestUrl: "" }),
       activeSessions: () => 0,
-      backupDb: () => null,
+      backupDb: async () => null,
       fetch: (async () => {
         throw new Error("must not fetch");
       }) as unknown as typeof fetch,

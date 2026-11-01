@@ -1,13 +1,13 @@
 # Strata for Apple platforms
 
-The SwiftUI client for Strata servers on **iPhone, iPad and Apple TV** (iOS / iPadOS / tvOS 26+). It browses the server's catalog, plays what the server offers, and keeps progress per profile. Sources are server-driven: the app shows a title's sources (and lets you pick one) only when the server lists some, and shows the server's own labels. It can be signed in to several Strata servers at once. The design follows the [Strata Design System](https://claude.ai/artifact/QefputW8ZwjL9kcAjqX8tu): a dark-first look, SF Pro, and Liquid Glass for every control that floats over content.
+The SwiftUI client for Strata servers on **iPhone, iPad and Apple TV** (iOS / iPadOS / tvOS 26+). It browses the server's catalog, plays what the server offers, and keeps progress per account. Sources are server-driven: the app shows a title's sources (and lets you pick one) only when the server lists some, and shows the server's own labels. It keeps several sign-ins (people's accounts, on one server or several) and switches between them from "Who's watching?". The design follows the [Strata Design System](https://claude.ai/artifact/QefputW8ZwjL9kcAjqX8tu): a dark-first look, SF Pro, and Liquid Glass for every control that floats over content.
 
 | Package | What it does |
 |---|---|
 | `Packages/StrataKit` | Server API client (`StrataClient`), models, multi-server `ServerStore` (Keychain tokens, address failover), Bonjour `ServerBrowser` (`_strata._tcp`), device playback capabilities, HLS media-time maths |
 | `Packages/StrataDesign` | Tokens (`Theme`, `Metrics`, type scale), artwork and placeholder views, poster/continue cards, rails, hero, glass buttons, badges, availability labels, the Strata mark |
 | `Packages/StrataPlayerUI` | `PlayerEngine` (AVPlayer over the server's direct/HLS streams, restart-on-seek outside the produced range, WebVTT subtitles, progress reporting), the glass player chrome, Now Playing / remote commands / PiP / AirPlay bridges |
-| `Packages/StrataFeatures` | Screens: connect (Bonjour + manual address), sign-in, profiles, Home, Movies, Shows, Search, My List, movie and show pages, source picker, player |
+| `Packages/StrataFeatures` | Screens: connect (Bonjour + manual address), sign-in (password, home-network join, TV code), Who's watching, households, Home, Movies, Shows, Search, My List, movie and show pages, source picker, player |
 | `App/` | `@main` app and app delegate |
 | `StrataWidgets/` | Lock Screen / Dynamic Island Now Playing Live Activity |
 
@@ -28,7 +28,7 @@ Debug builds accept `-StrataOpenURL strata://…` as a launch argument to open a
 
 ```sh
 cd Packages/StrataKit && swift test
-# Live tests against a running server (token must have a profile selected):
+# Live tests against a running server (StrataKit sets it up on first run; the token must have a household):
 STRATA_TEST_SERVER=http://127.0.0.1:8420 STRATA_TEST_TOKEN=… swift test           # StrataKit integration
 cd ../StrataPlayerUI && STRATA_TEST_SERVER=… STRATA_TEST_TOKEN=… swift test       # PlayerEngine playback
 ```

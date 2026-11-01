@@ -17,7 +17,7 @@ export function parseTorboxRef(ref: string): { kind: TorboxKind; itemId: number;
 }
 
 /** Upserts the video files of one finished TorBox item. */
-export function ingestItem(library: Library, kind: TorboxKind, item: TorboxItem): FileRow[] {
+export async function ingestItem(library: Library, kind: TorboxKind, item: TorboxItem): Promise<FileRow[]> {
   const rows: FileRow[] = [];
   // When it was added to TorBox: what "Recently Added" sorts by.
   const added = item.created_at ? Date.parse(item.created_at) : NaN;
@@ -26,7 +26,7 @@ export function ingestItem(library: Library, kind: TorboxKind, item: TorboxItem)
     const segments = path.split("/").filter(Boolean);
     if (!isVideoFile(segments[segments.length - 1] ?? "")) continue;
     rows.push(
-      library.upsert({
+      await library.upsert({
         provider: "torbox",
         ref: torboxRef(kind, item.id, file.id),
         name: segments[segments.length - 1]!,
@@ -59,14 +59,14 @@ export async function syncTorbox(client: TorboxClient, library: Library, report:
     for (const item of list) {
       if (!(item.download_present || item.download_finished)) continue;
       items++;
-      seen.push(...ingestItem(library, kind, item).map((f) => f.ref));
+      seen.push(...(await ingestItem(library, kind, item)).map((f) => f.ref));
     }
     report(items, 0, `Listed ${kind}`);
   }
   let missing = 0;
-  for (const kind of listed) missing += library.markMissing("torbox", seen, `${kind}:`);
+  for (const kind of listed) missing += await library.markMissing("torbox", seen, `${kind}:`);
   const { matched, unmatched } = await library.matchPending((done, total) => report(done, total, "Matching titles"));
-  library.pruneOrphans();
+  await library.pruneOrphans();
   log.info(`Synced ${items} TorBox item(s): ${seen.length} video files`);
   return { items, files: seen.length, missing, matched, unmatched };
 }

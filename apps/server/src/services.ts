@@ -1,147 +1,182 @@
-import { lt } from "drizzle-orm";
-import { tmdbCache } from "./db/schema";
+import { lt, sql } from "drizzle-orm";
 import { join } from "node:path";
-import { Auth } from "./auth";
-import { CatalogService } from "./catalog/service";
-import { CalendarService } from "./catalog/calendar";
-import { Matcher } from "./catalog/matcher";
-import { Tmdb } from "./catalog/tmdb";
+import { existsSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { createAuth, type Auth } from "./auth/betterAuth";
 import { dataPaths, type DataPaths, type RuntimeConfig } from "./config";
-import { openDatabase, type Db } from "./db";
+import { backupDatabase, closeDatabase, openDatabase, rowsOf, type Db } from "./db";
+import { organization, session as authSession, user, verification } from "./db/schema";
+import { ApiCache } from "./catalog/apiCache";
+import { Throttle } from "./throttle";
+import { announceSetupCode } from "./setupCode";
+import { defaultProfile, type DeploymentProfile } from "./profile";
 import { Jobs } from "./jobs";
-import { Library } from "./library";
 import { logger, setLogDir } from "./log";
-import { PlaybackService } from "./playback/service";
 import { SessionManager } from "./playback/sessions";
 import { detectFfmpeg, type FfmpegInfo } from "./platform/ffmpeg";
-import { installFfmpeg, type FfmpegSetup } from "./platform/ffmpegInstall";
+import { installFfmpeg, unpackEmbeddedFfmpeg, type FfmpegSetup } from "./platform/ffmpegInstall";
 import { KeepAwake } from "./platform/keepAwake";
 import { ProgressStore } from "./progress";
-import { ContentFilter } from "./catalog/contentRating";
 import { Anilist } from "./catalog/anime/anilist";
 import { Kitsu } from "./catalog/anime/kitsu";
-import { AnimeIds } from "./catalog/anime/ids";
-import { AnimeMatcher } from "./catalog/anime/match";
-import { TorboxHousekeeping } from "./sources/torbox/cleanup";
-import { DeviceLinks } from "./deviceLink";
+import { AnimeIds, cachedAnimeIdStore, fileAnimeIdStore } from "./catalog/anime/ids";
 import { SecretBox } from "./secrets";
-import { SettingsStore } from "./settings";
-import { scanLocal } from "./sources/local/scanner";
-import { TorboxClient } from "./sources/torbox/client";
-import { parseTorboxRef, syncTorbox } from "./sources/torbox/sync";
-import { Discovery } from "./sources/discovery";
+import { serverSettingsSchema, SERVER_SECRET_KEYS, SettingsStore, type ServerSettingsStore } from "./settings";
 import { SubtitleService } from "./playback/subtitles";
 import { Bonjour } from "./platform/bonjour";
-import { loadServerId } from "./platform/network";
-import { createUpdater, type Updater } from "./update";
+import { createUpdater, deployedUpdates, type SelfUpdate } from "./update";
 import { API_VERSION, VERSION } from "./version";
+import { Households, type Household } from "./household";
+import { runtime } from "#runtime";
+import { globalFetch } from "./net";
+import { JOB_SCHEDULE, nextScheduledRun } from "./cloudSchedule";
 
 const log = logger("server");
 const MINUTE = 60_000;
 
 export interface Services {
   config: RuntimeConfig;
+  /** What this server does (home or cloud, Bun or Workers, the demo): see profile.ts. */
+  profile: DeploymentProfile;
   paths: DataPaths;
   db: Db;
-  settings: SettingsStore;
+  /** The server's own settings (its provider keys come from its environment). */
+  settings: ServerSettingsStore;
+  /** Accounts, sign-in and households (Better Auth). */
   auth: Auth;
-  deviceLinks: DeviceLinks;
-  tmdb: Tmdb;
-  library: Library;
+  households: Households;
+  throttle: Throttle;
+  cache: ApiCache;
   progress: ProgressStore;
-  catalog: CatalogService;
-  calendar: CalendarService;
-  content: ContentFilter;
   sessions: SessionManager;
-  playback: PlaybackService;
-  discovery: Discovery;
   subtitles: SubtitleService;
   jobs: Jobs;
   /** Stable per-install id (advertised over Bonjour, returned by /api/info). */
   serverId: string;
   bonjour: Bonjour;
-  updater: Updater;
+  updater: SelfUpdate;
   ffmpeg: () => FfmpegInfo | null;
   /** The one-time ffmpeg download, when the server had to set ffmpeg up itself. */
   ffmpegSetup: () => FfmpegSetup;
-  torbox: () => TorboxClient | null;
+  /** Whether any account exists (setup has run). */
+  hasAccounts: () => Promise<boolean>;
+  /** Every household's id. */
+  householdIds: () => Promise<string[]>;
   startedAt: number;
   shutdown: () => void;
 }
 
 export interface ServiceOverrides {
   fetch?: typeof fetch;
+  /** Run as another kind of server (tests: cloud, or cloud on Bun, in the same process). */
+  profile?: DeploymentProfile;
   ffmpeg?: FfmpegInfo | null;
 }
 
 export async function createServices(config: RuntimeConfig, overrides: ServiceOverrides = {}): Promise<Services> {
+  const profile = overrides.profile ?? defaultProfile();
   const paths = dataPaths(config.dataDir);
-  setLogDir(paths.logs);
-  const db = openDatabase(paths.db, paths.backups);
-  const settings = new SettingsStore(db, SecretBox.load(paths.secretKey));
-  const fetchImpl = overrides.fetch ?? fetch;
+  if (profile.runtime === "bun") setLogDir(paths.logs);
+  const db = await openDatabase(config.databaseUrl ?? paths.db);
+  const box = SecretBox.load(profile.localState ? paths.secretKey : null);
+  const settings = new SettingsStore(db, box, serverSettingsSchema, SERVER_SECRET_KEYS);
+  await settings.load();
+  const fetchImpl = overrides.fetch ?? globalFetch;
+  const cache = new ApiCache(db);
+  const throttle = new Throttle(db);
+  const auth = createAuth({ db, profile, secretKey: box.signingKey(), baseURL: process.env.STRATA_PUBLIC_URL || undefined });
+  const hasAccounts = async () => (await db.select({ id: user.id }).from(user).limit(1)).length > 0;
+  const householdIds = async () => (await db.select({ id: organization.id }).from(organization)).map((o) => o.id);
+  if (profile.firstRunSetup && !(await hasAccounts())) await announceSetupCode(db);
 
-  let ffmpegInfo = overrides.ffmpeg !== undefined ? overrides.ffmpeg : await detectFfmpeg(paths.root);
+  // A release binary carries its own ffmpeg: unpacked into the data folder on first start.
+  if (profile.localMedia && overrides.ffmpeg === undefined) await unpackEmbeddedFfmpeg(paths.root).catch((err) => log.warn("Couldn't set up the built-in ffmpeg", err));
+  let ffmpegInfo = overrides.ffmpeg !== undefined ? overrides.ffmpeg : profile.localMedia ? await detectFfmpeg(paths.root) : null;
   const ffmpeg = () => ffmpegInfo;
 
-  let torboxClient: { key: string; client: TorboxClient } | undefined;
-  const torbox = () => {
-    const key = settings.getSecret("torboxApiKey");
-    if (!key) return null;
-    if (torboxClient?.key !== key) torboxClient = { key, client: new TorboxClient(key, fetchImpl) };
-    return torboxClient.client;
+  const anime = {
+    ids: new AnimeIds(profile.localState ? fileAnimeIdStore(join(paths.root, "cache")) : cachedAnimeIdStore(cache), fetchImpl, profile.runtime === "bun"),
+    anilist: new Anilist(cache, fetchImpl),
+    kitsu: new Kitsu(cache, fetchImpl),
+  };
+  const progress = new ProgressStore(db);
+  const sessions = new SessionManager(
+    db,
+    !profile.localMedia ? null : { transcodeDir: paths.transcode, getFfmpeg: ffmpeg, keepAwake: new KeepAwake(), maxTranscodes: () => settings.get().maxTranscodes, hwAllowed: () => settings.get().hardwareAcceleration },
+  );
+  const subtitles = new SubtitleService(join(paths.root, "cache", "subtitles"), ffmpeg);
+  const households = new Households({ db, box, serverSettings: settings, cache, throttle, anime, progress, sessions, ffmpeg, fetch: fetchImpl });
+
+  /** Runs `fn` for every household, one after another; a failing one doesn't stop the rest. */
+  const eachHousehold = async (what: string, fn: (h: Household) => Promise<unknown>) => {
+    let done = 0;
+    for (const id of await householdIds()) {
+      try {
+        await fn(await households.get(id));
+        done++;
+      } catch (err) {
+        log.warn(`${what} failed for household ${id.slice(0, 8)}`, err);
+      }
+    }
+    return { households: done };
   };
 
-  const tmdb = new Tmdb(db, () => settings.getSecret("tmdbApiKey"), () => settings.get().language, fetchImpl);
-  const animeIds = new AnimeIds(join(paths.root, "cache"), fetchImpl);
-  const anilist = new Anilist(db, fetchImpl);
-  const kitsu = new Kitsu(db, fetchImpl);
-  const library = new Library(db, tmdb, new Matcher(tmdb, new AnimeMatcher(anilist, animeIds, tmdb, kitsu)));
-  const progress = new ProgressStore(db);
-  const catalog = new CatalogService(tmdb, library, progress, () => settings.get(), { ids: animeIds, anilist, kitsu });
-  const content = new ContentFilter(db, tmdb, () => settings.get());
-  const calendar = new CalendarService(tmdb, library, progress, { ids: animeIds, anilist }, (profileId, id) => content.allowed(profileId, "show", id));
-  const sessions = new SessionManager(paths.transcode, ffmpeg, new KeepAwake(), () => settings.get().maxTranscodes, () => settings.get().hardwareAcceleration);
-  const subtitles = new SubtitleService(join(paths.root, "cache", "subtitles"), ffmpeg);
-  const housekeeping = new TorboxHousekeeping(db, library);
-  const discovery = new Discovery(tmdb, library, () => settings.get(), torbox, fetchImpl, (id, hash, name) => housekeeping.recordAdded(id, hash, name), animeIds);
-  const playback = new PlaybackService(library, sessions, progress, () => settings.get(), ffmpeg, torbox, discovery, (id, s, e) => catalog.nextEpisode(id, s, e), (id) => housekeeping.recordPlayed(id));
-
-  const jobs = new Jobs();
-  jobs.register("scanLocal", (report) => scanLocal(library, settings.get().mediaFolders, report));
-  jobs.register("syncTorbox", async (report) => {
-    const client = torbox();
-    if (!client) return { skipped: "TorBox not configured" };
-    return syncTorbox(client, library, report);
+  // The cloud's jobs run on whichever instance a cron or a request lands on: their last
+  // runs are kept in the database. Only Cron Triggers say when they run next; timers know.
+  const jobs = new Jobs(
+    profile.sharedJobHistory
+      ? {
+          history: {
+            load: async () =>
+              Object.fromEntries(rowsOf<{ key: string; value: string }>(await db.execute(sql`SELECT key, value FROM strata_meta WHERE key LIKE 'job:%'`)).map((r) => [r.key.slice(4), JSON.parse(r.value)])),
+            save: async (name, run) => {
+              await db.execute(sql`INSERT INTO strata_meta (key, value) VALUES (${`job:${name}`}, ${JSON.stringify(run)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
+            },
+          },
+          ...(profile.scheduler === "cron" ? { nextRun: (name: string) => nextScheduledRun(name) } : {}),
+        }
+      : {},
+  );
+  // Local folders, the bundled database, ffmpeg and self-updates are a home server's only:
+  // a scheduled job registers only where JOB_SCHEDULE says it can run.
+  const register = (name: string, fn: Parameters<Jobs["register"]>[1]) => {
+    const needs = JOB_SCHEDULE[name]?.needs;
+    if (!needs || profile[needs]) jobs.register(name, fn);
+  };
+  register("scanLocal", () => eachHousehold("Scanning folders", (h) => h.scanFolders()));
+  // Each household with a key, at most every `torboxSyncMinutes` (the job itself runs every 15).
+  register("syncTorbox", () => eachHousehold("TorBox sync", (h) => h.syncTorboxIfDue()));
+  register("matchPending", () => eachHousehold("Matching", (h) => h.library.matchPending()));
+  register("refreshAnimeIds", async () => {
+    await anime.ids.refresh();
+    return { entries: anime.ids.size };
   });
-  jobs.register("matchPending", (report) => library.matchPending((d, t) => report(d, t, "Matching titles")));
-  jobs.register("refreshAnimeIds", async () => {
-    await animeIds.ready();
-    return { entries: animeIds.size };
-  });
-  jobs.register("cleanTorbox", async () => {
-    const client = torbox();
-    if (!client) return { skipped: "TorBox not configured" };
-    // Never pull a torrent out from under something that's streaming it (checked per torrent).
-    const streaming = (id: number) =>
-      sessions.list().some((s) => {
-        const ref = library.get(s.fileId)?.ref;
-        return !!ref?.startsWith("torrents:") && parseTorboxRef(ref).itemId === id;
-      });
-    return housekeeping.clean(client, settings.get().torboxCleanupDays, streaming);
-  });
+  register("cleanTorbox", () => eachHousehold("TorBox cleanup", (h) => h.cleanTorbox()));
   // Catalog answers (TMDB, Kitsu, AniList) a month unused are only taking space.
-  jobs.register("pruneCatalogCache", async () => {
-    const removed = db.delete(tmdbCache).where(lt(tmdbCache.fetchedAt, Date.now() - 30 * 24 * 60 * MINUTE)).returning({ key: tmdbCache.key }).all().length;
-    return { removed };
+  register("pruneCatalogCache", async () => ({ removed: await cache.prune() }));
+  // Plays long over, old failed-attempt counts, and sign-ins and one-time links past their
+  // expiry: a device's details (address, location) go with its sign-in, as /privacy says.
+  register("pruneAuth", async () => {
+    await sessions.prune();
+    await throttle.prune();
+    const now = new Date();
+    const expired = await db.delete(authSession).where(lt(authSession.expiresAt, now)).returning({ id: authSession.id });
+    await db.delete(verification).where(lt(verification.expiresAt, now));
+    return { expiredSignIns: expired.length };
   });
-  jobs.register("detectFfmpeg", async () => {
+  // A home server's bundled database, copied once a day into <data-dir>/backups (the last
+  // week kept). Elsewhere the database's own host backs it up (Neon keeps a history).
+  register("backupDatabase", async () => {
+    const file = await backupDatabase(db, paths.backups, "daily");
+    return file ? { file } : { skipped: "the database isn't the bundled one" };
+  });
+  if (profile.localMedia) jobs.register("detectFfmpeg", async () => {
     ffmpegInfo = await detectFfmpeg(paths.root);
     return { found: !!ffmpegInfo };
   });
   // No ffmpeg on the machine: the server fetches its own (pinned, checksummed) into <data-dir>/bin.
   let ffmpegSetup: FfmpegSetup = { state: "idle" };
-  jobs.register("installFfmpeg", async () => {
+  if (profile.localMedia) jobs.register("installFfmpeg", async () => {
     if (ffmpegInfo) return { skipped: "ffmpeg is already available" };
     ffmpegSetup = { state: "downloading" };
     try {
@@ -157,50 +192,56 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
       throw err;
     }
   });
-  if (!ffmpegInfo && overrides.ffmpeg === undefined && process.env.STRATA_NO_FFMPEG_DOWNLOAD !== "1") void jobs.run("installFfmpeg");
+  // The cloud server plays nothing through ffmpeg (no local folders); only a home server fetches it.
+  if (profile.localMedia && !ffmpegInfo && overrides.ffmpeg === undefined && process.env.STRATA_NO_FFMPEG_DOWNLOAD !== "1") void jobs.run("installFfmpeg");
 
-  const serverId = loadServerId(paths.root);
-  const updater = createUpdater({ dataDir: paths.root, dbPath: paths.db, backupsDir: paths.backups, db, settings, activeSessions: () => sessions.list().length, fetch: fetchImpl });
-  jobs.register("checkUpdates", () => updater.checkAndMaybeApply());
+  const serverId = await loadServerId(db, profile.localState ? paths.root : null);
+  // Only local streams run through this server; TorBox plays don't mind an update.
+  const updater: SelfUpdate = !profile.selfUpdate
+    ? deployedUpdates(profile.runtime === "workers" ? "Deployed on Cloudflare: update by deploying a new version" : "A cloud server: update by deploying a new version", () => settings.get())
+    : createUpdater({ dataDir: paths.root, dbPath: paths.db, backupsDir: paths.backups, db, settings, activeSessions: () => sessions.activeTranscodes(), fetch: fetchImpl });
+  register("checkUpdates", () => updater.checkAndMaybeApply());
   // Started by main.ts once the HTTP server is listening; refreshed when the name/toggle changes.
   const bonjour = new Bonjour(() => {
     const s = settings.get();
-    return s.bonjourEnabled ? { name: s.serverName, port: config.port, txt: { version: VERSION, api: String(API_VERSION), id: serverId } } : null;
+    return s.bonjourEnabled && profile.bonjour ? { name: s.serverName, port: config.port, txt: { version: VERSION, api: String(API_VERSION), id: serverId } } : null;
   });
   settings.onChange(() => bonjour.refresh());
 
-  const applySchedule = () => {
-    const s = settings.get();
-    jobs.schedule("scanLocal", s.scanIntervalMinutes * MINUTE, 5_000);
-    jobs.schedule("syncTorbox", s.torboxSyncMinutes * MINUTE, 8_000);
-  };
-  let scheduled = { scan: -1, sync: -1, folders: "" };
-  settings.onChange((s) => {
-    const folders = JSON.stringify(s.mediaFolders);
-    // Only reschedule (and kick a run) when something relevant changed.
-    if (scheduled.scan !== s.scanIntervalMinutes || scheduled.sync !== s.torboxSyncMinutes || scheduled.folders !== folders) {
-      if (scheduled.folders !== folders && scheduled.folders !== "") void jobs.run("scanLocal");
-      scheduled = { scan: s.scanIntervalMinutes, sync: s.torboxSyncMinutes, folders };
-      applySchedule();
+  // In-process timers on Bun; Cron Triggers run the same jobs on Workers (src/worker.ts).
+  if (profile.scheduler === "timers" && process.env.STRATA_NO_JOBS !== "1") {
+    for (const [name, spec] of Object.entries(JOB_SCHEDULE)) {
+      if (spec.needs && !profile[spec.needs]) continue;
+      const every = typeof spec.everyMs === "function" ? spec.everyMs(settings.get()) : spec.everyMs;
+      jobs.schedule(name, every, spec.firstAfterMs);
     }
-  });
-  const initial = settings.get();
-  scheduled = { scan: initial.scanIntervalMinutes, sync: initial.torboxSyncMinutes, folders: JSON.stringify(initial.mediaFolders) };
-  if (process.env.STRATA_NO_JOBS !== "1") {
-    applySchedule();
-    jobs.schedule("checkUpdates", 6 * 60 * MINUTE, 60_000);
-    jobs.schedule("cleanTorbox", 24 * 60 * MINUTE, 10 * MINUTE);
-    jobs.schedule("pruneCatalogCache", 24 * 60 * MINUTE, 15 * MINUTE);
-    jobs.schedule("refreshAnimeIds", 24 * 60 * MINUTE, 30_000);
   }
 
   const shutdown = () => {
     bonjour.stop();
     jobs.stop();
     sessions.stopAll();
-    db.$client.close();
+    void closeDatabase(db);
     log.info("Stopped");
   };
+  log.info(`Running as a ${profile.mode} server`);
 
-  return { config, paths, db, settings, auth: new Auth(db), deviceLinks: new DeviceLinks(), tmdb, library, progress, catalog, calendar, content, sessions, playback, discovery, subtitles, jobs, serverId, bonjour, updater, ffmpeg, ffmpegSetup: () => ffmpegSetup, torbox, startedAt: Date.now(), shutdown };
+  return {
+    config, profile, paths, db, settings, auth, households, throttle, cache, progress, sessions, subtitles, jobs, serverId, bonjour, updater, ffmpeg,
+    ffmpegSetup: () => ffmpegSetup, hasAccounts, householdIds, startedAt: Date.now(), shutdown,
+  };
+}
+
+/**
+ * Stable id for this server (advertised over Bonjour, returned by /api/info), kept in the
+ * database so every cloud instance shares it. A home server that had one in its data
+ * folder keeps it.
+ */
+async function loadServerId(db: Db, dataDir: string | null): Promise<string> {
+  const rows = rowsOf<{ value: string }>(await db.execute(sql`SELECT value FROM strata_meta WHERE key = 'server_id'`));
+  if (rows[0]) return rows[0].value;
+  const file = dataDir && join(dataDir, "server-id");
+  const id = file && existsSync(file) ? readFileSync(file, "utf8").trim() : randomUUID();
+  await db.execute(sql`INSERT INTO strata_meta (key, value) VALUES ('server_id', ${id}) ON CONFLICT (key) DO NOTHING`);
+  return id;
 }

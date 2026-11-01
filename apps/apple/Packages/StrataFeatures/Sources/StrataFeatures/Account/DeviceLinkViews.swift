@@ -2,24 +2,20 @@ import SwiftUI
 import StrataKit
 import StrataDesign
 
-/// A server picked on the Connect screen, ready to sign in to.
-struct ServerTarget: Identifiable, Hashable {
-    let url: URL
-    let info: ServerInfo
-    var id: String { url.absoluteString }
-}
-
 #if os(tvOS)
-/// TV sign-in: a QR code a signed-in phone scans to approve this TV, with the
-/// code spelled out for typing in instead. Password sign-in stays one click away.
+/// TV sign-in (RFC 8628 device code): a QR code of the server's link page that a signed-in
+/// phone opens to approve this TV, with the code spelled out for typing in instead. The TV
+/// is then signed in as that account, in its household, able only to watch. Password
+/// sign-in stays one click away.
 struct TVCodeSignInView: View {
     @Environment(AppServices.self) private var services
     let target: ServerTarget
     let onSignedIn: () -> Void
 
-    @State private var link: DeviceLink?
+    @State private var code: DeviceCode?
     @State private var error: String?
-    /// Bumped to fetch a fresh code (the old one expired).
+    @State private var notice: String?
+    /// Bumped to fetch a fresh code (the old one expired or was declined).
     @State private var attempt = 0
     @State private var usePassword = false
 
@@ -28,19 +24,22 @@ struct TVCodeSignInView: View {
             VStack(alignment: .leading, spacing: Metrics.space10) {
                 VStack(alignment: .leading, spacing: Metrics.space3) {
                     Text("Sign in to \(target.info.serverName)").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                    Text("Scan the code with your phone's camera, then tap Approve in Strata.")
+                    Text("Scan the code with your phone's camera and approve this TV from your profile.")
                         .font(.stBody).foregroundStyle(Theme.ink2)
                 }
-                if let link {
+                if let code {
                     VStack(alignment: .leading, spacing: Metrics.space2) {
-                        Text("Or enter this code in Settings › Sign In a TV")
+                        Text("Or enter this code in Strata on your phone, in Settings › Link a TV")
                             .font(.stCallout).foregroundStyle(Theme.ink3)
-                        Text(link.displayCode)
+                        Text(code.displayCode)
                             .font(.system(size: 64, weight: .semibold, design: .monospaced))
                             .tracking(4)
                             .foregroundStyle(Theme.ink)
-                            .accessibilityLabel("Code \(link.displayCode.map(String.init).joined(separator: " "))")
+                            .accessibilityLabel("Code \(code.displayCode.map(String.init).joined(separator: " "))")
                     }
+                }
+                if let notice {
+                    Label(notice, systemImage: "info.circle").font(.stCallout).foregroundStyle(Theme.ink2)
                 }
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle.fill").font(.stCallout).foregroundStyle(Theme.danger)
@@ -50,7 +49,7 @@ struct TVCodeSignInView: View {
             .frame(maxWidth: 820, alignment: .leading)
 
             Group {
-                if let link, let url = link.approvalURL(serverID: target.info.id) {
+                if let code, let url = code.qrURL(server: target.url) {
                     QRCodeView(url.absoluteString, size: 440)
                 } else {
                     RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous)
@@ -64,26 +63,37 @@ struct TVCodeSignInView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.bg.ignoresSafeArea())
         .navigationDestination(isPresented: $usePassword) {
-            SignInView(address: target.url.absoluteString, serverName: target.info.serverName, onSignedIn: onSignedIn)
+            SignInView(target: target, onSignedIn: onSignedIn)
         }
         .task(id: attempt) { await run() }
     }
 
-    /// Gets a code, then polls until a phone approves it. An expired code is
-    /// replaced with a new one; the loop ends when the view goes away.
+    /// Gets a code, then polls at the server's interval until a phone approves it. An
+    /// expired or declined code is replaced with a new one; the loop ends when the view
+    /// goes away.
     private func run() async {
         let client = StrataClient(baseURL: target.url, cacheTTL: 0)
         do {
-            let fresh = try await client.startDeviceLink()
-            link = fresh
+            let fresh = try await client.startDeviceCode()
+            code = fresh
             error = nil
+            var interval = max(1, fresh.interval)
+            let expires = Date().addingTimeInterval(TimeInterval(fresh.expiresIn))
             while !Task.isCancelled {
-                try await Task.sleep(for: .milliseconds(max(1000, fresh.pollIntervalMs)))
-                if Date() >= fresh.expiresDate { attempt += 1; return }
-                let poll = try? await client.pollDeviceLink(fresh.pollToken)
-                switch poll?.status {
-                case .approved:
-                    guard let token = poll?.token else { return }
+                try await Task.sleep(for: .seconds(interval))
+                if Date() >= expires { attempt += 1; return }
+                let poll: DeviceTokenPoll
+                do {
+                    poll = try await client.pollDeviceCode(fresh.deviceCode)
+                } catch let e as StrataError where e.kind == .network {
+                    continue // a dropped poll: try again next tick
+                }
+                switch poll {
+                case .pending:
+                    continue
+                case .slowDown:
+                    interval += 5
+                case .approved(let token):
                     if await services.store.signIn(token: token, url: target.url, info: target.info) {
                         onSignedIn()
                     } else {
@@ -93,8 +103,10 @@ struct TVCodeSignInView: View {
                 case .expired:
                     attempt += 1
                     return
-                default:
-                    continue // pending, or a dropped poll: try again next tick
+                case .denied:
+                    notice = "That sign-in was declined on the phone. Here's a new code."
+                    attempt += 1
+                    return
                 }
             }
         } catch is CancellationError {
@@ -108,24 +120,34 @@ struct TVCodeSignInView: View {
 }
 #endif
 
-/// Phone side: confirms and approves a TV's sign-in code, from a scanned QR code
-/// (`request` set) or typed in from Settings (`request` nil).
+/// Phone side: confirms and approves a TV's sign-in code, from the TV's QR code opened in
+/// the app (`request` set) or typed in from Settings (`request` nil). The TV is signed in
+/// as the account approving it, in its current household, and can only watch.
 struct ApproveDeviceView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
     var request: LinkRequest?
 
     @State private var typedCode = ""
-    @State private var pending: PendingDeviceLink?
+    @State private var looked: DeviceCodeStatus?
     @State private var phase: Phase = .idle
     @State private var error: String?
 
-    enum Phase { case idle, looking, approving, done }
+    enum Phase { case idle, looking, approving, done, denied }
 
-    private var serverID: String? { request?.serverID ?? services.store.activeID }
-    private var server: SavedServer? { services.store.servers.first { $0.id == serverID } }
-    private var client: StrataClient? { serverID.flatMap { services.store.client(forServer: $0) } }
-    private var code: String { DeviceLink.normalize(request?.code ?? typedCode) }
+    /// The sign-in that approves: on the server the link names, the active one if it's
+    /// there, else the first saved on that server. Never a server this device hasn't
+    /// signed in to (a QR code could name any address).
+    private var signIn: SavedSignIn? {
+        let store = services.store
+        guard let named = request?.server else { return store.active }
+        guard let server = store.savedServer(matching: named) else { return nil }
+        if let active = store.active, active.serverID == server.id { return active }
+        return store.signIns(onServer: server.id).first
+    }
+    private var server: SavedServer? { signIn.flatMap { services.store.server(for: $0) } }
+    private var client: StrataClient? { signIn.flatMap { services.store.client(forSignIn: $0.id) } }
+    private var code: String { DeviceCode.normalize(request?.code ?? typedCode) }
 
     var body: some View {
         NavigationStack {
@@ -137,12 +159,12 @@ struct ApproveDeviceView: View {
             .padding(.top, Metrics.space6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle("Sign In a TV")
+            .navigationTitle("Link a TV")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(phase == .done ? "Done" : "Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(phase == .done || phase == .denied ? "Done" : "Cancel") { dismiss() } }
             }
         }
         .presentationDetents([.medium, .large])
@@ -152,24 +174,31 @@ struct ApproveDeviceView: View {
     @ViewBuilder private var content: some View {
         if client == nil {
             MessageView(systemImage: "server.rack", title: "Not signed in to that server",
-                        message: "Sign in to the server your TV is using on this phone first, then scan the code again.")
+                        message: "Sign in on this phone to the server your TV is using, then scan the code again.")
         } else if phase == .done {
             VStack(alignment: .leading, spacing: Metrics.space3) {
                 Image(systemName: "checkmark.circle.fill").font(.system(size: 44)).foregroundStyle(Theme.success)
                 Text("Your TV is signed in").font(.stTitle2).foregroundStyle(Theme.ink)
-                Text("Pick a profile on the TV to start watching.").font(.stCallout).foregroundStyle(Theme.ink2)
+                Text("It's watching as \(signIn?.name ?? "you").")
+                    .font(.stCallout).foregroundStyle(Theme.ink2)
             }
-        } else if let pending {
+        } else if phase == .denied {
+            VStack(alignment: .leading, spacing: Metrics.space3) {
+                Image(systemName: "xmark.circle.fill").font(.system(size: 44)).foregroundStyle(Theme.ink3)
+                Text("Sign-in declined").font(.stTitle2).foregroundStyle(Theme.ink)
+                Text("The TV wasn't signed in.").font(.stCallout).foregroundStyle(Theme.ink2)
+            }
+        } else if looked != nil {
             VStack(alignment: .leading, spacing: Metrics.space2) {
-                Text("Approve this sign-in?").font(.stTitle2).foregroundStyle(Theme.ink)
-                Text("“\(pending.deviceName)” will be signed in to \(server?.name ?? "this server") as \(server?.username ?? "you").")
+                Text("Approve this TV?").font(.stTitle2).foregroundStyle(Theme.ink)
+                Text("It will watch as \(signIn?.name ?? "you") on \(server?.name ?? "this server"), and can't change settings.")
                     .font(.stCallout).foregroundStyle(Theme.ink2)
             }
             // Someone could show you a code for their own device; matching the code on
             // your screen is what proves it's yours.
             VStack(alignment: .leading, spacing: Metrics.space2) {
                 Text("Check that your TV shows this code").font(.stFootnote).foregroundStyle(Theme.ink3)
-                Text(DeviceLink(code: code, pollToken: "", expiresAt: 0, pollIntervalMs: 0).displayCode)
+                Text(DeviceCode.display(code))
                     .font(.system(.title, design: .monospaced).weight(.semibold))
                     .tracking(2)
                     .foregroundStyle(Theme.ink)
@@ -180,9 +209,13 @@ struct ApproveDeviceView: View {
             errorLabel
             PrimaryButton("Approve", isLoading: phase == .approving) { Task { await approve() } }
                 .disabled(phase == .approving)
+            Button("Decline", role: .destructive) { Task { await deny() } }
+                .disabled(phase == .approving)
+                .frame(maxWidth: .infinity)
         } else {
             VStack(alignment: .leading, spacing: Metrics.space3) {
-                Text("Enter the code shown on your TV.").font(.stCallout).foregroundStyle(Theme.ink2)
+                Text("Enter the code shown on your TV. It will be signed in to \(server?.name ?? "this server") as \(signIn?.name ?? "you").")
+                    .font(.stCallout).foregroundStyle(Theme.ink2)
                 if request == nil {
                     TextField("K7QF-2MXD", text: $typedCode)
                         .font(.system(.title2, design: .monospaced).weight(.semibold))
@@ -211,15 +244,21 @@ struct ApproveDeviceView: View {
         }
     }
 
+    /// Opens the code, which also claims it for this account so it can be approved.
     private func lookUp() async {
         guard let client, !code.isEmpty else { return }
         phase = .looking
         error = nil
         defer { if phase == .looking { phase = .idle } }
         do {
-            pending = try await client.pendingDeviceLink(code: code)
+            let status = try await client.deviceCodeStatus(userCode: code)
+            if status.isPending {
+                looked = status
+            } else {
+                error = "That code was already used. Ask the TV for a new one."
+            }
         } catch {
-            self.error = StrataError.wrap(error).message
+            self.error = Self.message(error)
         }
     }
 
@@ -228,11 +267,29 @@ struct ApproveDeviceView: View {
         phase = .approving
         error = nil
         do {
-            try await client.approveDeviceLink(code: code)
+            try await client.approveDevice(userCode: code)
             phase = .done
         } catch {
-            self.error = StrataError.wrap(error).message
+            self.error = Self.message(error)
             phase = .idle
+        }
+    }
+
+    private func deny() async {
+        guard let client else { return }
+        try? await client.denyDevice(userCode: code)
+        phase = .denied
+    }
+
+    private static func message(_ error: Error) -> String {
+        let e = StrataError.wrap(error)
+        switch e.code {
+        case "invalid_request" where e.message.localizedCaseInsensitiveContains("invalid user code"):
+            return "There's no such code. Check it against the one on your TV."
+        case "expired_token":
+            return "That code has expired. The TV shows a new one."
+        default:
+            return e.message
         }
     }
 }

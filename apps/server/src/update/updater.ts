@@ -1,3 +1,4 @@
+import type { SelfUpdate } from "./index";
 import { createHash } from "node:crypto";
 import { accessSync, chmodSync, constants, existsSync, renameSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
@@ -43,7 +44,7 @@ export interface UpdaterOptions {
   settings: () => { updateChannel: Channel; autoUpdate: boolean; updateManifestUrl: string };
   activeSessions: () => number;
   /** Backs up the DB; returns the backup path (null when there is nothing to back up). */
-  backupDb: () => string | null;
+  backupDb: () => Promise<string | null>;
   fetch?: typeof fetch;
   idlePollMs?: number;
   /** Runs the downloaded binary with --version and returns what it prints. */
@@ -93,7 +94,7 @@ export const defaultCodesign = async (binary: string) => {
   await run(["codesign", "--force", "--sign", "-", binary]);
 };
 
-export class Updater {
+export class Updater implements SelfUpdate {
   private state: UpdateState = "idle";
   private latest: Manifest | null = null;
   private lastCheckedAt: number | null = null;
@@ -301,7 +302,7 @@ export class Updater {
         }
       }
 
-      const dbBackupPath = this.opts.backupDb();
+      const dbBackupPath = await this.opts.backupDb();
       const oldPath = `${binary}.old`;
       writeMarker(this.opts.dataDir, {
         fromVersion: this.opts.version,

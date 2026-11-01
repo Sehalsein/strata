@@ -9,15 +9,15 @@ struct MovieDetailView: View {
     let tmdbId: Int
     @State private var detail: Loadable<MovieDetail> = .loading
     @State private var inWatchlist = false
-    /// What the server can play this from; nil until it answers.
-    @State private var sources: [Candidate]?
+    /// What Play does, and the sources behind it; nil until the server answers.
+    @State private var playOptions: PlayOptions?
     @State private var showSources = false
 
     var body: some View {
         ScrollView {
             switch detail {
             case .loading:
-                ProgressView().frame(maxWidth: .infinity, minHeight: 500)
+                DetailSkeleton()
             case .failed(let message):
                 MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load this movie", message: message, actionTitle: "Try Again") {
                     Task { await load() }
@@ -27,14 +27,16 @@ struct MovieDetailView: View {
                 content(movie)
             }
         }
+        .heroUnderBar()
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
-        .ignoresSafeArea(edges: .top)
         #if os(tvOS)
         .toolbar(.hidden, for: .tabBar)
         // Content loads after the page appears, so focus Play once it's there
         // (otherwise the back button gets it).
-        .onChange(of: detail.value?.tmdbId) { _, id in if id != nil { playFocused = true } }
+        .onChange(of: detail.value?.tmdbId) { _, id in if id != nil { heroFocus = hasPlay ? .play : .list } }
+        // For a title the server looks up, Play arrives after the page: move to it then.
+        .onChange(of: hasPlay) { _, hasPlay in if hasPlay, heroFocus != .play { heroFocus = .play } }
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -53,24 +55,34 @@ struct MovieDetailView: View {
                           fallbackURL: movie.posterUrl,
                           eyebrow: movie.availabilityLabel ?? "Movie",
                           title: movie.title,
-                          meta: [movie.genres.first, movie.yearText, movie.runtimeText, movie.certification, movie.ratingText.map { "★ \($0)" }].compactMap { $0 },
+                          meta: [movie.genres.first, movie.yearText, movie.runtimeText, movie.certification, movie.ratings.tmdbStar(movie.ratingText)].compactMap { $0 },
                           badges: movie.sources.first?.specLabels.prefix(3).map { $0 } ?? [],
+                          ratings: movie.ratings.badges,
                           overview: movie.overview) {
                 // Plays when it's in the library or the server lists a source for it.
-                if canPlay(movie) {
-                    PlayButton(movie.resumeMs != nil ? "Resume" : "Play") { play(movie, candidateId: movie.isAvailable ? nil : sources?.first?.id) }
+                if let choice = playChoice(movie) {
+                    PlayButton(choice.label) { services.play(choice, title: movie.title, artworkURL: movie.backdropUrl ?? movie.posterUrl) }
                         .glassEffectID("play", in: namespace)
                         #if os(tvOS)
-                        .focused($playFocused)
+                        .focused($heroFocus, equals: .play)
                         #endif
                 }
                 GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV) {
                     Task { await toggleWatchlist(movie) }
                 }
+                #if os(tvOS)
+                .focused($heroFocus, equals: .list)
+                #endif
                 // Only when the server has sources to show.
-                if let sources, !sources.isEmpty {
+                if let sources = playOptions?.sources, !sources.isEmpty {
                     GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV) { showSources = true }
                 }
+                #if os(iOS)
+                if playChoice(movie) != nil {
+                    DownloadButton(target: movie.target, title: movie.title, subtitle: movie.yearText,
+                                   artworkURL: movie.backdropUrl ?? movie.posterUrl, known: playOptions?.sources ?? [])
+                }
+                #endif
                 if let trailer = movie.trailer?.youtubeURL { TrailerButton(url: trailer) }
             }
             #if os(tvOS)
@@ -78,7 +90,7 @@ struct MovieDetailView: View {
             .overlay(alignment: .topLeading) { TVBackButton { dismiss() } }
             #endif
 
-            if !movie.isAvailable, sources?.isEmpty == true {
+            if let playOptions, playOptions.choice == nil {
                 AvailabilityLabel(.unavailable).padding(.horizontal, Metrics.gutter)
             }
 
@@ -107,7 +119,7 @@ struct MovieDetailView: View {
             }
 
             InfoGrid(rows: [
-                ("Original title", movie.anime?.originalTitle ?? ""),
+                ("Original Title", movie.anime?.originalTitle ?? ""),
                 ("Studio", movie.anime?.studios.joined(separator: ", ") ?? ""),
                 ("Directed by", movie.directors.joined(separator: ", ")),
                 ("Genres", movie.genres.joined(separator: ", ")),
@@ -119,19 +131,26 @@ struct MovieDetailView: View {
         .padding(.bottom, Metrics.space12)
         .sheet(isPresented: $showSources) {
             // In the library, the page has only library sources: the sheet asks the server for more.
-            SourcePickerSheet(target: movie.target, title: movie.title, known: sources ?? [], lookFurther: movie.isAvailable) { candidate in
+            SourcePickerSheet(target: movie.target, title: movie.title, known: playOptions?.sources ?? [], lookFurther: playOptions?.lookedFurther == false) { candidate in
                 play(movie, candidateId: candidate.id)
             }
         }
-        // Looking further than the library only where that decides whether it can play.
-        .task(id: movie.tmdbId) { sources = await services.sources(for: movie.target, discover: !movie.isAvailable) }
+        // Asked again only when Play's answer could change (it joins the library, or Play becomes Resume).
+        .task(id: "\(movie.isAvailable)|\(movie.resumeMs != nil)") {
+            playOptions = nil
+            playOptions = await services.titles.play(movie)
+        }
     }
 
     @Namespace private var namespace
 
-    private func canPlay(_ movie: MovieDetail) -> Bool { movie.isAvailable || sources?.isEmpty == false }
+    /// The server's answer once it's in; until then, the library's.
+    private func playChoice(_ movie: MovieDetail) -> PlayChoice? { (playOptions ?? TitleActions.libraryPlay(movie)).choice }
     #if os(tvOS)
-    @FocusState private var playFocused: Bool
+    @FocusState private var heroFocus: HeroFocus?
+    enum HeroFocus: Hashable { case play, list }
+    /// Play is on the page (the library has it, or the server found a source).
+    private var hasPlay: Bool { detail.value.flatMap(playChoice) != nil }
     #endif
 
     private func play(_ movie: MovieDetail, candidateId: String? = nil) {
@@ -142,7 +161,12 @@ struct MovieDetailView: View {
 
     private func load(force: Bool = false) async {
         await services.loadCached(force: force, { try await $0.movie(tmdbId, $1) }) { result in
-            detail = result
+            // Fades in over the skeleton the first time; later reloads swap in place.
+            if case .loading = detail {
+                withAnimation(.easeOut(duration: 0.25)) { detail = result }
+            } else {
+                detail = result
+            }
             if let movie = result.value { inWatchlist = movie.inWatchlist }
         }
     }
@@ -150,7 +174,7 @@ struct MovieDetailView: View {
     private func toggleWatchlist(_ movie: MovieDetail) async {
         inWatchlist.toggle()
         let on = inWatchlist
-        if case .failed = await services.load({ try await $0.setWatchlist(.movie, tmdbId: movie.tmdbId, on) }) { inWatchlist = !on }
+        do { try await services.titles.setOnList(.movie, tmdbId: movie.tmdbId, on) } catch { inWatchlist = !on }
     }
 }
 
@@ -171,10 +195,9 @@ struct CastRail: View {
 
     private func member(_ person: CastMember) -> some View {
         VStack(spacing: Metrics.space2) {
-            AsyncImage(url: person.profileUrl) { phase in
-                if case .success(let image) = phase { image.resizable().scaledToFill() } else {
-                    Theme.surface2.overlay { Text(person.name.prefix(1)).font(.stTitle2).foregroundStyle(Theme.ink3) }
-                }
+            // Cached and decoded off the main thread, so scrolling the rail back doesn't flash.
+            RemoteImage(url: person.profileUrl, maxPixel: Int(avatar * 3)) {
+                Theme.surface2.overlay { Text(person.name.prefix(1)).font(.stTitle2).foregroundStyle(Theme.ink3) }
             }
             .frame(width: avatar, height: avatar)
             .clipShape(Circle())
@@ -184,11 +207,27 @@ struct CastRail: View {
         .frame(width: avatar + 16)
     }
 
+    private var avatar: CGFloat { Self.avatar }
+
     #if os(tvOS)
-    private let avatar: CGFloat = 140
+    static let avatar: CGFloat = 140
     #else
-    private var avatar: CGFloat { Metrics.isPad ? 96 : 72 }
+    @MainActor static var avatar: CGFloat { Metrics.isPad ? 96 : 72 }
     #endif
+}
+
+/// A detail page while it loads, laid out like one (hero, then Cast, then a poster
+/// rail) so the page doesn't jump when it arrives.
+struct DetailSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: Metrics.railGap) {
+            SkeletonHero()
+            SkeletonRail(width: CastRail.avatar, circle: true)
+            SkeletonRail(width: Metrics.posterWidth)
+        }
+        .padding(.bottom, Metrics.space12)
+        .allowsHitTesting(false)
+    }
 }
 
 /// Opens the trailer on YouTube. Labeled where there's room, icon-only on iPhone.

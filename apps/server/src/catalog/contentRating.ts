@@ -1,11 +1,12 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import type { Db } from "../db";
-import { profiles } from "../db/schema";
+import { member } from "../db/schema";
 import { logger } from "../log";
 import type { Settings } from "../settings";
 import type { TitleType } from "./service";
 import type { Tmdb, TmdbMovie, TmdbShow } from "./tmdb";
+import { SharedWork } from "../inFlight";
 
 const log = logger("ratings");
 
@@ -78,36 +79,42 @@ function showCertification(s: TmdbShow, region: string): string | null {
 
 /** Applies a profile's content limit to catalog lists, detail pages and playback. */
 export class ContentFilter {
-  private ages = new Map<string, Promise<{ age: number | null; genres: number[] }>>();
+  /** Ratings looked up, by title and region (failures aren't kept). */
+  private ages = new SharedWork<string, { age: number | null; genres: number[] }>({ remember: true, max: 5_000 });
 
   constructor(
     private readonly db: Db,
+    /** The household whose members' limits apply. */
+    private readonly organizationId: string,
     private readonly tmdb: Tmdb,
     private readonly settings: () => Settings,
   ) {}
 
   /** Max age for a profile, or null when it has no limit. */
-  maxAge(profileId: number): number | null {
-    const row = this.db.select({ limit: profiles.contentLimit }).from(profiles).where(eq(profiles.id, profileId)).get();
+  async maxAge(userId: string): Promise<number | null> {
+    const [row] = await this.db
+      .select({ limit: member.contentLimit })
+      .from(member)
+      .where(and(eq(member.userId, userId), eq(member.organizationId, this.organizationId)));
     const limit = row?.limit ?? "none";
     // A value we don't know (shouldn't happen: writes are validated) means the strictest limit.
     return limit in MAX_AGE ? MAX_AGE[limit as ContentLimit] : MAX_AGE.little;
   }
 
-  async allowed(profileId: number, type: TitleType, tmdbId: number): Promise<boolean> {
-    const maxAge = this.maxAge(profileId);
+  async allowed(userId: string, type: TitleType, tmdbId: number): Promise<boolean> {
+    const maxAge = await this.maxAge(userId);
     if (maxAge === null) return true;
     return this.fits(maxAge, type, tmdbId);
   }
 
   /** Throws 403 for a title the profile can't see (opened by link or id). */
-  async assertAllowed(profileId: number, type: TitleType, tmdbId: number) {
-    if (!(await this.allowed(profileId, type, tmdbId))) throw new HTTPException(403, { message: "This title isn't available on this profile." });
+  async assertAllowed(userId: string, type: TitleType, tmdbId: number) {
+    if (!(await this.allowed(userId, type, tmdbId))) throw new HTTPException(403, { message: "This title isn't available to this account." });
   }
 
   /** Keeps only cards the profile may see. Lookups are cached, a few at a time. */
-  async filter<T extends { type: TitleType; tmdbId: number }>(profileId: number, cards: T[]): Promise<T[]> {
-    const maxAge = this.maxAge(profileId);
+  async filter<T extends { type: TitleType; tmdbId: number }>(userId: string, cards: T[]): Promise<T[]> {
+    const maxAge = await this.maxAge(userId);
     if (maxAge === null || cards.length === 0) return cards;
     const keep = new Array<boolean>(cards.length).fill(false);
     let next = 0;
@@ -137,22 +144,15 @@ export class ContentFilter {
   private rating(type: TitleType, tmdbId: number) {
     const region = this.settings().region;
     const key = `${type}:${tmdbId}:${region}`;
-    let pending = this.ages.get(key);
-    if (!pending) {
-      pending = (async () => {
-        if (type === "movie") {
-          const m = await this.tmdb.movie(tmdbId);
-          const cert = movieCertification(m, region);
-          return { age: cert ? certificationAge(cert, region) : null, genres: m.genres.map((g) => g.id) };
-        }
-        const s = await this.tmdb.show(tmdbId);
-        const cert = showCertification(s, region);
-        return { age: cert ? certificationAge(cert, region) : null, genres: s.genres.map((g) => g.id) };
-      })();
-      pending.catch(() => this.ages.delete(key));
-      if (this.ages.size > 5_000) this.ages.clear();
-      this.ages.set(key, pending);
-    }
-    return pending;
+    return this.ages.get(key, async () => {
+      if (type === "movie") {
+        const m = await this.tmdb.movie(tmdbId);
+        const cert = movieCertification(m, region);
+        return { age: cert ? certificationAge(cert, region) : null, genres: m.genres.map((g) => g.id) };
+      }
+      const s = await this.tmdb.show(tmdbId);
+      const cert = showCertification(s, region);
+      return { age: cert ? certificationAge(cert, region) : null, genres: s.genres.map((g) => g.id) };
+    });
   }
 }

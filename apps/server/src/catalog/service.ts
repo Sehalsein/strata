@@ -1,4 +1,5 @@
 import type { FileProvider } from "../db/schema";
+import { runtime } from "#runtime";
 import type { Library } from "../library";
 import { isResumable, type ProgressRow, type ProgressStore } from "../progress";
 import type { Settings } from "../settings";
@@ -8,6 +9,7 @@ import { logger } from "../log";
 import type { Anilist, AnilistHomeItem, AnilistRankedList } from "./anime/anilist";
 import type { AnimeIds } from "./anime/ids";
 import { ANIME_CATEGORIES, type Kitsu, type KitsuRail } from "./anime/kitsu";
+import type { Omdb, Ratings } from "./omdb";
 
 const log = logger("catalog");
 
@@ -70,8 +72,6 @@ export interface ProgressDto {
 
 const progressDto = (row?: ProgressRow): ProgressDto | null => (row ? { positionMs: row.positionMs, durationMs: row.durationMs, completed: row.completed } : null);
 
-const PROFILE_SHELVES_TTL_MS = 60 * 60 * 1000;
-
 /** A Home rail that fails is left out rather than failing the page. */
 async function homeSafe<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
   try {
@@ -85,11 +85,11 @@ async function homeSafe<T>(label: string, fn: () => Promise<T>): Promise<T | nul
 /** The Anime tab's rails after Trending, in order: the AniList list, how many on the rail. */
 const ANIME_LISTS: { id: Exclude<AnilistRankedList, "trending"> | "latest"; slug: string; title: string; rail: number; badge?: (i: AnilistHomeItem, laterSeason: boolean) => string | undefined }[] = [
   { id: "latest", slug: "latest-episodes", title: "Latest Episodes", rail: 20, badge: (i) => (i.aired ? `Episode ${i.aired.episode}` : undefined) },
-  { id: "airing", slug: "top-airing", title: "Top Airing", rail: 15 },
-  { id: "popular", slug: "most-popular", title: "Most Popular", rail: 15 },
-  { id: "favourites", slug: "most-favorite", title: "Most Favorite", rail: 15 },
-  { id: "completed", slug: "latest-completed", title: "Latest Completed", rail: 15 },
-  { id: "upcoming", slug: "upcoming", title: "Top Upcoming", rail: 15, badge: (_, laterSeason) => (laterSeason ? "New season" : undefined) },
+  { id: "airing", slug: "top-airing", title: "Airing Now", rail: 15 },
+  { id: "popular", slug: "most-popular", title: "Popular", rail: 15 },
+  { id: "favourites", slug: "most-favorite", title: "Fan Favorites", rail: 15 },
+  { id: "completed", slug: "latest-completed", title: "Recently Finished", rail: 15 },
+  { id: "upcoming", slug: "upcoming", title: "Coming Soon", rail: 15, badge: (_, laterSeason) => (laterSeason ? "New season" : undefined) },
 ];
 
 export class CatalogService {
@@ -99,7 +99,24 @@ export class CatalogService {
     private readonly progress: ProgressStore,
     private readonly settings: () => Settings,
     private readonly anime?: { ids: AnimeIds; anilist: Anilist; kitsu?: Kitsu },
+    private readonly omdb?: Omdb,
   ) {}
+
+  /** IMDb / Rotten Tomatoes ratings, or null; like AniList, the page waits at most 1.5s. */
+  private ratings(imdbId: string | null | undefined): Promise<Ratings | null> {
+    if (!this.omdb?.configured || !imdbId) return Promise.resolve(null);
+    return Promise.race([this.omdb.ratings(imdbId).catch(() => null), runtime.sleep(1_500).then(() => null)]);
+  }
+
+  /** IMDb rating per episode of one season (empty without an OMDb key). */
+  private async episodeRatings(showId: number, seasonNumber: number): Promise<Map<number, number>> {
+    if (!this.omdb?.configured) return new Map();
+    const lookup = async () => {
+      const imdbId = (await this.tmdb.show(showId)).external_ids?.imdb_id;
+      return this.omdb!.episodeRatings(imdbId, seasonNumber);
+    };
+    return Promise.race([lookup().catch(() => new Map<number, number>()), runtime.sleep(1_500).then(() => new Map<number, number>())]);
+  }
 
   /**
    * AniList details for an anime title (romaji/Japanese titles, studio, score, next
@@ -107,7 +124,7 @@ export class CatalogService {
    * shouldn't wait on it; the answer is cached for next time.
    */
   private animeInfo(type: TitleType, tmdbId: number) {
-    return Promise.race([this.animeInfoUncapped(type, tmdbId), Bun.sleep(1_500).then(() => null)]);
+    return Promise.race([this.animeInfoUncapped(type, tmdbId), runtime.sleep(1_500).then(() => null)]);
   }
 
   private async animeInfoUncapped(type: TitleType, tmdbId: number) {
@@ -131,39 +148,23 @@ export class CatalogService {
     };
   }
 
-  /** Home in one answer, for apps that don't ask for its two parts: the hero, the profile's rails, then the catalog's. */
-  async home(profileId: number): Promise<Shelf[]> {
-    const [catalog, mine] = await Promise.all([this.homeCatalog(), this.homeProfile(profileId)]);
+  /** Home in one answer, for apps that don't ask for its two parts: the hero, the person's rails, then the catalog's. */
+  async home(userId: string): Promise<Shelf[]> {
+    const [catalog, mine] = await Promise.all([this.homeCatalog(), this.homeProfile(userId)]);
     const featured = catalog.filter((s) => s.id === "featured");
     return [...featured, ...mine, ...catalog.filter((s) => s.id !== "featured")];
   }
 
-  private readonly profileShelves = new Map<number, { revision: number; at: number; shelves: Promise<Shelf[]> }>();
-
-  /**
-   * Continue Watching, Next Up and My List. Kept per profile until its progress or list
-   * changes (the apps ask on every visit), and an hour at most: Next Up moves when a new
-   * episode airs.
-   */
-  homeProfile(profileId: number): Promise<Shelf[]> {
-    const revision = this.progress.revision(profileId);
-    const kept = this.profileShelves.get(profileId);
-    if (kept && kept.revision === revision && Date.now() - kept.at < PROFILE_SHELVES_TTL_MS) return kept.shelves;
-    const shelves = this.buildHomeProfile(profileId);
-    this.profileShelves.set(profileId, { revision, at: Date.now(), shelves });
-    shelves.catch(() => this.profileShelves.delete(profileId));
-    return shelves;
-  }
-
-  private async buildHomeProfile(profileId: number): Promise<Shelf[]> {
+  /** Continue Watching, Up Next and My List: this person's own rails, asked for on every visit. */
+  async homeProfile(userId: string): Promise<Shelf[]> {
     const [cont, nextUp, watchlist] = await Promise.all([
-      homeSafe("continue", () => this.continueWatching(profileId)),
-      homeSafe("nextUp", () => this.nextUp(profileId)),
-      homeSafe("watchlist", () => this.watchlist(profileId)),
+      homeSafe("continue", () => this.continueWatching(userId)),
+      homeSafe("nextUp", () => this.nextUp(userId)),
+      homeSafe("watchlist", () => this.watchlist(userId)),
     ]);
     const shelves: Shelf[] = [];
     if (cont?.length) shelves.push({ id: "continue", title: "Continue Watching", kind: "continue", items: cont });
-    if (nextUp?.length) shelves.push({ id: "nextUp", title: "Next Up", kind: "continue", items: nextUp });
+    if (nextUp?.length) shelves.push({ id: "nextUp", title: "Up Next", kind: "continue", items: nextUp });
     if (watchlist?.length) shelves.push({ id: "watchlist", title: "My List", kind: "titles", items: watchlist });
     return shelves;
   }
@@ -175,42 +176,48 @@ export class CatalogService {
 
     // Anime gets rails of its own on Home: it's left out of the movie and show rails.
     // Usually instant (the list is cached); never hold Home up for long on a slow load.
+    // A load that outlasts the wait carries on in the background, tied to this request (on
+    // Workers its database connection stays open until it's done).
     let timer: Timer | undefined;
-    await Promise.race([this.anime?.ids.ready().catch(() => {}), new Promise<void>((resolve) => (timer = setTimeout(resolve, 1_500)))]);
+    const loading = this.anime?.ids.ready().catch(() => {});
+    if (loading) runtime.background(loading);
+    await Promise.race([loading, new Promise<void>((resolve) => (timer = setTimeout(resolve, 1_500)))]);
     clearTimeout(timer);
     const isAnimeShow = (i: TmdbListItem) => this.isAnimeItem("show", i);
     const isAnimeFilm = (i: TmdbListItem) => this.isAnimeItem("movie", i);
     const [trendingMovieList, trendingShows, trendingAnimeShows] = await Promise.all([
       safe("trendingMovies", async () => (await this.tmdb.trending("movie")).results),
-      safe("trendingShows", async () => this.cards((await this.tmdb.trending("tv")).results.filter((i) => !isAnimeShow(i)), "show")),
+      safe("trendingShows", async () => await this.cards((await this.tmdb.trending("tv")).results.filter((i) => !isAnimeShow(i)), "show")),
       safe("trendingAnime", () => this.trendingThisWeek("show", isAnimeShow, ANIME_DISCOVER)),
     ]);
-    const trendingMovies = trendingMovieList ? this.cards(trendingMovieList.filter((i) => !isAnimeFilm(i)), "movie") : null;
+    const trendingMovies = trendingMovieList ? await this.cards(trendingMovieList.filter((i) => !isAnimeFilm(i)), "movie") : null;
     // Anime films trending this week join the anime shows, every third card.
-    const animeFilms = trendingMovieList ? this.cards(trendingMovieList.filter(isAnimeFilm), "movie") : [];
+    const animeFilms = trendingMovieList ? await this.cards(trendingMovieList.filter(isAnimeFilm), "movie") : [];
     const trendingAnime = interleave(trendingAnimeShows ?? [], animeFilms, 3).slice(0, 20);
 
     // "Recently Added" is the catalog's, not the library's: what's newly out to watch.
-    const [recentMovies, recentShows, recentAnime] = await Promise.all([
+    // "New" is the catalog's, not the library's: what's newly out to watch. Shows get the
+    // episodes that just aired, like the Anime tab's Latest Episodes; new anime only
+    // reaches the hero (the Anime tab has its own).
+    const [recentMovies, latestEpisodes, recentAnime] = await Promise.all([
       safe("recentMovies", () => this.newlyReleased("movie", (i) => !isAnimeFilm(i))).then((c) => c ?? []),
-      safe("recentShows", () => this.newlyReleased("show", (i) => !isAnimeShow(i))).then((c) => c ?? []),
+      safe("latestEpisodes", () => this.latestEpisodes((i) => !isAnimeShow(i))).then((c) => c ?? []),
       safe("recentAnime", () => this.newAnime()).then((c) => c ?? []),
     ]);
 
     const featured = await safe("featured", () =>
       this.featured([
-        { label: "Recently Added", cards: recentMovies, take: 2 },
+        { label: "New Movie", cards: recentMovies, take: 2 },
         { label: "Trending Movie", cards: trendingMovies ?? [], take: 3 },
         { label: "Trending Show", cards: trendingShows ?? [], take: 2 },
         { label: "Trending Anime", cards: trendingAnime, take: 2 },
-        { label: "Recently Added", cards: recentShows, take: 1 },
-        { label: "Recently Added Anime", cards: recentAnime, take: 1 },
+        { label: "New Episode", cards: latestEpisodes, take: 1 },
+        { label: "New Anime", cards: recentAnime, take: 1 },
       ]),
     );
     if (featured?.length) shelves.push({ id: "featured", title: "Featured", kind: "titles", items: featured });
-    if (recentMovies.length) shelves.push({ id: "recentMovies", title: "Recently Added Movies", kind: "titles", items: recentMovies });
-    if (recentShows.length) shelves.push({ id: "recentShows", title: "Recently Added Shows", kind: "titles", items: recentShows });
-    if (recentAnime.length) shelves.push({ id: "recentAnime", title: "Recently Added Anime", kind: "titles", items: recentAnime });
+    if (latestEpisodes.length) shelves.push({ id: "latestEpisodes", title: "Latest Episodes", kind: "titles", items: latestEpisodes });
+    if (recentMovies.length) shelves.push({ id: "recentMovies", title: "New Movies", kind: "titles", items: recentMovies });
     if (trendingMovies?.length) shelves.push({ id: "trendingMovies", title: "Trending Movies", kind: "titles", items: trendingMovies });
     if (trendingShows?.length) shelves.push({ id: "trendingShows", title: "Trending Shows", kind: "titles", items: trendingShows });
     if (trendingAnime.length) shelves.push({ id: "trendingAnime", title: "Trending Anime", kind: "titles", items: trendingAnime });
@@ -231,7 +238,10 @@ export class CatalogService {
         const full = await Promise.all(
           candidates.map(async (c) => (c.overview ? c : ((await this.detailCards(c.type, [c.tmdbId]))[0] ?? null))),
         );
-        return full.filter((c): c is TitleCard => !!c?.backdropUrl).map((c) => ({ ...c, eyebrow: src.label }));
+        // The hero fills the screen: list cards carry a w780 backdrop, too soft at that size.
+        return full
+          .filter((c): c is TitleCard => !!c?.backdropUrl)
+          .map((c) => ({ ...c, backdropUrl: c.backdropUrl!.replace(/\/t\/p\/w\d+\//, "/t/p/original/"), eyebrow: src.label }));
       }),
     );
     const seen = new Set<string>();
@@ -248,10 +258,10 @@ export class CatalogService {
   }
 
   async browse(type: TitleType, list: "trending" | "popular" | "topRated" | "library"): Promise<TitleCard[]> {
-    if (list === "library") return this.libraryCards(type, 500);
+    if (list === "library") return await this.libraryCards(type, 500);
     const tmdbType = type === "movie" ? "movie" : "tv";
     const page = list === "trending" ? await this.tmdb.trending(tmdbType) : list === "popular" ? await this.tmdb.popular(tmdbType) : await this.tmdb.topRated(tmdbType);
-    return this.cards(page.results, type);
+    return await this.cards(page.results, type);
   }
 
   /** TMDB's genres. Anime has its own tab (see `animePage`). */
@@ -281,7 +291,7 @@ export class CatalogService {
       safe(discover({ sort_by: `${dateKey}.desc`, [`${dateKey}.lte`]: today, "vote_count.gte": "20" })),
     ]);
     const shelves: Shelf[] = [];
-    if (trending.length) shelves.push({ id: "trending", title: "Trending This Week", kind: "titles", items: trending });
+    if (trending.length) shelves.push({ id: "trending", title: "Trending", kind: "titles", items: trending });
     if (fresh.length) shelves.push({ id: "new", title: "New", kind: "titles", items: fresh });
     if (popular.length) shelves.push({ id: "popular", title: "Popular", kind: "titles", items: popular });
     if (topRated.length) shelves.push({ id: "topRated", title: "Top Rated", kind: "titles", items: topRated });
@@ -307,7 +317,73 @@ export class CatalogService {
       const seen = new Set(items.map((i) => i.id));
       items.push(...recent.filter((i) => !seen.has(i.id)));
     }
-    return this.cards(items.slice(0, 20), type);
+    return await this.cards(items.slice(0, 20), type);
+  }
+
+  /**
+   * The Shows tab, laid out like the Anime tab: a spotlight of what's trending, the
+   * trending top 10, episodes that just aired, then new, popular, top rated and coming
+   * soon. Anime has its own tab, so it's left out.
+   */
+  async showsPage(): Promise<Shelf[]> {
+    await this.anime?.ids.ready().catch(() => {});
+    const keep = (i: TmdbListItem) => !this.isAnimeItem("show", i);
+    const day = (offset: number) => new Date(Date.now() - offset * 86_400_000).toISOString().slice(0, 10);
+    // Not daily talk, news or soaps: they "air" every day and would fill the rails.
+    const discover = (params: Record<string, string>) =>
+      this.tmdb
+        .discover("tv", { without_genres: "10763,10766,10767", sort_by: "popularity.desc", ...params })
+        .then((p) => this.cards(p.results.filter(keep), "show"))
+        .catch(() => [] as TitleCard[]);
+    const list = (work: Promise<{ results: TmdbListItem[] }>) => work.then((p) => this.cards(p.results.filter(keep), "show")).catch(() => [] as TitleCard[]);
+    const [trending, latest, fresh, popular, topRated, soon] = await Promise.all([
+      this.trendingThisWeek("show", keep, {}).catch(() => [] as TitleCard[]),
+      this.latestEpisodes(keep).catch(() => [] as TitleCard[]),
+      discover({ "first_air_date.gte": day(90), "first_air_date.lte": day(0), "vote_count.gte": "10" }),
+      list(this.tmdb.popular("tv")),
+      list(this.tmdb.topRated("tv")),
+      discover({ "first_air_date.gte": day(-1), "first_air_date.lte": day(-90) }),
+    ]);
+    const spotlight = trending
+      .filter((c) => c.backdropUrl && c.overview)
+      .slice(0, 8)
+      .map((c, i) => ({ ...c, eyebrow: `#${i + 1} in Shows` }));
+    const shelves: Shelf[] = [
+      { id: "shows-spotlight", title: "Spotlight", kind: "titles", style: "hero", items: spotlight },
+      { id: "shows-trending", title: "Trending", kind: "titles", items: trending.slice(0, 10) },
+      { id: "shows-latest-episodes", title: "Latest Episodes", kind: "titles", items: latest },
+      { id: "shows-new", title: "New Shows", kind: "titles", items: fresh },
+      { id: "shows-popular", title: "Popular", kind: "titles", items: popular },
+      { id: "shows-top-rated", title: "Top Rated", kind: "titles", items: topRated },
+      { id: "shows-coming-soon", title: "Coming Soon", kind: "titles", items: soon },
+    ];
+    return shelves.filter((s) => s.items.length >= 3);
+  }
+
+  /**
+   * Shows with an episode out in the last few days, most popular first, each labelled
+   * with that episode ("S2 · E5", as the apps write it).
+   */
+  private async latestEpisodes(keep: (item: TmdbListItem) => boolean): Promise<TitleCard[]> {
+    const day = (offset: number) => new Date(Date.now() - offset * 86_400_000).toISOString().slice(0, 10);
+    const params = { sort_by: "popularity.desc", "air_date.gte": day(3), "air_date.lte": day(0), "vote_count.gte": "10", without_genres: "10763,10766,10767" };
+    const pages = await Promise.all([1, 2].map((page) => this.tmdb.discover("tv", { ...params, page: String(page) }).then((p) => p.results).catch(() => [] as TmdbListItem[])));
+    const seen = new Set<number>();
+    const ids = pages
+      .flat()
+      .filter((i) => keep(i) && !seen.has(i.id) && seen.add(i.id))
+      .slice(0, 24)
+      .map((i) => i.id);
+    // Details (cached) say which episode aired; the discover list doesn't.
+    const shows = await Promise.all(ids.map((id) => this.tmdb.show(id).catch(() => null)));
+    const label = new Map<number, string>();
+    for (const show of shows) {
+      const last = show?.last_episode_to_air;
+      if (show && last?.air_date && last.air_date >= day(7)) label.set(show.id, `S${last.season_number} · E${last.episode_number}`);
+    }
+    return (await this.cards(shows.filter((s): s is TmdbShow => !!s && label.has(s.id)), "show"))
+      .map((c) => ({ ...c, badge: label.get(c.tmdbId) }))
+      .slice(0, 20);
   }
 
   /** The Anime tab's categories (Kitsu's). */
@@ -332,14 +408,14 @@ export class CatalogService {
     const plans: Plan[] = category
       ? [
           { id: "anime-series-season", title: "This Season", kind: "series", rail: "season" },
-          { id: "anime-series-popular", title: "Popular Series", kind: "series", rail: "popular" },
-          { id: "anime-series-top", title: "Top Rated Series", kind: "series", rail: "top" },
+          { id: "anime-series-popular", title: "Popular Shows", kind: "series", rail: "popular" },
+          { id: "anime-series-top", title: "Top Rated Shows", kind: "series", rail: "top" },
           { id: "anime-films-popular", title: "Popular Movies", kind: "films", rail: "popular" },
           { id: "anime-films-top", title: "Top Rated Movies", kind: "films", rail: "top" },
         ]
       : [
           { id: "anime-series-season", title: "This Season", kind: "series", rail: "season" },
-          { id: "anime-series-top", title: "Top Rated Series", kind: "series", rail: "top" },
+          { id: "anime-series-top", title: "Top Rated Shows", kind: "series", rail: "top" },
           { id: "anime-films-recent", title: "New Movies", kind: "films", rail: "recent" },
           { id: "anime-series-lastSeason", title: "Last Season", kind: "series", rail: "lastSeason" },
           { id: "anime-series-popular", title: "All-Time Popular", kind: "series", rail: "popular" },
@@ -358,7 +434,7 @@ export class CatalogService {
       }),
     ]);
     const shelves = ranked.filter((s) => s.items.length >= 3);
-    if (trending.length >= 3) shelves.unshift({ id: "anime-series-trending", title: "Trending This Week", kind: "titles", items: trending });
+    if (trending.length >= 3) shelves.unshift({ id: "anime-series-trending", title: "Trending", kind: "titles", items: trending });
     return shelves;
   }
 
@@ -381,7 +457,7 @@ export class CatalogService {
     const spotlight = trending
       .filter((c) => c.backdropUrl && c.overview)
       .slice(0, 8)
-      .map((c, i) => ({ ...c, eyebrow: `#${i + 1} Spotlight` }));
+      .map((c, i) => ({ ...c, eyebrow: `#${i + 1} in Anime` }));
     const shelves: Shelf[] = [
       { id: "anime-spotlight", title: "Spotlight", kind: "titles", style: "hero", items: spotlight },
       { id: "anime-trending", title: "Trending", kind: "titles", items: trending.slice(0, 10), more: "trending" },
@@ -450,7 +526,7 @@ export class CatalogService {
     };
     await Promise.all(Array.from({ length: Math.min(8, tmdbIds.length) }, worker));
     // One availability query for the lot, not one per card.
-    return this.cards(details.filter((d): d is TmdbListItem => d !== null), type);
+    return await this.cards(details.filter((d): d is TmdbListItem => d !== null), type);
   }
 
   /** A cast or crew member and the movies and shows they're known for, most popular first. */
@@ -479,8 +555,8 @@ export class CatalogService {
       placeOfBirth: p.place_of_birth ?? null,
       knownFor: p.known_for_department ?? null,
       profileUrl: imageUrl(p.profile_path, "w500"),
-      movies: withRole(this.cards(ranked.filter((c) => c.media_type === "movie").slice(0, 40), "movie"), "movie"),
-      shows: withRole(this.cards(ranked.filter((c) => c.media_type === "tv").slice(0, 40), "show"), "tv"),
+      movies: withRole(await this.cards(ranked.filter((c) => c.media_type === "movie").slice(0, 40), "movie"), "movie"),
+      shows: withRole(await this.cards(ranked.filter((c) => c.media_type === "tv").slice(0, 40), "show"), "tv"),
     };
   }
 
@@ -488,22 +564,24 @@ export class CatalogService {
     const page = await this.tmdb.searchMulti(query);
     const movies = page.results.filter((r) => r.media_type === "movie");
     const shows = page.results.filter((r) => r.media_type === "tv");
-    const movieCards = this.cards(movies, "movie");
-    const showCards = this.cards(shows, "show");
+    const movieCards = await this.cards(movies, "movie");
+    const showCards = await this.cards(shows, "show");
     // Keep TMDB's relevance order across both types.
     return page.results.flatMap((r) => (r.media_type === "movie" ? movieCards.filter((c) => c.tmdbId === r.id) : r.media_type === "tv" ? showCards.filter((c) => c.tmdbId === r.id) : []));
   }
 
-  async movie(profileId: number, id: number) {
+  async movie(userId: string, id: number) {
     const m = await this.tmdb.movie(id);
-    const sources = findCandidates(this.library, this.settings(), "movie", id);
+    const imdbId = m.imdb_id ?? m.external_ids?.imdb_id ?? null;
+    const [anime, ratings] = await Promise.all([this.animeInfo("movie", id).catch(() => null), this.ratings(imdbId)]);
+    const sources = await findCandidates(this.library, this.settings(), "movie", id);
     const region = this.settings().region;
     const certification =
       m.release_dates?.results.find((r) => r.iso_3166_1 === region)?.release_dates.find((d) => d.certification)?.certification ?? null;
     return {
       type: "movie" as const,
       tmdbId: m.id,
-      imdbId: m.imdb_id ?? m.external_ids?.imdb_id ?? null,
+      imdbId,
       title: m.title,
       tagline: m.tagline || null,
       overview: m.overview ?? "",
@@ -512,6 +590,8 @@ export class CatalogService {
       runtimeMinutes: m.runtime ?? null,
       genres: m.genres.map((g) => g.name),
       rating: m.vote_average ?? null,
+      /** IMDb and Rotten Tomatoes, when the server has an OMDb key. */
+      ratings,
       certification,
       posterUrl: imageUrl(m.poster_path, "w500"),
       backdropUrl: imageUrl(m.backdrop_path, "w1280"),
@@ -520,24 +600,26 @@ export class CatalogService {
       trailer: trailerOf(m.videos),
       videos: videosOf(m.videos),
       collection: m.belongs_to_collection ? { id: m.belongs_to_collection.id, name: m.belongs_to_collection.name } : null,
-      recommendations: this.cards(m.recommendations?.results ?? [], "movie"),
+      recommendations: await this.cards(m.recommendations?.results ?? [], "movie"),
       available: [...new Set(sources.map((s) => s.provider))],
       sources,
-      progress: progressDto(this.progress.get(profileId, { mediaType: "movie", tmdbId: id })),
-      inWatchlist: this.progress.inWatchlist(profileId, "movie", id),
-      anime: await this.animeInfo("movie", id).catch(() => null),
+      progress: progressDto(await this.progress.get(userId, { mediaType: "movie", tmdbId: id })),
+      inWatchlist: await this.progress.inWatchlist(userId, "movie", id),
+      anime,
     };
   }
 
-  async show(profileId: number, id: number) {
+  async show(userId: string, id: number) {
     const s = await this.tmdb.show(id);
-    const watched = this.progress.forShow(profileId, id);
-    const available = this.library.filesFor("episode", id);
+    const watched = await this.progress.forShow(userId, id);
+    const available = await this.library.filesFor("episode", id);
     const region = this.settings().region;
+    const imdbId = s.external_ids?.imdb_id ?? null;
+    const [anime, ratings, upNext] = await Promise.all([this.animeInfo("show", id).catch(() => null), this.ratings(imdbId), this.showUpNext(s, watched)]);
     return {
       type: "show" as const,
       tmdbId: s.id,
-      imdbId: s.external_ids?.imdb_id ?? null,
+      imdbId,
       title: s.name,
       tagline: s.tagline || null,
       overview: s.overview ?? "",
@@ -547,6 +629,8 @@ export class CatalogService {
       status: s.status ?? null,
       genres: s.genres.map((g) => g.name),
       rating: s.vote_average ?? null,
+      /** IMDb and Rotten Tomatoes, when the server has an OMDb key. */
+      ratings,
       certification: s.content_ratings?.results.find((r) => r.iso_3166_1 === region)?.rating || null,
       posterUrl: imageUrl(s.poster_path, "w500"),
       backdropUrl: imageUrl(s.backdrop_path, "w1280"),
@@ -561,19 +645,19 @@ export class CatalogService {
         posterUrl: imageUrl(season.poster_path, "w342"),
         availableEpisodes: new Set(available.filter((f) => f.season === season.season_number).map((f) => f.episode)).size,
       })),
-      recommendations: this.cards(s.recommendations?.results ?? [], "show"),
+      recommendations: await this.cards(s.recommendations?.results ?? [], "show"),
       available: [...new Set(available.map((f) => f.provider))],
       /** Where the Play button should go: an in-progress episode, else the next unwatched one. */
-      upNext: await this.showUpNext(s, watched),
-      inWatchlist: this.progress.inWatchlist(profileId, "show", id),
-      anime: await this.animeInfo("show", id).catch(() => null),
+      upNext,
+      inWatchlist: await this.progress.inWatchlist(userId, "show", id),
+      anime,
     };
   }
 
-  async season(profileId: number, showId: number, seasonNumber: number) {
-    const season = await this.tmdb.season(showId, seasonNumber);
-    const files = this.library.filesFor("episode", showId, seasonNumber);
-    const watched = new Map(this.progress.forShow(profileId, showId).filter((p) => p.season === seasonNumber).map((p) => [p.episode, p]));
+  async season(userId: string, showId: number, seasonNumber: number) {
+    const [season, imdbRatings] = await Promise.all([this.tmdb.season(showId, seasonNumber), this.episodeRatings(showId, seasonNumber)]);
+    const files = await this.library.filesFor("episode", showId, seasonNumber);
+    const watched = new Map((await this.progress.forShow(userId, showId)).filter((p) => p.season === seasonNumber).map((p) => [p.episode, p]));
     return {
       season: season.season_number,
       name: season.name,
@@ -589,19 +673,20 @@ export class CatalogService {
         runtimeMinutes: e.runtime ?? null,
         stillUrl: imageUrl(e.still_path, "w780"),
         rating: e.vote_average ?? null,
+        imdbRating: imdbRatings.get(e.episode_number) ?? null,
         available: [...new Set(files.filter((f) => f.episode === e.episode_number).map((f) => f.provider))],
         progress: progressDto(watched.get(e.episode_number)),
       })),
     };
   }
 
-  sources(type: "movie" | "episode", tmdbId: number, season?: number, episode?: number): Candidate[] {
+  sources(type: "movie" | "episode", tmdbId: number, season?: number, episode?: number): Promise<Candidate[]> {
     return findCandidates(this.library, this.settings(), type, tmdbId, season, episode);
   }
 
-  private async continueWatching(profileId: number): Promise<ContinueCard[]> {
-    const hidden = this.progress.hiddenFilter(profileId);
-    const rows = this.progress.inProgress(profileId).filter((r) => !hidden(r));
+  private async continueWatching(userId: string): Promise<ContinueCard[]> {
+    const hidden = await this.progress.hiddenFilter(userId);
+    const rows = (await this.progress.inProgress(userId)).filter((r) => !hidden(r));
     const cards = await Promise.all(rows.map((row) => this.continueCard(row).catch(() => null)));
     return cards.filter((c): c is ContinueCard => c !== null);
   }
@@ -609,32 +694,32 @@ export class CatalogService {
   private async continueCard(row: ProgressRow): Promise<ContinueCard> {
     if (row.mediaType === "movie") {
       const m = await this.tmdb.movie(row.tmdbId);
-      return { ...this.movieCard(m), positionMs: row.positionMs, durationMs: row.durationMs };
+      return { ...(await this.movieCard(m)), positionMs: row.positionMs, durationMs: row.durationMs };
     }
     const show = await this.tmdb.show(row.tmdbId);
     const season = await this.tmdb.season(row.tmdbId, row.season);
     const ep = season.episodes.find((e) => e.episode_number === row.episode);
     return {
-      ...this.showCard(show),
+      ...(await this.showCard(show)),
       episode: { season: row.season, episode: row.episode, name: ep?.name ?? `Episode ${row.episode}`, stillUrl: imageUrl(ep?.still_path, "w780") },
       positionMs: row.positionMs,
       durationMs: row.durationMs,
     };
   }
 
-  private async nextUp(profileId: number): Promise<ContinueCard[]> {
-    const inProgressShows = new Set(this.progress.inProgress(profileId, 100).filter((r) => r.mediaType === "episode").map((r) => r.tmdbId));
-    const hidden = this.progress.hiddenFilter(profileId);
-    const latest = this.progress.recentlyCompletedEpisodes(profileId).filter((r) => !inProgressShows.has(r.tmdbId) && !hidden(r));
+  private async nextUp(userId: string): Promise<ContinueCard[]> {
+    const inProgressShows = new Set((await this.progress.inProgress(userId, 100)).filter((r) => r.mediaType === "episode").map((r) => r.tmdbId));
+    const hidden = await this.progress.hiddenFilter(userId);
+    const latest = (await this.progress.recentlyCompletedEpisodes(userId)).filter((r) => !inProgressShows.has(r.tmdbId) && !hidden(r));
     const cards = await Promise.all(
       latest.map(async (row) => {
         try {
           const show = await this.tmdb.show(row.tmdbId);
           const next = await this.episodeAfter(show, row.season, row.episode);
           if (!next) return null;
-          const done = this.progress.get(profileId, { mediaType: "episode", tmdbId: row.tmdbId, season: next.season, episode: next.episode });
+          const done = await this.progress.get(userId, { mediaType: "episode", tmdbId: row.tmdbId, season: next.season, episode: next.episode });
           if (done?.completed) return null;
-          return { ...this.showCard(show), episode: next, positionMs: 0, durationMs: 0 } satisfies ContinueCard;
+          return { ...(await this.showCard(show)), episode: next, positionMs: 0, durationMs: 0 } satisfies ContinueCard;
         } catch {
           return null;
         }
@@ -663,7 +748,7 @@ export class CatalogService {
 
   /** `available`: the episode is in the library, so Play plays it (apps offer nothing else). */
   private async showUpNext(show: TmdbShow, watched: ProgressRow[]) {
-    const files = this.library.filesFor("episode", show.id).filter((f) => f.season !== null && f.episode !== null);
+    const files = (await this.library.filesFor("episode", show.id)).filter((f) => f.season !== null && f.episode !== null);
     const has = (season: number, episode: number) => files.some((f) => f.season === season && f.episode === episode);
     const at = (season: number, episode: number, positionMs = 0) => ({ season, episode, positionMs, available: has(season, episode) });
     const inProgress = watched.filter(isResumable).sort((a, b) => b.updatedAt - a.updatedAt)[0];
@@ -680,12 +765,13 @@ export class CatalogService {
     return first ? at(first.season_number, 1) : null;
   }
 
-  private async watchlist(profileId: number): Promise<TitleCard[]> {
-    const rows = this.progress.watchlist(profileId);
+  /** The titles on this person's list (My List), newest first. */
+  async watchlist(userId: string): Promise<TitleCard[]> {
+    const rows = await this.progress.watchlist(userId);
     const cards = await Promise.all(
       rows.map(async (r) => {
         try {
-          return r.type === "movie" ? this.movieCard(await this.tmdb.movie(r.tmdbId)) : this.showCard(await this.tmdb.show(r.tmdbId));
+          return r.type === "movie" ? await this.movieCard(await this.tmdb.movie(r.tmdbId)) : await this.showCard(await this.tmdb.show(r.tmdbId));
         } catch {
           return null;
         }
@@ -695,9 +781,9 @@ export class CatalogService {
   }
 
   /** Library titles, newest first (by when their files were added). */
-  private libraryCards(type: TitleType, limit = 20): TitleCard[] {
-    const items = this.library.recentlyAdded(type, limit);
-    const avail = this.library.availability(type, items.map((i) => i.tmdbId));
+  private async libraryCards(type: TitleType, limit = 20): Promise<TitleCard[]> {
+    const items = await this.library.recentlyAdded(type, limit);
+    const avail = await this.library.availability(type, items.map((i) => i.tmdbId));
     return items.map((i) => ({
       type,
       tmdbId: i.tmdbId,
@@ -723,7 +809,7 @@ export class CatalogService {
     const tmdbType = type === "movie" ? "movie" : "tv";
     const pages = await Promise.all([1, 2].map((page) => this.tmdb.discover(tmdbType, { ...params, page: String(page) }).then((p) => p.results).catch(() => [] as TmdbListItem[])));
     const seen = new Set<number>();
-    return this.cards(pages.flat().filter((i) => keep(i) && !seen.has(i.id) && seen.add(i.id)).slice(0, 20), type);
+    return await this.cards(pages.flat().filter((i) => keep(i) && !seen.has(i.id) && seen.add(i.id)).slice(0, 20), type);
   }
 
   /** New anime: this season's series as Kitsu ranks them, with recent anime films mixed in. */
@@ -761,8 +847,8 @@ export class CatalogService {
   }
 
 
-  private cards(items: TmdbListItem[], type: TitleType): TitleCard[] {
-    const avail = this.library.availability(type, items.map((i) => i.id));
+  private async cards(items: TmdbListItem[], type: TitleType): Promise<TitleCard[]> {
+    const avail = await this.library.availability(type, items.map((i) => i.id));
     return items.map((i) => ({
       type,
       tmdbId: i.id,
@@ -776,12 +862,12 @@ export class CatalogService {
     }));
   }
 
-  private movieCard(m: TmdbMovie): TitleCard {
-    return this.cards([{ ...m, media_type: "movie" }], "movie")[0]!;
+  private async movieCard(m: TmdbMovie): Promise<TitleCard> {
+    return (await this.cards([{ ...m, media_type: "movie" }], "movie"))[0]!;
   }
 
-  private showCard(s: TmdbShow): TitleCard {
-    return this.cards([{ ...s, media_type: "tv" }], "show")[0]!;
+  private async showCard(s: TmdbShow): Promise<TitleCard> {
+    return (await this.cards([{ ...s, media_type: "tv" }], "show"))[0]!;
   }
 }
 

@@ -138,6 +138,19 @@ jobs:
           echo "marketing_version=$version" >> "$GITHUB_OUTPUT"
           echo "build_number=$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
+      - name: Restore FFmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: apps/apple/Packages/StrataRemux/Frameworks
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('apps/apple/Packages/StrataRemux/scripts/build-ffmpeg.sh') }}
+
+      # StrataRemux links FFmpeg (LGPL, built from source); the framework isn't kept in git.
+      - name: Build FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        working-directory: apps/apple
+        run: Packages/StrataRemux/scripts/build-ffmpeg.sh
+
       - name: Generate Xcode project
         working-directory: apps/apple
         run: xcodegen generate

@@ -50,17 +50,18 @@ has a `SHA256SUMS` to check the download against.
 | `--host` | `STRATA_HOST` | `0.0.0.0` |
 | `--data-dir` | `STRATA_DATA_DIR` | `~/Library/Application Support/Strata` (macOS), `~/.local/share/strata` (Linux) |
 | `--web-dir` | `STRATA_WEB_DIR` | embedded dashboard |
-| | `TMDB_API_KEY`, `TORBOX_API_KEY` | override keys saved in the dashboard |
-| | `STRATA_DOCKER=1` | disables self-update (the image tag is the update mechanism) |
+| | `TMDB_API_KEY`, `TORBOX_API_KEY`, `OMDB_API_KEY` | override keys saved in the dashboard (OMDb is optional: IMDb and Rotten Tomatoes ratings) |
 | | `STRATA_DEBUG=1` | debug logging (includes ffmpeg command lines) |
 
-ffmpeg and ffprobe (for probing, remuxing and transcoding) come with it: the server looks in
-`<data-dir>/bin`, `$PATH`, `/opt/homebrew/bin` and `/usr/local/bin`, and when there's none it
-sets up its own on first start, a one-time download of
+The binary is self-contained: the dashboard, the database (Postgres, as PGlite) and ffmpeg
+are all inside it, and it sets them up in its data folder on first start. ffmpeg and
+ffprobe (for probing, remuxing and transcoding) are
 [jellyfin-ffmpeg](https://github.com/jellyfin/jellyfin-ffmpeg) (static, with VideoToolbox,
-VAAPI and QSV) into `<data-dir>/bin`, pinned by version and SHA-256
-(`src/platform/ffmpegInstall.ts`). An ffmpeg already on the machine is used instead.
-`STRATA_NO_FFMPEG_DOWNLOAD=1` turns the download off.
+VAAPI and QSV), pinned by version and SHA-256 (`src/platform/ffmpegInstall.ts`), embedded
+gzipped by `scripts/build.ts` and unpacked into `<data-dir>/bin` with their licence notice
+(they're GPL). Run from source, the server looks in `<data-dir>/bin`, `$PATH`,
+`/opt/homebrew/bin` and `/usr/local/bin`, and downloads the same build when there's none;
+`STRATA_NO_FFMPEG_DOWNLOAD=1` turns that off.
 
 Port and bind address are deliberately CLI/env-only (the dashboard shows them read-only), so
 a settings change can never cut the dashboard off. The server advertises itself on the LAN
@@ -139,7 +140,7 @@ above puts the nightly back.
 
 From the command line: `strata-server update --check` reports, `strata-server update` installs
 immediately (it can't see active streams from there) and restarts the service if one is
-installed. Self-update is disabled when running from source and with `STRATA_DOCKER=1`.
+installed. Self-update is disabled when running from source.
 
 ### Signing a release by hand
 
@@ -223,4 +224,4 @@ Known gaps:
 - Subtitles are not served yet (tracks are listed in the play response).
 - The HLS output has been validated with ffprobe/ffmpeg, but not yet on a real AVPlayer device.
 - Phase 2 (done): Bonjour, self-update with rollback, `service install`.
-  Still planned: release CI and the update feed, a downloaded ffmpeg, the Docker image.
+  Since then: release CI and the update feed, and ffmpeg built into the binary.

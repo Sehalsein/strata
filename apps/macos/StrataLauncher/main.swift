@@ -28,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var isUp = false
     private var openItem: NSMenuItem!
     private var restartItem: NSMenuItem!
+    private var updatesItem: NSMenuItem!
+    private var versionItem: NSMenuItem!
     private var loginItem: NSMenuItem!
     /// The server this app started. The app only ever opens the dashboard of this one.
     private var server: Process?
@@ -96,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         setState("Running on port \(port)", running: true)
+        await refreshServerVersion()
         if openDashboard {
             UserDefaults.standard.set(true, forKey: "openedOnce")
             self.openDashboard()
@@ -140,11 +143,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // The server stops itself if this app disappears without stopping it (crash, force quit).
         env["STRATA_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         env["STRATA_LAUNCH_SECRET"] = launchSecret
-        let ffmpegDir = bundle.appendingPathComponent("Contents/Resources/ffmpeg")
-        if FileManager.default.fileExists(atPath: ffmpegDir.appendingPathComponent("ffmpeg").path) {
-            env["STRATA_FFMPEG"] = ffmpegDir.appendingPathComponent("ffmpeg").path
-            env["STRATA_FFPROBE"] = ffmpegDir.appendingPathComponent("ffprobe").path
-        }
         process.environment = env
 
         try FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -214,6 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.button?.toolTip = "Strata"
 
         let menu = NSMenu()
+        menu.delegate = self
         menu.autoenablesItems = false // we decide what's enabled (Open Dashboard only when ours runs)
         stateItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
         stateItem.isEnabled = false
@@ -227,20 +226,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginItem = item("Start at Login", #selector(toggleLoginItem), "")
         menu.addItem(loginItem)
         menu.addItem(.separator())
+        versionItem = NSMenuItem(title: "Server version unavailable", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
+        updatesItem = item("Check for Updates…", #selector(checkForUpdates), "")
+        menu.addItem(updatesItem)
+        menu.addItem(.separator())
         menu.addItem(item("Quit Strata", #selector(NSApplication.terminate(_:)), "q"))
         menu.delegate = self
         statusItem.menu = menu
     }
 
+    func menuWillOpen(_ menu: NSMenu) {
+        Task { await refreshServerVersion() }
+    }
+
     /// The running server's version (it updates itself, so this app's own can be older).
     /// Only as signed by the server this app started (with the proof Open Dashboard checks),
     /// and only while it's still running.
-    func menuWillOpen(_ menu: NSMenu) {
-        guard isUp, server?.isRunning == true else { return }
-        Task {
-            guard let version = await proveOurs(), !version.isEmpty, isUp, server?.isRunning == true else { return }
-            stateItem.title = "Strata \(version): \(stateText)"
+    private func refreshServerVersion() async {
+        guard isUp, let version = await proveOurs(), !version.isEmpty, isUp, server?.isRunning == true else {
+            versionItem.title = "Server version unavailable"
+            return
         }
+        versionItem.title = "Server v\(version)"
     }
 
     private func item(_ title: String, _ action: Selector, _ key: String) -> NSMenuItem {
@@ -255,6 +264,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         stateText = text
         isUp = running
         openItem.isEnabled = running
+        updatesItem.isEnabled = running
         statusItem.button?.appearsDisabled = !running
     }
 
@@ -266,6 +276,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return
             }
             NSWorkspace.shared.open(dashboardURL)
+        }
+    }
+
+    /// Keep update checks in the authenticated dashboard, using its signed update feed.
+    @objc private func checkForUpdates() {
+        Task {
+            guard await isOurs() else {
+                setState("Couldn't verify the server on port \(port). Choose Restart Server.", running: false)
+                return
+            }
+            NSWorkspace.shared.open(URL(string: "backoffice/settings?checkUpdate=1#updates", relativeTo: dashboardURL)!.absoluteURL)
         }
     }
 

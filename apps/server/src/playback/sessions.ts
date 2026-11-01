@@ -1,4 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { and, eq, gt, lt } from "drizzle-orm";
+import type { Db } from "../db";
+import { playSessions } from "../db/schema";
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
@@ -33,8 +36,9 @@ export interface SessionTarget {
 
 export interface PlaybackSession {
   id: string;
-  profileId: number;
-  userId: number;
+  /** The household it plays in, and whose account. */
+  organizationId: string;
+  userId: string;
   fileId: number;
   target: SessionTarget;
   plan: PlaybackPlan;
@@ -55,45 +59,122 @@ export interface PlaybackSession {
   error?: string;
 }
 
+/** Remux and transcode run ffmpeg here; direct and device play only hand out a link. */
+export const isHls = (mode: PlaybackPlan["mode"]) => mode === "remux" || mode === "transcode";
+
+/** A TorBox play nobody has touched for this long (no progress, no link refresh) is over. */
+const LINK_SESSION_IDLE_MS = 4 * IDLE_TIMEOUT_MS * 10;
+
+/**
+ * Playback sessions. A TorBox play only hands the app a link, so its session lives in
+ * the database (`play_sessions`) where every server sharing it can find it — the cloud
+ * server keeps nothing in memory between requests. A local file streamed by this
+ * server's ffmpeg keeps its session here in memory, with the process.
+ */
 export class SessionManager {
   private sessions = new Map<string, PlaybackSession>();
   private hwStalledAt = 0;
-  private sweeper: ReturnType<typeof setInterval>;
+  private sweeper?: ReturnType<typeof setInterval>;
 
   constructor(
-    private readonly transcodeDir: string,
-    private readonly getFfmpeg: () => FfmpegInfo | null,
-    private readonly keepAwake: KeepAwake,
-    private readonly maxTranscodes: () => number,
-    private readonly hwAllowed: () => boolean,
+    private readonly db: Db,
+    /** Null on the cloud server: no local files, no ffmpeg, no timers. */
+    private readonly local: {
+      transcodeDir: string;
+      getFfmpeg: () => FfmpegInfo | null;
+      keepAwake: KeepAwake;
+      maxTranscodes: () => number;
+      hwAllowed: () => boolean;
+    } | null,
   ) {
+    if (!local) return;
     // Leftovers from a crash or restart are never resumable.
-    for (const name of existsSync(transcodeDir) ? readdirSync(transcodeDir) : []) rmSync(join(transcodeDir, name), { recursive: true, force: true });
+    for (const name of existsSync(local.transcodeDir) ? readdirSync(local.transcodeDir) : []) rmSync(join(local.transcodeDir, name), { recursive: true, force: true });
     this.sweeper = setInterval(() => this.sweep(), 2_000);
   }
 
-  create(init: Omit<PlaybackSession, "id" | "createdAt" | "lastAccessAt" | "lastSegmentRequested">): PlaybackSession {
-    const session: PlaybackSession = { ...init, id: randomBytes(16).toString("hex"), createdAt: Date.now(), lastAccessAt: Date.now(), lastSegmentRequested: 0 };
-    if (session.plan.mode !== "direct") this.startHls(session);
-    this.sessions.set(session.id, session);
-    this.keepAwake.acquire();
+  private get transcodeDir() {
+    return this.local!.transcodeDir;
+  }
+  private get getFfmpeg() {
+    return this.local!.getFfmpeg;
+  }
+  private get keepAwake() {
+    return this.local!.keepAwake;
+  }
+  private get maxTranscodes() {
+    return this.local!.maxTranscodes;
+  }
+  private get hwAllowed() {
+    return this.local!.hwAllowed;
+  }
+
+  async create(init: Omit<PlaybackSession, "id" | "createdAt" | "lastAccessAt" | "lastSegmentRequested">): Promise<PlaybackSession> {
+    const now = Date.now();
+    const session: PlaybackSession = { ...init, id: randomBytes(16).toString("hex"), createdAt: now, lastAccessAt: now, lastSegmentRequested: 0 };
+    if (init.inputKind === "url" && !isHls(init.plan.mode)) {
+      await this.db.insert(playSessions).values({
+        id: session.id,
+        organizationId: init.organizationId,
+        userId: init.userId,
+        fileId: init.fileId,
+        targetJson: JSON.stringify(init.target),
+        planJson: JSON.stringify(init.plan),
+        input: init.input,
+        createdAt: now,
+        lastAccessAt: now,
+      });
+    } else {
+      if (!this.local) throw new Error("This server doesn't stream files itself");
+      if (isHls(session.plan.mode)) this.startHls(session);
+      this.sessions.set(session.id, session);
+      this.keepAwake.acquire();
+    }
     log.info(`Session ${session.id.slice(0, 8)} ${session.plan.mode} file=${session.fileId}${session.plan.reasons.length ? ` (${session.plan.reasons.join("; ")})` : ""}`);
     return session;
   }
 
-  get(id: string): PlaybackSession | undefined {
-    const session = this.sessions.get(id);
-    if (session) session.lastAccessAt = Date.now();
-    return session;
+  /** The session, if it's still going; touching it keeps it alive. */
+  async get(id: string): Promise<PlaybackSession | undefined> {
+    const local = this.sessions.get(id);
+    if (local) {
+      local.lastAccessAt = Date.now();
+      return local;
+    }
+    if (!/^[0-9a-f]{32}$/.test(id)) return undefined;
+    const now = Date.now();
+    const [row] = await this.db
+      .update(playSessions)
+      .set({ lastAccessAt: now })
+      .where(and(eq(playSessions.id, id), gt(playSessions.lastAccessAt, now - LINK_SESSION_IDLE_MS)))
+      .returning();
+    return row ? fromRow(row) : undefined;
   }
 
-  list(): PlaybackSession[] {
-    return [...this.sessions.values()];
+  /** Every live session (for the dashboard). */
+  async list(): Promise<PlaybackSession[]> {
+    const rows = await this.db.select().from(playSessions).where(gt(playSessions.lastAccessAt, Date.now() - LINK_SESSION_IDLE_MS));
+    return [...this.sessions.values(), ...rows.map(fromRow)];
   }
 
-  stop(id: string) {
-    const session = this.sessions.get(id);
-    if (!session) return;
+  /** Records a fresh link for a TorBox play (the old one expired). */
+  async updateLink(session: PlaybackSession, url: string) {
+    session.input = url;
+    if (!this.sessions.has(session.id)) await this.db.update(playSessions).set({ input: url }).where(eq(playSessions.id, session.id));
+  }
+
+  /** Forgets TorBox plays long over. */
+  async prune() {
+    await this.db.delete(playSessions).where(lt(playSessions.lastAccessAt, Date.now() - LINK_SESSION_IDLE_MS));
+  }
+
+  async stop(id: string) {
+    if (!this.sessions.has(id)) {
+      const gone = await this.db.delete(playSessions).where(eq(playSessions.id, id)).returning({ id: playSessions.id });
+      if (gone.length) log.info(`Session ${id.slice(0, 8)} ended`);
+      return;
+    }
+    const session = this.sessions.get(id)!;
     this.sessions.delete(id);
     if (session.proc && session.proc.exitCode === null) {
       if (session.paused) process.kill(session.proc.pid, "SIGCONT");
@@ -105,21 +186,19 @@ export class SessionManager {
   }
 
   stopAll() {
-    clearInterval(this.sweeper);
-    for (const id of [...this.sessions.keys()]) this.stop(id);
+    if (this.sweeper) clearInterval(this.sweeper);
+    for (const id of [...this.sessions.keys()]) void this.stop(id);
   }
 
   /** Stops the user's other sessions for the same title (e.g. a restart at a new offset). */
-  stopForTarget(userId: number, target: SessionTarget) {
-    for (const s of this.sessions.values()) {
-      if (s.userId === userId && s.target.mediaType === target.mediaType && s.target.tmdbId === target.tmdbId && s.target.season === target.season && s.target.episode === target.episode) {
-        this.stop(s.id);
-      }
-    }
+  async stopForTarget(userId: string, target: SessionTarget) {
+    const same = (s: PlaybackSession) =>
+      s.userId === userId && s.target.mediaType === target.mediaType && s.target.tmdbId === target.tmdbId && s.target.season === target.season && s.target.episode === target.episode;
+    for (const s of await this.list()) if (same(s)) await this.stop(s.id);
   }
 
   activeTranscodes(): number {
-    return this.list().filter((s) => s.plan.mode !== "direct").length;
+    return [...this.sessions.values()].filter((s) => isHls(s.plan.mode)).length;
   }
 
   /** Waits for an HLS output file to exist (ffmpeg writes .tmp then renames). */
@@ -218,9 +297,29 @@ export class SessionManager {
     for (const session of this.sessions.values()) {
       // Direct-play range requests are sparse (AVPlayer buffers minutes at a time), so
       // direct sessions live until progress stops or the client ends them.
-      const timeout = session.plan.mode === "direct" ? IDLE_TIMEOUT_MS * 4 : IDLE_TIMEOUT_MS;
+      const timeout = isHls(session.plan.mode) ? IDLE_TIMEOUT_MS : IDLE_TIMEOUT_MS * 4;
       if (now - session.lastAccessAt > timeout) this.stop(session.id);
       else this.throttle(session);
     }
   }
+}
+
+function fromRow(row: typeof playSessions.$inferSelect): PlaybackSession {
+  return {
+    id: row.id,
+    organizationId: row.organizationId,
+    userId: row.userId,
+    fileId: row.fileId,
+    target: JSON.parse(row.targetJson) as SessionTarget,
+    plan: JSON.parse(row.planJson) as PlaybackPlan,
+    // Not kept for link sessions: nothing that uses them needs the details again.
+    info: { container: "", durationMs: 0, audio: [], subtitles: [], chapters: [] },
+    input: row.input,
+    inputKind: "url",
+    startOffsetMs: 0,
+    subtitles: [],
+    createdAt: row.createdAt,
+    lastAccessAt: row.lastAccessAt,
+    lastSegmentRequested: 0,
+  };
 }

@@ -13,9 +13,12 @@ settings:
     SWIFT_STRICT_CONCURRENCY: minimal
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     DEAD_CODE_STRIPPING: YES
-    MARKETING_VERSION: "0.3.0"
+    MARKETING_VERSION: "0.4.0"
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: ""
+    # FFmpeg (StrataRemux) is built for Apple-silicon simulators only.
+    EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+    EXCLUDED_ARCHS[sdk=appletvsimulator*]: x86_64
 
 packages:
   StrataKit:
@@ -26,6 +29,9 @@ packages:
     path: Packages/StrataPlayerUI
   StrataFeatures:
     path: Packages/StrataFeatures
+  # Repackages files on the device for the player (used by StrataPlayerUI).
+  StrataRemux:
+    path: Packages/StrataRemux
 
 targets:
   Strata:
@@ -60,6 +66,7 @@ targets:
           NSAllowsLocalNetworking: true
         NSBonjourServices: [_strata._tcp]
         NSLocalNetworkUsageDescription: Strata looks for your Strata servers on the local network.
+        NSCameraUsageDescription: Strata uses the camera to scan sign-in and server QR codes from your server's dashboard.
         NSUserActivityTypes:
           - com.strata.viewing
           - com.strata.watching

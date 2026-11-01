@@ -16,6 +16,11 @@ let package = Package(
         .target(
             name: "StrataFeatures",
             dependencies: ["StrataKit", "StrataDesign", "StrataPlayerUI"],
+            resources: [
+                .copy("Resources/PrivacyInfo.xcprivacy"),
+                // Third-party notices and licence texts, shown in Settings > Acknowledgements.
+                .copy("Resources/Acknowledgements.plist"),
+            ],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]

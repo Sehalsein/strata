@@ -1,0 +1,11 @@
+{
+    "name": "strata",
+    "serverName": "Strata",
+    "id": "14cda735-78e6-44d1-b76c-793b115d1fa8",
+    "version": "0.1.5",
+    "apiVersion": 1,
+    "mode": "home",
+    "setupRequired": false,
+    "setupCodeRequired": false,
+    "localJoin": true
+}

@@ -34,13 +34,15 @@ struct AnimeView: View {
             #endif
             .padding(.bottom, Metrics.space12)
         }
+        #if !os(tvOS)
+        // The spotlight runs to the top edge, under the bar, like Home's hero.
+        .heroUnderBar(hero != nil)
+        #endif
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
         #if os(tvOS)
         .ignoresSafeArea(edges: .top)
         #else
-        // The spotlight runs to the top edge, under the bar, like Home's hero.
-        .ignoresSafeArea(edges: hero == nil ? [] : .top)
         .navigationTitle("Anime")
         .navigationSubtitle(category?.name ?? "")
         #if os(iOS)
@@ -48,8 +50,7 @@ struct AnimeView: View {
         #endif
         .toolbar {
             if !categories.isEmpty { ToolbarItem(placement: .primaryAction) { menu } }
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-            ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() }
+            ProfileToolbarItems()
         }
         .refreshable { await load(force: true) }
         #endif

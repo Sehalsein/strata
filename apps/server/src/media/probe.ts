@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { redactSecrets } from "../log";
 
 export interface VideoTrack {
@@ -41,6 +42,31 @@ export interface MediaInfo {
   subtitles: SubtitleTrack[];
   chapters: { startMs: number; title?: string }[];
 }
+
+/** Media info as the app sends it (it reads files itself where there's no ffprobe). */
+export const mediaInfoSchema = z.object({
+  container: z.string().max(32),
+  durationMs: z.number().int().min(0).max(100 * 3_600_000),
+  bitrate: z.number().int().min(0).optional(),
+  video: z
+    .object({
+      index: z.number().int().min(0),
+      codec: z.string().max(32),
+      profile: z.string().max(64).optional(),
+      width: z.number().int().min(0).max(16_384),
+      height: z.number().int().min(0).max(16_384),
+      fps: z.number().min(0).max(1000).optional(),
+      bitDepth: z.number().int().min(1).max(16).optional(),
+      hdr: z.enum(["dv", "hdr10", "hlg"]).nullable(),
+      dvProfile: z.number().int().min(0).max(20).optional(),
+    })
+    .optional(),
+  audio: z.array(z.object({ index: z.number().int().min(0), codec: z.string().max(32), channels: z.number().int().min(0).max(32), language: z.string().max(16).optional(), title: z.string().max(256).optional(), isDefault: z.boolean() })).max(64),
+  subtitles: z
+    .array(z.object({ index: z.number().int().min(0), codec: z.string().max(32), language: z.string().max(16).optional(), title: z.string().max(256).optional(), isDefault: z.boolean(), isForced: z.boolean(), isText: z.boolean() }))
+    .max(128),
+  chapters: z.array(z.object({ startMs: z.number().int().min(0), title: z.string().max(256).optional() })).max(512),
+}) satisfies z.ZodType<MediaInfo>;
 
 const TEXT_SUBTITLES = new Set(["subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text"]);
 

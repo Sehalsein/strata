@@ -1,3 +1,4 @@
+import { globalFetch } from "../../net";
 const BASE = "https://api.torbox.app/v1/api";
 const SEARCH_BASE = "https://search-api.torbox.app";
 const PAGE = 1000;
@@ -70,7 +71,7 @@ const ID_PARAM: Record<TorboxKind, string> = { torrents: "torrent_id", usenet: "
 export class TorboxClient {
   constructor(
     private readonly apiKey: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = globalFetch,
   ) {}
 
   me() {

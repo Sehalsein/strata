@@ -1,6 +1,7 @@
 import type { ParsedName } from "../media/parse";
 import type { AnimeMatcher } from "./anime/match";
 import { type Tmdb, type TmdbListItem, yearOf } from "./tmdb";
+import { SharedWork } from "../inFlight";
 
 export interface MatchResult {
   type: "movie" | "show";
@@ -17,7 +18,7 @@ export interface MatchResult {
 
 /** Maps parsed file names to TMDB ids. Results are memoized per (kind, title, year). */
 export class Matcher {
-  private memo = new Map<string, Promise<MatchResult | null>>();
+  private memo = new SharedWork<string, MatchResult | null>({ remember: true, max: 5_000 });
 
   constructor(
     private readonly tmdb: Tmdb,
@@ -38,14 +39,8 @@ export class Matcher {
     if (!parsed.title) return Promise.resolve(null);
     const type = parsed.kind === "episode" ? "show" : "movie";
     const key = `${type}|${normalize(parsed.title)}|${parsed.year ?? ""}`;
-    let pending = this.memo.get(key);
-    if (!pending) {
-      pending = this.lookup(type, parsed.title, parsed.year);
-      this.memo.set(key, pending);
-      // Don't memoize failures (network errors etc.) so the next scan retries.
-      pending.catch(() => this.memo.delete(key));
-    }
-    return pending;
+    // Failures (network errors etc.) aren't kept, so the next scan retries.
+    return this.memo.get(key, () => this.lookup(type, parsed.title!, parsed.year));
   }
 
   private async lookup(type: "movie" | "show", title: string, year?: number): Promise<MatchResult | null> {

@@ -106,15 +106,14 @@ describe("discovery end to end", () => {
       return new Response("unexpected " + url, { status: 500 });
     }) as typeof fetch;
 
-    process.env.TORBOX_API_KEY = "tb-test";
-    server = await startTestServer(fakeFetch);
-    token = ((await (await server.request("/api/setup/admin", { method: "POST", json: { username: "a", password: "password1" } })).json()) as { token: string }).token;
+    // No ffprobe here, as on the cloud server: the app reads files itself.
+    server = await startTestServer(fakeFetch, { ffmpeg: null, keys: { tmdbApiKey: "test-key", torboxApiKey: "tb-test" } });
+    token = ((await (await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "aa", password: "password1" } })).json()) as { token: string }).token;
   }, 60_000);
 
   afterAll(() => {
     server.services.shutdown();
     cdn.stop(true);
-    delete process.env.TORBOX_API_KEY;
   });
 
   test("sources lists cached releases first and drops cams", async () => {
@@ -127,15 +126,37 @@ describe("discovery end to end", () => {
     expect(items[0]!.size).toBe(Math.round(1.2 * 1024 ** 3));
   });
 
-  test("play with nothing in the library adds the cached release and remuxes it", async () => {
-    const res = await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378 } });
+  test("play with nothing in the library adds the cached release; the app reads it and plays it from TorBox", async () => {
+    const caps = { containers: ["mp4", "mov", "m4v"], videoCodecs: ["h264", "hevc"], audioCodecs: ["aac", "ac3", "eac3"], maxHeight: 2160, hdr: ["hdr10", "dv"], dvProfiles: [5, 8], deviceRemux: true };
+    const ask = () => server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, caps } });
+    // The server can't read the file: it hands the app the link to read it from.
+    const first = await ask();
+    expect(first.status).toBe(428);
+    const { needsProbe } = (await first.json()) as { needsProbe: { fileId: number; url: string } };
+    expect(needsProbe.url).toBe(`http://127.0.0.1:${cdn.port}/file.mkv`);
+    // What the app read.
+    const info = {
+      container: "mkv",
+      durationMs: 596_000,
+      video: { index: 0, codec: "h264", width: 1920, height: 1080, fps: 24, bitDepth: 8, hdr: null },
+      audio: [{ index: 1, codec: "dts", channels: 6, language: "eng", isDefault: true }],
+      subtitles: [{ index: 2, codec: "subrip", language: "eng", isDefault: false, isForced: false, isText: true }],
+      chapters: [],
+    };
+    expect((await server.request(`/api/files/${needsProbe.fileId}/probe`, { method: "POST", token, json: { ...info, container: 7 } })).status).toBe(400);
+    expect((await server.request(`/api/files/${needsProbe.fileId}/probe`, { method: "POST", token, json: info })).status).toBe(200);
+    const res = await ask();
     expect(res.status).toBe(200);
-    const play = (await res.json()) as { mode: string; url: string; sessionId: string; candidate: { provider: string } };
-    expect(play.mode).toBe("remux");
+    const play = (await res.json()) as { mode: string; url: string; sessionId: string; candidate: { provider: string }; remux: { audio: string }; subtitleTracks: { embedded?: boolean }[] };
+    expect(play.mode).toBe("device");
+    expect(play.url).toBe(needsProbe.url); // straight from TorBox
+    expect(play.remux.audio).toBe("lossless");
+    expect(play.subtitleTracks[0]!.embedded).toBe(true);
     expect(play.candidate.provider).toBe("torbox");
-    const segment = await server.request(play.url.replace("stream.m3u8", "seg00000.m4s"));
-    expect(segment.status).toBe(200);
-    server.services.sessions.stop(play.sessionId);
+    // Its session is in the database: any server can refresh the link.
+    const link = await server.request(`/api/play/${play.sessionId}/link`, { method: "POST", token });
+    expect(((await link.json()) as { url: string }).url).toBe(needsProbe.url);
+    await server.services.sessions.stop(play.sessionId);
     // The release is now part of the library and no longer "discovered".
     const { items } = (await (await server.request("/api/sources?mediaType=movie&tmdbId=10378&discover=1", { token })).json()) as { items: { id: string }[] };
     expect(items[0]!.id).toMatch(/^file:/);
@@ -150,11 +171,11 @@ describe("discovery end to end", () => {
   });
 
   test("a library torrent can't be replayed as a different title", async () => {
-    const before = server.services.library.byHash(CACHED).map((f) => [f.id, f.mediaType, f.tmdbId]);
+    const before = (await (await server.household()).library.byHash(CACHED)).map((f) => [f.id, f.mediaType, f.tmdbId]);
     expect(before.length).toBeGreaterThan(0);
     const res = await server.request("/api/play", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 1, candidateId: `hash:${CACHED}` } });
     expect(res.status).toBe(404);
-    expect(server.services.library.byHash(CACHED).map((f) => [f.id, f.mediaType, f.tmdbId])).toEqual(before);
+    expect((await (await server.household()).library.byHash(CACHED)).map((f) => [f.id, f.mediaType, f.tmdbId])).toEqual(before);
   });
 
   test("an uncached release reports download progress", async () => {
