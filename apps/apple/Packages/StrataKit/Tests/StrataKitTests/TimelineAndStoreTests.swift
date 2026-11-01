@@ -94,10 +94,10 @@ final class ServerStoreTests: XCTestCase {
     }
 
     func testLocalAddresses() {
-        for local in ["http://192.168.1.20:8420", "http://10.0.0.5", "http://nas.local", "http://nas:8420", "http://100.64.0.7", "http://127.0.0.1:8470", "http://[fd7a:115c::1]"] {
+        for local in ["http://192.168.1.20:8420", "http://10.0.0.5", "http://nas.local", "http://nas:8420", "http://127.0.0.1:8470", "http://[fd7a:115c::1]", "http://[fe80::1]", "http://[::1]"] {
             XCTAssertTrue(ServerAddress.isLocal(URL(string: local)!), local)
         }
-        for remote in ["http://strata.example.com", "http://8.8.8.8", "http://172.32.0.1"] {
+        for remote in ["http://strata.example.com", "http://8.8.8.8", "http://172.32.0.1", "http://100.64.0.7", "http://10.1.2.3.example.com", "http://192.168.1.1.evil.test", "http://[2001:db8::1]"] {
             XCTAssertFalse(ServerAddress.isLocal(URL(string: remote)!), remote)
         }
     }

@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 /// Turns what a user types ("192.168.1.20", "nas.local:8420", "https://strata.example.com/")
 /// into a base URL the client can use.
@@ -44,18 +45,22 @@ public enum ServerAddress {
     }
 
     /// On this device or the local network: a private, link-local or loopback address, or
-    /// a `.local` or one-word name. Plain HTTP is expected there.
+    /// a `.local` or one-word name. Plain HTTP is expected there. Addresses are parsed, not
+    /// pattern-matched, so "10.1.2.3.example.com" isn't one; carrier-NAT space (100.64/10)
+    /// isn't local either, as other customers share it.
     public static func isLocal(_ url: URL) -> Bool {
-        guard let host = url.host()?.lowercased() else { return false }
-        if host == "localhost" || host.hasSuffix(".local") || !host.contains(".") && !host.contains(":") { return true }
-        if host.contains(":") { return host == "::1" || host.hasPrefix("fe80:") || host.hasPrefix("fd") || host.hasPrefix("fc") }
-        let parts = host.split(separator: ".").compactMap { Int($0) }
-        guard parts.count == 4 else { return false }
-        switch (parts[0], parts[1]) {
-        case (10, _), (127, _), (192, 168), (169, 254): return true
-        case (172, 16...31), (100, 64...127): return true // private, and CGNAT (Tailscale)
-        default: return false
+        guard var host = url.host()?.lowercased() else { return false }
+        if host.hasPrefix("["), host.hasSuffix("]") { host = String(host.dropFirst().dropLast()) }
+        if let v4 = IPv4Address(host) {
+            let b = [UInt8](v4.rawValue)
+            return b[0] == 10 || b[0] == 127 || (b[0] == 172 && (16...31).contains(b[1])) || (b[0] == 192 && b[1] == 168) || (b[0] == 169 && b[1] == 254)
         }
+        if let v6 = IPv6Address(host) {
+            let b = [UInt8](v6.rawValue)
+            return v6 == .loopback || (b[0] == 0xfe && b[1] & 0xc0 == 0x80) || b[0] & 0xfe == 0xfc // link-local, unique local
+        }
+        // A name: this device, mDNS, or a one-word LAN name (an address can't be one).
+        return host == "localhost" || host.hasSuffix(".local") || !host.contains(".") && !host.contains(":")
     }
 
     private static func isIPAddress(_ host: String) -> Bool {
