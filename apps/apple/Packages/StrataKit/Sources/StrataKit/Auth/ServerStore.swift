@@ -451,7 +451,7 @@ public final class ServerStore {
             needsProfileSelection = false
             return
         }
-        client = StrataClient(baseURL: server.url, token: token, session: session)
+        client = StrataClient(baseURL: server.url, token: token, session: session, persistent: true)
         needsProfileSelection = server.profileId == nil
     }
 

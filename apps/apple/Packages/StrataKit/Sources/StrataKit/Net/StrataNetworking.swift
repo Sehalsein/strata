@@ -18,14 +18,14 @@ public enum StrataNetworking {
 
     /// Session for all Strata API calls. Explicit `timeoutIntervalForRequest`
     /// means a flaky connection fails in ~20s instead of hanging on the 60s
-    /// system default; the shared cache enables conditional revalidation.
+    /// system default. No URLCache: `StrataClient` keeps catalog answers itself.
     public static let apiSession: URLSession = {
         configureSharedCaches()
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 20
         cfg.timeoutIntervalForResource = 60
-        cfg.urlCache = URLCache.shared
-        cfg.requestCachePolicy = .useProtocolCachePolicy
+        cfg.urlCache = nil
+        cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: cfg)
     }()
 }

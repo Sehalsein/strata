@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { body, intParam, optionalInt, profileOf, requireAuth, type Env } from "../context";
+import { body, cacheFor, DAY, HOUR, intParam, optionalInt, profileOf, requireAuth, type Env } from "../context";
 import { capsSchema } from "../../playback/decide";
 import type { Shelf } from "../../catalog/service";
 
@@ -24,66 +24,71 @@ async function allowedShelves(c: Context<Env>, shelves: Shelf[]): Promise<Shelf[
   return filtered.filter((shelf) => shelf.items.length > 0);
 }
 
+// How long the apps keep each answer (see cacheFor). Catalog lists and title pages barely
+// change; the calendar follows the profile's list, which the apps drop themselves when they
+// change it. Home isn't kept: it has the profile's own rails.
+const TTL = { catalog: DAY, title: DAY, calendar: 6 * HOUR, search: HOUR } as const;
+
 export const catalogRoutes = new Hono<Env>()
   .use(requireAuth)
 
   .get("/home", async (c) => c.json({ shelves: await allowedShelves(c, await c.var.services.catalog.home(profileOf(c))) }))
 
-  .get("/genres/:type", async (c) => {
+  .get("/genres/:type", cacheFor(TTL.catalog), async (c) => {
     const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
     return c.json({ items: await c.var.services.catalog.genres(type) });
   })
 
-  .get("/browse/:type/genre/:id", async (c) => {
+  .get("/browse/:type/genre/:id", cacheFor(TTL.catalog), async (c) => {
     const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
     return c.json({ shelves: await allowedShelves(c, await c.var.services.catalog.genreShelves(type, intParam(c, "id"))) });
   })
 
   // Episodes of the shows on this profile's list: the last week and the next month.
-  .get("/calendar", async (c) => c.json({ items: await c.var.services.calendar.episodes(profileOf(c)) }))
+  .get("/calendar", cacheFor(TTL.calendar), async (c) => c.json({ items: await c.var.services.calendar.episodes(profileOf(c)) }))
 
-  .get("/anime/categories", (c) => c.json({ items: c.var.services.catalog.animeCategories() }))
+  .get("/anime/categories", cacheFor(TTL.catalog), (c) => c.json({ items: c.var.services.catalog.animeCategories() }))
 
-  .get("/anime", async (c) => {
+  .get("/anime", cacheFor(TTL.catalog), async (c) => {
     const category = c.req.query("category") || undefined;
     if (category && !c.var.services.catalog.animeCategories().some((x) => x.id === category)) throw new HTTPException(400, { message: "Unknown anime category" });
     return c.json({ shelves: await allowedShelves(c, await c.var.services.catalog.animePage(category)) });
   })
 
-  .get("/person/:id", async (c) => {
+  .get("/person/:id", cacheFor(TTL.catalog), async (c) => {
     const person = await c.var.services.catalog.person(intParam(c, "id"));
     const content = c.var.services.content;
     const profileId = profileOf(c);
     return c.json({ ...person, movies: await content.filter(profileId, person.movies), shows: await content.filter(profileId, person.shows) });
   })
 
-  .get("/browse/:type/:list", async (c) => {
+  .get("/browse/:type/:list", cacheFor(TTL.catalog), async (c) => {
     const type = z.enum(["movie", "show"]).parse(c.req.param("type"));
     const list = z.enum(["trending", "popular", "topRated", "library"]).parse(c.req.param("list"));
     return c.json({ items: await c.var.services.content.filter(profileOf(c), await c.var.services.catalog.browse(type, list)) });
   })
 
-  .get("/search", async (c) => {
+  .get("/search", cacheFor(TTL.search), async (c) => {
     const q = c.req.query("q")?.trim();
     if (!q) return c.json({ items: [] });
     return c.json({ items: await c.var.services.content.filter(profileOf(c), await c.var.services.catalog.search(q)) });
   })
 
-  .get("/titles/movie/:id", async (c) => {
+  .get("/titles/movie/:id", cacheFor(TTL.title), async (c) => {
     const { catalog, content } = c.var.services;
     const [profileId, id] = [profileOf(c), intParam(c, "id")];
     await content.assertAllowed(profileId, "movie", id);
     const movie = await catalog.movie(profileId, id);
     return c.json({ ...movie, recommendations: await content.filter(profileId, movie.recommendations) });
   })
-  .get("/titles/show/:id", async (c) => {
+  .get("/titles/show/:id", cacheFor(TTL.title), async (c) => {
     const { catalog, content } = c.var.services;
     const [profileId, id] = [profileOf(c), intParam(c, "id")];
     await content.assertAllowed(profileId, "show", id);
     const show = await catalog.show(profileId, id);
     return c.json({ ...show, recommendations: await content.filter(profileId, show.recommendations) });
   })
-  .get("/titles/show/:id/seasons/:season", async (c) => {
+  .get("/titles/show/:id/seasons/:season", cacheFor(TTL.title), async (c) => {
     const [profileId, id] = [profileOf(c), intParam(c, "id")];
     await c.var.services.content.assertAllowed(profileId, "show", id);
     return c.json(await c.var.services.catalog.season(profileId, id, intParam(c, "season")));

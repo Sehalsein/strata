@@ -17,11 +17,11 @@ public final class AppServices {
     /// What the full-screen player is showing, if anything.
     public var watching: WatchRequest?
     /// Bumped after playback stops and its final position is saved, so screens
-    /// showing progress (Continue Watching, Resume buttons) can reload.
+    /// showing progress (Continue Watching, Resume buttons) can reload. (Saving it
+    /// already dropped the title's cached page.)
     public private(set) var progressRevision = 0
 
     public func progressChanged() async {
-        await client?.clearCache()
         progressRevision += 1
     }
 
@@ -67,6 +67,25 @@ public final class AppServices {
                 if let value = try? await work(retry) { return .loaded(value) }
             }
             return .failed(StrataError.wrap(error).message)
+        }
+    }
+
+    /// Stale-while-revalidate: hands `show` what this device kept, however old, at once,
+    /// then the server's answer when the kept one is stale or missing (each catalog answer
+    /// says how long it stays fresh). A failed refresh leaves the kept answer up.
+    /// `force` (pull to refresh) goes straight to the server.
+    public func loadCached<T>(force: Bool = false, _ work: (StrataClient, CachePolicy) async throws -> T,
+                              show: (Loadable<T>) -> Void) async {
+        var showingKept = false
+        if !force, let client, let kept = try? await work(client, .cachedOnly) {
+            show(.loaded(kept))
+            showingKept = true
+        }
+        let result = await load { try await work($0, force ? .reload : .fresh) }
+        switch result {
+        case .loading: return
+        case .failed where showingKept: return
+        default: show(result)
         }
     }
 

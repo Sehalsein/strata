@@ -48,17 +48,19 @@ struct BrowseView: View {
             ToolbarSpacer(.fixed, placement: .primaryAction)
             ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() }
         }
-        .refreshable { await services.client?.clearCache(); await load() }
+        .refreshable { await load(force: true); await loadGenreShelves(force: true) }
         #endif
         .task { await load() }
         .task { await loadGenres() }
         .task(id: genre) {
-            guard let genre else { return }
             genreShelves = .loading
-            let result = await services.load { try await $0.genreShelves(type, genreId: genre.id) }
-            if case .loading = result { return }
-            genreShelves = result
+            await loadGenreShelves()
         }
+    }
+
+    private func loadGenreShelves(force: Bool = false) async {
+        guard let genre else { return }
+        await services.loadCached(force: force, { try await $0.genreShelves(type, genreId: genre.id, $1) }) { genreShelves = $0 }
     }
 
     @ViewBuilder private func genreContent(_ genre: Genre) -> some View {
@@ -102,8 +104,8 @@ struct BrowseView: View {
                 }
     }
 
-    private func loadGenres() async {
-        if case .loaded(let items) = await services.load({ try await $0.genres(type) }) { genres = items }
+    private func loadGenres(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.genres(type, $1) }) { if case .loaded(let items) = $0 { genres = items } }
     }
 
     private func railTitle(_ list: BrowseList) -> String {
@@ -115,16 +117,17 @@ struct BrowseView: View {
         }
     }
 
-    private func load() async {
-        await withTaskGroup(of: (BrowseList, Loadable<[TitleCard]>).self) { group in
+    private func load(force: Bool = false) async {
+        await withTaskGroup(of: Void.self) { group in
             for list in order {
-                group.addTask { @MainActor in (list, await services.load { try await $0.browse(type, list: list) }) }
-            }
-            for await (list, result) in group {
-                switch result {
-                case .loaded(let items): lists[list] = items
-                case .failed(let message): if list != .library { error = message }
-                case .loading: break
+                group.addTask { @MainActor in
+                    await services.loadCached(force: force, { try await $0.browse(type, list: list, $1) }) { result in
+                        switch result {
+                        case .loaded(let items): lists[list] = items; error = nil
+                        case .failed(let message): if list != .library { error = message }
+                        case .loading: break
+                        }
+                    }
                 }
             }
         }
@@ -213,7 +216,7 @@ struct BrowseListView: View {
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
         .navigationTitle(list.title)
-        .task { items = await services.load { try await $0.browse(type, list: list) } }
+        .task { await services.loadCached({ try await $0.browse(type, list: list, $1) }) { items = $0 } }
     }
 }
 

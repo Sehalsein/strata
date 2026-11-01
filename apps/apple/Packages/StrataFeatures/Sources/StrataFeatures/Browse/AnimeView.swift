@@ -51,12 +51,17 @@ struct AnimeView: View {
             ToolbarSpacer(.fixed, placement: .primaryAction)
             ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() }
         }
-        .refreshable { await services.client?.clearCache(); await load() }
+        .refreshable { await load(force: true) }
         #endif
-        .task {
-            if case .loaded(let items) = await services.load({ try await $0.animeCategories() }) { categories = items }
+        .task { await loadCategories() }
+        .task(id: category) {
+            shelves = .loading
+            await load()
         }
-        .task(id: category) { await load() }
+    }
+
+    private func loadCategories(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.animeCategories($1) }) { if case .loaded(let items) = $0 { categories = items } }
     }
 
     private var menu: some View {
@@ -86,10 +91,8 @@ struct AnimeView: View {
         shelves.value?.first { $0.style == .hero && !$0.items.isEmpty }
     }
 
-    private func load() async {
-        shelves = .loading
-        let result = await services.load { try await $0.anime(category: category?.id) }
-        if case .loading = result { return }
-        shelves = result
+    private func load(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.anime(category: category?.id, $1) }) { shelves = $0 }
     }
 }
+

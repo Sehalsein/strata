@@ -16,6 +16,8 @@ public struct StrataError: Error, LocalizedError, Sendable, Equatable {
         /// Bad input on our side (e.g. an empty or malformed address).
         case invalidInput
         case cancelled
+        /// `CachePolicy.cachedOnly` found nothing kept on this device.
+        case notCached
     }
 
     public var kind: Kind

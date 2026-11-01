@@ -46,6 +46,9 @@ struct ShowDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        #if !os(tvOS)
+        .refreshable { await load(force: true); await loadSeason(quietly: true, force: true) }
+        #endif
         .task { await load() }
         .onChange(of: services.progressRevision) { Task { await load(); await loadSeason(quietly: true) } }
         .task(id: selectedSeason) { await loadSeason() }
@@ -245,29 +248,26 @@ struct ShowDetailView: View {
         }
     }
 
-    private func load() async {
-        let result = await services.load { try await $0.show(tmdbId) }
-        if case .loading = result { return }
-        detail = result
-        if let show = result.value {
-            inWatchlist = show.inWatchlist
-            if selectedSeason == nil { selectedSeason = show.upNext?.season ?? show.orderedSeasons.first?.season }
+    private func load(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.show(tmdbId, $1) }) { result in
+            detail = result
+            if let show = result.value {
+                inWatchlist = show.inWatchlist
+                if selectedSeason == nil { selectedSeason = show.upNext?.season ?? show.orderedSeasons.first?.season }
+            }
         }
     }
 
     /// `quietly` keeps the current episodes on screen while refreshing their progress.
-    private func loadSeason(quietly: Bool = false) async {
+    private func loadSeason(quietly: Bool = false, force: Bool = false) async {
         guard let n = selectedSeason else { return }
         if !quietly { season = .loading }
-        let result = await services.load { try await $0.season(show: tmdbId, n) }
-        if case .loading = result { return }
-        season = result
+        await services.loadCached(force: force, { try await $0.season(show: tmdbId, n, $1) }) { season = $0 }
     }
 
     private func setWatched(_ show: ShowDetail, _ episode: EpisodeItem, _ watched: Bool) async {
         _ = await services.load { try await $0.setWatched(episode.target(show: show.tmdbId), watched) }
-        await services.client?.clearCache()
-        await loadSeason()
+        await loadSeason(quietly: true)
     }
 
     private func toggleWatchlist(_ show: ShowDetail) async {

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Async client for one Strata server. Cheap to create; immutable (`withToken` returns a copy).
 ///
@@ -12,12 +13,15 @@ public final class StrataClient: Sendable {
 
     /// - Parameters:
     ///   - baseURL: `http(s)://host:port` (see `ServerAddress.normalize`).
-    ///   - cacheTTL: lifetime of cached GET responses (home/browse/search/titles); 0 disables.
-    public init(baseURL: URL, token: String? = nil, session: URLSession = StrataNetworking.apiSession, cacheTTL: TimeInterval = 30) {
+    ///   - cacheTTL: how long a catalog answer stays fresh when the server doesn't say
+    ///     (`Cache-Control: max-age`); 0 turns caching off.
+    ///   - persistent: keeps catalog answers on disk too, so a cold launch paints at once.
+    public init(baseURL: URL, token: String? = nil, session: URLSession = StrataNetworking.apiSession,
+                cacheTTL: TimeInterval = 30, persistent: Bool = false) {
         self.baseURL = baseURL
         self.token = token
         self.session = session
-        self.cache = ResponseCache(ttl: cacheTTL)
+        self.cache = ResponseCache(ttl: cacheTTL, directory: persistent && cacheTTL > 0 ? ResponseCache.directory(for: token) : nil)
     }
 
     private init(baseURL: URL, token: String?, session: URLSession, cache: ResponseCache) {
@@ -29,7 +33,7 @@ public final class StrataClient: Sendable {
 
     /// Same server and cache, different credentials.
     public func withToken(_ token: String?) -> StrataClient {
-        StrataClient(baseURL: baseURL, token: token, session: session, cache: ResponseCache(ttl: cache.ttl))
+        StrataClient(baseURL: baseURL, token: token, session: session, cacheTTL: cache.ttl, persistent: cache.isPersistent)
     }
 
     /// Same token, different address (address fallback).
@@ -37,7 +41,7 @@ public final class StrataClient: Sendable {
         StrataClient(baseURL: url, token: token, session: session, cache: cache)
     }
 
-    /// Drops cached GET responses (e.g. after pull-to-refresh).
+    /// Drops every cached answer, on disk too (sign-out, profile switch).
     public func clearCache() async { await cache.clear() }
 
     /// Server-relative URL → absolute.
@@ -115,47 +119,47 @@ public final class StrataClient: Sendable {
 
     // MARK: - Catalog
 
-    public func home() async throws -> [Shelf] {
-        let res: ShelvesResponse = try await get("/api/home")
+    public func home(_ policy: CachePolicy = .fresh) async throws -> [Shelf] {
+        let res: ShelvesResponse = try await get("/api/home", policy: policy)
         return res.shelves
     }
 
-    public func browse(_ type: TitleType, list: BrowseList) async throws -> [TitleCard] {
-        let res: ItemsResponse<TitleCard> = try await get("/api/browse/\(type.rawValue)/\(list.rawValue)")
+    public func browse(_ type: TitleType, list: BrowseList, _ policy: CachePolicy = .fresh) async throws -> [TitleCard] {
+        let res: ItemsResponse<TitleCard> = try await get("/api/browse/\(type.rawValue)/\(list.rawValue)", policy: policy)
         return res.items
     }
 
     /// TMDB genres for movies or shows, in the server's language.
-    public func genres(_ type: TitleType) async throws -> [Genre] {
-        let res: ItemsResponse<Genre> = try await get("/api/genres/\(type.rawValue)")
+    public func genres(_ type: TitleType, _ policy: CachePolicy = .fresh) async throws -> [Genre] {
+        let res: ItemsResponse<Genre> = try await get("/api/genres/\(type.rawValue)", policy: policy)
         return res.items
     }
 
     /// Rails for one genre: In Your Library, New, Popular, Top Rated.
-    public func genreShelves(_ type: TitleType, genreId: Int) async throws -> [Shelf] {
-        let res: ShelvesResponse = try await get("/api/browse/\(type.rawValue)/genre/\(genreId)")
+    public func genreShelves(_ type: TitleType, genreId: Int, _ policy: CachePolicy = .fresh) async throws -> [Shelf] {
+        let res: ShelvesResponse = try await get("/api/browse/\(type.rawValue)/genre/\(genreId)", policy: policy)
         return res.shelves
     }
 
-    public func animeCategories() async throws -> [AnimeCategory] {
-        let res: ItemsResponse<AnimeCategory> = try await get("/api/anime/categories")
+    public func animeCategories(_ policy: CachePolicy = .fresh) async throws -> [AnimeCategory] {
+        let res: ItemsResponse<AnimeCategory> = try await get("/api/anime/categories", policy: policy)
         return res.items
     }
 
     /// The Anime tab's rails, for every category or just one.
-    public func anime(category: String? = nil) async throws -> [Shelf] {
-        let res: ShelvesResponse = try await get("/api/anime", query: category.map { [URLQueryItem(name: "category", value: $0)] } ?? [])
+    public func anime(category: String? = nil, _ policy: CachePolicy = .fresh) async throws -> [Shelf] {
+        let res: ShelvesResponse = try await get("/api/anime", query: category.map { [URLQueryItem(name: "category", value: $0)] } ?? [], policy: policy)
         return res.shelves
     }
 
     /// Episodes of the shows on this profile's list: the last week and the next month.
-    public func calendar() async throws -> [CalendarEpisode] {
-        let res: ItemsResponse<CalendarEpisode> = try await get("/api/calendar")
+    public func calendar(_ policy: CachePolicy = .fresh) async throws -> [CalendarEpisode] {
+        let res: ItemsResponse<CalendarEpisode> = try await get("/api/calendar", policy: policy)
         return res.items
     }
 
-    public func person(_ id: Int) async throws -> PersonDetail {
-        try await get("/api/person/\(id)")
+    public func person(_ id: Int, _ policy: CachePolicy = .fresh) async throws -> PersonDetail {
+        try await get("/api/person/\(id)", policy: policy)
     }
 
     public func search(_ query: String) async throws -> [TitleCard] {
@@ -165,17 +169,19 @@ public final class StrataClient: Sendable {
         return res.items
     }
 
-    public func movie(_ tmdbId: Int) async throws -> MovieDetail {
-        try await get("/api/titles/movie/\(tmdbId)")
+    public func movie(_ tmdbId: Int, _ policy: CachePolicy = .fresh) async throws -> MovieDetail {
+        try await get(Self.titlePath(.movie, tmdbId), policy: policy)
     }
 
-    public func show(_ tmdbId: Int) async throws -> ShowDetail {
-        try await get("/api/titles/show/\(tmdbId)")
+    public func show(_ tmdbId: Int, _ policy: CachePolicy = .fresh) async throws -> ShowDetail {
+        try await get(Self.titlePath(.show, tmdbId), policy: policy)
     }
 
-    public func season(show tmdbId: Int, _ season: Int) async throws -> SeasonDetail {
-        try await get("/api/titles/show/\(tmdbId)/seasons/\(season)")
+    public func season(show tmdbId: Int, _ season: Int, _ policy: CachePolicy = .fresh) async throws -> SeasonDetail {
+        try await get(Self.titlePath(.show, tmdbId) + "/seasons/\(season)", policy: policy)
     }
+
+    static func titlePath(_ type: TitleType, _ tmdbId: Int) -> String { "/api/titles/\(type.rawValue)/\(tmdbId)" }
 
     /// What the server can play a title from. `discover` asks it to look further than its
     /// library where it's set up to (takes a few seconds); the list is whatever it returns.
@@ -197,9 +203,9 @@ public final class StrataClient: Sendable {
                      caps: ClientCaps = .current) async throws -> PlayOutcome {
         let body = PlayBody(mediaType: target.mediaType, tmdbId: target.tmdbId, season: target.season, episode: target.episode,
                             candidateId: candidateId, startMs: startMs, audioStreamIndex: audioStreamIndex, caps: caps)
-        let (data, status) = try await perform(request("POST", "/api/play", body: body))
+        let (data, response) = try await perform(request("POST", "/api/play", body: body))
         // 202: the server is getting the source ready; repeat the call to follow it.
-        if status == 202 {
+        if response.statusCode == 202 {
             return .preparing(try decode(PreparingStatus.self, from: data))
         }
         var res = try decode(PlayResponse.self, from: data)
@@ -220,26 +226,26 @@ public final class StrataClient: Sendable {
         let body = ProgressBody(mediaType: target.mediaType, tmdbId: target.tmdbId, season: target.season, episode: target.episode,
                                 positionMs: max(0, positionMs), durationMs: max(0, durationMs), sessionId: sessionId)
         let res: WatchProgress = try await send("POST", "/api/progress", body: body)
-        await cache.clear()
+        await cache.remove(["/api/home", Self.titlePath(target.titleType, target.tmdbId)])
         return res
     }
 
     public func setWatched(_ target: PlaybackTarget, _ watched: Bool) async throws {
         let body = WatchedBody(mediaType: target.mediaType, tmdbId: target.tmdbId, season: target.season, episode: target.episode, watched: watched)
         let _: OKResponse = try await send("POST", "/api/watched", body: body)
-        await cache.clear()
+        await cache.remove(["/api/home", Self.titlePath(target.titleType, target.tmdbId)])
     }
 
     /// Takes a title off Continue Watching and Next Up (until it's watched again); its
     /// progress is kept.
     public func hideFromContinue(_ type: TitleType, tmdbId: Int) async throws {
         let _: OKResponse = try await send("DELETE", "/api/continue/\(type.rawValue)/\(tmdbId)")
-        await cache.clear()
+        await cache.remove(["/api/home"])
     }
 
     public func setWatchlist(_ type: TitleType, tmdbId: Int, _ on: Bool) async throws {
         let _: OKResponse = try await send("PUT", "/api/watchlist", body: WatchlistBody(type: type, tmdbId: tmdbId, on: on))
-        await cache.clear()
+        await cache.remove(["/api/home", "/api/calendar", Self.titlePath(type, tmdbId)])
     }
 
     /// Fetches a WebVTT track. The server extracts embedded tracks on demand and answers
@@ -283,24 +289,28 @@ public final class StrataClient: Sendable {
 
     // MARK: - Plumbing
 
-    private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = [], cached: Bool = true) async throws -> T {
+    private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = [], cached: Bool = true, policy: CachePolicy = .fresh) async throws -> T {
         let req = try request("GET", path, query: query)
+        guard cached, cache.ttl > 0 else { return try decode(T.self, from: try await perform(req).0) }
         let key = cacheKey(req)
-        if cached, let hit = await cache.get(key) {
-            return try decode(T.self, from: hit)
+        if policy != .reload, let hit = await cache.entry(key), policy == .cachedOnly || hit.isFresh {
+            return try decode(T.self, from: hit.body)
         }
-        guard cached else { return try decode(T.self, from: try await perform(req).0) }
+        if policy == .cachedOnly { throw StrataError(kind: .notCached, message: "Not saved on this device yet.") }
         // Screens appearing together often ask for the same thing: share one request.
-        let task = await cache.shared(key) { try await self.perform(req).0 }
-        let data: Data
+        let task = await cache.shared(key) {
+            let (data, response) = try await self.perform(req)
+            return (data, ResponseCache.maxAge(response))
+        }
+        let result: (Data, TimeInterval?)
         do {
-            data = try await task.value
+            result = try await task.value
         } catch {
-            await cache.finished(key, task, data: nil)
+            await cache.finished(key, task, result: nil)
             throw error
         }
-        await cache.finished(key, task, data: data)
-        return try decode(T.self, from: data)
+        await cache.finished(key, task, result: result)
+        return try decode(T.self, from: result.0)
     }
 
     private func send<T: Decodable>(_ method: String, _ path: String) async throws -> T {
@@ -329,6 +339,9 @@ public final class StrataClient: Sendable {
             throw StrataError(kind: .invalidInput, message: "That doesn't look like a valid server address.")
         }
         var req = URLRequest(url: url)
+        // The client keeps catalog answers itself (`ResponseCache`); URLCache mustn't answer
+        // in its place, or a pull-to-refresh would get the old answer back.
+        req.cachePolicy = .reloadIgnoringLocalCacheData
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
@@ -339,12 +352,12 @@ public final class StrataClient: Sendable {
         return req
     }
 
-    /// Returns body + status for 2xx; throws `StrataError` otherwise.
-    private func perform(_ req: URLRequest) async throws -> (Data, Int) {
+    /// Returns body + response for 2xx; throws `StrataError` otherwise.
+    private func perform(_ req: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let (data, response) = try await rawData(req)
         let status = response.statusCode
         guard (200..<300).contains(status) else { throw httpError(status, data) }
-        return (data, status)
+        return (data, response)
     }
 
     private func rawData(_ req: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -373,8 +386,11 @@ public final class StrataClient: Sendable {
         }
     }
 
+    /// Path and query only: the cache belongs to this token, and a fallback address of the
+    /// same server (`withBaseURL`) shares it.
     private func cacheKey(_ req: URLRequest) -> String {
-        (req.url?.absoluteString ?? "") + "|" + (token ?? "")
+        guard let url = req.url else { return "" }
+        return url.path + (url.query.map { "?" + $0 } ?? "")
     }
 }
 
@@ -419,51 +435,152 @@ private struct WatchedBody: Encodable {
 
 // MARK: - Cache
 
-/// Tiny in-memory TTL cache for GET bodies.
+/// How a catalog read uses the answers kept on this device.
+public enum CachePolicy: Sendable {
+    /// The kept answer while the server's `max-age` says it's fresh; otherwise ask.
+    case fresh
+    /// Whatever is kept, however old, without asking; throws `.notCached` when there's none.
+    /// With `.fresh` after it, a screen shows the old answer while the new one loads.
+    case cachedOnly
+    /// Always ask the server (pull to refresh).
+    case reload
+}
+
+/// GET bodies the server let us keep, in memory and (when persistent) on disk, each with
+/// the `max-age` it came with. Stale entries stay until replaced: they're what a screen
+/// shows while it asks again.
 actor ResponseCache {
-    nonisolated let ttl: TimeInterval
-    private var entries: [String: (at: Date, data: Data)] = [:]
-    private let limit = 64
-
-    init(ttl: TimeInterval) { self.ttl = ttl }
-
-    func get(_ key: String) -> Data? {
-        guard ttl > 0, let e = entries[key] else { return nil }
-        if Date().timeIntervalSince(e.at) > ttl {
-            entries[key] = nil
-            return nil
-        }
-        return e.data
+    struct Entry: Codable {
+        var storedAt: Date
+        var maxAge: TimeInterval
+        var body: Data
+        var isFresh: Bool { Date().timeIntervalSince(storedAt) < maxAge }
     }
 
-    func set(_ key: String, _ data: Data) {
-        guard ttl > 0 else { return }
-        if entries.count >= limit, let oldest = entries.min(by: { $0.value.at < $1.value.at })?.key {
-            entries[oldest] = nil
+    nonisolated let ttl: TimeInterval
+    private let directory: URL?
+    nonisolated var isPersistent: Bool { directory != nil }
+    private var entries: [String: Entry] = [:]
+    private var running: [String: Task<(Data, TimeInterval?), Error>] = [:]
+    private var pruned = false
+    private let limit = 64
+    /// Disk entries older than this are past any use, even as a placeholder.
+    private static let diskLifetime: TimeInterval = 30 * 24 * 3600
+
+    init(ttl: TimeInterval, directory: URL? = nil) {
+        self.ttl = ttl
+        self.directory = directory
+    }
+
+    /// One folder per token, so answers never cross accounts.
+    static func directory(for token: String?) -> URL? {
+        guard let token, let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        return caches.appendingPathComponent("strata-api", isDirectory: true).appendingPathComponent(digest(token), isDirectory: true)
+    }
+
+    /// `max-age` from Cache-Control (0: keep it, but ask again next time); -1 for `no-store`;
+    /// nil when it doesn't say.
+    nonisolated static func maxAge(_ response: HTTPURLResponse) -> TimeInterval? {
+        guard let header = response.value(forHTTPHeaderField: "Cache-Control")?.lowercased() else { return nil }
+        if header.contains("no-store") { return -1 }
+        if header.contains("no-cache") { return 0 }
+        guard let range = header.range(of: #"max-age=\d+"#, options: .regularExpression) else { return nil }
+        return TimeInterval(header[range].dropFirst("max-age=".count))
+    }
+
+    func entry(_ key: String) -> Entry? {
+        if let e = entries[key] { return e }
+        guard let file = file(for: key), let data = try? Data(contentsOf: file),
+              let e = try? PropertyListDecoder().decode(Entry.self, from: data) else { return nil }
+        remember(key, e)
+        return e
+    }
+
+    func set(_ key: String, _ data: Data, maxAge: TimeInterval?) {
+        let maxAge = maxAge ?? ttl
+        guard maxAge >= 0 else { return remove(key) }
+        let e = Entry(storedAt: Date(), maxAge: maxAge, body: data)
+        remember(key, e)
+        guard let directory, let file = file(for: key) else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? PropertyListEncoder().encode(e).write(to: file, options: .atomic)
+        pruneOnce()
+    }
+
+    /// Drops these paths and everything under them (`/api/titles/show/1` takes its seasons).
+    func remove(_ paths: [String]) {
+        func matches(_ key: String) -> Bool {
+            paths.contains { key == $0 || key.hasPrefix($0 + "/") || key.hasPrefix($0 + "?") }
         }
-        entries[key] = (Date(), data)
+        for key in entries.keys where matches(key) { entries[key] = nil }
+        for key in running.keys where matches(key) { running[key] = nil }
+        guard let directory, let files = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else { return }
+        let prefixes = paths.map { Self.fileStem($0) + "-" }
+        for name in files where prefixes.contains(where: name.hasPrefix) {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+        }
     }
 
     func clear() {
         entries.removeAll()
         running.removeAll()
+        if let directory { try? FileManager.default.removeItem(at: directory) }
     }
 
-    private var running: [String: Task<Data, Error>] = [:]
-
     /// The request already on its way for `key`, or a new one.
-    func shared(_ key: String, _ work: @escaping @Sendable () async throws -> Data) -> Task<Data, Error> {
+    func shared(_ key: String, _ work: @escaping @Sendable () async throws -> (Data, TimeInterval?)) -> Task<(Data, TimeInterval?), Error> {
         if let task = running[key] { return task }
         let task = Task { try await work() }
         running[key] = task
         return task
     }
 
-    /// Forgets the request (if it's still the current one) and stores its answer.
-    func finished(_ key: String, _ task: Task<Data, Error>, data: Data?) {
+    /// Forgets the request (if it's still the current one: a clear or a change since it
+    /// started means its answer may be out of date) and stores its answer.
+    func finished(_ key: String, _ task: Task<(Data, TimeInterval?), Error>, result: (Data, TimeInterval?)?) {
         guard running[key] == task else { return }
         running[key] = nil
-        if let data { set(key, data) }
+        if let result { set(key, result.0, maxAge: result.1) }
+    }
+
+    private func remove(_ key: String) {
+        entries[key] = nil
+        if let file = file(for: key) { try? FileManager.default.removeItem(at: file) }
+    }
+
+    private func remember(_ key: String, _ e: Entry) {
+        if entries[key] == nil, entries.count >= limit, let oldest = entries.min(by: { $0.value.storedAt < $1.value.storedAt })?.key {
+            entries[oldest] = nil
+        }
+        entries[key] = e
+    }
+
+    /// Readable path first (so `remove` can match a whole title by prefix), then a digest
+    /// of the full key (the query, and to keep names unique and short).
+    private func file(for key: String) -> URL? {
+        guard let directory else { return nil }
+        let path = key.split(separator: "?", maxSplits: 1).first.map(String.init) ?? key
+        return directory.appendingPathComponent("\(Self.fileStem(path))-\(Self.digest(key).prefix(16)).plist")
+    }
+
+    private static func fileStem(_ path: String) -> String {
+        path.split(separator: "/").map { $0.filter { $0.isLetter || $0.isNumber || $0 == "-" } }.joined(separator: "-")
+    }
+
+    private static func digest(_ s: String) -> String {
+        SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Once per launch: sweeps out entries too old to be worth showing.
+    private func pruneOnce() {
+        guard !pruned, let directory else { return }
+        pruned = true
+        let fm = FileManager.default
+        let cutoff = Date().addingTimeInterval(-Self.diskLifetime)
+        for url in (try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] {
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            if modified < cutoff { try? fm.removeItem(at: url) }
+        }
     }
 }
 

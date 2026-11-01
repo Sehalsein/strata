@@ -48,7 +48,7 @@ struct CalendarView: View {
             }
             ToolbarItem(placement: .primaryAction) { ProfileToolbarButton() }
         }
-        .refreshable { await services.client?.clearCache(); await load() }
+        .refreshable { await load(force: true) }
         .alert("Notifications are off for Strata", isPresented: $alertsDenied) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -116,11 +116,9 @@ struct CalendarView: View {
         return day.formatted(.dateTime.weekday(.wide).month(.wide).day())
     }
 
-    private func load() async {
-        let result = await services.load { try await $0.calendar() }
-        if case .loading = result { return }
-        episodes = result
-        if case .loaded(let list) = result { await EpisodeAlerts.schedule(list) }
+    private func load(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.calendar($1) }) { episodes = $0 }
+        if case .loaded(let list) = episodes { await EpisodeAlerts.schedule(list) }
     }
 
     private func toggleAlerts() async {

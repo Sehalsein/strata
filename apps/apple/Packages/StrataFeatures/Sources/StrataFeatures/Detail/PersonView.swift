@@ -34,6 +34,9 @@ struct PersonView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline) // the header carries the name
         #endif
+        #if !os(tvOS)
+        .refreshable { await load(force: true) }
+        #endif
         .task { await load() }
     }
 
@@ -94,10 +97,8 @@ struct PersonView: View {
     private var bioLines: Int { Metrics.isPad ? 5 : 4 }
     #endif
 
-    private func load() async {
-        let result = await services.load { try await $0.person(personId) }
-        if case .loading = result { return }
-        person = result
+    private func load(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.person(personId, $1) }) { person = $0 }
     }
 }
 

@@ -39,6 +39,9 @@ struct MovieDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        #if !os(tvOS)
+        .refreshable { await load(force: true) }
+        #endif
         .task { await load() }
         .onChange(of: services.progressRevision) { Task { await load() } }
     }
@@ -137,11 +140,11 @@ struct MovieDetailView: View {
                                    candidateId: candidateId))
     }
 
-    private func load() async {
-        let result = await services.load { try await $0.movie(tmdbId) }
-        if case .loading = result { return }
-        detail = result
-        if let movie = result.value { inWatchlist = movie.inWatchlist }
+    private func load(force: Bool = false) async {
+        await services.loadCached(force: force, { try await $0.movie(tmdbId, $1) }) { result in
+            detail = result
+            if let movie = result.value { inWatchlist = movie.inWatchlist }
+        }
     }
 
     private func toggleWatchlist(_ movie: MovieDetail) async {

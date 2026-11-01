@@ -186,6 +186,14 @@ describe("library", () => {
     expect(trending.items[0].available).toEqual(["local"]);
   });
 
+  test("catalog answers say how long the apps may keep them; errors and the rest don't", async () => {
+    const cacheControl = async (path: string) => (await server.request(path, { token })).headers.get("cache-control");
+    expect(await cacheControl("/api/genres/movie")).toBe("private, max-age=86400, stale-while-revalidate=604800");
+    expect(await cacheControl("/api/home")).toBeNull();
+    expect(await cacheControl("/api/genres/nope")).toBeNull();
+    expect(await cacheControl("/api/me")).toBeNull();
+  });
+
   test("genres: the list, and rails for one genre (trending, then new)", async () => {
     const genres = (await json(await server.request("/api/genres/movie", { token }))).items;
     expect(genres.some((g: any) => g.id === -1)).toBe(false); // anime has its own tab now
