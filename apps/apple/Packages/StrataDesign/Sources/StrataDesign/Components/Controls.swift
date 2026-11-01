@@ -221,11 +221,7 @@ public struct ProfileAvatar: View {
             }
             .overlay {
                 if let imageURL {
-                    AsyncImage(url: imageURL) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        Color.clear
-                    }
+                    RemoteImage(url: imageURL, maxPixel: Int(size * 3)) { Color.clear }
                     .frame(width: size, height: size)
                     .clipShape(Circle())
                 }

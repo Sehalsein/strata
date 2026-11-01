@@ -199,6 +199,13 @@ struct ConnectView: View {
         }
     }
 
+    /// The host, with the port when it isn't Strata's usual one (two servers on one machine).
+    private static func address(_ url: URL) -> String {
+        guard let host = url.host() else { return url.absoluteString }
+        guard let port = url.port, port != 8420 else { return host }
+        return "\(host):\(port)"
+    }
+
     private func serverRow(_ server: Row) -> some View {
         HStack(spacing: Metrics.space4) {
             Image(systemName: "server.rack")
@@ -208,7 +215,7 @@ struct ConnectView: View {
                 .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Metrics.radiusSM, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 Text(server.name).font(.stHeadline).foregroundStyle(Theme.ink)
-                Text(server.url.host() ?? server.url.absoluteString).font(.stFootnote).foregroundStyle(Theme.ink3)
+                Text(Self.address(server.url)).font(.stFootnote).foregroundStyle(Theme.ink3)
             }
             Spacer(minLength: Metrics.space2)
             if probing == server.url.absoluteString {

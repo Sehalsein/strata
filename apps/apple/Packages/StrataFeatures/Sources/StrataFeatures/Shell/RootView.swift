@@ -81,6 +81,19 @@ struct MainShell: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var tab: AppTab = Self.launchTab
     @State private var showSettings = Self.launchSettings
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
+
+    /// Whether the iPad sidebar (with My List, Downloads and the profile) is showing. Not
+    /// in a narrow window (Split View, Slide Over), where it collapses to the tab bar.
+    private var showsSidebar: Bool {
+        #if os(iOS)
+        Self.sidebar && sizeClass != .compact
+        #else
+        false
+        #endif
+    }
 
     /// DEBUG: `-StrataTab search` opens a tab and `-StrataSettings YES` the Settings
     /// sheet at launch, for screenshots and UI tests.
@@ -113,22 +126,22 @@ struct MainShell: View {
     var body: some View {
         TabView(selection: $tab) {
             Tab("Home", systemImage: "house", value: AppTab.home) {
-                StackHost { HomeView() }
+                StackHost(tab: .home) { HomeView() }
             }
             Tab("Movies", systemImage: "film", value: AppTab.movies) {
-                StackHost { BrowseView(type: .movie) }
+                StackHost(tab: .movies) { BrowseView(type: .movie) }
             }
             Tab("Shows", systemImage: "tv", value: AppTab.shows) {
-                StackHost { BrowseView(type: .show) }
+                StackHost(tab: .shows) { BrowseView(type: .show) }
             }
             Tab("Anime", image: "StrawHat", value: AppTab.anime) {
-                StackHost { AnimeView() }
+                StackHost(tab: .anime) { AnimeView() }
             }
             #if os(tvOS)
             // The TV's top tab bar has room for it; iPhone and iPad reach it from Home's
             // Coming Up rail (and iPad's sidebar).
             Tab("Calendar", systemImage: "calendar", value: AppTab.calendar) {
-                StackHost { CalendarView() }
+                StackHost(tab: .calendar) { CalendarView() }
             }
             #endif
             Tab(value: AppTab.search, role: .search) {
@@ -138,13 +151,13 @@ struct MainShell: View {
             if Self.sidebar {
                 TabSection("Library") {
                     Tab("My List", systemImage: "bookmark", value: AppTab.myList) {
-                        StackHost { MyListView() }
+                        StackHost(tab: .myList) { MyListView() }
                     }
                     Tab("Calendar", systemImage: "calendar", value: AppTab.calendar) {
-                        StackHost { CalendarView() }
+                        StackHost(tab: .calendar) { CalendarView() }
                     }
                     Tab("Downloads", systemImage: "arrow.down.circle", value: AppTab.downloads) {
-                        StackHost { DownloadsView() }
+                        StackHost(tab: .downloads) { DownloadsView() }
                     }
                 }
                 .tabPlacement(.sidebarOnly)
@@ -169,10 +182,22 @@ struct MainShell: View {
         #if os(iOS)
         .tabViewStyle(.sidebarAdaptable)
         .tabBarMinimizeBehavior(.onScrollDown)
+        // Pages put My List, Downloads and the profile in their toolbars when there's no sidebar.
+        .environment(\.showsSidebar, showsSidebar)
+        // A sidebar-only tab can't stay selected once the window narrows to a tab bar.
+        .onChange(of: showsSidebar) { _, shown in
+            if !shown, [.myList, .calendar, .downloads, .profile].contains(tab) { tab = .home }
+        }
         // Not on tvOS: there the tint also colors focused labels, which sit on white.
         .tint(Theme.ink)
         .sheet(isPresented: $showSettings) { SettingsView() }
         #endif
+        .environment(\.selectedTab, tab)
+        // A link (strata://movie/…, a notification) opens in the tab on screen, or Home
+        // when that tab has no stack to push onto (Search, the profile).
+        .onChange(of: services.coordinator.pendingRoute) { _, route in
+            if route != nil, [.search, .profile].contains(tab) { tab = .home }
+        }
         // Episode notifications follow the calendar: on launch, account switches and return.
         .task(id: services.store.active.map { "\($0.id)/\($0.household?.id ?? "")" }) { await services.refreshEpisodeAlerts() }
         .onChange(of: scenePhase) { _, phase in
@@ -184,17 +209,27 @@ struct MainShell: View {
 /// A navigation stack with the app's destinations and deep-link handling.
 struct StackHost<Root: View>: View {
     @Environment(AppServices.self) private var services
+    @Environment(\.selectedTab) private var selectedTab
     @State private var path: [Route] = []
+    /// The tab this stack is in: only the selected tab's stack takes a pending link.
+    let tab: AppTab
     @ViewBuilder let root: () -> Root
 
     var body: some View {
         NavigationStack(path: $path) {
             root().routeDestinations()
         }
-        .environment(\.pushRoute, PushRouteAction { path.append($0) })
-        .onChange(of: services.coordinator.pendingRoute) { _, route in
-            if route != nil, let next = services.coordinator.consume() { path.append(next) }
-        }
+        // A second tap while the page is pushing doesn't push it twice.
+        .environment(\.pushRoute, PushRouteAction { route in if path.last != route { path.append(route) } })
+        .onChange(of: services.coordinator.pendingRoute) { openPending() }
+        .onChange(of: selectedTab) { openPending() }
+        // A link opened before this screen existed (from "Who's watching?" or sign-in).
+        .onAppear { openPending() }
+    }
+
+    private func openPending() {
+        guard selectedTab == tab, services.coordinator.pendingRoute != nil, let next = services.coordinator.consume() else { return }
+        if path.last != next { path.append(next) }
     }
 }
 
@@ -207,12 +242,18 @@ struct PushRouteAction {
 
 extension EnvironmentValues {
     @Entry var pushRoute = PushRouteAction { _ in }
+    /// The iPad sidebar is showing (it has My List, Downloads and the profile).
+    @Entry var showsSidebar = false
+    /// The main tab on screen, for `StackHost`.
+    @Entry var selectedTab: AppTab = .home
 }
 
 #if !os(tvOS)
 /// The avatar button, after a gap, at the end of a page's toolbar. Not on iPad,
 /// where the profile is in the sidebar.
 struct ProfileToolbarItems: ToolbarContent {
+    @Environment(\.showsSidebar) private var showsSidebar
+
     var body: some ToolbarContent {
         if showsButton {
             ToolbarSpacer(.fixed, placement: .primaryAction)
@@ -220,13 +261,7 @@ struct ProfileToolbarItems: ToolbarContent {
         }
     }
 
-    private var showsButton: Bool {
-        #if os(iOS)
-        !Metrics.isPad
-        #else
-        true
-        #endif
-    }
+    private var showsButton: Bool { !showsSidebar }
 }
 #endif
 

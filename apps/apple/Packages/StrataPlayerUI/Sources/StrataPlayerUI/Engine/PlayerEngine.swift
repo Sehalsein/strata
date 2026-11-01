@@ -95,6 +95,8 @@ public final class PlayerEngine {
 
     /// When the sleep timer will pause playback, if armed.
     public private(set) var sleepTimerEnds: Date?
+    /// The sleep timer's chosen length, `.off` when it isn't armed (for the menu's checkmark).
+    public private(set) var sleepOption: SleepOption = .off
     private var sleepTask: Task<Void, Never>?
 
     public enum SleepOption: Int, CaseIterable, Identifiable, Sendable {
@@ -558,6 +560,7 @@ public final class PlayerEngine {
     /// Survives moving to the next episode; cleared on `unload()`.
     public func setSleepTimer(_ option: SleepOption) {
         sleepTask?.cancel()
+        sleepOption = option
         guard option != .off else {
             sleepTimerEnds = nil
             return
@@ -569,6 +572,7 @@ public final class PlayerEngine {
             guard let self, !Task.isCancelled else { return }
             self.pause()
             self.sleepTimerEnds = nil
+            self.sleepOption = .off
         }
     }
 
@@ -789,6 +793,7 @@ public final class PlayerEngine {
     public func unload() async {
         sleepTask?.cancel()
         sleepTimerEnds = nil
+        sleepOption = .off
         await teardown(reportFinal: true)
         generation += 1
         target = nil

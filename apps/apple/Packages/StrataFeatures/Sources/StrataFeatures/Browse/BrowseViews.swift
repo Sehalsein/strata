@@ -73,10 +73,7 @@ struct BrowseView: View {
         .task { await loadGenres() }
         .task(id: genre) {
             guard let genre else { return }
-            genreShelves = .loading
-            let result = await services.load { try await $0.genreShelves(type, genreId: genre.id) }
-            if case .loading = result { return }
-            genreShelves = result
+            await loadGenre(genre)
         }
     }
 
@@ -86,7 +83,10 @@ struct BrowseView: View {
             SkeletonRail(width: Metrics.posterWidth)
             SkeletonRail(width: Metrics.posterWidth)
         case .failed(let message):
-            MessageView(systemImage: "wifi.exclamationmark", title: "Couldn't load \(genre.name)", message: message).frame(minHeight: 300)
+            MessageView(systemImage: "wifi.exclamationmark", title: "Couldn't load \(genre.name)", message: message, actionTitle: "Try Again") {
+                Task { await loadGenre(genre) }
+            }
+            .frame(minHeight: 300)
         case .loaded(let shelves) where shelves.isEmpty:
             MessageView(systemImage: "film.stack", title: "Nothing in \(genre.name) yet").frame(minHeight: 300)
         case .loaded(let shelves):
@@ -148,7 +148,16 @@ struct BrowseView: View {
         }
     }
 
+    private func loadGenre(_ genre: Genre) async {
+        genreShelves = .loading
+        let result = await services.load { try await $0.genreShelves(type, genreId: genre.id) }
+        if case .loading = result { return }
+        genreShelves = result
+    }
+
     private func load() async {
+        // Try Again shows the skeleton again while it loads.
+        if lists.isEmpty { error = nil }
         // Older servers have no Shows page: they get the lists below.
         if type == .show, let shelves = try? await services.client?.shows(), !shelves.isEmpty {
             page = shelves
@@ -238,7 +247,13 @@ struct BrowseListView: View {
         ScrollView {
             switch items {
             case .loading: ProgressView().padding(Metrics.space12)
-            case .failed(let message): MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load \(list.title)", message: message)
+            case .failed(let message):
+                MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load \(list.title)", message: message, actionTitle: "Try Again") {
+                    Task { items = .loading; await load() }
+                }
+                .frame(minHeight: 400)
+            case .loaded(let cards) where cards.isEmpty:
+                MessageView(systemImage: "film.stack", title: "Nothing here yet").frame(minHeight: 400)
             case .loaded(let cards):
                 PosterGrid {
                     ForEach(cards) { card in
@@ -251,7 +266,17 @@ struct BrowseListView: View {
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
         .navigationTitle(list.title)
-        .task { items = await services.load { try await $0.browse(type, list: list) } }
+        #if os(iOS)
+        .refreshable { await services.client?.clearCache(); await load() }
+        #endif
+        .task { await load() }
+    }
+
+    private func load() async {
+        let result = await services.load { try await $0.browse(type, list: list) }
+        if case .loading = result { return }
+        if case .failed = result, items.value != nil { return }
+        items = result
     }
 }
 
@@ -263,9 +288,9 @@ struct SearchTab: View {
 
     var body: some View {
         #if os(iOS)
-        StackHost { SearchView(query: $query).searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Movies and shows") }
+        StackHost(tab: .search) { SearchView(query: $query).searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Movies and shows") }
         #else
-        StackHost { SearchView(query: $query).searchable(text: $query, prompt: "Movies and shows") }
+        StackHost(tab: .search) { SearchView(query: $query).searchable(text: $query, prompt: "Movies and shows") }
         #endif
     }
 }
@@ -307,7 +332,8 @@ struct SearchView: View {
             guard q.count >= 2 else { results = nil; return }
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
-            results = .loading
+            // The last results stay up while typing; the spinner is only for the first search.
+            if results?.value == nil { results = .loading }
             let result = await services.load { try await $0.search(q) }
             if !Task.isCancelled { results = result }
         }
@@ -317,6 +343,7 @@ struct SearchView: View {
 /// The account's watchlist, from the server's My List shelf.
 struct MyListView: View {
     @Environment(AppServices.self) private var services
+    @Environment(\.showsSidebar) private var showsSidebar
     @State private var items: Loadable<[TitleCard]> = .loading
 
     var body: some View {
@@ -341,14 +368,15 @@ struct MyListView: View {
         .fullBleedOnTV()
         .navigationTitle("My List")
         #if os(iOS)
-        // iPad has Downloads in its sidebar.
+        // The iPad sidebar has Downloads.
         .toolbar {
-            if !Metrics.isPad {
+            if !showsSidebar {
                 ToolbarItem(placement: .primaryAction) {
                     NavigationLink { DownloadsView() } label: { Label("Downloads", systemImage: "arrow.down.circle") }
                 }
             }
         }
+        .refreshable { await services.client?.clearCache(); items = await services.load { try await $0.watchlist() } }
         #endif
         .task {
             await services.client?.clearCache()

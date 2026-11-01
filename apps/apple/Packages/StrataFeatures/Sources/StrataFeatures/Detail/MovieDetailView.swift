@@ -34,7 +34,9 @@ struct MovieDetailView: View {
         .toolbar(.hidden, for: .tabBar)
         // Content loads after the page appears, so focus Play once it's there
         // (otherwise the back button gets it).
-        .onChange(of: detail.value?.tmdbId) { _, id in if id != nil { playFocused = true } }
+        .onChange(of: detail.value?.tmdbId) { _, id in if id != nil { heroFocus = hasPlay ? .play : .list } }
+        // For a title the server looks up, Play arrives after the page: move to it then.
+        .onChange(of: hasPlay) { _, hasPlay in if hasPlay, heroFocus != .play { heroFocus = .play } }
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -59,12 +61,15 @@ struct MovieDetailView: View {
                     PlayButton(choice.label) { services.play(choice, title: movie.title, artworkURL: movie.backdropUrl ?? movie.posterUrl) }
                         .glassEffectID("play", in: namespace)
                         #if os(tvOS)
-                        .focused($playFocused)
+                        .focused($heroFocus, equals: .play)
                         #endif
                 }
                 GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV) {
                     Task { await toggleWatchlist(movie) }
                 }
+                #if os(tvOS)
+                .focused($heroFocus, equals: .list)
+                #endif
                 // Only when the server has sources to show.
                 if let sources = playOptions?.sources, !sources.isEmpty {
                     GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV) { showSources = true }
@@ -139,7 +144,10 @@ struct MovieDetailView: View {
     /// The server's answer once it's in; until then, the library's.
     private func playChoice(_ movie: MovieDetail) -> PlayChoice? { (playOptions ?? TitleActions.libraryPlay(movie)).choice }
     #if os(tvOS)
-    @FocusState private var playFocused: Bool
+    @FocusState private var heroFocus: HeroFocus?
+    enum HeroFocus: Hashable { case play, list }
+    /// Play is on the page (the library has it, or the server found a source).
+    private var hasPlay: Bool { detail.value.flatMap(playChoice) != nil }
     #endif
 
     private func play(_ movie: MovieDetail, candidateId: String? = nil) {
@@ -184,10 +192,9 @@ struct CastRail: View {
 
     private func member(_ person: CastMember) -> some View {
         VStack(spacing: Metrics.space2) {
-            AsyncImage(url: person.profileUrl) { phase in
-                if case .success(let image) = phase { image.resizable().scaledToFill() } else {
-                    Theme.surface2.overlay { Text(person.name.prefix(1)).font(.stTitle2).foregroundStyle(Theme.ink3) }
-                }
+            // Cached and decoded off the main thread, so scrolling the rail back doesn't flash.
+            RemoteImage(url: person.profileUrl, maxPixel: Int(avatar * 3)) {
+                Theme.surface2.overlay { Text(person.name.prefix(1)).font(.stTitle2).foregroundStyle(Theme.ink3) }
             }
             .frame(width: avatar, height: avatar)
             .clipShape(Circle())

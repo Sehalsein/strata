@@ -126,7 +126,7 @@ public struct SpeedMenu: View {
             }
             .pickerStyle(.inline)
             Picker("Sleep Timer", selection: Binding(
-                get: { PlayerEngine.SleepOption.off },
+                get: { engine.sleepOption },
                 set: { engine.setSleepTimer($0) }
             )) {
                 ForEach(PlayerEngine.SleepOption.allCases) { option in

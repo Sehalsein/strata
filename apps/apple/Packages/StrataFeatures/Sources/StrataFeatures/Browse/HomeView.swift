@@ -5,6 +5,7 @@ import StrataPlayerUI
 
 struct HomeView: View {
     @Environment(AppServices.self) private var services
+    @Environment(\.showsSidebar) private var showsSidebar
     @State private var shelves: Loadable<[Shelf]> = .loading
     @State private var upcoming: [CalendarEpisode] = []
 
@@ -51,15 +52,15 @@ struct HomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            // On iPad, My List and the profile are in the sidebar.
-            if !Metrics.isPad {
+            // With the iPad sidebar, My List and the profile are there.
+            if !showsSidebar {
                 ToolbarItem(placement: .primaryAction) {
                     NavigationLink(value: Route.myList) { Label("My List", systemImage: "bookmark") }
                 }
             }
             ProfileToolbarItems()
         }
-        .refreshable { await load(force: true) }
+        .refreshable { await load(force: true); await loadUpcoming() }
         #endif
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
@@ -108,6 +109,8 @@ struct HomeView: View {
         if force { await services.client?.clearCache() }
         let result = await services.load { try await $0.home() }
         if case .loading = result { return }
+        // A reload after playing or a My List change keeps the page if it fails.
+        if case .failed = result, shelves.value != nil { return }
         shelves = result
     }
 }
@@ -149,7 +152,8 @@ struct ShelfRail: View {
                         if let request = card.watchRequest() { services.play(request) }
                     }
                     .contextMenu {
-                        NavigationLink(value: card.route) { Label(card.type == .show ? "Go to Show" : "Go to Movie", systemImage: "info.circle") }
+                        // A Button, not a NavigationLink: menu items sit outside the stack.
+                        Button { pushRoute(card.route) } label: { Label(card.type == .show ? "Go to Show" : "Go to Movie", systemImage: "info.circle") }
                         Button { if let r = card.watchRequest(restart: true) { services.play(r) } } label: { Label("Play from Beginning", systemImage: "arrow.counterclockwise") }
                         if let target = card.watchRequest()?.target {
                             Button { setWatched(target, true) } label: { Label("Mark as Watched", systemImage: "checkmark.circle") }

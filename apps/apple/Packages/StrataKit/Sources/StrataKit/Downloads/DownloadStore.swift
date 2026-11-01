@@ -41,6 +41,8 @@ public final class DownloadStore {
     @ObservationIgnored private let delegate = SessionDelegate()
     @ObservationIgnored private var tasks: [String: URLSessionDownloadTask] = [:]
     @ObservationIgnored private var lastSave = Date.distantPast
+    /// When each download's progress last reached `items` (see `progressed`).
+    @ObservationIgnored private var lastProgress: [String: Date] = [:]
     /// Links refreshed per download, so a link that keeps failing can't loop forever.
     @ObservationIgnored private var refreshes: [String: Int] = [:]
 
@@ -200,6 +202,10 @@ public final class DownloadStore {
     }
 
     fileprivate func progressed(_ id: String, written: Int64, expected: Int64) {
+        // A few times a second at most: every change redraws the pages that show the item.
+        let now = Date()
+        if let last = lastProgress[id], now.timeIntervalSince(last) < 0.25 { return }
+        lastProgress[id] = now
         update(id) {
             $0.bytesWritten = written
             if expected > 0 { $0.bytesExpected = expected }
@@ -209,6 +215,7 @@ public final class DownloadStore {
 
     fileprivate func finished(_ id: String, status: Int, moved: Bool) {
         tasks[id] = nil
+        lastProgress[id] = nil
         if moved {
             update(id) {
                 $0.state = .done

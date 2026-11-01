@@ -11,15 +11,17 @@ public struct PlayerChrome: View {
     let onDetails: () -> Void
     let onPiP: (() -> Void)?
     let onInteraction: () -> Void
+    let onScrubbing: (Bool) -> Void
 
     /// `onInteraction` fires on any touch inside the controls, so the caller can keep
     /// them visible while someone is using them (e.g. a track menu is open).
-    public init(engine: PlayerEngine, onClose: @escaping () -> Void, onDetails: @escaping () -> Void, onPiP: (() -> Void)? = nil, onInteraction: @escaping () -> Void = {}) {
+    public init(engine: PlayerEngine, onClose: @escaping () -> Void, onDetails: @escaping () -> Void, onPiP: (() -> Void)? = nil, onInteraction: @escaping () -> Void = {}, onScrubbing: @escaping (Bool) -> Void = { _ in }) {
         self.engine = engine
         self.onClose = onClose
         self.onDetails = onDetails
         self.onPiP = onPiP
         self.onInteraction = onInteraction
+        self.onScrubbing = onScrubbing
     }
 
     private var isPlaying: Bool { engine.status == .playing }
@@ -120,7 +122,7 @@ public struct PlayerChrome: View {
             if let chapter = engine.currentChapter?.title {
                 Text(chapter).eyebrowStyle(Theme.onArtwork.opacity(0.75))
             }
-            Scrubber(position: engine.position, duration: engine.duration, chapters: engine.chapters) { target in
+            Scrubber(position: engine.position, duration: engine.duration, chapters: engine.chapters, onScrubbing: onScrubbing) { target in
                 Task { await engine.seek(to: target) }
             }
             HStack(spacing: Metrics.space2) {

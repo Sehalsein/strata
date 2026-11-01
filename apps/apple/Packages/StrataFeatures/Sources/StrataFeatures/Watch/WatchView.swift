@@ -14,6 +14,8 @@ struct WatchView: View {
     @State private var chromeVisible = true
     @State private var hideTask: Task<Void, Never>?
     @State private var showDetails = false
+    /// "Choose Source" after a source failed to play.
+    @State private var showSources = false
     @State private var upNextDismissed = false
     @State private var pip = PiPController()
     #if os(tvOS)
@@ -59,6 +61,13 @@ struct WatchView: View {
             }
             #endif
 
+            #if os(iOS)
+            // Space, arrows, J/L, M and C with a hardware keyboard (iPad).
+            PlayerKeyCommands(engine: engine, onToggleCaptions: toggleCaptions,
+                              onToggleFullscreen: { engine.toggleVideoGravity() },
+                              onTogglePiP: { if pip.isAvailable { pip.toggle() } })
+            #endif
+
             SubtitleOverlay(engine: engine, raised: chromeVisible)
 
             stateOverlay
@@ -67,7 +76,9 @@ struct WatchView: View {
             if chromeVisible, !showsStateCard {
                 PlayerChrome(engine: engine, onClose: close, onDetails: { showDetails = true },
                              onPiP: pip.isAvailable ? { pip.toggle() } : nil,
-                             onInteraction: { scheduleHide(after: 8) })
+                             onInteraction: { scheduleHide(after: 8) },
+                             // Held up while scrubbing: hiding would drop the scrub.
+                             onScrubbing: { scrubbing in if scrubbing { hideTask?.cancel() } else { scheduleHide(after: 8) } })
                     .transition(.opacity)
             }
 
@@ -98,8 +109,16 @@ struct WatchView: View {
         .onExitCommand {
             if chromeVisible { chromeVisible = false } else { close() }
         }
-        .onMoveCommand { _ in if !chromeVisible { showChrome() } }
+        // Moving around the controls counts as using them: keep them up a while longer.
+        .onMoveCommand { _ in if chromeVisible { scheduleHide(after: 8) } else { showChrome() } }
         #endif
+        .sheet(isPresented: $showSources) {
+            let target = engine.target ?? request.target
+            let meta = engine.meta ?? request.meta
+            SourcePickerSheet(target: target, title: meta.title) { candidate in
+                Task { await engine.load(target: target, meta: meta, candidateId: candidate.id, startMs: request.startMs) }
+            }
+        }
         .sheet(isPresented: $showDetails) {
             StreamDetailsPanel(session: engine.session, bytesRead: engine.remuxStats?.bytesFetched).presentationDetents([.medium])
         }
@@ -174,6 +193,10 @@ struct WatchView: View {
                         PlayButton("Try Again", systemImage: "arrow.clockwise") {
                             Task { await start() }
                         }
+                        // The message often says to pick another source: offer the list here.
+                        if request.downloadID == nil {
+                            GlassButton("Choose Source", systemImage: "rectangle.stack") { showSources = true }
+                        }
                         GlassButton("Close", action: close)
                     }
                 }
@@ -210,6 +233,12 @@ struct WatchView: View {
         hideTask?.cancel()
         services.watching = nil
         dismiss()
+    }
+
+    /// C: off, or on with the first text track.
+    private func toggleCaptions() {
+        let track = engine.captionsEnabled ? nil : engine.subtitleTracks.first(where: \.isTextBased)
+        Task { await engine.selectSubtitle(track) }
     }
 
     private func toggleChrome() {

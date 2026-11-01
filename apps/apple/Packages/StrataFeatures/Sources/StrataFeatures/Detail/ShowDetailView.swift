@@ -19,8 +19,13 @@ struct ShowDetailView: View {
     @State private var showUpNextSources = false
     /// "Not in your library" after asking the server about an episode it has nothing for.
     @State private var notice: String?
+    /// The episode whose source is being looked up (a few seconds when it isn't in the library).
+    @State private var resolving: String?
     #if os(tvOS)
-    @FocusState private var playFocused: Bool
+    @FocusState private var heroFocus: HeroFocus?
+    enum HeroFocus: Hashable { case play, list }
+    /// Play is on the page (the library has it, or the server found a source).
+    private var hasPlay: Bool { detail.value.flatMap { (playOptions ?? TitleActions.libraryPlay($0)).choice } != nil }
     #endif
 
     var body: some View {
@@ -43,7 +48,9 @@ struct ShowDetailView: View {
         #if os(tvOS)
         .toolbar(.hidden, for: .tabBar)
         // Content loads after the page appears, so focus Play once it's there.
-        .onChange(of: detail.value?.tmdbId) { _, id in if id != nil { playFocused = true } }
+        .onChange(of: detail.value?.tmdbId) { _, id in if id != nil { heroFocus = hasPlay ? .play : .list } }
+        // For a title the server looks up, Play arrives after the page: move to it then.
+        .onChange(of: hasPlay) { _, hasPlay in if hasPlay, heroFocus != .play { heroFocus = .play } }
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -67,12 +74,15 @@ struct ShowDetailView: View {
                 if let choice = (playOptions ?? TitleActions.libraryPlay(show)).choice {
                     PlayButton(choice.label) { services.play(choice, title: show.title, artworkURL: show.backdropUrl) }
                     #if os(tvOS)
-                    .focused($playFocused)
+                    .focused($heroFocus, equals: .play)
                     #endif
                 }
                 GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV) {
                     Task { await toggleWatchlist(show) }
                 }
+                #if os(tvOS)
+                .focused($heroFocus, equals: .list)
+                #endif
                 // Only when the server has sources to show.
                 if let sources = playOptions?.sources, !sources.isEmpty {
                     GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV) { showUpNextSources = true }
@@ -187,7 +197,9 @@ struct ShowDetailView: View {
                                 }
                                 #endif
                                 // Playable is the default, so only exceptions get an icon.
-                                if let state = rowState(episode) {
+                                if resolving == episode.id {
+                                    ProgressView().accessibilityLabel("Finding a source")
+                                } else if let state = rowState(episode) {
                                     Image(systemName: state.systemImage)
                                         .font(.stHeadline)
                                         .foregroundStyle(Theme.ink3)
@@ -196,7 +208,8 @@ struct ShowDetailView: View {
                             }
                         }
                         .buttonStyle(FocusLiftStyle())
-                        .disabled(episode.isUpcoming)
+                        // Upcoming rows stay enabled: on the TV a disabled row can't take focus,
+                        // so the season's later episodes and their menu would be out of reach.
                         .contextMenu {
                             Button { Task { await setWatched(show, episode, !episode.isWatched) } } label: {
                                 Label(episode.isWatched ? "Mark as Unwatched" : "Mark as Watched", systemImage: episode.isWatched ? "eye.slash" : "eye")
@@ -259,6 +272,14 @@ struct ShowDetailView: View {
 
     /// An episode in the library plays; otherwise the server is asked what it can play it from.
     private func playEpisode(_ show: ShowDetail, _ episode: EpisodeItem) async {
+        if episode.isUpcoming {
+            notice = "\(code(episode.season, episode.episode)) hasn't aired yet."
+            return
+        }
+        // One lookup at a time: a second tap mustn't open the player twice.
+        guard resolving == nil else { return }
+        resolving = episode.id
+        defer { resolving = nil }
         if let choice = await services.titles.play(episode, of: show.tmdbId) {
             services.play(choice, title: show.title, artworkURL: episode.stillUrl ?? show.backdropUrl)
         } else {

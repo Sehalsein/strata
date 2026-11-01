@@ -2,6 +2,7 @@ import SwiftUI
 import StrataKit
 import StrataDesign
 #if os(iOS)
+import AVFoundation
 import VisionKit
 #endif
 
@@ -50,8 +51,13 @@ struct QRScannerSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onScan: (String) -> Void
     @State private var pasted = ""
+    /// `DataScannerViewController.isAvailable` is false until camera access is granted,
+    /// so it's checked again after asking.
+    @State private var canScan = Self.scannerReady
+    /// Still waiting on the camera prompt (first use): no "can't use the camera" yet.
+    @State private var asking = AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined
 
-    private var canScan: Bool { DataScannerViewController.isSupported && DataScannerViewController.isAvailable }
+    private static var scannerReady: Bool { DataScannerViewController.isSupported && DataScannerViewController.isAvailable }
 
     var body: some View {
         NavigationStack {
@@ -71,6 +77,8 @@ struct QRScannerSheet: View {
                     .frame(maxHeight: 420)
                     Text("Point the camera at the QR code in your server's dashboard: someone's sign-in code (Members › Sign-in code), or the server's address.")
                         .font(.stCallout).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
+                } else if asking {
+                    ProgressView().frame(maxHeight: 420)
                 } else {
                     Image(systemName: "camera.metering.unknown").font(.system(size: 44)).foregroundStyle(Theme.ink3)
                     Text(DataScannerViewController.isSupported
@@ -94,6 +102,12 @@ struct QRScannerSheet: View {
             }
             .padding(Metrics.gutter)
             .background(Theme.bg.ignoresSafeArea())
+            .task {
+                guard asking else { return }
+                _ = await AVCaptureDevice.requestAccess(for: .video)
+                canScan = Self.scannerReady
+                asking = false
+            }
             .navigationTitle("Scan QR Code")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -121,7 +135,8 @@ private struct QRDataScanner: UIViewControllerRepresentable {
             isHighlightingEnabled: true
         )
         scanner.delegate = context.coordinator
-        try? scanner.startScanning()
+        // Started once it's in the window: before that, VisionKit can refuse to start.
+        Task { @MainActor in if !scanner.isScanning { try? scanner.startScanning() } }
         return scanner
     }
 

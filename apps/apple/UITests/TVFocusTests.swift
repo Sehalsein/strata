@@ -122,19 +122,22 @@ final class TVFocusTests: XCTestCase {
         press(.right, 6)
         Thread.sleep(forTimeInterval: 2)
         snapshot("profile-02-tab")
-        XCTAssertTrue(app.buttons["Switch Account"].waitForExistence(timeout: 5), "the account tab should show Settings")
+        XCTAssertTrue(app.buttons["Add Profile"].waitForExistence(timeout: 5), "the account tab should show Settings")
         press(.down, pause: 1)
         snapshot("profile-03-settings")
     }
 
-    /// Movies tab genre chips, then a cast member's page from a movie's detail page.
+    /// The Movies tab's genre menu, then a cast member's page from a movie's detail page.
     func testGenresAndPerson() {
         let movie = ProcessInfo.processInfo.environment["STRATA_TEST_MOVIE"] ?? "10378"
         launchSignedIn(["-StrataTab", "movies"])
-        XCTAssertTrue(app.buttons["All"].waitForExistence(timeout: 15), "genre chips should show on Movies")
-        press(.down, pause: 1)
-        press(.right, pause: 1)
-        press(.select, pause: 3)
+        XCTAssertTrue(app.buttons["Filter by genre"].waitForExistence(timeout: 15), "the genre menu should show on Movies")
+        Thread.sleep(forTimeInterval: 3)
+        press(.down, pause: 1) // from the tab bar to the menu
+        press(.select, pause: 1.5)
+        snapshot("genre-00-menu-open")
+        press(.down, pause: 0.5) // the first genre after All Genres
+        press(.select, pause: 4)
         snapshot("genre-01-selected")
         press(.down, pause: 1.5)
         snapshot("genre-02-rails")

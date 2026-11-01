@@ -79,8 +79,9 @@ struct CalendarView: View {
                         .accessibilityAddTraits(.isHeader)
                     VStack(spacing: 0) {
                         ForEach(day.episodes) { episode in
+                            // A full-width row lifts like an episode row, not like a poster.
                             NavigationLink(value: Route.show(episode.tmdbId)) { CalendarRow(episode: episode) }
-                                .buttonStyle(StrataCardStyle())
+                                .buttonStyle(FocusLiftStyle())
                             if episode.id != day.episodes.last?.id { Divider().overlay(Theme.hairline) }
                         }
                     }

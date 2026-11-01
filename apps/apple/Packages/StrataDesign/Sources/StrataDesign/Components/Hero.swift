@@ -61,7 +61,15 @@ public struct HeroBillboard<Actions: View>: View {
     public var body: some View {
         ZStack(alignment: .bottomLeading) {
             backdrop
-            scrims
+            ZStack { scrims }
+                .visualEffect { [stretches] content, proxy in
+                    // Pulled down, the shades stretch with the art, so the top one doesn't
+                    // stop in a hard line partway up the stretched picture.
+                    let y = stretches ? proxy.frame(in: .scrollView(axis: .vertical)).minY : 0
+                    let height = max(proxy.size.height, 1)
+                    return content.scaleEffect(y > 0 ? (height + y) / height : 1, anchor: .bottom)
+                }
+                .allowsHitTesting(false)
             #if os(tvOS)
             tvInfo
             #else
@@ -74,6 +82,15 @@ public struct HeroBillboard<Actions: View>: View {
         .frame(height: UIScreen.main.bounds.height)
         #else
         .frame(height: height)
+        #endif
+    }
+
+    /// Whether the art stretches into a pulled-down page (and the shades with it).
+    private var stretches: Bool {
+        #if os(iOS)
+        !reduceMotion
+        #else
+        false
         #endif
     }
 
