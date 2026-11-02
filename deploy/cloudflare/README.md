@@ -15,12 +15,30 @@ is in Postgres, so any number of Worker instances serve it.
 
 ## Deploy
 
+Every merge to main deploys, through Cloudflare's Workers Builds (nothing runs on GitHub):
+[`deploy.sh`](deploy.sh) typechecks, builds the dashboard and bundles the Worker, migrates
+Neon (`apps/server/scripts/migrate.ts`), then deploys. Workers never migrate themselves;
+one that finds the schema behind its build refuses to start. The previous Worker runs on
+the new schema until the deploy is live, so migrations only add.
+
+Workers Builds settings (Worker `strata` › Settings › Builds):
+
+| | |
+|---|---|
+| Repository, branch | `Sehalsein/strata`, `main`; builds for other branches off |
+| Root directory | `/` |
+| Build command | (none) |
+| Deploy command | `bash deploy/cloudflare/deploy.sh` |
+| Build watch paths | `apps/server/**`, `deploy/cloudflare/**`, `package.json`, `bun.lock` |
+| Variables | `BUN_VERSION` = `1.2.20`; `DATABASE_URL` (secret) = Neon's pooled connection string |
+
+By hand, the first time:
+
 ```sh
-cd apps/server/web && bun run build          # the dashboard
-cd ../../../deploy/cloudflare
+cd deploy/cloudflare
 npx wrangler secret put DATABASE_URL         # Neon connection string (sslmode=require)
 npx wrangler secret put STRATA_SECRET_KEY    # openssl rand -base64 32 — keep it safe
-npx wrangler deploy
+DATABASE_URL='postgres://…' bash deploy.sh   # migrate, then deploy
 ```
 
 Optional: `STRATA_PUBLIC_URL` (in `wrangler.jsonc` vars) once it has a domain. Provider

@@ -2,6 +2,8 @@
 // each entry runs once, in order, in a transaction. Never edit one that has shipped;
 // add a new one. Times are milliseconds (BIGINT) set by the app, except Better Auth's
 // own tables, which use TIMESTAMPTZ. Keep in lockstep with schema.ts.
+// The cloud deploy migrates Neon before the new Worker is live, so the previous release
+// runs on each new schema for a while: add, don't rename or drop what it still uses.
 export const migrations: string[] = [
   /* 1 */ `
   CREATE TABLE "user" (
