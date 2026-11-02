@@ -31,6 +31,9 @@ interface Env {
   STRATA_PRIVACY_CONTACT?: string;
   /** Errors to Sentry, when set. */
   SENTRY_DSN?: string;
+  /** AniList through a relay outside Cloudflare (deploy/anilist-relay): both, or AniList directly. */
+  ANILIST_RELAY_URL?: string;
+  ANILIST_RELAY_SECRET?: string;
   /** Emails whose accounts run the server (comma-separated). */
   STRATA_ADMIN_EMAILS?: string;
   /** The public site in front (its own Worker): the privacy page lives there. */
@@ -60,7 +63,7 @@ async function boot(env: Env): Promise<Booted> {
     DATABASE_URL: env.DATABASE_URL,
     STRATA_SECRET_KEY: env.STRATA_SECRET_KEY,
     ...(env.STRATA_PUBLIC_URL ? { STRATA_PUBLIC_URL: env.STRATA_PUBLIC_URL } : {}),
-    ...Object.fromEntries((["RESEND_API_KEY", "STRATA_EMAIL_FROM", "STRATA_OPERATOR", "STRATA_PRIVACY_CONTACT", "SENTRY_DSN", "STRATA_ADMIN_EMAILS", "STRATA_SITE_URL", "STRATA_PASSKEY_RP_ID"] as const).filter((k) => env[k]).map((k) => [k, env[k]!])),
+    ...Object.fromEntries((["RESEND_API_KEY", "STRATA_EMAIL_FROM", "STRATA_OPERATOR", "STRATA_PRIVACY_CONTACT", "SENTRY_DSN", "STRATA_ADMIN_EMAILS", "STRATA_SITE_URL", "STRATA_PASSKEY_RP_ID", "ANILIST_RELAY_URL", "ANILIST_RELAY_SECRET"] as const).filter((k) => env[k]).map((k) => [k, env[k]!])),
     ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET ? { GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET } : {}),
   });
   const { createServices } = await import("./services");

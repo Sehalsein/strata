@@ -6,6 +6,21 @@ import { globalFetch } from "../../net";
 
 const log = logger("anilist");
 const ENDPOINT = "https://graphql.anilist.co";
+
+/**
+ * AniList blocks Cloudflare Workers' addresses ("manually blocked"), so the cloud server
+ * reaches it through a relay elsewhere (deploy/anilist-relay) when one is set.
+ */
+export interface AnilistRelay {
+  url: string;
+  secret: string;
+}
+
+export function anilistRelayFromEnv(): AnilistRelay | undefined {
+  const url = process.env.ANILIST_RELAY_URL;
+  const secret = process.env.ANILIST_RELAY_SECRET;
+  return url && secret ? { url, secret } : undefined;
+}
 /** AniList allows 30 requests a minute right now: one every 2s, lazily, never bulk. */
 const MIN_INTERVAL_MS = 2_100;
 const HOUR = 60 * 60_000;
@@ -222,6 +237,7 @@ export class Anilist {
   constructor(
     private readonly cache: ApiCache,
     private readonly fetchImpl: typeof fetch = globalFetch,
+    private readonly relay?: AnilistRelay,
   ) {}
 
   /** Anime whose titles match `query`, best first. Throws when AniList can't answer (rather than finding nothing). */
@@ -321,9 +337,9 @@ export class Anilist {
       const wait = this.last + MIN_INTERVAL_MS - Date.now();
       if (wait > 0) await runtime.sleep(wait);
       this.last = Date.now();
-      const res = await this.fetchImpl(ENDPOINT, {
+      const res = await this.fetchImpl(this.relay?.url ?? ENDPOINT, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: { "Content-Type": "application/json", Accept: "application/json", ...(this.relay && { Authorization: `Bearer ${this.relay.secret}` }) },
         body: JSON.stringify({ query, variables }),
         signal: AbortSignal.timeout(15_000),
       });
