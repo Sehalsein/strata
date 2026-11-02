@@ -56,7 +56,11 @@ Keep all key and certificate files outside the repository.
 
 ## 3. Upload builds
 
-For a versioned upload, tag the commit. The version is taken from the tag:
+Every merge to `main` that changes `apps/apple` uploads a build under `MARKETING_VERSION`
+from `project.yml`. Bump it to start a new App Store version: once a version is released,
+App Store Connect takes no more builds of it.
+
+To upload another commit or version, tag it. The version is taken from the tag:
 
 ```sh
 git tag apple-v0.1.0
