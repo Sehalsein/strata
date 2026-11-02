@@ -17,7 +17,7 @@ import { detectFfmpeg, type FfmpegInfo } from "./platform/ffmpeg";
 import { installFfmpeg, unpackEmbeddedFfmpeg, type FfmpegSetup } from "./platform/ffmpegInstall";
 import { KeepAwake } from "./platform/keepAwake";
 import { ProgressStore } from "./progress";
-import { Anilist } from "./catalog/anime/anilist";
+import { Anilist, anilistRelayFromEnv } from "./catalog/anime/anilist";
 import { Kitsu } from "./catalog/anime/kitsu";
 import { AnimeIds, cachedAnimeIdStore, fileAnimeIdStore } from "./catalog/anime/ids";
 import { SecretBox } from "./secrets";
@@ -96,7 +96,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
 
   const anime = {
     ids: new AnimeIds(profile.localState ? fileAnimeIdStore(join(paths.root, "cache")) : cachedAnimeIdStore(cache), fetchImpl, profile.runtime === "bun"),
-    anilist: new Anilist(cache, fetchImpl),
+    anilist: new Anilist(cache, fetchImpl, anilistRelayFromEnv()),
     kitsu: new Kitsu(cache, fetchImpl),
   };
   const progress = new ProgressStore(db);
