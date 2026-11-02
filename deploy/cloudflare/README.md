@@ -17,9 +17,9 @@ is in Postgres, so any number of Worker instances serve it.
 
 Every merge to main deploys, through Cloudflare's Workers Builds (nothing runs on GitHub):
 [`deploy.sh`](deploy.sh) typechecks, builds the dashboard and bundles the Worker, migrates
-Neon (`apps/server/scripts/migrate.ts`), then deploys. Workers never migrate themselves;
-one that finds the schema behind its build refuses to start. The previous Worker runs on
-the new schema until the deploy is live, so migrations only add.
+Neon (`apps/server/scripts/migrate.ts`), then deploys. Workers never migrate or check the
+schema themselves, so deploy with `deploy.sh`, not plain `wrangler deploy`. The previous
+Worker runs on the new schema until the deploy is live, so migrations only add.
 
 Workers Builds settings (Worker `strata` › Settings › Builds):
 
