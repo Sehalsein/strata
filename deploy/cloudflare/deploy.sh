@@ -20,13 +20,21 @@ fi
 bun install --frozen-lockfile
 bun install --frozen-lockfile --cwd apps/server/web
 (cd apps/server && bun run typecheck)
+# With no terminal (Workers Builds), wrangler under Bun can stop without deploying and
+# still exit 0, so it runs under Node where there is one.
+wrangler() {
+  if command -v node >/dev/null; then (cd deploy/cloudflare && node "$ROOT/node_modules/wrangler/bin/wrangler.js" "$@")
+  else (cd deploy/cloudflare && bun --bun "$ROOT/node_modules/.bin/wrangler" "$@"); fi
+}
 # Built (and the Worker bundled) before migrating, so a broken build stops the deploy with
 # Neon untouched.
-wrangler() { (cd deploy/cloudflare && bun --bun "$ROOT/node_modules/.bin/wrangler" "$@"); }
 (cd apps/server/web && bun run build)
 wrangler deploy --dry-run
 
 (cd apps/server && bun scripts/migrate.ts)
 
-wrangler deploy --message "$(git rev-parse --short HEAD)${WORKERS_CI:+ from main}"
+# Neon is migrated by now: a deploy that didn't happen has to fail the build.
+out="$(wrangler deploy --message "$(git rev-parse --short HEAD)${WORKERS_CI:+ from main}" 2>&1)" || { echo "$out"; exit 1; }
+echo "$out"
+grep -q "Current Version ID" <<<"$out" || { echo "wrangler didn't deploy (no new version)." >&2; exit 1; }
 curl -fsS https://app.strata.sehalsein.com/api/info && echo

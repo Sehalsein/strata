@@ -28,8 +28,8 @@ const handles = new WeakMap<object, Handle>();
 const handleOf = (db: Db): Handle => handles.get(db)!;
 
 /**
- * Opens the database and brings its schema up to date. On Workers it only checks the
- * schema: the deploy migrates Neon before it deploys (scripts/migrate.ts).
+ * Opens the database and brings its schema up to date, except on Workers: the deploy
+ * migrates Neon before it deploys them (scripts/migrate.ts).
  * - `postgres://…` / `postgresql://…`: a Postgres server (Neon in the cloud);
  * - a directory: the bundled database, kept there (the home server's default);
  * - `memory`: bundled, in memory (tests).
@@ -39,23 +39,11 @@ export async function openDatabase(target: string): Promise<Db> {
   const db = client.db as unknown as Db;
   handles.set(db, { kind: client.kind, close: client.close, dump: client.dump });
   if (client.kind === "server" && /^postgres/.test(target)) log.info(`Using Postgres at ${new URL(target).host}`);
-  await (runtime.name === "workers" ? checkSchema(db) : migrate(db));
+  if (runtime.name !== "workers") await migrate(db);
   return db;
 }
 
 export const closeDatabase = (db: Db) => handleOf(db).close();
-
-/**
- * Workers never migrate. A newer schema is expected: the deploy migrates first, so the
- * previous version keeps serving on it until the new one is live (and after a rollback).
- */
-async function checkSchema(db: Db) {
-  const rows = rowsOf(await db.execute(sql`SELECT value FROM strata_meta WHERE key = 'schema_version'`));
-  const current = rows.length ? Number(rows[0]!.value) : 0;
-  if (current < migrations.length) {
-    throw new Error(`Database schema is v${current}, this build needs v${migrations.length}. Deploys migrate first: deploy/cloudflare/deploy.sh.`);
-  }
-}
 
 /**
  * The schema version lives in `strata_meta`. Several servers may start at once (a cloud
