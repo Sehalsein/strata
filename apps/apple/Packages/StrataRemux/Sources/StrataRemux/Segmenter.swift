@@ -48,8 +48,9 @@ final class Segmenter {
     private let lossless: LosslessAudio?
     private let subtitles: SubtitleReader
     private var initData: Data?
-    /// Segment 0's media, built along with the header.
+    /// The media of the segment the header was built from (`firstIndex`).
     private var firstMedia: Data?
+    private var firstIndex = 0
     /// Lines from the text subtitle streams, as segments are read.
     var onCues: (([SubtitleCue]) -> Void)?
 
@@ -92,26 +93,36 @@ final class Segmenter {
 
     // MARK: - Segments
 
-    /// ftyp + moov, describing the tracks every segment carries.
-    func initSegment() throws -> Data {
+    /// The segment playing `seconds` (media time).
+    func segment(at seconds: Double) -> Int {
+        guard seconds > 0 else { return 0 }
+        let i = (boundaries.lastIndex { $0 <= seconds + 0.001 } ?? 0)
+        return min(i, segmentCount - 1)
+    }
+
+    /// ftyp + moov, describing the tracks every segment carries. Built along with segment
+    /// `index` (where playback starts), whose media is kept for the player's first request.
+    func initSegment(from index: Int = 0) throws -> Data {
         if let initData { return initData }
-        let full = try build(segment: 0)
+        let full = try build(segment: index)
         let boxes = MP4Boxes.split(full)
         guard !boxes.header.isEmpty else { throw RemuxError.ffmpeg("The MP4 writer produced no header.") }
         initData = boxes.header
         firstMedia = boxes.media
+        firstIndex = index
         return boxes.header
     }
 
-    /// moof + mdat for one segment.
-    func mediaSegment(_ index: Int) throws -> Data {
-        if index == 0, let firstMedia { return firstMedia }
-        return MP4Boxes.split(try build(segment: index)).media
+    /// moof + mdat for one segment. `abandon` is asked as packets are read; returning true
+    /// stops the build (the player has moved elsewhere) with `RemuxError.abandoned`.
+    func mediaSegment(_ index: Int, abandon: () -> Bool = { false }) throws -> Data {
+        if index == firstIndex, let firstMedia { return firstMedia }
+        return MP4Boxes.split(try build(segment: index, abandon: abandon)).media
     }
 
     /// Reads one segment's packets and writes them as a fragmented MP4 (with its own header,
     /// which callers keep or drop).
-    private func build(segment index: Int) throws -> Data {
+    private func build(segment index: Int, abandon: () -> Bool = { false }) throws -> Data {
         let start = boundaries[index]
         let end = boundaries[index + 1]
         let last = index == segmentCount - 1
@@ -143,6 +154,7 @@ final class Segmenter {
         defer { var p: UnsafeMutablePointer<AVPacket>? = packet; av_packet_free(&p) }
 
         while !(videoDone && audioDone) {
+            if abandon() { throw RemuxError.abandoned }
             guard try demuxer.read(into: packet) else { break }
             defer { av_packet_unref(packet) }
             let si = packet.pointee.stream_index

@@ -103,6 +103,34 @@ final class RemuxTests: XCTestCase {
         }
     }
 
+    /// A resume starts the stream at its segment: the player begins there without fetching
+    /// the start of the file, and the header built from that segment still plays the rest.
+    func testStartingMidFileBeginsThere() async throws {
+        let session = RemuxSession(source: .file(fixture("hevc_eac3_srt.mkv")), plan: RemuxPlan())
+        let url = try await session.start(at: 13)
+        defer { session.stop() }
+        let playlist = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(playlist.contains("#EXT-X-START:TIME-OFFSET=13.000"), playlist)
+
+        let item = AVPlayerItem(url: url)
+        let player = AVPlayer(playerItem: item)
+        player.isMuted = true
+        player.play()
+        let deadline = Date().addingTimeInterval(20)
+        while item.status == .unknown || item.currentTime().seconds < 13.5, Date() < deadline {
+            if item.status == .failed { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertEqual(item.status, .readyToPlay, item.error.map { String(describing: $0) } ?? "")
+        XCTAssertGreaterThan(item.currentTime().seconds, 12.9, "begins at the resume point")
+        // Back to the start: segments before the first one built play too.
+        await player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+        try await Task.sleep(for: .milliseconds(1500))
+        XCTAssertGreaterThan(item.currentTime().seconds, 0.3)
+        XCTAssertLessThan(item.currentTime().seconds, 5)
+        player.pause()
+    }
+
     /// Subtitles go to the player as a WebVTT track it draws itself (so they show in Picture
     /// in Picture and on AirPlay), at the right moment.
     func testSubtitlesAreAWebVTTTrackThePlayerShows() async throws {
@@ -166,7 +194,7 @@ final class RemuxTests: XCTestCase {
     /// session asks for a new one and carries on.
     func testRemoteFileWithAnExpiredLink() async throws {
         let file = try Data(contentsOf: fixture("hevc_eac3_srt.mkv"))
-        let origin = try LoopbackServer { path in path == "/good.mkv" ? (file, "video/x-matroska") : nil }
+        let origin = try LoopbackServer { path in path == "/good.mkv" ? .ok(file, "video/x-matroska") : .notFound }
         let port = try await origin.start()
         defer { origin.stop() }
         let good = URL(string: "http://127.0.0.1:\(port)/good.mkv")!

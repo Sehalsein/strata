@@ -15,6 +15,8 @@ public enum RemuxError: Error, LocalizedError, Equatable {
     case linkExpired
     case unsupported(String)
     case ffmpeg(String)
+    /// A segment nobody wants any more (the player seeked away) was left unbuilt.
+    case abandoned
 
     public var errorDescription: String? {
         switch self {
@@ -22,6 +24,7 @@ public enum RemuxError: Error, LocalizedError, Equatable {
         case .linkExpired: "The link to this file expired."
         case .unsupported(let message): message
         case .ffmpeg(let message): message
+        case .abandoned: "Skipped."
         }
     }
 }
@@ -49,12 +52,17 @@ final class FileByteSource: ByteSource {
 /// A file behind an HTTP(S) link (TorBox), fetched in blocks with ranged requests through
 /// URLSession, so it uses the system's networking (proxies, HTTP/2, VPNs). Blocks are kept
 /// in a small LRU and the next ones are fetched ahead while the player reads forward.
-/// A link that stops working (401/403/404/410) is replaced once through `refresh`.
+/// A link that stops working (401/403/404/410) is replaced once through `refresh`; a
+/// dropped connection, timeout or 5xx is tried again a few times before the read fails.
 final class HTTPByteSource: ByteSource, @unchecked Sendable {
     static let blockSize = 2 << 20
     /// About 64 MB: enough read-ahead for a 4K remux without holding much of the file.
     static let maxBlocks = 32
-    static let readAhead = 3
+    /// Blocks fetched in parallel ahead of the reader: a 4K segment is 20–40 blocks, and
+    /// each request waits a round trip before its bytes arrive.
+    static let readAhead = 6
+    /// Tries for a block after the first, with a growing pause between them.
+    static let retries = 3
 
     private var url: URL
     private let refresh: (@Sendable () async throws -> URL)?
@@ -76,8 +84,8 @@ final class HTTPByteSource: ByteSource, @unchecked Sendable {
         let config = URLSessionConfiguration.default
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.urlCache = nil
-        config.timeoutIntervalForRequest = 30
-        config.httpMaximumConnectionsPerHost = 4
+        config.timeoutIntervalForRequest = 20
+        config.httpMaximumConnectionsPerHost = Self.readAhead + 1
         session = URLSession(configuration: config)
         // The first block also tells us the file's size (Content-Range).
         _ = try block(0)
@@ -143,7 +151,7 @@ final class HTTPByteSource: ByteSource, @unchecked Sendable {
         wanted.forEach { fetch($0) }
     }
 
-    private func fetch(_ index: Int64, retried: Bool = false) {
+    private func fetch(_ index: Int64, retried: Bool = false, attempt: Int = 0) {
         let from = index * Int64(Self.blockSize)
         let to = from + Int64(Self.blockSize) - 1
         lock.lock()
@@ -164,11 +172,16 @@ final class HTTPByteSource: ByteSource, @unchecked Sendable {
                 Task {
                     do {
                         self.setURL(try await refresh())
-                        self.fetch(index, retried: true)
+                        self.fetch(index, retried: true, attempt: attempt)
                     } catch {
                         self.finish(index, .failure(RemuxError.linkExpired))
                     }
                 }
+                return
+            }
+            if attempt < Self.retries, Self.isTransient(error, status: status) {
+                let pause = 0.5 * Double(1 << attempt)
+                DispatchQueue.global().asyncAfter(deadline: .now() + pause) { self.fetch(index, retried: retried, attempt: attempt + 1) }
                 return
             }
             if let error {
@@ -187,6 +200,16 @@ final class HTTPByteSource: ByteSource, @unchecked Sendable {
                 self.finish(index, .failure(RemuxError.network("The file server answered \(status).")))
             }
         }.resume()
+    }
+
+    /// Worth asking again: the connection dropped or timed out, or the server had a moment.
+    private static func isTransient(_ error: Error?, status: Int) -> Bool {
+        if let error = error as? URLError {
+            return [.timedOut, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed,
+                    .notConnectedToInternet, .resourceUnavailable, .secureConnectionFailed].contains(error.code)
+        }
+        if error != nil { return false }
+        return status == 408 || status == 429 || (500...599).contains(status)
     }
 
     private func setURL(_ new: URL) {

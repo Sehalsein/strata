@@ -1,6 +1,13 @@
 import Foundation
 import FFmpeg
 import Security
+import os
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "strata", category: "remux")
+
+func remuxLog(_ message: String) {
+    logger.warning("\(message, privacy: .public)")
+}
 
 /// Plays a file AVPlayer can't open by itself (MKV, DTS, TrueHD…) by repackaging it on the
 /// device: the file is read straight from its link (or from disk, for downloads), cut
@@ -66,6 +73,18 @@ public final class RemuxSession: @unchecked Sendable {
     private var cache: [Int: Data] = [:]
     private var cacheOrder: [Int] = []
     private let lock = NSLock()
+    /// Segments waiting to be built, and the one being built (all under `lock`).
+    private var jobs: [Job] = []
+    private var building: Job?
+    /// The segment the player asked for last: where playback is. Builds for segments far
+    /// from it (a scrub moved on) are dropped, or stopped part way, so the one the player
+    /// waits for now never queues behind them.
+    private var playhead = 0
+    /// Where playback starts (media seconds): the header is built with that segment, and the
+    /// playlists tell the player to begin there rather than at 0.
+    private var startSeconds: Double = 0
+    /// The header (ftyp + moov), built in `start()`.
+    private var initData: Data?
     private var seenCues = Set<SubtitleCue>()
     /// Lines read so far, by stream, for the WebVTT tracks.
     private var cuesByStream: [Int32: [SubtitleCue]] = [:]
@@ -86,8 +105,10 @@ public final class RemuxSession: @unchecked Sendable {
 
     deinit { stop() }
 
-    /// Opens the file, reads its index and starts the loopback server.
-    public func start() async throws -> URL {
+    /// Opens the file, reads its index and starts the loopback server. `at` (media seconds)
+    /// is where playback will begin: that segment is built first and the next one after it,
+    /// so a resume doesn't wait for the start of the file and then a seek.
+    public func start(at seconds: Double = 0) async throws -> URL {
         let segmenter = try await onWorkQueue { () throws -> Segmenter in
             let bytes: ByteSource
             switch self.source {
@@ -99,13 +120,18 @@ public final class RemuxSession: @unchecked Sendable {
             let segmenter = try Segmenter(demuxer: demuxer, plan: self.plan)
             segmenter.onCues = { [weak self] cues in self?.deliver(cues) }
             // The header first: it fails fast on anything the writer can't take.
-            _ = try segmenter.initSegment()
-            self.markBuilt(0)
+            let first = segmenter.segment(at: seconds)
+            self.initData = try segmenter.initSegment(from: first)
+            self.markBuilt(first)
             return segmenter
         }
         self.segmenter = segmenter
+        let first = segmenter.segment(at: seconds)
+        startSeconds = first > 0 ? max(0, seconds) : 0
+        lock.withLock { playhead = first }
+        if first + 1 < segmenter.segmentCount { Task { _ = await self.segment(first + 1, for: .prefetch) } }
         videoFormat = Self.videoFormat(segmenter, plan: plan)
-        let server = try LoopbackServer { [weak self] path in await self?.respond(to: path) }
+        let server = try LoopbackServer { [weak self] path in await self?.respond(to: path) ?? .notFound }
         let port = try await server.start()
         self.server = server
         let url = URL(string: "http://127.0.0.1:\(port)/index.m3u8")!
@@ -124,8 +150,8 @@ public final class RemuxSession: @unchecked Sendable {
         let token = bytes.map { String(format: "%02x", $0) }.joined()
         let prefix = "/\(token)/"
         let server = try LoopbackServer(loopbackOnly: false) { [weak self] path in
-            guard path.hasPrefix(prefix) else { return nil }
-            return await self?.respond(to: "/" + path.dropFirst(prefix.count))
+            guard path.hasPrefix(prefix) else { return .notFound }
+            return await self?.respond(to: "/" + path.dropFirst(prefix.count)) ?? .notFound
         }
         let port = try await server.start()
         networkServer = server
@@ -135,6 +161,12 @@ public final class RemuxSession: @unchecked Sendable {
     }
 
     public func stop() {
+        lock.lock()
+        let waiting = jobs
+        jobs = []
+        playhead = Int.min / 2 // anything being built is now stale and stops
+        lock.unlock()
+        for job in waiting { job.waiters.forEach { $0.resume(returning: nil) } }
         server?.stop()
         server = nil
         networkServer?.stop()
@@ -154,6 +186,7 @@ public final class RemuxSession: @unchecked Sendable {
         let seconds = max(1, segmenter.boundaries.last ?? 1)
         let bandwidth = max(1_000_000, Int(Double(byteSource?.size ?? 0) * 8 / seconds))
         var lines = ["#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-INDEPENDENT-SEGMENTS"]
+        if let start = startTag { lines.append(start) }
         for r in subtitleRenditions {
             var attributes = [
                 "TYPE=SUBTITLES", "GROUP-ID=\"subs\"", "NAME=\"\(Self.quoted(r.name))\"",
@@ -238,7 +271,7 @@ public final class RemuxSession: @unchecked Sendable {
     /// them, so it's built first if the player hasn't asked for its video yet.
     func subtitleSegment(stream: Int32, index n: Int) async -> String {
         guard let segmenter, n >= 0, n < segmenter.segmentCount else { return "" }
-        if !isBuilt(n) { _ = await segment(n) }
+        if !isBuilt(n) { _ = await segment(n, for: .subtitles) }
         let from = segmenter.boundaries[n], to = segmenter.boundaries[n + 1]
         let cues = cues(stream, from: from, to: to)
         // The video's timestamps run `timelineShift` ahead of the file's; the map ties the
@@ -272,6 +305,7 @@ public final class RemuxSession: @unchecked Sendable {
             "#EXT-X-INDEPENDENT-SEGMENTS",
             "#EXT-X-MAP:URI=\"init.mp4\"",
         ]
+        if let start = startTag { lines.insert(start, at: 6) }
         for (i, d) in durations.enumerated() {
             lines.append(String(format: "#EXTINF:%.6f,", d))
             lines.append(String(format: "seg%05d.m4s", i))
@@ -280,42 +314,137 @@ public final class RemuxSession: @unchecked Sendable {
         return lines.joined(separator: "\n") + "\n"
     }
 
-    private func respond(to path: String) async -> (Data, String)? {
+    /// Has the player begin at the resume point, so it never fetches the start of the file.
+    private var startTag: String? {
+        startSeconds > 0 ? String(format: "#EXT-X-START:TIME-OFFSET=%.3f,PRECISE=YES", startSeconds) : nil
+    }
+
+    private func respond(to path: String) async -> LoopbackServer.Reply {
         let name = path.split(separator: "?").first.map { String($0.dropFirst()) } ?? ""
         let m3u8 = "application/vnd.apple.mpegurl"
-        if name == "index.m3u8" { return (Data(masterPlaylist().utf8), m3u8) }
-        if name == "video.m3u8" { return (Data(playlist().utf8), m3u8) }
+        if name == "index.m3u8" { return .ok(Data(masterPlaylist().utf8), m3u8) }
+        if name == "video.m3u8" { return .ok(Data(playlist().utf8), m3u8) }
         if name.hasPrefix("subs") {
             let body = name.dropFirst(4)
             if body.hasSuffix(".m3u8"), let stream = Int32(body.dropLast(5)) {
-                return (Data(subtitlePlaylist(stream: stream).utf8), m3u8)
+                return .ok(Data(subtitlePlaylist(stream: stream).utf8), m3u8)
             }
             let parts = body.dropLast(4).split(separator: "_")
             if body.hasSuffix(".vtt"), parts.count == 2, let stream = Int32(parts[0]), let n = Int(parts[1]) {
-                return (Data(await subtitleSegment(stream: stream, index: n).utf8), "text/vtt")
+                return .ok(Data(await subtitleSegment(stream: stream, index: n).utf8), "text/vtt")
             }
-            return nil
+            return .notFound
         }
         if name == "init.mp4" {
-            return (try? await onWorkQueue { try self.segmenter!.initSegment() }).map { ($0, "video/mp4") }
+            // Built in `start()`: answered at once, not behind a segment being built.
+            guard let initData else { return .notFound }
+            return .ok(initData, "video/mp4")
         }
         guard name.hasPrefix("seg"), name.hasSuffix(".m4s"), let n = Int(name.dropFirst(3).dropLast(4)),
-              let segmenter, n >= 0, n < segmenter.segmentCount else { return nil }
-        guard let data = await segment(n) else { return nil }
-        // The player will want the next one soon.
-        if n + 1 < segmenter.segmentCount { Task { _ = await self.segment(n + 1) } }
-        return (data, "video/iso.segment")
+              let segmenter, n >= 0, n < segmenter.segmentCount else { return .notFound }
+        switch await segment(n, for: .player) {
+        case .some(let data):
+            // The player will want the next one soon.
+            if n + 1 < segmenter.segmentCount { Task { _ = await self.segment(n + 1, for: .prefetch) } }
+            return .ok(data, "video/iso.segment")
+        case .none:
+            // Dropped for a newer request, or the read failed: the player asks again.
+            return .unavailable
+        }
     }
 
-    private func segment(_ n: Int) async -> Data? {
-        if let hit = cached(n) { return hit }
-        guard let data = try? await onWorkQueue({ () throws -> Data in
-            if let hit = self.cached(n) { return hit }
-            return try self.segmenter!.mediaSegment(n)
-        }) else { return nil }
-        markBuilt(n)
-        store(n, data)
-        return data
+    // MARK: - Building segments
+
+    enum Purpose {
+        /// The player is waiting for it: it moves the playhead.
+        case player
+        /// Built ahead of the player; dropped when it's no longer near the playhead.
+        case prefetch
+        /// Read for its subtitle lines; never dropped, and doesn't move the playhead.
+        case subtitles
+    }
+
+    private final class Job {
+        let index: Int
+        var purpose: Purpose
+        var waiters: [CheckedContinuation<Data?, Never>] = []
+        init(index: Int, purpose: Purpose) {
+            self.index = index
+            self.purpose = purpose
+        }
+    }
+
+    /// A segment's media, built once however many ask for it. Nil when it was dropped as
+    /// stale or couldn't be read.
+    func segment(_ n: Int, for purpose: Purpose) async -> Data? {
+        if let hit = cached(n) {
+            if purpose == .player { lock.withLock { playhead = n } }
+            return hit
+        }
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Data?, Never>) in
+            lock.lock()
+            if purpose == .player { playhead = n }
+            if let job = (building?.index == n ? building : nil) ?? jobs.first(where: { $0.index == n }) {
+                job.waiters.append(continuation)
+                if purpose != .prefetch { job.purpose = purpose }
+            } else {
+                let job = Job(index: n, purpose: purpose)
+                job.waiters.append(continuation)
+                jobs.append(job)
+            }
+            let idle = building == nil
+            lock.unlock()
+            if idle { work.async { self.drain() } }
+        }
+    }
+
+    /// Whether a segment is too far from the playhead to be worth building (lock held).
+    private func isStale(_ job: Job) -> Bool {
+        guard job.purpose != .subtitles else { return false }
+        return job.index < playhead - 1 || job.index > playhead + 3
+    }
+
+    /// Builds queued segments one at a time on the work queue: what the player waits for
+    /// first, nearest the playhead, dropping the rest.
+    private func drain() {
+        while true {
+            lock.lock()
+            guard building == nil else { lock.unlock(); return }
+            let stale = jobs.filter(isStale)
+            jobs.removeAll(where: isStale)
+            let next = jobs.min { a, b in
+                let ra = a.purpose == .prefetch ? 1 : 0, rb = b.purpose == .prefetch ? 1 : 0
+                return ra != rb ? ra < rb : abs(a.index - playhead) < abs(b.index - playhead)
+            }
+            if let next { jobs.removeAll { $0 === next } }
+            building = next
+            lock.unlock()
+            for job in stale { job.waiters.forEach { $0.resume(returning: nil) } }
+            guard let job = next else { return }
+
+            var data = cached(job.index)
+            if data == nil, let segmenter {
+                do {
+                    data = try segmenter.mediaSegment(job.index) { [unowned self] in
+                        self.lock.lock(); defer { self.lock.unlock() }
+                        return self.isStale(job)
+                    }
+                } catch RemuxError.abandoned {
+                    data = nil
+                } catch {
+                    remuxLog("segment \(job.index) failed: \(error.localizedDescription)")
+                }
+                if let data {
+                    markBuilt(job.index)
+                    store(job.index, data)
+                }
+            }
+            lock.lock()
+            building = nil
+            let waiters = job.waiters
+            lock.unlock()
+            waiters.forEach { $0.resume(returning: data) }
+        }
     }
 
     private func cached(_ n: Int) -> Data? {

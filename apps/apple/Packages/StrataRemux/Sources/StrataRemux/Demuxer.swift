@@ -76,6 +76,13 @@ final class Demuxer {
 
     /// Positions the reader at the last video keyframe at or before `seconds`.
     func seek(to seconds: Double) throws {
+        // A failed read (a network blip) leaves the reader flagged as failed and at the end,
+        // which would fail every later segment too: each seek starts it afresh.
+        if let pb = format.pointee.pb {
+            pb.pointee.error = 0
+            pb.pointee.eof_reached = 0
+        }
+        _ = io.takeError()
         let tb = stream(videoIndex).pointee.time_base
         let ts = Int64((seconds / tb.seconds).rounded(.down))
         let result = av_seek_frame(format, videoIndex, max(0, ts), AVSEEK_FLAG_BACKWARD)
