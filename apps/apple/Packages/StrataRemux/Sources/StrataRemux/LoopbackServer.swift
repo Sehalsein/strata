@@ -2,10 +2,18 @@ import Foundation
 import Network
 
 /// A tiny HTTP/1.1 server for AVPlayer, on 127.0.0.1 (or, for AirPlay, every interface):
-/// GET requests, answered by `handler` with a body and content type, or nil for 404.
-/// Connections are kept alive.
+/// GET requests, answered by `handler`. Connections are kept alive.
 final class LoopbackServer: @unchecked Sendable {
-    typealias Handler = @Sendable (String) async -> (Data, String)?
+    enum Reply: Sendable {
+        /// A body and its content type.
+        case ok(Data, String)
+        case notFound
+        /// Not now (a segment dropped for a newer request, or a failed read): the player
+        /// asks again.
+        case unavailable
+    }
+
+    typealias Handler = @Sendable (String) async -> Reply
 
     private let listener: NWListener
     private let queue = DispatchQueue(label: "strata.remux.http")
@@ -83,7 +91,12 @@ final class LoopbackServer: @unchecked Sendable {
             var body = Data()
             var type = "text/plain"
             var extra = ""
-            if method == "GET" || method == "HEAD", let (data, contentType) = await handler(path) {
+            let reply: Reply = method == "GET" || method == "HEAD" ? await handler(path) : .notFound
+            if case .unavailable = reply {
+                status = "503 Service Unavailable"
+                extra = "Retry-After: 1\r\n"
+            }
+            if case .ok(let data, let contentType) = reply {
                 status = "200 OK"
                 body = data
                 type = contentType

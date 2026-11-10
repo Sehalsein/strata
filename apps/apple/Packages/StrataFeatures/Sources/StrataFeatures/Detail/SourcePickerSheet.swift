@@ -23,6 +23,11 @@ struct SourcePickerSheet: View {
     @State private var sources: Loadable<[Candidate]> = .loading
     @State private var filter: Filter = .all
 
+    /// The source you chose last time, which Play goes back to.
+    private var lastPicked: String? {
+        services.client.flatMap { SourceMemory.shared.pick(for: target, server: $0.baseURL) }
+    }
+
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", uhd = "4K", hd = "1080p", sd = "720p"
         var id: String { rawValue }
@@ -70,7 +75,7 @@ struct SourcePickerSheet: View {
                                         dismiss()
                                         onChoose(candidate)
                                     } label: {
-                                        SourceRow(candidate: candidate)
+                                        SourceRow(candidate: candidate, isLastPicked: purpose == .play && candidate.id == lastPicked)
                                     }
                                     .buttonStyle(.plain)
                                     if candidate.id != shown.last?.id { Divider().overlay(Theme.hairline) }
@@ -103,6 +108,7 @@ struct SourcePickerSheet: View {
 
 struct SourceRow: View {
     let candidate: Candidate
+    var isLastPicked = false
 
     var body: some View {
         HStack(alignment: .top, spacing: Metrics.space3) {
@@ -113,6 +119,11 @@ struct SourceRow: View {
                 }
                 if let detail = candidate.detail ?? candidate.sizeLabel {
                     Text(detail).font(.stFootnote).foregroundStyle(Theme.ink3)
+                }
+                if isLastPicked {
+                    Label("Your last pick", systemImage: "checkmark.circle.fill")
+                        .font(.stFootnote)
+                        .foregroundStyle(Theme.accentText)
                 }
             }
             Spacer(minLength: Metrics.space2)

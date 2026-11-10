@@ -67,7 +67,7 @@ final class MediaProbeTests: XCTestCase {
     /// only the header is fetched.
     func testRemoteFileWithAnExpiredLink() async throws {
         let file = try Data(contentsOf: fixture("hdr10_hevc_untagged.mkv"))
-        let origin = try LoopbackServer { path in path == "/good.mkv" ? (file, "video/x-matroska") : nil }
+        let origin = try LoopbackServer { path in path == "/good.mkv" ? .ok(file, "video/x-matroska") : .notFound }
         let port = try await origin.start()
         defer { origin.stop() }
         let good = URL(string: "http://127.0.0.1:\(port)/good.mkv")!
@@ -83,7 +83,7 @@ final class MediaProbeTests: XCTestCase {
     func testAStalledServerFailsInsteadOfHanging() async throws {
         let origin = try LoopbackServer { _ in
             try? await Task.sleep(for: .seconds(10))
-            return nil
+            return .notFound
         }
         let port = try await origin.start()
         defer { origin.stop() }

@@ -147,6 +147,12 @@ public final class PlayerEngine {
     private var restartTarget: TimeInterval?
     /// Files whose media info this load already read for the server (see `probe`).
     private var probedFiles = Set<Int>()
+    /// Device mode: waits out a stall, then reopens the stream where it stopped.
+    private var stallTask: Task<Void, Never>?
+    /// Times the device stream was reopened after a stall or failure, and where the last
+    /// one was: a title that keeps failing at one spot stops trying.
+    private var recoveries = 0
+    private var recoveredAt: TimeInterval = 0
     @ObservationIgnored private var lastReportAt = Date.distantPast
     @ObservationIgnored private var lastReportedMs: Int?
     /// Set once the first item became ready; before that there's no real position to report
@@ -171,6 +177,10 @@ public final class PlayerEngine {
     public var restartDebounce: TimeInterval = 0.4
     /// How often a source the server is getting ready is asked about again.
     public var preparePollInterval: TimeInterval = 5
+    /// How long the device stream may stall before it's reopened where it stopped.
+    public var stallLimit: TimeInterval = 15
+    /// Reopenings allowed before giving up (counted afresh after a minute of playing).
+    private static let maxRecoveries = 3
 
     public init() {
         if let raw = UserDefaults.standard.string(forKey: Self.videoGravityKey) {
@@ -197,6 +207,7 @@ public final class PlayerEngine {
         let gen = generation
         skipNativeSubtitles = false
         probedFiles = []
+        recoveries = 0
         self.target = target
         self.meta = meta
         status = .loading
@@ -206,8 +217,19 @@ public final class PlayerEngine {
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                let res = try await self.requestPlay(client: client, target: target, candidateId: candidateId, startMs: startMs, audioIndex: nil, gen: gen)
+                let memory = SourceMemory.shared
+                // A source you picked before for this (or, for a show, one like it).
+                let remembered = candidateId == nil ? await self.rememberedSource(for: target, client: client) : nil
+                var res: PlayResponse
+                do {
+                    res = try await self.requestPlay(client: client, target: target, candidateId: candidateId ?? remembered, startMs: startMs, audioIndex: nil, gen: gen)
+                } catch let error as StrataError where remembered != nil && error.kind == .http && [404, 410].contains(error.status ?? 0) {
+                    // That file is gone: let the server choose again.
+                    memory.forget(target, server: client.baseURL)
+                    res = try await self.requestPlay(client: client, target: target, candidateId: nil, startMs: startMs, audioIndex: nil, gen: gen)
+                }
                 try await self.start(res, gen: gen, newTitle: true, autoplay: true)
+                if candidateId != nil { memory.remember(res.candidate, for: target, server: client.baseURL) }
             } catch let failure as DeviceFailure {
                 guard gen == self.generation else { return }
                 Log.player.warning("device play failed: \(failure.message, privacy: .public)")
@@ -230,6 +252,7 @@ public final class PlayerEngine {
         let gen = generation
         skipNativeSubtitles = false
         probedFiles = []
+        recoveries = 0
         self.target = target
         self.meta = meta
         status = .loading
@@ -249,6 +272,16 @@ public final class PlayerEngine {
         }
         loadTask = task
         await task.value
+    }
+
+    /// The source you chose for `target` before, or for a show the episode's copy most like
+    /// the one you chose for another episode (asked of the library only, which is quick).
+    private func rememberedSource(for target: PlaybackTarget, client: StrataClient) async -> String? {
+        let memory = SourceMemory.shared
+        if let id = memory.pick(for: target, server: client.baseURL) { return id }
+        guard memory.hasShowPreference(target, server: client.baseURL),
+              let sources = try? await client.sources(target, discover: false) else { return nil }
+        return memory.match(sources, for: target, server: client.baseURL)?.id
     }
 
     /// Plays the next episode (from `nextEpisode`), from the start.
@@ -315,7 +348,8 @@ public final class PlayerEngine {
         if res.mode == .device {
             let local = makeRemux(res)
             do {
-                url = try await local.start()
+                // Built from the resume point, so the player begins there.
+                url = try await local.start(at: TimeInterval(res.seekToMs) / 1000)
                 #if os(iOS)
                 // An Apple TV on AirPlay fetches the stream itself: it gets the Wi-Fi address.
                 if player.isExternalPlaybackActive { url = try await local.networkPlaylistURL() }
@@ -329,6 +363,8 @@ public final class PlayerEngine {
             newRemux = local
         }
         removeObservers()
+        stallTask?.cancel()
+        stallTask = nil
 
         session = res
         timeline = MediaTimeline(res)
@@ -787,6 +823,43 @@ public final class PlayerEngine {
     }
     #endif
 
+    /// Device mode: a stall that lasts (a segment that never arrived, a player that gave up
+    /// waiting) reopens the stream where it stopped instead of spinning forever.
+    private func watchForStall() {
+        guard session?.mode == .device, stallTask == nil, restartTarget == nil else { return }
+        let gen = generation
+        let item = player.currentItem
+        let limit = stallLimit
+        stallTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(limit * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            self.stallTask = nil
+            guard gen == self.generation, self.player.currentItem === item,
+                  self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate else { return }
+            self.recoverDevice("stalled for \(Int(limit))s", giveUp: "Playback stalled and couldn't pick up again. Check the connection and try again, or pick another source.")
+        }
+    }
+
+    /// Reopens the device stream at the current position; after a few tries in a row, fails
+    /// with `giveUp`.
+    private func recoverDevice(_ reason: String, giveUp: String) {
+        guard let current = session, current.mode == .device else { return }
+        guard recoveries < Self.maxRecoveries else {
+            Log.player.warning("device stream \(reason, privacy: .public); giving up")
+            player.pause()
+            isBuffering = false
+            status = .failed(giveUp)
+            return
+        }
+        recoveries += 1
+        recoveredAt = position
+        Log.player.warning("device stream \(reason, privacy: .public); reopening at \(self.position, privacy: .public)s")
+        restartTask?.cancel()
+        let gen = generation
+        let at = position
+        restartTask = Task { [weak self] in await self?.restartDevice(current, at: at, wasPlaying: true, gen: gen) }
+    }
+
     // MARK: - Unload
 
     /// Stops playback: reports the final position, ends the server session, clears state.
@@ -812,6 +885,8 @@ public final class PlayerEngine {
         restartTask = nil
         subtitleTask?.cancel()
         subtitleTask = nil
+        stallTask?.cancel()
+        stallTask = nil
         if reportFinal { reportProgress(force: true) }
         if let session { stopSession(session.sessionId) }
         removeObservers()
@@ -900,6 +975,7 @@ public final class PlayerEngine {
                     self.nowPlaying?.update(meta: self.meta, position: self.position, duration: self.duration, rate: rate)
                 }
                 if self.status == .playing { self.reportProgress(force: false) }
+                if self.recoveries > 0, self.position - self.recoveredAt > 60 { self.recoveries = 0 }
             }
         }
         statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
@@ -907,6 +983,12 @@ public final class PlayerEngine {
             let message = Self.describe(item.error)
             Task { @MainActor [weak self] in
                 guard let self, failed, self.player.currentItem === item else { return }
+                // Mid-play on the device (a read that failed for good, say): reopen where it
+                // was. Before it first plays, `start` handles the failure itself.
+                if self.session?.mode == .device, self.status == .playing || self.status == .paused, self.restartTarget == nil {
+                    self.recoverDevice("failed: \(message)", giveUp: message)
+                    return
+                }
                 self.status = .failed(message)
                 self.isBuffering = false
             }
@@ -916,6 +998,7 @@ public final class PlayerEngine {
             Task { @MainActor [weak self] in
                 guard let self, self.session != nil else { return }
                 self.isBuffering = tcs == .waitingToPlayAtSpecifiedRate || self.restartTarget != nil
+                if tcs == .waitingToPlayAtSpecifiedRate { self.watchForStall() } else { self.stallTask?.cancel(); self.stallTask = nil }
                 switch tcs {
                 case .playing:
                     if self.restartTarget == nil { self.status = .playing }

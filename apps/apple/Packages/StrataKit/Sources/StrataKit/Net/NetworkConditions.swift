@@ -78,8 +78,13 @@ public final class NetworkConditions: @unchecked Sendable {
         return id
     }
 
-    /// The source height to prefer right now: the cellular setting while on cellular.
+    /// The source height to prefer when the app chooses: the cellular setting while on
+    /// cellular, and at most 1080p on an iPhone anywhere (a 4K remux is many times the
+    /// data, starts and seeks slower, and looks no sharper on a phone). A source you pick
+    /// yourself plays whatever its resolution.
     public var preferredMaxHeight: Int? {
-        isExpensive ? CellularQuality.current.maxHeight : nil
+        let cellular = isExpensive ? CellularQuality.current.maxHeight : nil
+        let device = DeviceInfo.deviceClass == "iPhone" ? 1080 : nil
+        return [cellular, device].compactMap { $0 }.min()
     }
 }

@@ -33,6 +33,15 @@ struct WatchView: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
+            // The title's artwork while it starts, rather than a black screen.
+            if isStarting {
+                RemoteImage(url: (engine.meta ?? request.meta).artworkURL, maxPixel: 1280, blur: 24) { Color.black }
+                    .overlay(Color.black.opacity(0.55))
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+
             #if !os(tvOS)
             // The video's UIView swallows touches, so taps land on this layer instead.
             Color.clear
@@ -100,6 +109,7 @@ struct WatchView: View {
             }
         }
         .animation(.easeOut(duration: 0.25), value: chromeVisible)
+        .animation(.easeOut(duration: 0.35), value: isStarting)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showUpNext)
         .preferredColorScheme(.dark)
         #if os(iOS)
@@ -117,8 +127,10 @@ struct WatchView: View {
         .sheet(isPresented: $showSources) {
             let target = engine.target ?? request.target
             let meta = engine.meta ?? request.meta
+            // Carries on from where it got to, not from where it started.
+            let at = engine.position > 0 ? Int(engine.position * 1000) : request.startMs
             SourcePickerSheet(target: target, title: meta.title) { candidate in
-                Task { await engine.load(target: target, meta: meta, candidateId: candidate.id, startMs: request.startMs) }
+                Task { await engine.load(target: target, meta: meta, candidateId: candidate.id, startMs: at) }
             }
         }
         .sheet(isPresented: $showDetails) {
@@ -164,6 +176,14 @@ struct WatchView: View {
         return engine.duration - engine.position <= 30 && engine.status == .playing
     }
 
+    /// Nothing to show yet: asking the server, or the first frames on their way.
+    private var isStarting: Bool {
+        switch engine.status {
+        case .idle, .loading, .preparing: true
+        default: false
+        }
+    }
+
     private var showsStateCard: Bool {
         switch engine.status {
         case .failed, .preparing: true
@@ -181,6 +201,14 @@ struct WatchView: View {
                 #else
                 if !chromeVisible { ProgressView().controlSize(.large).tint(.white) }
                 #endif
+                if !chromeVisible {
+                    Text((engine.meta ?? request.meta).title)
+                        .font(.stTitle2)
+                        .foregroundStyle(Theme.onArtwork)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .frame(maxWidth: 520)
+                }
                 if let loadingCaption {
                     Text(loadingCaption)
                         .font(.stCallout)
