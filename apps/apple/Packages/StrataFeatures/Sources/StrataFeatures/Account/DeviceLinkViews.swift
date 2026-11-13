@@ -11,6 +11,8 @@ struct TVCodeSignInView: View {
     @Environment(AppServices.self) private var services
     let target: ServerTarget
     let onSignedIn: () -> Void
+    /// A code already got for this TV (the phone that sent the server is approving it).
+    var initialCode: DeviceCode? = nil
 
     @State private var code: DeviceCode?
     @State private var error: String?
@@ -24,8 +26,10 @@ struct TVCodeSignInView: View {
             VStack(alignment: .leading, spacing: Metrics.space10) {
                 VStack(alignment: .leading, spacing: Metrics.space3) {
                     Text("Sign in to \(target.info.serverName)").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                    Text("Scan the code with your phone's camera and approve this TV from your profile.")
+                    Text(initialCode == nil ? "Scan the code with your phone's camera and approve this TV from your profile."
+                         : "Approve this TV on your phone. Check the code there matches this one.")
                         .font(.stBody).foregroundStyle(Theme.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if let code {
                     VStack(alignment: .leading, spacing: Metrics.space2) {
@@ -74,7 +78,8 @@ struct TVCodeSignInView: View {
     private func run() async {
         let client = StrataClient(baseURL: target.url, cacheTTL: 0)
         do {
-            let fresh = try await client.startDeviceCode()
+            let fresh: DeviceCode
+            if attempt == 0, let initialCode { fresh = initialCode } else { fresh = try await client.startDeviceCode() }
             code = fresh
             error = nil
             var interval = max(1, fresh.interval)
@@ -116,6 +121,78 @@ struct TVCodeSignInView: View {
             try? await Task.sleep(for: .seconds(5))
             if !Task.isCancelled { attempt += 1 }
         }
+    }
+}
+
+/// "Sign In with Your Phone": a QR code for a phone already signed in to Strata. The phone
+/// finds this TV on the network and sends it the server (nothing typed on either), the TV
+/// gets a sign-in code from that server, and the phone approves it.
+struct TVPhoneSignInView: View {
+    @Environment(AppServices.self) private var services
+    let onSignedIn: () -> Void
+
+    @State private var host = TVLinkHost()
+    @State private var linked: Linked?
+    @State private var error: String?
+
+    struct Linked: Hashable {
+        let target: ServerTarget
+        let code: DeviceCode
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Metrics.space20) {
+            VStack(alignment: .leading, spacing: Metrics.space10) {
+                VStack(alignment: .leading, spacing: Metrics.space3) {
+                    Text("Sign in with your phone").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                    Text("Scan the code with the camera on a phone that's signed in to Strata. It sends this TV its server, then asks you to approve.")
+                        .font(.stBody).foregroundStyle(Theme.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("The phone needs to be on the same Wi-Fi as this TV.")
+                        .font(.stCallout).foregroundStyle(Theme.ink3)
+                }
+                if let message = error ?? host.failure {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.stCallout).foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: 820, alignment: .leading)
+
+            QRCodeView(TVLink.url(key: host.key).absoluteString, size: 440)
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.bg.ignoresSafeArea())
+        .navigationDestination(item: $linked) { linked in
+            TVCodeSignInView(target: linked.target, onSignedIn: onSignedIn, initialCode: linked.code)
+        }
+        .onAppear {
+            host.onOffer = { addresses in try await offer(addresses) }
+            host.start()
+        }
+        .onDisappear { host.stop() }
+    }
+
+    /// The phone sent its server's addresses: reach one, get a sign-in code from it, and
+    /// hand the code back for the phone to approve.
+    private func offer(_ addresses: [String]) async throws -> String {
+        error = nil
+        var lastError: Error?
+        for address in addresses {
+            do {
+                let (url, info) = try await services.store.probeServer(address)
+                let code = try await StrataClient(baseURL: url, cacheTTL: 0).startDeviceCode()
+                linked = Linked(target: ServerTarget(url: url, info: info), code: code)
+                return code.userCode
+            } catch {
+                lastError = error
+            }
+        }
+        let message = "This TV can't reach your phone's server. \(lastError.map { StrataError.wrap($0).message } ?? "")"
+            .trimmingCharacters(in: .whitespaces)
+        error = message
+        throw StrataError(kind: .network, message: message)
     }
 }
 #endif
@@ -293,3 +370,65 @@ struct ApproveDeviceView: View {
         }
     }
 }
+
+#if os(iOS)
+/// Phone side of a TV's "Sign in with your phone" code: finds the TV on the network, sends
+/// it this phone's server, then approves the sign-in code the TV got from it.
+struct PhoneLinkTVView: View {
+    @Environment(AppServices.self) private var services
+    @Environment(\.dismiss) private var dismiss
+    let request: TVLinkRequest
+
+    @State private var code: String?
+    @State private var error: String?
+    @State private var attempt = 0
+
+    var body: some View {
+        if let code, let server = services.store.activeServer {
+            ApproveDeviceView(request: LinkRequest(code: code, server: server.id))
+        } else {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: Metrics.space4) {
+                    if let error {
+                        MessageView(systemImage: "appletv", title: "Couldn't sign in your TV", message: error, actionTitle: "Try Again") {
+                            attempt += 1
+                        }
+                    } else {
+                        HStack(spacing: Metrics.space3) {
+                            ProgressView()
+                            Text("Finding your TV…").font(.stCallout).foregroundStyle(Theme.ink2)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.top, Metrics.space6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.bg.ignoresSafeArea())
+                .navigationTitle("Link a TV")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .task(id: attempt) { await link() }
+        }
+    }
+
+    private func link() async {
+        error = nil
+        guard let server = services.store.activeServer else {
+            error = "Sign in on this phone first."
+            return
+        }
+        do {
+            code = try await TVLinkClient.link(key: request.key, addresses: server.addresses)
+        } catch is CancellationError {
+            return
+        } catch {
+            self.error = StrataError.wrap(error).message
+        }
+    }
+}
+#endif

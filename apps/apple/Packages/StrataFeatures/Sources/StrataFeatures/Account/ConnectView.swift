@@ -26,6 +26,8 @@ struct ConnectView: View {
     @State private var signInTarget: ServerTarget?
     @State private var joinTarget: ServerTarget?
     @State private var showAddressEntry = false
+    /// TV: a phone already signed in sends the server; nothing typed.
+    @State private var showPhoneSignIn = false
     /// The camera (or a pasted link): a member's sign-in code or a server's address.
     @State private var scanning = false
     @State private var scannedSignIn: SignInCodeRequest?
@@ -49,7 +51,10 @@ struct ConnectView: View {
                     #endif
                     serverList
                     #if os(tvOS)
-                    Button("Enter Address") { showAddressEntry = true }
+                    VStack(spacing: Metrics.space4) {
+                        Button("Enter Address") { showAddressEntry = true }
+                        Button("Sign In with Your Phone") { showPhoneSignIn = true }
+                    }
                     #else
                     addressEntry
                     #endif
@@ -78,6 +83,9 @@ struct ConnectView: View {
                 JoinMemberPickerView(target: target, onSignedIn: signedIn)
             }
             #if os(tvOS)
+            .navigationDestination(isPresented: $showPhoneSignIn) {
+                TVPhoneSignInView(onSignedIn: signedIn)
+            }
             .navigationDestination(isPresented: $showAddressEntry) {
                 VStack(alignment: .leading, spacing: Metrics.space8) {
                     Text("Enter the server address").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
@@ -102,6 +110,10 @@ struct ConnectView: View {
         // `-StrataServer 127.0.0.1:8460` connects at launch, for UI tests and screenshots
         // (typing an address with a remote is slow to script).
         .task {
+            #if os(tvOS)
+            // `-StrataPhoneSignIn YES` opens "Sign In with Your Phone".
+            if !isAdding, UserDefaults.standard.bool(forKey: "StrataPhoneSignIn") { showPhoneSignIn = true }
+            #endif
             guard !isAdding, let preset = UserDefaults.standard.string(forKey: "StrataServer"), !preset.isEmpty else { return }
             address = preset
             await probe(preset)
@@ -133,7 +145,8 @@ struct ConnectView: View {
         #if os(iOS)
         isAdding ? "Scan a code from your admin, or pick the server it's on." : "Scan a code from your admin, or pick a server on your network."
         #else
-        isAdding ? "Pick the server it's on, or enter its address." : "Pick a server on your network, or enter its address."
+        isAdding ? "Pick the server it's on, enter its address, or sign in with your phone."
+            : "Pick a server on your network, enter its address, or sign in with your phone."
         #endif
     }
 
@@ -302,6 +315,8 @@ struct ConnectView: View {
             Task { await probe(address) }
         case .tvLink:
             error = "That's a TV's code. To sign a TV in, open Settings › Link a TV."
+        case .tvPhoneLink:
+            error = "That's a TV's code. Sign in on this phone first, then scan it again to sign the TV in."
         case .unknown:
             error = "That QR code isn't from Strata. Scan a sign-in code from Members, or the server's address."
         }

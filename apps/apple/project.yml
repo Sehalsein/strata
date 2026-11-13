@@ -64,8 +64,8 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
-        NSBonjourServices: [_strata._tcp]
-        NSLocalNetworkUsageDescription: Strata looks for your Strata servers on the local network.
+        NSBonjourServices: [_strata._tcp, _strata-tv._tcp]
+        NSLocalNetworkUsageDescription: Strata looks for your Strata servers, and lets a phone sign in your Apple TV, on the local network.
         NSCameraUsageDescription: Strata uses the camera to scan sign-in and server QR codes from your server's dashboard.
         NSUserActivityTypes:
           - com.strata.viewing

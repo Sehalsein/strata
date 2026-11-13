@@ -228,13 +228,21 @@ public struct LinkRequest: Identifiable, Hashable {
     }
 }
 
+/// A TV's "Sign in with your phone" QR code (`strata://tv-link?key=…`): send that TV
+/// this phone's server, then approve it.
+public struct TVLinkRequest: Identifiable, Hashable {
+    public let key: String
+    public var id: String { key }
+}
+
 /// Handles `strata://` deep links:
 /// `strata://title/<ref>` (like `strata://title/anilist:show:154587`), and for TMDB titles
 /// `strata://movie/<id>`, `strata://show/<id>`,
 /// `strata://watch/movie/<id>`, `strata://watch/episode/<show>/<season>/<episode>` (open the
 /// title's page: a link never starts playback by itself),
 /// `strata://link?user_code=<code>&server=<id or address>` (approve a TV's sign-in),
-/// `strata://sign-in?server=<address>&code=<code>` (a member's QR code: sign in as them), and
+/// `strata://sign-in?server=<address>&code=<code>` (a member's QR code: sign in as them),
+/// `strata://tv-link?key=<key>` (a TV with no server yet: send it this phone's), and
 /// the TV's own `https://<server>/link?user_code=<code>` when it opens the app.
 @MainActor
 @Observable
@@ -242,6 +250,7 @@ public final class AppCoordinator {
     public var pendingRoute: Route?
     public var pendingLink: LinkRequest?
     public var pendingSignIn: SignInCodeRequest?
+    public var pendingTVLink: TVLinkRequest?
 
     public init() {}
 
@@ -266,6 +275,8 @@ public final class AppCoordinator {
             let kind = url.pathComponents.dropFirst().first
             if kind == "movie", let id = parts.first { pendingRoute = .title(.tmdb(.movie, id)) }
             if kind == "episode", parts.count == 3 { pendingRoute = .title(.tmdb(.show, parts[0])) }
+        case "tv-link":
+            if let key = TVLink.key(in: url) { pendingTVLink = TVLinkRequest(key: key) }
         case "link":
             if let code = value("user_code") ?? value("code") { link(code, server: value("server")) }
         case "sign-in":
