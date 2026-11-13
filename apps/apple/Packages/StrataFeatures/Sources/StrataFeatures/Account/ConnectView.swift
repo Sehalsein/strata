@@ -26,6 +26,8 @@ struct ConnectView: View {
     @State private var signInTarget: ServerTarget?
     @State private var joinTarget: ServerTarget?
     @State private var showAddressEntry = false
+    /// TV: a phone already signed in sends the server; nothing typed.
+    @State private var showPhoneSignIn = false
     /// The camera (or a pasted link): a member's sign-in code or a server's address.
     @State private var scanning = false
     @State private var scannedSignIn: SignInCodeRequest?
@@ -44,13 +46,11 @@ struct ConnectView: View {
             ScrollView {
                 VStack(alignment: Self.alignment, spacing: Metrics.space8) {
                     header
-                    #if os(iOS)
-                    scanButton
-                    #endif
-                    serverList
                     #if os(tvOS)
-                    Button("Enter Address") { showAddressEntry = true }
+                    tvOptions
                     #else
+                    scanButton
+                    serverList
                     addressEntry
                     #endif
                 }
@@ -78,14 +78,11 @@ struct ConnectView: View {
                 JoinMemberPickerView(target: target, onSignedIn: signedIn)
             }
             #if os(tvOS)
+            .navigationDestination(isPresented: $showPhoneSignIn) {
+                TVPhoneSignInView(onSignedIn: signedIn)
+            }
             .navigationDestination(isPresented: $showAddressEntry) {
-                VStack(alignment: .leading, spacing: Metrics.space8) {
-                    Text("Enter the server address").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                    addressEntry
-                }
-                .frame(maxWidth: Self.columnWidth, alignment: .leading)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Theme.bg.ignoresSafeArea())
+                tvAddressEntry
             }
             #endif
         }
@@ -102,6 +99,10 @@ struct ConnectView: View {
         // `-StrataServer 127.0.0.1:8460` connects at launch, for UI tests and screenshots
         // (typing an address with a remote is slow to script).
         .task {
+            #if os(tvOS)
+            // `-StrataPhoneSignIn YES` opens "Sign In with Your Phone".
+            if !isAdding, UserDefaults.standard.bool(forKey: "StrataPhoneSignIn") { showPhoneSignIn = true }
+            #endif
             guard !isAdding, let preset = UserDefaults.standard.string(forKey: "StrataServer"), !preset.isEmpty else { return }
             address = preset
             await probe(preset)
@@ -133,13 +134,17 @@ struct ConnectView: View {
         #if os(iOS)
         isAdding ? "Scan a code from your admin, or pick the server it's on." : "Scan a code from your admin, or pick a server on your network."
         #else
-        isAdding ? "Pick the server it's on, or enter its address." : "Pick a server on your network, or enter its address."
+        isAdding ? "Choose the server the profile is on." : "Choose how to sign in this Apple TV."
         #endif
     }
 
     private var header: some View {
         VStack(alignment: Self.alignment, spacing: Metrics.space3) {
+            #if os(tvOS)
+            StrataMark().frame(height: 64).padding(.bottom, Metrics.space3)
+            #else
             StrataMark().frame(height: 44).padding(.bottom, Metrics.space2)
+            #endif
             Text(isAdding ? "Add a profile" : "Connect to Strata")
                 .font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
             Text(Self.subtitle(isAdding: isAdding))
@@ -147,6 +152,77 @@ struct ConnectView: View {
                 .multilineTextAlignment(Self.alignment == .center ? .center : .leading)
         }
     }
+
+    #if os(tvOS)
+    /// Servers on the network first (usually one, and the quickest way in), then the two
+    /// ways in that don't need one found: a phone that's signed in, or a typed address.
+    private var tvOptions: some View {
+        VStack(alignment: .leading, spacing: Metrics.space12) {
+            VStack(alignment: .leading, spacing: Metrics.space4) {
+                sectionTitle("On your network")
+                serverList
+            }
+            VStack(alignment: .leading, spacing: Metrics.space4) {
+                sectionTitle(rows.isEmpty ? "Or sign in another way" : "Other ways to sign in")
+                HStack(spacing: Metrics.space8) {
+                    optionCard("Sign In with Your Phone", detail: "Scan a code. Nothing to type.", systemImage: "iphone") {
+                        showPhoneSignIn = true
+                    }
+                    optionCard("Enter Address", detail: "Type the server's address.", systemImage: "keyboard") {
+                        showAddressEntry = true
+                    }
+                }
+            }
+        }
+        .focusSection()
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.stEyebrow).tracking(1.5)
+            .foregroundStyle(Theme.ink3)
+            .padding(.leading, Metrics.space2)
+    }
+
+    private func optionCard(_ title: String, detail: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: Metrics.space5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(Theme.accentText)
+                    .frame(width: Self.iconSize, height: Self.iconSize)
+                    .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
+                VStack(alignment: .leading, spacing: Metrics.space1) {
+                    Text(title).font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(1)
+                    Text(detail).font(.stFootnote).foregroundStyle(Theme.ink3).lineLimit(1)
+                }
+            }
+            .padding(Metrics.space6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.card)
+        .disabled(probing != nil)
+    }
+
+    /// The address, on its own screen: the remote's keyboard takes over the bottom half.
+    private var tvAddressEntry: some View {
+        VStack(spacing: Metrics.space10) {
+            VStack(spacing: Metrics.space3) {
+                Image(systemName: "keyboard")
+                    .font(.system(size: 44, weight: .medium))
+                    .foregroundStyle(Theme.accentText)
+                    .padding(.bottom, Metrics.space2)
+                Text("Enter the server address").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                Text("It's on the server's dashboard, like 192.168.1.20 or strata.example.com.")
+                    .font(.stCallout).foregroundStyle(Theme.ink2)
+                    .multilineTextAlignment(.center)
+            }
+            addressEntry.frame(width: 760)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.bg.ignoresSafeArea())
+    }
+    #endif
 
     /// A server to offer: one this device already uses, or one found on the network.
     private struct Row: Identifiable {
@@ -166,7 +242,7 @@ struct ConnectView: View {
     }
 
     @ViewBuilder private var serverList: some View {
-        VStack(spacing: Metrics.space2) {
+        VStack(spacing: Self.rowSpacing) {
             if rows.isEmpty {
                 HStack(spacing: Metrics.space3) {
                     if services.browser.state == .denied {
@@ -179,8 +255,14 @@ struct ConnectView: View {
                 }
                 .font(.stCallout)
                 .foregroundStyle(Theme.ink2)
+                #if os(tvOS)
+                .padding(Metrics.space6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.radiusLG, style: .continuous))
+                #else
                 .frame(maxWidth: .infinity, alignment: Self.frameAlignment)
                 .padding(.vertical, Metrics.space4)
+                #endif
             }
             ForEach(rows) { server in
                 Button {
@@ -219,12 +301,16 @@ struct ConnectView: View {
                     Button(hidden == 1 ? "Show 1 Hidden Server" : "Show \(hidden) Hidden Servers") { services.store.showHiddenServers() }
                 }
             }
+            #if os(tvOS)
+            .font(.stFootnote)
+            .buttonStyle(.borderless)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            #else
             .font(.stCallout)
-            #if !os(tvOS)
             .buttonStyle(.plain)
             .foregroundStyle(Theme.accentText)
-            #endif
             .frame(maxWidth: .infinity, alignment: Self.frameAlignment)
+            #endif
             .padding(.top, Metrics.space1)
         }
     }
@@ -236,13 +322,28 @@ struct ConnectView: View {
         return "\(host):\(port)"
     }
 
+    #if os(tvOS)
+    private static let rowSpacing = Metrics.space6
+    private static let iconSize: CGFloat = 72
+    private static let rowPadding = Metrics.space6
+    #else
+    private static let rowSpacing = Metrics.space2
+    private static let iconSize: CGFloat = 44
+    private static let rowPadding = Metrics.space4
+    #endif
+
     private func serverRow(_ server: Row) -> some View {
         HStack(spacing: Metrics.space4) {
             Image(systemName: "server.rack")
+                #if os(tvOS)
+                .font(.system(size: 30, weight: .medium))
+                .foregroundStyle(Theme.accentText)
+                #else
                 .font(.stHeadline)
                 .foregroundStyle(Theme.ink2)
-                .frame(width: 44, height: 44)
-                .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Metrics.radiusSM, style: .continuous))
+                #endif
+                .frame(width: Self.iconSize, height: Self.iconSize)
+                .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Self.iconSize > 44 ? Metrics.radiusMD : Metrics.radiusSM, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 Text(server.name).font(.stHeadline).foregroundStyle(Theme.ink)
                 Text(Self.address(server.url)).font(.stFootnote).foregroundStyle(Theme.ink3)
@@ -256,7 +357,7 @@ struct ConnectView: View {
                 Image(systemName: "chevron.right").font(.stFootnote.weight(.semibold)).foregroundStyle(Theme.ink3)
             }
         }
-        .padding(Metrics.space4)
+        .padding(Self.rowPadding)
         .contentShape(Rectangle())
     }
 
@@ -302,6 +403,8 @@ struct ConnectView: View {
             Task { await probe(address) }
         case .tvLink:
             error = "That's a TV's code. To sign a TV in, open Settings › Link a TV."
+        case .tvPhoneLink:
+            error = "That's a TV's code. Sign in on this phone first, then scan it again to sign the TV in."
         case .unknown:
             error = "That QR code isn't from Strata. Scan a sign-in code from Members, or the server's address."
         }

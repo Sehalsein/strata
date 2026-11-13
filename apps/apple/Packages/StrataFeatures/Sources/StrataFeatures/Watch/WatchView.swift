@@ -298,9 +298,9 @@ struct WatchView: View {
         dismiss()
     }
 
-    /// C: off, or on with the first text track.
+    /// C: off, or on with the first track that can show.
     private func toggleCaptions() {
-        let track = engine.captionsEnabled ? nil : engine.subtitleTracks.first(where: \.isTextBased)
+        let track = engine.captionsEnabled ? nil : engine.subtitleTracks.first(where: \.isShowable)
         Task { await engine.selectSubtitle(track) }
     }
 

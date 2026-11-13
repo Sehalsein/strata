@@ -14,6 +14,8 @@ enum ScannedCode: Equatable {
     case server(String)
     /// A TV's sign-in code: approved from Settings › Link a TV, not here.
     case tvLink
+    /// A TV's "Sign in with your phone" code: this phone needs to be signed in first.
+    case tvPhoneLink
     case unknown
 
     init(_ text: String) {
@@ -34,6 +36,8 @@ enum ScannedCode: Equatable {
             }
         case "strata" where url.host == "link":
             self = .tvLink
+        case "strata" where url.host == "tv-link":
+            self = TVLink.key(in: url) == nil ? .unknown : .tvPhoneLink
         case "http", "https":
             // A TV's QR code is the server's own /link page.
             self = url.path == "/link" ? .tvLink : .server(trimmed)

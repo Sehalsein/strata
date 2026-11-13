@@ -68,6 +68,11 @@ public struct RootView: View {
                              set: { services.coordinator.pendingLink = $0 })) { request in
             ApproveDeviceView(request: request)
         }
+        // A TV's "Sign in with your phone" code: send it this phone's server, then approve.
+        .sheet(item: Binding(get: { services.store.signIns.isEmpty ? nil : services.coordinator.pendingTVLink },
+                             set: { services.coordinator.pendingTVLink = $0 })) { request in
+            PhoneLinkTVView(request: request)
+        }
         #endif
     }
 }

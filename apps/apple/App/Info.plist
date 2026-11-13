@@ -45,11 +45,12 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_strata._tcp</string>
+		<string>_strata-tv._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Strata uses the camera to scan sign-in and server QR codes from your server's dashboard.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Strata looks for your Strata servers on the local network.</string>
+	<string>Strata looks for your Strata servers, and lets a phone sign in your Apple TV, on the local network.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSUserActivityTypes</key>

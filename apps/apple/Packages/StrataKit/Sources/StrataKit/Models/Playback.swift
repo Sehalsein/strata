@@ -252,13 +252,18 @@ public struct SubtitleTrack: Codable, Sendable, Hashable, Identifiable {
     /// Nil for bitmap formats (PGS/VobSub) the server can't convert, and for tracks the
     /// app reads from the stream itself (`embedded`).
     public var url: URL?
-    /// Device mode: a text track inside the file, read as the file plays.
+    /// Device mode: a text track inside the file, read as the file plays (false for a
+    /// picture track inside the file).
     public var embedded: Bool?
     /// The track's stream index in the file (device mode).
     public var streamIndex: Int?
 
     public var isEmbedded: Bool { embedded == true && streamIndex != nil }
     public var isTextBased: Bool { url != nil || isEmbedded }
+    /// Device mode: a picture track inside the file (PGS, VobSub), read and drawn as the file plays.
+    public var isPicture: Bool { embedded == false && streamIndex != nil && !external && url == nil }
+    /// The player can show it: text, or a picture read from the file.
+    public var isShowable: Bool { isTextBased || isPicture }
     public var displayTitle: String {
         let lang = language.flatMap(LanguageName.display)
         var head = title?.isEmpty == false ? title! : (lang ?? "Track \(id)")

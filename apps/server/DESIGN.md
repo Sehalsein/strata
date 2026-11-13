@@ -174,7 +174,8 @@ it answers 428 and the app probes the file and sends the details.
 play on the server; `HouseholdPlays` lets a household see and stop only its own.
 
 Subtitles: text subtitles (SRT/ASS) are converted to WebVTT. Image subtitles (PGS/VobSub)
-are not supported yet.
+can't be converted; in device mode the app reads them from the file and draws them itself
+(sent as `embedded: false` with their `streamIndex`).
 
 Seeking: an HLS stream starts at the resume point (`startOffsetMs`). A seek outside it
 starts a new session at that offset, which replaces the old one.
@@ -310,7 +311,7 @@ the database, since any instance may run it.
 5. **Later**
    - Watchlist auto-acquire.
    - Trakt sync.
-   - Image subtitles (PGS/VobSub).
+   - Image subtitles (PGS/VobSub) outside device mode.
 
 ## Open risks
 

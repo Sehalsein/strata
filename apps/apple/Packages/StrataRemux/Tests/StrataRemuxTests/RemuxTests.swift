@@ -1,4 +1,5 @@
 import AVFoundation
+import ImageIO
 import FFmpeg
 import XCTest
 @testable import StrataRemux
@@ -71,6 +72,26 @@ final class RemuxTests: XCTestCase {
         XCTAssertEqual(cues.map(\.text), ["First line", "Second line", "Third line"])
         XCTAssertEqual(cues[1].start, 8.5, accuracy: 0.01)
         XCTAssertEqual(cues[1].end, 10, accuracy: 0.01)
+    }
+
+    func testPictureSubtitlesBecomeAPNGPlacedOnTheFrame() throws {
+        // Two rects of a 1920×1080 PGS frame: index 0 clear, 1 opaque white, 2 half-alpha red.
+        let palette: [UInt32] = [0x0000_0000, 0xFFFF_FFFF, 0x80FF_0000]
+        let top = SubtitleReader.Bitmap(x: 100, y: 50, width: 4, height: 2, indices: [1, 1, 0, 0, 2, 2, 0, 0, 9, 9], stride: 5, palette: palette)
+        let bottom = SubtitleReader.Bitmap(x: 100, y: 1000, width: 2, height: 2, indices: [1, 1, 1, 1], stride: 2, palette: palette)
+        let image = try XCTUnwrap(SubtitleReader.picture([top, bottom], canvasWidth: 1920, canvasHeight: 1080))
+        XCTAssertEqual(image.x, 100 / 1920, accuracy: 1e-9)
+        XCTAssertEqual(image.y, 50 / 1080, accuracy: 1e-9)
+        XCTAssertEqual(image.width, 4 / 1920, accuracy: 1e-9)
+        XCTAssertEqual(image.height, 952 / 1080, accuracy: 1e-9)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(image.png as CFData, nil))
+        let decoded = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(decoded.width, 4)
+        XCTAssertEqual(decoded.height, 952)
+        // All clear: nothing to show.
+        let clear = SubtitleReader.Bitmap(x: 0, y: 0, width: 2, height: 1, indices: [0, 0], stride: 2, palette: palette)
+        XCTAssertNil(SubtitleReader.picture([clear], canvasWidth: 1920, canvasHeight: 1080))
+        XCTAssertNil(SubtitleReader.picture([], canvasWidth: 1920, canvasHeight: 1080))
     }
 
     /// The real test: Apple's player accepts the loopback HLS stream and plays it.

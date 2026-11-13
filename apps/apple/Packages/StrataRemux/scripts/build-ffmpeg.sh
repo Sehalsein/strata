@@ -5,8 +5,8 @@
 #
 # LGPL-2.1 only: no --enable-gpl, --enable-version3 or --enable-nonfree, and nothing
 # outside FFmpeg itself. Only what the remuxer needs: Matroska/MP4/AVI in, fragmented
-# MP4 out, the Dolby Vision bitstream filter, DTS/TrueHD decoders and lossless
-# (FLAC/ALAC/PCM) or AAC encoders. Network I/O is the app's own (URLSession), so
+# MP4 out, the Dolby Vision bitstream filter, DTS/TrueHD decoders, text and picture
+# (PGS, VobSub, DVB) subtitle decoders, and lossless (FLAC/ALAC/PCM) or AAC encoders. Network I/O is the app's own (URLSession), so
 # FFmpeg is built without networking or TLS.
 #
 # The HEVC decoder is there only for reading a file's media info (MediaProbe, and the
@@ -53,6 +53,7 @@ COMPONENTS=(
   --enable-decoder=pcm_s24le --enable-decoder=pcm_s32le
   --enable-decoder=subrip --enable-decoder=srt --enable-decoder=ass --enable-decoder=ssa
   --enable-decoder=webvtt --enable-decoder=movtext
+  --enable-decoder=pgssub --enable-decoder=dvdsub --enable-decoder=dvbsub
   --enable-encoder=flac --enable-encoder=alac --enable-encoder=aac
   --enable-encoder=pcm_s16le --enable-encoder=pcm_s24le
   --enable-bsf=dovi_rpu --enable-bsf=dovi_split --enable-bsf=hevc_mp4toannexb --enable-bsf=h264_mp4toannexb
