@@ -33,13 +33,17 @@ const caps = capsSchema.parse({ deviceRemux: true });
 const movie = { source: "tmdb" as const, mediaType: "movie" as const, titleId: 42, caps };
 
 describe("downloads", () => {
-  test("hand over the TorBox link and the device plan, with only embedded text subtitles", async () => {
+  test("hand over the TorBox link and the device plan, with the embedded subtitles the app reads", async () => {
     const res = await service().prepareDownload(movie);
     expect(res.fileId).toBe(1);
     expect(res.url).toBe("https://cdn.torbox.test/1");
     expect(res.mode).toBe("device");
     expect(res.remux?.audio).not.toBe("copy");
-    expect(res.subtitleTracks).toEqual([expect.objectContaining({ id: "s2", embedded: true, streamIndex: 2, url: null })]);
+    expect(res.subtitleTracks).toEqual([
+      expect.objectContaining({ id: "s2", embedded: true, streamIndex: 2, url: null }),
+      // A picture track: the app draws it.
+      expect.objectContaining({ id: "s3", embedded: false, streamIndex: 3, url: null }),
+    ]);
     expect(res.chapters).toHaveLength(1);
   });
 

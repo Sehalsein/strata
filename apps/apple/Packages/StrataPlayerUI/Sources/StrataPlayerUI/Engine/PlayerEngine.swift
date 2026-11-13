@@ -79,9 +79,32 @@ public final class PlayerEngine {
     public var activeCueText: String? {
         guard !subtitleCues.isEmpty else { return nil }
         let t = position
-        let texts = subtitleCues.lazy.filter { t >= $0.start && t <= $0.end }.map(\.text)
+        let texts = subtitleCues.lazy.filter { t >= $0.start && t <= $0.end && !$0.text.isEmpty }.map(\.text)
         let joined = texts.joined(separator: "\n")
         return joined.isEmpty ? nil : joined
+    }
+    /// Picture subtitles to draw right now.
+    public var activeCueImages: [SubtitleImage] {
+        guard !subtitleCues.isEmpty else { return [] }
+        let t = position
+        return subtitleCues.compactMap { t >= $0.start && t <= $0.end ? $0.image : nil }
+    }
+    /// The video's frame size (device mode), which picture subtitles are placed against.
+    public var videoSize: CGSize? {
+        guard let format = remux?.videoFormat, format.width > 0, format.height > 0 else { return nil }
+        return CGSize(width: format.width, height: format.height)
+    }
+    /// Decoded pictures of the last few cues shown, so a redraw doesn't decode the PNG again.
+    @ObservationIgnored private var decodedPictures: [SubtitleImage: CGImage] = [:]
+
+    /// The picture subtitle as an image to draw.
+    public func picture(_ image: SubtitleImage) -> CGImage? {
+        if let decoded = decodedPictures[image] { return decoded }
+        guard let source = CGImageSourceCreateWithData(image.png as CFData, nil),
+              let decoded = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        if decodedPictures.count >= 8 { decodedPictures.removeAll() }
+        decodedPictures[image] = decoded
+        return decoded
     }
 
     public private(set) var chapters: [Chapter] = []
@@ -629,7 +652,8 @@ public final class PlayerEngine {
     }
 
     /// Shows a subtitle track (nil turns subtitles off). Text tracks are fetched as WebVTT
-    /// (the server may take a moment to extract embedded ones); bitmap tracks can't be shown.
+    /// (the server may take a moment to extract embedded ones). In device mode, tracks
+    /// inside the file (text and pictures) are read from it as it plays.
     public func selectSubtitle(_ track: SubtitleTrack?) async {
         subtitleTask?.cancel()
         subtitleError = nil
@@ -640,7 +664,7 @@ public final class PlayerEngine {
             isLoadingSubtitles = false
             return
         }
-        if track.isEmbedded, let index = track.streamIndex {
+        if track.isEmbedded || track.isPicture, let index = track.streamIndex {
             activeSubtitleId = track.id
             isLoadingSubtitles = false
             // The player draws it from the stream; otherwise the overlay shows the lines read
@@ -679,7 +703,7 @@ public final class PlayerEngine {
     private func autoSelectForcedSubtitles() {
         let audioLang = LanguageName.normalized(audioTracks.first { $0.index == activeAudioIndex }?.language)
         guard let forced = subtitleTracks.first(where: { t in
-            t.forced && t.isTextBased && (audioLang == nil || LanguageName.normalized(t.language) == audioLang)
+            t.forced && t.isShowable && (audioLang == nil || LanguageName.normalized(t.language) == audioLang)
         }) else { return }
         Task { await selectSubtitle(forced) }
     }
@@ -756,14 +780,15 @@ public final class PlayerEngine {
         var touched = Set<Int>()
         for cue in cues {
             let index = Int(cue.streamIndex)
-            let line = VTTCue(start: cue.start, end: cue.end, text: cue.text)
-            // A new session after an audio switch reads some of the same lines again.
-            guard embeddedCues[index]?.contains(line) != true else { continue }
+            let line = VTTCue(start: cue.start, end: cue.end, text: cue.text, image: cue.image)
+            // A new session after an audio switch reads some of the same lines again (a
+            // picture's end can differ between reads, so pictures match by start).
+            guard embeddedCues[index]?.contains(where: { $0 == line || (line.image != nil && $0.image != nil && $0.start == line.start) }) != true else { continue }
             embeddedCues[index, default: []].append(line)
             touched.insert(index)
         }
         for index in touched { embeddedCues[index]?.sort { $0.start < $1.start } }
-        if let active = activeSubtitle, active.isEmbedded, let index = active.streamIndex, touched.contains(index),
+        if let active = activeSubtitle, active.isEmbedded || active.isPicture, let index = active.streamIndex, touched.contains(index),
            nativeOption(for: active) == nil {
             subtitleCues = embeddedCues[index] ?? []
         }

@@ -267,9 +267,10 @@ export class PlaybackService {
       durationMs: info.durationMs,
       candidate,
       audioTracks,
+      // Read from the file as it plays: text, and pictures (embedded false) the app draws.
       subtitleTracks: embeddedTracks(info)
-        .filter((t) => t.text && typeof t.source === "number")
-        .map((t) => ({ id: t.id, codec: t.codec, language: t.language, title: t.title, forced: t.forced, isDefault: t.isDefault, external: false, url: null, embedded: true, streamIndex: t.source as number })),
+        .filter((t) => typeof t.source === "number")
+        .map((t) => ({ id: t.id, codec: t.codec, language: t.language, title: t.title, forced: t.forced, isDefault: t.isDefault, external: false, url: null, embedded: t.text, streamIndex: t.source as number })),
       chapters: info.chapters,
     };
   }

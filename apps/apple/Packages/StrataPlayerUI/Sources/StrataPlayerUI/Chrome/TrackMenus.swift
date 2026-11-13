@@ -77,7 +77,8 @@ public struct AudioMenu: View {
     }
 }
 
-/// Subtitle picker: Off plus every text track the server can convert.
+/// Subtitle picker: Off plus every track the player can show (text, and pictures read
+/// from the file on the device).
 public struct SubtitleMenu: View {
     @Bindable var engine: PlayerEngine
     public init(engine: PlayerEngine) { self.engine = engine }
@@ -92,12 +93,12 @@ public struct SubtitleMenu: View {
                 }
             )) {
                 Text("Off").tag("")
-                ForEach(engine.subtitleTracks.filter(\.isTextBased)) { track in
+                ForEach(engine.subtitleTracks.filter(\.isShowable)) { track in
                     Text(track.displayTitle).tag(track.id)
                 }
             }
             .pickerStyle(.inline)
-            if engine.subtitleTracks.contains(where: { !$0.isTextBased }) {
+            if engine.subtitleTracks.contains(where: { !$0.isShowable }) {
                 Text("Some subtitle tracks are images and can't be shown yet.")
             }
         } label: {

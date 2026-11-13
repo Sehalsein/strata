@@ -19,6 +19,52 @@ public struct SubtitleOverlay: View {
     #endif
 
     public var body: some View {
+        ZStack {
+            pictures
+            lines
+        }
+    }
+
+    /// Picture subtitles (PGS, VobSub), where they were authored on the video's frame.
+    private var pictures: some View {
+        GeometryReader { geo in
+            let frame = videoFrame(in: geo.size)
+            ForEach(engine.activeCueImages, id: \.self) { image in
+                if let cg = engine.picture(image) {
+                    let width = image.width * frame.width, height = image.height * frame.height
+                    // Lifted above the controls when they show.
+                    let bottom = frame.minY + (image.y + image.height) * frame.height
+                    let lift = raised ? max(0, bottom - (geo.size.height - Self.raisedInset)) : 0
+                    Image(decorative: cg, scale: 1)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: width, height: height)
+                        .position(x: frame.minX + image.x * frame.width + width / 2,
+                                  y: frame.minY + image.y * frame.height + height / 2 - lift)
+                }
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+
+    #if os(tvOS)
+    private static let raisedInset: CGFloat = 260
+    #else
+    private static let raisedInset: CGFloat = 180
+    #endif
+
+    /// Where the video sits on screen, as the player layer fits or fills it.
+    private func videoFrame(in size: CGSize) -> CGRect {
+        guard let video = engine.videoSize, size.width > 0, size.height > 0 else { return CGRect(origin: .zero, size: size) }
+        let fit = min(size.width / video.width, size.height / video.height)
+        let fill = max(size.width / video.width, size.height / video.height)
+        let scale = engine.videoGravity == .resizeAspectFill ? fill : fit
+        let w = video.width * scale, h = video.height * scale
+        return CGRect(x: (size.width - w) / 2, y: (size.height - h) / 2, width: w, height: h)
+    }
+
+    private var lines: some View {
         VStack {
             Spacer()
             if let text = engine.activeCueText {

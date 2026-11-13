@@ -272,6 +272,9 @@ final class ModelDecodingTests: XCTestCase {
         let pgs = p.subtitleTracks[2]
         XCTAssertFalse(pgs.isEmbedded)
         XCTAssertFalse(pgs.isTextBased)
+        XCTAssertTrue(pgs.isPicture, "read from the file and drawn on the device")
+        XCTAssertTrue(pgs.isShowable)
+        XCTAssertFalse(text.isPicture)
         // Older answers have no plan.
         XCTAssertNil(try Fixture.decode(PlayResponse.self, "play_remux").remux)
     }
@@ -291,6 +294,7 @@ final class ModelDecodingTests: XCTestCase {
         let pgs = try XCTUnwrap(p.subtitleTracks.last)
         XCTAssertNil(pgs.url)
         XCTAssertFalse(pgs.isTextBased)
+        XCTAssertFalse(pgs.isShowable, "only the device reads pictures from the file")
         XCTAssertEqual(p.chapters.map(\.start), [0, 600, 1800])
         XCTAssertNil(p.chapters[1].title)
         XCTAssertEqual(p.nextEpisode?.available, false)

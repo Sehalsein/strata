@@ -16,7 +16,7 @@ export interface SubtitleTrack {
   forced: boolean;
   isDefault: boolean;
   external: boolean;
-  /** Text tracks convert to WebVTT; bitmap ones (PGS, VobSub) can't yet. */
+  /** Text tracks convert to WebVTT; bitmap ones (PGS, VobSub) can't, but the app reads and draws them in device mode. */
   text: boolean;
   /** Embedded stream index, or the sidecar's path. */
   source: number | string;

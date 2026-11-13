@@ -1,9 +1,13 @@
 import Foundation
+import StrataRemux
 
 public struct VTTCue: Equatable, Sendable {
     public let start: TimeInterval
     public let end: TimeInterval
+    /// Empty for a picture subtitle.
     public let text: String
+    /// A picture subtitle (PGS, VobSub) read from the file.
+    public var image: SubtitleImage? = nil
 }
 
 /// Minimal WebVTT parser. Handles WEBVTT header, cue timings, and multi-line

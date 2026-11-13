@@ -22,12 +22,28 @@ public struct RemuxPlan: Sendable, Equatable {
     }
 }
 
-/// A text subtitle line from the stream, in media seconds.
+/// A subtitle line from the stream, in media seconds: text, or a picture (PGS, VobSub).
 public struct SubtitleCue: Sendable, Equatable, Hashable {
     public let streamIndex: Int32
     public let start: Double
     public let end: Double
+    /// Empty for a picture.
     public let text: String
+    public var image: SubtitleImage? = nil
+
+    func ending(at end: Double) -> SubtitleCue {
+        SubtitleCue(streamIndex: streamIndex, start: start, end: end, text: text, image: image)
+    }
+}
+
+/// A picture subtitle as a PNG, placed on the video as fractions of its frame (0...1 from
+/// the top left).
+public struct SubtitleImage: Sendable, Equatable, Hashable {
+    public let png: Data
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
 }
 
 /// Cuts the file into HLS segments at video keyframes (about every 6 s) and writes each as
@@ -184,8 +200,10 @@ final class Segmenter {
                 } else if t >= start - eps || index == 0 {
                     audioPackets.append(av_packet_clone(packet))
                 }
-            } else if let cue = subtitles.cues(for: packet), t(of: packet) < end, t(of: packet) >= start - eps {
-                cues += cue
+            } else if let read = subtitles.cues(for: packet) {
+                // By the line's own time: a picture's end comes with a later packet, which
+                // may be read with the next segment.
+                cues += read.filter { $0.start < end && $0.end >= start - eps }
             }
             // Keep a stuck stream from reading the rest of the file.
             if Double(rawTs == AV_NOPTS ? 0 : rawTs) * demuxer.stream(si).pointee.time_base.seconds > end + 20 {
@@ -250,11 +268,6 @@ final class Segmenter {
         var shift = reorderDelay
         for (i, p) in pts.enumerated() where sorted[i] - shift > p { shift = sorted[i] - p }
         for (i, packet) in packets.enumerated() { packet.pointee.dts = sorted[i] - shift }
-    }
-
-    private func t(of packet: UnsafeMutablePointer<AVPacket>) -> Double {
-        let ts = packet.pointee.pts != AV_NOPTS ? packet.pointee.pts : packet.pointee.dts
-        return Double(ts) * demuxer.stream(packet.pointee.stream_index).pointee.time_base.seconds
     }
 }
 
