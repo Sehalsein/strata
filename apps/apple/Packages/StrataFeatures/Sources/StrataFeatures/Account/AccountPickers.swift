@@ -34,7 +34,7 @@ struct WhoIsWatchingView: View {
                                    detail: showsServers ? store.server(for: signIn)?.name : nil,
                                    isKids: signIn.isKids, isCurrent: isSheet && signIn.id == store.activeID)
                     }
-                    .buttonStyle(StrataCardStyle())
+                    .cardButtonStyle()
                     .focused($focused, equals: signIn.id)
                     #if !os(tvOS)
                     .contextMenu {
@@ -50,7 +50,7 @@ struct WhoIsWatchingView: View {
                 } label: {
                     AvatarTile(name: "Add Profile", seed: "", systemImage: "plus")
                 }
-                .buttonStyle(StrataCardStyle())
+                .cardButtonStyle()
                 .focused($focused, equals: "add")
             }
         }
@@ -218,7 +218,7 @@ struct JoinMemberPickerView: View {
                                        imageURL: member.image.flatMap { URL(string: $0, relativeTo: target.url)?.absoluteURL },
                                        isKids: member.isKids, isBusy: joining == member.id)
                         }
-                        .buttonStyle(StrataCardStyle())
+                        .cardButtonStyle()
                         .focused($focused, equals: member.id)
                         .disabled(joining != nil)
                     }

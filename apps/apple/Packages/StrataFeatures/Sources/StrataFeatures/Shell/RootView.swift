@@ -80,12 +80,14 @@ public struct RootView: View {
 enum AppTab: String, Hashable { case home, movies, shows, anime, calendar, search, myList, downloads, profile }
 
 /// The signed-in app: a floating Liquid Glass tab bar (iPhone), a sidebar
-/// that adapts to a tab bar (iPad), or the top tab bar (tvOS).
+/// that adapts to a tab bar (iPad), or the TV app's sidebar (tvOS).
 struct MainShell: View {
     @Environment(AppServices.self) private var services
     @Environment(\.scenePhase) private var scenePhase
     @State private var tab: AppTab = Self.launchTab
     @State private var showSettings = Self.launchSettings
+    /// Every tab's pushed pages, so Menu on the TV can go back from anywhere (see below).
+    @State private var paths = TabPaths()
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -130,6 +132,18 @@ struct MainShell: View {
 
     var body: some View {
         TabView(selection: $tab) {
+            #if os(tvOS)
+            // Like the TV app's sidebar: the account first, then Search, the pages, and
+            // the library. The account has switching accounts, households and sign-out.
+            Tab(value: AppTab.profile) {
+                SettingsView(embedded: true)
+            } label: {
+                Label(services.store.active?.name ?? "Profile", systemImage: "person.crop.circle")
+            }
+            Tab(value: AppTab.search, role: .search) {
+                SearchTab()
+            }
+            #endif
             Tab("Home", systemImage: "house", value: AppTab.home) {
                 StackHost(tab: .home) { HomeView() }
             }
@@ -143,15 +157,19 @@ struct MainShell: View {
                 StackHost(tab: .anime) { AnimeView() }
             }
             #if os(tvOS)
-            // The TV's top tab bar has room for it; iPhone and iPad reach it from Home's
-            // Coming Up rail (and iPad's sidebar).
-            Tab("Calendar", systemImage: "calendar", value: AppTab.calendar) {
-                StackHost(tab: .calendar) { CalendarView() }
+            TabSection("Library") {
+                Tab("My List", systemImage: "bookmark", value: AppTab.myList) {
+                    StackHost(tab: .myList) { MyListView() }
+                }
+                Tab("Calendar", systemImage: "calendar", value: AppTab.calendar) {
+                    StackHost(tab: .calendar) { CalendarView() }
+                }
             }
-            #endif
+            #else
             Tab(value: AppTab.search, role: .search) {
                 SearchTab()
             }
+            #endif
             #if os(iOS)
             if Self.sidebar {
                 TabSection("Library") {
@@ -174,16 +192,17 @@ struct MainShell: View {
                 .tabPlacement(.sidebarOnly)
             }
             #endif
-            #if os(tvOS)
-            // tvOS has no toolbar for the avatar button, so the account lives in the
-            // tab bar like the TV app's: switching accounts, households and sign-out.
-            Tab(value: AppTab.profile) {
-                SettingsView(embedded: true)
-            } label: {
-                Label(services.store.active?.name ?? "Profile", systemImage: "person.crop.circle")
-            }
-            #endif
         }
+        #if os(tvOS)
+        // The TV app's sidebar: a "‹ Home" button in the corner that opens over the page.
+        .tabViewStyle(.sidebarAdaptable)
+        // Menu goes back a page whenever the tab has one to go back to. The stack does
+        // that itself while focus is on the page, but not once focus has moved into the
+        // sidebar (left from a page's first column): there the system took Menu as
+        // leaving the app. With nothing pushed, Menu keeps its usual job.
+        .onExitCommand(perform: paths[tab].isEmpty ? nil : { paths[tab].removeLast() })
+        #endif
+        .environment(paths)
         #if os(iOS)
         .tabViewStyle(.sidebarAdaptable)
         .tabBarMinimizeBehavior(.onScrollDown)
@@ -211,17 +230,31 @@ struct MainShell: View {
     }
 }
 
+/// The pages pushed in each tab, kept by `MainShell` so it can go back in any of them.
+@Observable final class TabPaths {
+    private var stacks: [AppTab: [Route]] = [:]
+
+    subscript(tab: AppTab) -> [Route] {
+        get { stacks[tab] ?? [] }
+        set { stacks[tab] = newValue }
+    }
+}
+
 /// A navigation stack with the app's destinations and deep-link handling.
 struct StackHost<Root: View>: View {
     @Environment(AppServices.self) private var services
     @Environment(\.selectedTab) private var selectedTab
-    @State private var path: [Route] = []
+    @Environment(TabPaths.self) private var paths
+    private var path: [Route] {
+        get { paths[tab] }
+        nonmutating set { paths[tab] = newValue }
+    }
     /// The tab this stack is in: only the selected tab's stack takes a pending link.
     let tab: AppTab
     @ViewBuilder let root: () -> Root
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack(path: Binding(get: { paths[tab] }, set: { paths[tab] = $0 })) {
             root().routeDestinations()
         }
         // A second tap while the page is pushing doesn't push it twice.

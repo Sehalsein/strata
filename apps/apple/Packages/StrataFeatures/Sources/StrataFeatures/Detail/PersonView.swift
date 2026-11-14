@@ -81,7 +81,7 @@ struct PersonView: View {
         if !cards.isEmpty {
             Rail(title) {
                 ForEach(cards) { card in
-                    NavigationLink(value: card.route) { PosterCardLabel(card: card) }.buttonStyle(StrataCardStyle())
+                    NavigationLink(value: card.route) { PosterCardLabel(card: card) }.cardButtonStyle()
                 }
             }
         }

@@ -15,7 +15,7 @@ struct CalendarView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Metrics.space6) {
                     #if os(tvOS)
-                    Color.clear.frame(height: 120) // clear the top tab bar
+                    Color.clear.frame(height: 120) // clear the sidebar button
                     #endif
                     content
                 }

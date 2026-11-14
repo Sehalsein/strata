@@ -83,7 +83,12 @@ public enum Metrics {
     public static let posterWidth: CGFloat = 248
     public static let landscapeWidth: CGFloat = 548
     public static let cardGap: CGFloat = 40
-    public static let railGap: CGFloat = 48
+    /// Between rails: room for the focused card's lift and a clear break before the next title.
+    public static let railGap: CGFloat = 80
+    /// Between rows of a poster grid, past the captions and the focus lift.
+    public static let gridRowGap: CGFloat = 72
+    /// Between a card's art and its caption: room for the system's focus lift.
+    public static let cardCaptionGap: CGFloat = 32
     public static let cardRadius: CGFloat = radiusLG
     #else
     @MainActor public static var isPad: Bool {
@@ -100,6 +105,8 @@ public enum Metrics {
     @MainActor public static var landscapeWidth: CGFloat { isPad ? 320 : 264 }
     @MainActor public static var cardGap: CGFloat { isPad ? 20 : 12 }
     @MainActor public static var railGap: CGFloat { isPad ? 40 : 32 }
+    public static let gridRowGap: CGFloat = space8
+    public static let cardCaptionGap: CGFloat = space2
     public static let cardRadius: CGFloat = radiusMD
     #endif
 }

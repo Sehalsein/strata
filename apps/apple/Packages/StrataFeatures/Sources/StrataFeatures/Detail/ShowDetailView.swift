@@ -72,15 +72,16 @@ struct ShowDetailView: View {
                           title: show.title,
                           meta: [show.genres.first, show.yearRangeText, show.certification, seasonCount(show), show.ratings.tmdbStar(show.ratingText)].compactMap { $0 },
                           ratings: show.ratings.badges,
-                          overview: show.overview) {
+                          overview: show.overview, featured: Metrics.isTV,
+                          credits: [HeroCredit("Starring", show.cast.prefix(3).map(\.name))].filter { !$0.names.isEmpty }) {
                 // Plays when it's in the library or the server lists a source for it.
                 if let choice = (playOptions ?? TitleActions.libraryPlay(show)).choice {
-                    PlayButton(choice.label) { services.play(choice, title: show.title, artworkURL: show.backdropUrl) }
+                    PlayButton(choice.label, size: Metrics.heroControlSize) { services.play(choice, title: show.title, artworkURL: show.backdropUrl) }
                     #if os(tvOS)
                     .focused($heroFocus, equals: .play)
                     #endif
                 }
-                GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV) {
+                GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV || Metrics.isTV, size: Metrics.heroControlSize) {
                     Task { await toggleWatchlist(show) }
                 }
                 #if os(tvOS)
@@ -88,7 +89,7 @@ struct ShowDetailView: View {
                 #endif
                 // Only when the server has sources to show.
                 if let sources = playOptions?.sources, !sources.isEmpty {
-                    GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV) { showUpNextSources = true }
+                    GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV || Metrics.isTV, size: Metrics.heroControlSize) { showUpNextSources = true }
                 }
                 if let trailer = show.trailer?.youtubeURL { TrailerButton(url: trailer) }
             }
@@ -108,7 +109,7 @@ struct ShowDetailView: View {
             if !show.recommendations.isEmpty {
                 Rail("More Like This") {
                     ForEach(show.recommendations) { card in
-                        NavigationLink(value: card.route) { PosterCardLabel(card: card) }.buttonStyle(StrataCardStyle())
+                        NavigationLink(value: card.route) { PosterCardLabel(card: card) }.cardButtonStyle()
                     }
                 }
             }
@@ -125,13 +126,13 @@ struct ShowDetailView: View {
             ])
         }
         .padding(.bottom, Metrics.space12)
-        .sheet(item: $sourcesFor) { episode in
+        .pickerSheet(item: $sourcesFor) { episode in
             SourcePickerSheet(target: episode.target(show: show.ref), title: "\(show.title) · \(episode.code)") { candidate in
                 play(show, season: episode.season, episode: episode.episode, name: episode.name, still: episode.stillUrl, candidateId: candidate.id)
             }
         }
         #if os(iOS)
-        .sheet(item: $downloadFor) { episode in
+        .pickerSheet(item: $downloadFor) { episode in
             SourcePickerSheet(target: episode.target(show: show.ref), title: "\(show.title) · \(episode.code)", purpose: .download) { candidate in
                 Task {
                     notice = await services.download(episode.target(show: show.ref), candidateId: candidate.id, title: show.title,
@@ -140,7 +141,7 @@ struct ShowDetailView: View {
             }
         }
         #endif
-        .sheet(isPresented: $showUpNextSources) {
+        .pickerSheet(isPresented: $showUpNextSources) {
             if let upNext = show.upNext {
                 SourcePickerSheet(target: .episode(show: show.ref, season: upNext.season, episode: upNext.episode),
                                   title: "\(show.title) · \(code(upNext.season, upNext.episode))", known: playOptions?.sources ?? [], lookFurther: playOptions?.lookedFurther == false) { candidate in

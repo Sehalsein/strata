@@ -42,6 +42,45 @@ public final class PlayerEngine {
     }
 
     public private(set) var status: Status = .idle
+    /// Set while a copy that wouldn't open is being passed over for another, to say so.
+    public private(set) var fallbackNote: String?
+    /// What a start is doing right now, for the loading screen. Only the steps this start
+    /// actually goes through are set.
+    public private(set) var loadingStep: LoadingStep?
+
+    public enum LoadingStep: Equatable, Sendable {
+        /// Asking the server what to play.
+        case finding
+        /// Reading the file's tracks for the server (the first time a file plays).
+        case reading
+        /// Opening the file over the network to play it on this device.
+        case connecting
+        /// The server is repackaging it; waiting for the stream's first part.
+        case preparingStream
+        /// Stream open; the player is buffering its first seconds.
+        case buffering
+
+        public var label: String {
+            switch self {
+            case .finding: "Asking the server for the best copy…"
+            case .reading: "Checking the file's video and audio…"
+            case .connecting: "Connecting to the file…"
+            case .preparingStream: "The server is getting the stream ready…"
+            case .buffering: "Starting playback…"
+            }
+        }
+
+        /// Said instead once the step has run long.
+        public var slowLabel: String {
+            switch self {
+            case .finding: "The server is still looking for a copy. This can take a moment."
+            case .reading: "Still checking the file. Large files take longer."
+            case .connecting: "Still connecting to the file. The server holding it is slow to answer."
+            case .preparingStream: "The server is still getting the stream ready. This can take a moment."
+            case .buffering: "Still buffering. The connection is slow right now."
+            }
+        }
+    }
     /// Media time, seconds.
     public private(set) var position: TimeInterval = 0
     /// Full title duration from the server (HLS EVENT playlists grow, so the item's own duration isn't used).
@@ -170,6 +209,10 @@ public final class PlayerEngine {
     private var restartTarget: TimeInterval?
     /// Files whose media info this load already read for the server (see `probe`).
     private var probedFiles = Set<Int>()
+    /// The file last read for the server (`probe`), so a failed read can rule it out.
+    private var lastProbedFile: Int?
+    /// Other copies tried after the first one failed on this device, at most.
+    private static let maxFallbacks = 3
     /// Device mode: waits out a stall, then reopens the stream where it stopped.
     private var stallTask: Task<Void, Never>?
     /// Times the device stream was reopened after a stall or failure, and where the last
@@ -230,6 +273,7 @@ public final class PlayerEngine {
         let gen = generation
         skipNativeSubtitles = false
         probedFiles = []
+        lastProbedFile = nil
         recoveries = 0
         self.target = target
         self.meta = meta
@@ -237,29 +281,21 @@ public final class PlayerEngine {
         position = startMs.map { TimeInterval($0) / 1000 } ?? 0
         nowPlaying?.update(meta: meta, position: position, duration: duration, rate: 0)
 
+        fallbackNote = nil
+        loadingStep = nil
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                let memory = SourceMemory.shared
-                // A source you picked before for this (or, for a show, one like it).
-                let remembered = candidateId == nil ? await self.rememberedSource(for: target, client: client) : nil
-                var res: PlayResponse
-                do {
-                    res = try await self.requestPlay(client: client, target: target, candidateId: candidateId ?? remembered, startMs: startMs, audioIndex: nil, gen: gen)
-                } catch let error as StrataError where remembered != nil && error.kind == .http && [404, 410].contains(error.status ?? 0) {
-                    // That file is gone: let the server choose again.
-                    memory.forget(target, server: client.baseURL)
-                    res = try await self.requestPlay(client: client, target: target, candidateId: nil, startMs: startMs, audioIndex: nil, gen: gen)
-                }
-                try await self.start(res, gen: gen, newTitle: true, autoplay: true)
-                if candidateId != nil { memory.remember(res.candidate, for: target, server: client.baseURL) }
+                try await self.loadWithFallback(client: client, target: target, candidateId: candidateId, startMs: startMs, gen: gen)
             } catch let failure as DeviceFailure {
                 guard gen == self.generation else { return }
                 Log.player.warning("device play failed: \(failure.message, privacy: .public)")
+                self.fallbackNote = nil
                 self.status = .failed(failure.message)
             } catch {
                 guard gen == self.generation, !(error is CancellationError) else { return }
                 let e = StrataError.wrap(error)
+                self.fallbackNote = nil
                 if e.kind != .cancelled { self.status = .failed(e.message) }
             }
         }
@@ -297,6 +333,83 @@ public final class PlayerEngine {
         await task.value
     }
 
+    /// Plays the server's choice (or `candidateId`, or the copy you chose before). When the
+    /// server's choice won't open on this device (its link doesn't connect, the file can't be
+    /// read or decoded here), the next copy the server lists that's ready to play is tried,
+    /// up to `maxFallbacks` of them; the one that plays is remembered for next time. A copy
+    /// you picked yourself isn't swapped: its failure is shown, with Choose Source.
+    private func loadWithFallback(client: StrataClient, target: PlaybackTarget, candidateId: String?, startMs: Int?, gen: Int) async throws {
+        let memory = SourceMemory.shared
+        // A source you picked before for this (or, for a show, one like it).
+        let remembered = candidateId == nil ? await rememberedSource(for: target, client: client) : nil
+        var pick = candidateId ?? remembered
+        var failedCandidates = Set<String>()
+        var failedFiles = Set<Int>()
+        var others: [Candidate]?
+        var attempt = 0
+        while true {
+            try Task.checkCancellation()
+            var res: PlayResponse?
+            do {
+                do {
+                    res = try await requestPlay(client: client, target: target, candidateId: pick, startMs: startMs, audioIndex: nil, gen: gen)
+                } catch let error as StrataError where attempt == 0 && pick == remembered && remembered != nil && error.kind == .http && [404, 410].contains(error.status ?? 0) {
+                    // That file is gone: let the server choose again.
+                    memory.forget(target, server: client.baseURL)
+                    pick = nil
+                    res = try await requestPlay(client: client, target: target, candidateId: nil, startMs: startMs, audioIndex: nil, gen: gen)
+                }
+                try await start(res!, gen: gen, newTitle: true, autoplay: true)
+                fallbackNote = nil
+                loadingStep = nil
+                // Your pick, or a copy that played after others didn't: start with it next time.
+                if candidateId != nil || attempt > 0 { memory.remember(res!.candidate, for: target, server: client.baseURL) }
+                return
+            } catch let failure as DeviceFailure {
+                guard gen == generation else { throw CancellationError() }
+                guard candidateId == nil else { throw failure }
+                guard attempt < Self.maxFallbacks else {
+                    throw DeviceFailure(message: "Tried \(attempt + 1) copies; none would play here. " + failure.message)
+                }
+                if let res {
+                    failedCandidates.insert(res.candidate.id)
+                    failedFiles.insert(res.candidate.fileId)
+                } else if let lastProbedFile {
+                    failedFiles.insert(lastProbedFile)
+                }
+                if let pick { failedCandidates.insert(pick) }
+                if pick == remembered, remembered != nil { memory.forget(target, server: client.baseURL) }
+                if others == nil { others = (try? await client.sources(target, discover: false)) ?? [] }
+                guard gen == generation else { throw CancellationError() }
+                // Ready now or shortly; not one the server would have to download first.
+                guard let next = others?.first(where: { !failedCandidates.contains($0.id) && !failedFiles.contains($0.fileId) && $0.readiness != .download }) else {
+                    // Say how far it got, so "Pick another source" isn't the first you hear of it.
+                    if attempt > 0 { throw DeviceFailure(message: "Tried \(attempt + 1) copies; none would play here. " + failure.message) }
+                    throw failure
+                }
+                Log.player.warning("copy failed (\(failure.message, privacy: .public)); trying \(next.id, privacy: .public)")
+                attempt += 1
+                pick = next.id
+                fallbackNote = Self.fallbackNote(after: failure, next: next, attempt: attempt)
+                status = .loading
+            }
+        }
+    }
+
+    /// What the player says while it switches: why the last copy was passed over, and
+    /// which one it's trying ("That copy couldn't be reached. Switching to 1080p · WEB (2 of 4)…").
+    private static func fallbackNote(after failure: DeviceFailure, next: Candidate, attempt: Int) -> String {
+        let text = failure.message.lowercased()
+        let why = text.contains("connect") || text.contains("timed out") || text.contains("network")
+            ? "That copy couldn't be reached."
+            : text.contains("can't play on this device") || text.contains("dolby vision") || text.contains("hdr")
+            ? "That copy won't play on this device."
+            : "That copy wouldn't open."
+        let label = [next.resolutionLabel, next.source?.uppercased()].compactMap { $0 }.joined(separator: " · ")
+        let what = label.isEmpty ? "another source" : label
+        return "\(why) Switching to \(what) (try \(attempt + 1) of \(maxFallbacks + 1))…"
+    }
+
     /// The source you chose for `target` before, or for a show the episode's copy most like
     /// the one you chose for another episode (asked of the library only, which is quick).
     private func rememberedSource(for target: PlaybackTarget, client: StrataClient) async -> String? {
@@ -320,6 +433,7 @@ public final class PlayerEngine {
         var candidateId = candidateId
         while true {
             try Task.checkCancellation()
+            loadingStep = .finding
             switch try await client.play(target, candidateId: candidateId, startMs: startMs, audioStreamIndex: audioIndex) {
             case .started(let res):
                 guard gen == generation else { throw CancellationError() }
@@ -341,6 +455,7 @@ public final class PlayerEngine {
     /// first time it plays it: read the header from the link and send it. Once per file per
     /// load, so a server that keeps asking can't loop forever.
     private func probe(fileId: Int, url: URL, client: StrataClient, gen: Int) async throws {
+        lastProbedFile = fileId
         guard probedFiles.insert(fileId).inserted else {
             throw DeviceFailure(message: "The server couldn't use what this file holds. Pick another source.")
         }
@@ -348,6 +463,7 @@ public final class PlayerEngine {
         let info: MediaInfo
         do {
             // MediaProbe reads on its own queue; the main actor only waits.
+            loadingStep = .reading
             info = try await MediaProbe.probe(url: url)
         } catch {
             guard gen == generation, !(error is CancellationError) else { throw CancellationError() }
@@ -372,6 +488,7 @@ public final class PlayerEngine {
             let local = makeRemux(res)
             do {
                 // Built from the resume point, so the player begins there.
+                loadingStep = .connecting
                 url = try await local.start(at: TimeInterval(res.seekToMs) / 1000)
                 #if os(iOS)
                 // An Apple TV on AirPlay fetches the stream itself: it gets the Wi-Fi address.
@@ -404,7 +521,10 @@ public final class PlayerEngine {
             subtitleError = nil
         }
 
-        if res.mode.isHLS { try await waitForPlaylist(res.url, gen: gen) }
+        if res.mode.isHLS {
+            loadingStep = .preparingStream
+            try await waitForPlaylist(res.url, gen: gen)
+        }
         let item = AVPlayerItem(url: url)
         // Start buffering a little ahead; long forward buffers waste server work on a remux.
         // On the device a minute ahead rides out a slow patch in the network.
@@ -422,6 +542,7 @@ public final class PlayerEngine {
         if let previous, previous.sessionId != res.sessionId { stopSession(previous.sessionId) }
 
         do {
+            loadingStep = .buffering
             try await waitUntilReady(item)
         } catch let error as StrataError where res.mode == .device {
             guard gen == generation else { throw CancellationError() }
@@ -433,6 +554,11 @@ public final class PlayerEngine {
             }
             // AVPlayer refused what the device made (a codec it can't decode, say).
             throw DeviceFailure(message: "This file can't play on this device (\(error.message)). Pick another source.")
+        } catch let error as StrataError where newTitle {
+            // Played from its link or the server's stream: the copy wouldn't open (its host
+            // didn't answer, say). A failure like this is the copy's, so another may play.
+            guard gen == generation else { throw CancellationError() }
+            throw DeviceFailure(message: "This copy couldn't be opened (\(error.message)). Pick another source.")
         }
         guard gen == generation else { throw CancellationError() }
         #if os(tvOS)

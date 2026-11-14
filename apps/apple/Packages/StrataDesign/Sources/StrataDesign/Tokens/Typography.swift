@@ -46,7 +46,8 @@ public extension View {
     /// The rail header style for the current platform.
     @ViewBuilder func railHeaderStyle() -> some View {
         #if os(tvOS)
-        font(.stTitle2).foregroundStyle(Theme.ink)
+        // The TV app's size: a quiet label over the cards, not a page title.
+        font(.system(size: 34, weight: .semibold)).foregroundStyle(Theme.ink.opacity(0.85))
         #else
         font(Metrics.isPad ? .stTitle2 : .stHeadline).foregroundStyle(Theme.ink)
         #endif

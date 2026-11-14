@@ -32,10 +32,10 @@ struct HomeView: View {
                     .frame(minHeight: 400)
                 case .loaded(let list):
                     if let featured = list.first(where: { $0.id == "featured" }), !featured.items.isEmpty {
-                        HeroCarousel(cards: featured.items, watchlist: watchlistKeys(list))
+                        HeroCarousel(cards: featured.items, watchlist: watchlistKeys(list), takesLaunchFocus: true)
                     } else {
                         #if os(tvOS)
-                        Color.clear.frame(height: 120) // clear the top tab bar when there's no hero
+                        Color.clear.frame(height: 120) // clear the sidebar button when there's no hero
                         #endif
                     }
                     if list.isEmpty {
@@ -108,7 +108,7 @@ struct HomeView: View {
 
     private var hasHero: Bool {
         #if os(tvOS)
-        true // the top tab bar floats over the page either way
+        true // the sidebar button floats over the page either way
         #else
         shelves.value?.contains { $0.id == "featured" && !$0.items.isEmpty } ?? false
         #endif
@@ -177,7 +177,7 @@ struct ShelfRail: View {
                     NavigationLink(value: card.route) {
                         PosterCardLabel(card: card)
                     }
-                    .buttonStyle(StrataCardStyle())
+                    .cardButtonStyle()
                 }
             }
         }
@@ -209,7 +209,7 @@ struct PosterCardLabel: View {
     var width: CGFloat? = Metrics.posterWidth
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.space2) {
+        VStack(alignment: .leading, spacing: Metrics.cardCaptionGap) {
             // No title on the placeholder: the caption below already names it.
             ArtworkImage(url: card.posterUrl, aspectRatio: 2 / 3, seed: card.id)
                 .overlay(alignment: .bottomLeading) {
@@ -253,7 +253,7 @@ struct ComingUpRail: View {
             Rail("Upcoming Episodes", seeAll: { pushRoute(.calendar) }) {
                 ForEach(episodes) { episode in
                     NavigationLink(value: Route.title(episode.ref)) { ComingUpCard(episode: episode) }
-                        .buttonStyle(StrataCardStyle())
+                        .cardButtonStyle()
                 }
             }
         }
@@ -264,7 +264,7 @@ private struct ComingUpCard: View {
     let episode: CalendarEpisode
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.space2) {
+        VStack(alignment: .leading, spacing: Metrics.cardCaptionGap) {
             ArtworkImage(url: episode.backdropUrl, aspectRatio: 16 / 9, seed: episode.ref.description,
                          title: episode.backdropUrl == nil ? episode.title : nil)
             VStack(alignment: .leading, spacing: 2) {
@@ -292,14 +292,19 @@ private struct ComingUpCard: View {
 
 /// The Home hero: a carousel of featured titles (recently added, trending movies,
 /// shows and anime) that moves on by itself. iPhone and iPad swipe between them, and
-/// tapping the art opens the title; on tvOS, moving left or right past the hero's
-/// buttons does.
+/// tapping the art opens the title; on tvOS, the "›" button after the hero's buttons
+/// moves to the next one.
 struct HeroCarousel: View {
     @Environment(AppServices.self) private var services
     @Environment(\.pushRoute) private var pushRoute
     let cards: [TitleCard]
     /// The ref of each title on My List, from Home's own shelf.
     var watchlist: Set<String> = []
+    /// Home's carousel takes focus when it first shows, so the app opens on Play rather
+    /// than in the sidebar (which tvOS opens when nothing else can take focus while Home
+    /// loads). Once per launch: later it would pull focus out of the sidebar mid-browse.
+    var takesLaunchFocus = false
+    @MainActor private static var tookLaunchFocus = false
     /// Taps on + not yet reflected in `watchlist`.
     @State private var listed: [String: Bool] = [:]
     /// What Play does for each title the carousel has shown, once the server has said.
@@ -313,7 +318,7 @@ struct HeroCarousel: View {
     @Environment(\.scenePhase) private var scenePhase
     #if os(tvOS)
     @FocusState private var focus: HeroButton?
-    enum HeroButton: Hashable { case play, add, info }
+    enum HeroButton: Hashable { case play, add, info, next }
     #endif
 
     private static let interval: Double = 8
@@ -344,6 +349,18 @@ struct HeroCarousel: View {
             .onChange(of: cards.count) { if index >= cards.count { index = 0 } }
             .onChange(of: watchlist) { listed = [:] }
             .onAppear { visible = true }
+            #if os(tvOS)
+            .task {
+                // Not when the app opened on a link: that page goes over Home and keeps focus.
+                guard takesLaunchFocus, !Self.tookLaunchFocus, !cards.isEmpty,
+                      services.coordinator.pendingRoute == nil else { return }
+                Self.tookLaunchFocus = true
+                // After the buttons are in place, so the focus engine can find them.
+                try? await Task.sleep(for: .milliseconds(150))
+                guard visible, services.coordinator.pendingRoute == nil else { return }
+                if focus == nil { focus = hasPlay(cards[min(index, cards.count - 1)]) ? .play : .add }
+            }
+            #endif
             .onDisappear { visible = false }
             // Only the title on screen: asking about all of them would send the server
             // looking for sources for ten titles at once.
@@ -369,13 +386,6 @@ struct HeroCarousel: View {
             .id(index)
             .transition(.opacity)
             .focusSection()
-            .onMoveCommand { direction in
-                // Past the last button goes to the next title, before the first to the previous one.
-                let last: HeroButton = .info
-                let first: HeroButton = hasPlay(cards[index]) ? .play : .add
-                if direction == .right, focus == last { step(1) }
-                if direction == .left, focus == first { step(-1) }
-            }
     }
 
     private func step(_ by: Int) {
@@ -410,7 +420,7 @@ struct HeroCarousel: View {
         // Clipped at the sides only, so the art can stretch up into a pulled-down page.
         .scrollClipDisabled()
         .clipShape(OpenTopRectangle())
-        .frame(height: Metrics.isPad ? 620 : 520)
+        .frame(height: Metrics.isPad ? 720 : 520)
     }
     #else
     private var content: some View { hero(cards[min(index, cards.count - 1)]) }
@@ -437,23 +447,40 @@ struct HeroCarousel: View {
     }
 
     private func key(_ card: TitleCard) -> String { card.ref.description }
+
+    /// "Movie · 2026 · ★ 7.8", for the featured layout.
+    private func meta(_ card: TitleCard) -> [String] {
+        [card.type == .movie ? "Movie" : "TV Show", card.yearText, card.ratingText.map { "★ \($0)" }].compactMap { $0 }
+    }
     private func isListed(_ card: TitleCard) -> Bool { listed[key(card)] ?? watchlist.contains(key(card)) }
 
     /// Wide like the TV app's: the row's width on iPhone, a generous fixed width on iPad.
     private var primaryWidth: CGFloat {
         #if os(iOS)
-        Metrics.isPad ? 320 : .infinity
+        Metrics.isPad ? 280 : .infinity
         #else
-        420
+        300
+        #endif
+    }
+
+    /// A size down from the detail pages' buttons on the TV, so the hero's text leads.
+    private var heroControlSize: ControlSize {
+        #if os(tvOS)
+        .regular
+        #else
+        .large
         #endif
     }
 
     private func hero(_ card: TitleCard) -> some View {
-        // Just the name: the carousel is for picking, the title page has the details.
-        HeroBillboard(id: card.id, backdropURL: card.backdropUrl, fallbackURL: card.posterUrl, eyebrow: card.eyebrow, title: card.title, paged: true) {
+        // Just the name on iPhone: the carousel is for picking, the title page has the
+        // details. Apple TV and iPad have room for a line of facts and the synopsis.
+        HeroBillboard(id: card.id, backdropURL: card.backdropUrl, fallbackURL: card.posterUrl, eyebrow: card.eyebrow, title: card.title,
+                      meta: Metrics.isPadOrTV ? meta(card) : [], badges: Metrics.isPadOrTV ? card.badge.map { [$0] } ?? [] : [],
+                      overview: Metrics.isPadOrTV ? card.overview : nil, paged: true, featured: true) {
             // Play when the server can play it now; otherwise the wide button opens it.
             if let choice = playChoice(card) {
-                PlayButton(choice.label, maxWidth: primaryWidth) { services.play(choice, title: card.title, artworkURL: card.backdropUrl) }
+                PlayButton(choice.label, maxWidth: primaryWidth, size: heroControlSize) { services.play(choice, title: card.title, artworkURL: card.backdropUrl) }
                 #if os(tvOS)
                 .focused($focus, equals: .play)
                 #endif
@@ -468,7 +495,7 @@ struct HeroCarousel: View {
                         .frame(maxWidth: primaryWidth, minHeight: 30)
                 }
                 .buttonStyle(.glass)
-                .controlSize(.large)
+                .controlSize(heroControlSize)
                 .tint(Theme.ink)
                 #endif
             }
@@ -482,7 +509,7 @@ struct HeroCarousel: View {
             }
             .buttonStyle(.glass)
             .buttonBorderShape(.circle)
-            .controlSize(.large)
+            .controlSize(heroControlSize)
             .tint(Theme.ink)
             .accessibilityLabel(on ? "Remove from My List" : "Add to My List")
             #if os(tvOS)
@@ -491,12 +518,30 @@ struct HeroCarousel: View {
             #if os(tvOS)
             // No art to click on the TV: its page is a button away.
             NavigationLink(value: card.route) {
-                Label("More Info", systemImage: "info.circle").font(.stHeadline).frame(minHeight: 30)
+                Image(systemName: "info")
+                    .font(.stHeadline)
+                    .frame(width: 30, height: 30)
             }
             .buttonStyle(.glass)
-            .controlSize(.large)
+            .buttonBorderShape(.circle)
+            .controlSize(heroControlSize)
             .tint(Theme.ink)
+            .accessibilityLabel("More Info")
             .focused($focus, equals: .info)
+            // The next featured title; focus stays here, so it can be pressed again.
+            if cards.count > 1 {
+                Button { step(1) } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.stHeadline)
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .controlSize(heroControlSize)
+                .tint(Theme.ink)
+                .accessibilityLabel("Next")
+                .focused($focus, equals: .next)
+            }
             #endif
         }
     }

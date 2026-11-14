@@ -28,7 +28,7 @@ struct BrowseView: View {
                     HeroCarousel(cards: hero.items)
                 }
                 #if os(tvOS)
-                if hero == nil || genre != nil { Color.clear.frame(height: 120) } // clear the top tab bar
+                if hero == nil || genre != nil { Color.clear.frame(height: 120) } // clear the sidebar button
                 if !genres.isEmpty {
                     // Full width, so down from the tab bar reaches it (see AnimeView).
                     HStack { GenreMenu(genres: genres, selected: $genre); Spacer() }
@@ -128,7 +128,7 @@ struct BrowseView: View {
                         Rail(railTitle(list), link: items.count > Metrics.railLimit ? Route.browse(type, list) : nil) {
                             ForEach(items.prefix(Metrics.railLimit)) { card in
                                 NavigationLink(value: card.route) { PosterCardLabel(card: card) }
-                                    .buttonStyle(StrataCardStyle())
+                                    .cardButtonStyle()
                             }
                         }
                     }
@@ -224,6 +224,7 @@ struct BrowseListView: View {
 
     var body: some View {
         ScrollView {
+            TVPageHeader(title: list.title)
             switch items {
             case .loading: ProgressView().padding(Metrics.space12)
             case .failed(let message):
@@ -236,7 +237,7 @@ struct BrowseListView: View {
             case .loaded(let cards):
                 PosterGrid {
                     ForEach(cards) { card in
-                        NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.buttonStyle(StrataCardStyle())
+                        NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.cardButtonStyle()
                     }
                 }
                 .padding(.vertical, Metrics.space4)
@@ -244,7 +245,7 @@ struct BrowseListView: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
-        .navigationTitle(list.title)
+        .pageTitle(list.title)
         #if os(iOS)
         .refreshable { await load(force: true) }
         #endif
@@ -297,7 +298,7 @@ struct SearchView: View {
                 } else {
                     PosterGrid {
                         ForEach(cards) { card in
-                            NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.buttonStyle(StrataCardStyle())
+                            NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.cardButtonStyle()
                         }
                     }
                     .padding(.vertical, Metrics.space4)
@@ -326,16 +327,17 @@ struct ShelfGridView: View {
 
     var body: some View {
         ScrollView {
+            TVPageHeader(title: shelf.title)
             PosterGrid {
                 ForEach(shelf.items) { card in
-                    NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.buttonStyle(StrataCardStyle())
+                    NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.cardButtonStyle()
                 }
             }
             .padding(.vertical, Metrics.space4)
         }
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
-        .navigationTitle(shelf.title)
+        .pageTitle(shelf.title)
     }
 }
 
@@ -347,6 +349,7 @@ struct MyListView: View {
 
     var body: some View {
         ScrollView {
+            TVPageHeader(title: "My List")
             switch items {
             case .loading: ProgressView().padding(Metrics.space12)
             case .failed(let message):
@@ -357,7 +360,7 @@ struct MyListView: View {
             case .loaded(let cards):
                 PosterGrid {
                     ForEach(cards) { card in
-                        NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.buttonStyle(StrataCardStyle())
+                        NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.cardButtonStyle()
                     }
                 }
                 .padding(.vertical, Metrics.space4)
@@ -365,7 +368,7 @@ struct MyListView: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
-        .navigationTitle("My List")
+        .pageTitle("My List")
         #if os(iOS)
         // The iPad sidebar has Downloads.
         .toolbar {

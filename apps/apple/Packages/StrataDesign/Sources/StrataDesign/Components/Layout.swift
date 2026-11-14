@@ -30,7 +30,7 @@ public struct Rail<Content: View>: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RailTitleButtonStyle())
             .accessibilityAddTraits(.isHeader)
             .accessibilityHint("Shows the full list"))
         }
@@ -96,6 +96,29 @@ extension Rail {
     }
 }
 
+/// A rail's "Title ›" link. On the TV it lifts and brightens when focused, like the TV
+/// app's, rather than sitting on a white platter its light text can't be read on.
+struct RailTitleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { Label(configuration: configuration) }
+
+    private struct Label: View {
+        let configuration: Configuration
+        @Environment(\.isFocused) private var focused
+
+        var body: some View {
+            #if os(tvOS)
+            configuration.label
+                .opacity(focused ? 1 : 0.8)
+                .scaleEffect(focused ? 1.08 : 1, anchor: .leading)
+                .shadow(color: .black.opacity(focused ? 0.4 : 0), radius: 8, y: 4)
+                .animation(.easeOut(duration: 0.15), value: focused)
+            #else
+            configuration.label.opacity(configuration.isPressed ? 0.6 : 1)
+            #endif
+        }
+    }
+}
+
 /// A responsive grid of poster cards (Movies, Shows, search results, My List).
 public struct PosterGrid<Content: View>: View {
     @ViewBuilder let content: () -> Content
@@ -116,7 +139,7 @@ public struct PosterGrid<Content: View>: View {
 
     public var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: minimum), spacing: Metrics.cardGap, alignment: .top)],
-                  alignment: .leading, spacing: Metrics.space8) {
+                  alignment: .leading, spacing: Metrics.gridRowGap) {
             content()
         }
         .padding(.horizontal, Metrics.gutter)

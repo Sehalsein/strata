@@ -6,16 +6,30 @@ public struct PlayButton: View {
     let systemImage: String
     /// Widens the button, like the TV app's hero (`.infinity` to fill the row).
     let maxWidth: CGFloat?
+    let size: ControlSize
     let action: () -> Void
 
-    public init(_ title: String = "Play", systemImage: String = "play.fill", maxWidth: CGFloat? = nil, action: @escaping () -> Void) {
+    public init(_ title: String = "Play", systemImage: String = "play.fill", maxWidth: CGFloat? = nil, size: ControlSize = Metrics.heroControlSize, action: @escaping () -> Void) {
         self.title = title
         self.systemImage = systemImage
         self.maxWidth = maxWidth
+        self.size = size
         self.action = action
     }
 
     public var body: some View {
+        #if os(tvOS)
+        // On the TV, translucent glass like the buttons beside it; focus turns it white.
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.stHeadline)
+                .padding(.horizontal, Metrics.space2)
+                .frame(maxWidth: maxWidth, minHeight: 30)
+        }
+        .buttonStyle(.glass)
+        .tint(Theme.ink)
+        .controlSize(size)
+        #else
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(.stHeadline)
@@ -25,7 +39,8 @@ public struct PlayButton: View {
         }
         .buttonStyle(.glassProminent)
         .tint(Theme.apricot)
-        .controlSize(.large)
+        .controlSize(size)
+        #endif
     }
 }
 
@@ -63,12 +78,14 @@ public struct GlassButton: View {
     let title: String
     let systemImage: String?
     let iconOnly: Bool
+    let size: ControlSize
     let action: () -> Void
 
-    public init(_ title: String, systemImage: String? = nil, iconOnly: Bool = false, action: @escaping () -> Void) {
+    public init(_ title: String, systemImage: String? = nil, iconOnly: Bool = false, size: ControlSize = Metrics.heroControlSize, action: @escaping () -> Void) {
         self.title = title
         self.systemImage = systemImage
         self.iconOnly = iconOnly
+        self.size = size
         self.action = action
     }
 
@@ -87,7 +104,8 @@ public struct GlassButton: View {
             .frame(minHeight: 30)
         }
         .buttonStyle(.glass)
-        .controlSize(.large)
+        .controlSize(size)
+        .buttonBorderShape(iconOnly ? .circle : .automatic)
         // Glass labels take the tint: ink, not the app's accent (apricot is for Play only).
         // The system still inverts it for the tvOS focus state.
         .tint(Theme.ink)

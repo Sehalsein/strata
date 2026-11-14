@@ -12,6 +12,10 @@ public struct Scrubber: View {
     let onScrub: (TimeInterval) -> Void
     /// True while someone is dragging or scrubbing, so the controls can stay up.
     let onScrubbing: (Bool) -> Void
+    /// Shown as a play / pause glyph by the elapsed time (the TV's player).
+    let isPlaying: Bool?
+    /// Select on the bar when not scrubbing (tvOS): play or pause.
+    let onSelect: (() -> Void)?
 
     @State private var scrubValue: TimeInterval?
     #if os(tvOS)
@@ -19,10 +23,13 @@ public struct Scrubber: View {
     #endif
 
     public init(position: TimeInterval, duration: TimeInterval, chapters: [Chapter] = [],
+                isPlaying: Bool? = nil, onSelect: (() -> Void)? = nil,
                 onScrubbing: @escaping (Bool) -> Void = { _ in }, onScrub: @escaping (TimeInterval) -> Void) {
         self.position = position
         self.duration = duration
         self.chapters = chapters
+        self.isPlaying = isPlaying
+        self.onSelect = onSelect
         self.onScrubbing = onScrubbing
         self.onScrub = onScrub
     }
@@ -38,7 +45,7 @@ public struct Scrubber: View {
     }
 
     #if os(tvOS)
-    private let trackHeight: CGFloat = 10
+    private let trackHeight: CGFloat = 8
     #else
     private let trackHeight: CGFloat = 6
     #endif
@@ -49,7 +56,7 @@ public struct Scrubber: View {
                 let w = geo.size.width
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.25))
-                    Capsule().fill(Theme.apricot).frame(width: max(trackHeight, w * fraction))
+                    Capsule().fill(fill).frame(width: max(trackHeight, w * fraction))
                     ForEach(Array(chapters.enumerated()), id: \.offset) { _, chapter in
                         if duration > 0, chapter.start > 0, chapter.start < duration {
                             Rectangle().fill(.white.opacity(0.6))
@@ -100,7 +107,7 @@ public struct Scrubber: View {
                 }
             }
             .onTapGesture {
-                if let scrubValue { onScrub(scrubValue) }
+                if let scrubValue { onScrub(scrubValue) } else { onSelect?() }
                 scrubValue = nil
             }
             .onChange(of: focused) { _, isFocused in if !isFocused { scrubValue = nil } }
@@ -108,8 +115,13 @@ public struct Scrubber: View {
 
             .onChange(of: scrubValue != nil) { _, scrubbing in onScrubbing(scrubbing) }
 
-            HStack {
+            HStack(spacing: Metrics.space2) {
                 Text(Self.format(shown))
+                if let isPlaying {
+                    Image(systemName: isPlaying ? "pause.circle" : "play.circle")
+                        .contentTransition(.symbolEffect(.replace))
+                        .accessibilityHidden(true)
+                }
                 Spacer()
                 Text("−" + Self.format(max(0, duration - shown)))
             }
@@ -122,6 +134,15 @@ public struct Scrubber: View {
         .accessibilityAdjustableAction { direction in
             onScrub(direction == .increment ? min(duration, position + 10) : max(0, position - 10))
         }
+    }
+
+    /// The played part: white on the TV, like its player; apricot elsewhere.
+    private var fill: Color {
+        #if os(tvOS)
+        Theme.onArtwork
+        #else
+        Theme.apricot
+        #endif
     }
 
     private func preview(_ seconds: TimeInterval) -> some View {

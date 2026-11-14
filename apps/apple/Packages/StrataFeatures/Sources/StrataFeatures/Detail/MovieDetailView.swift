@@ -58,16 +58,17 @@ struct MovieDetailView: View {
                           meta: [movie.genres.first, movie.yearText, movie.runtimeText, movie.certification, movie.ratings.tmdbStar(movie.ratingText)].compactMap { $0 },
                           badges: movie.sources.first?.specLabels.prefix(3).map { $0 } ?? [],
                           ratings: movie.ratings.badges,
-                          overview: movie.overview) {
+                          overview: movie.overview, featured: Metrics.isTV,
+                          credits: [HeroCredit("Starring", movie.cast.prefix(3).map(\.name)), HeroCredit("Director", movie.directors)].filter { !$0.names.isEmpty }) {
                 // Plays when it's in the library or the server lists a source for it.
                 if let choice = playChoice(movie) {
-                    PlayButton(choice.label) { services.play(choice, title: movie.title, artworkURL: movie.backdropUrl ?? movie.posterUrl) }
+                    PlayButton(choice.label, size: Metrics.heroControlSize) { services.play(choice, title: movie.title, artworkURL: movie.backdropUrl ?? movie.posterUrl) }
                         .glassEffectID("play", in: namespace)
                         #if os(tvOS)
                         .focused($heroFocus, equals: .play)
                         #endif
                 }
-                GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV) {
+                GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV || Metrics.isTV, size: Metrics.heroControlSize) {
                     Task { await toggleWatchlist(movie) }
                 }
                 #if os(tvOS)
@@ -75,7 +76,7 @@ struct MovieDetailView: View {
                 #endif
                 // Only when the server has sources to show.
                 if let sources = playOptions?.sources, !sources.isEmpty {
-                    GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV) { showSources = true }
+                    GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV || Metrics.isTV, size: Metrics.heroControlSize) { showSources = true }
                 }
                 #if os(iOS)
                 if playChoice(movie) != nil {
@@ -115,7 +116,7 @@ struct MovieDetailView: View {
             if !movie.recommendations.isEmpty {
                 Rail("More Like This") {
                     ForEach(movie.recommendations) { card in
-                        NavigationLink(value: card.route) { PosterCardLabel(card: card) }.buttonStyle(StrataCardStyle())
+                        NavigationLink(value: card.route) { PosterCardLabel(card: card) }.cardButtonStyle()
                     }
                 }
             }
@@ -131,7 +132,7 @@ struct MovieDetailView: View {
             ])
         }
         .padding(.bottom, Metrics.space12)
-        .sheet(isPresented: $showSources) {
+        .pickerSheet(isPresented: $showSources) {
             // In the library, the page has only library sources: the sheet asks the server for more.
             SourcePickerSheet(target: movie.target, title: movie.title, known: playOptions?.sources ?? [], lookFurther: playOptions?.lookedFurther == false) { candidate in
                 play(movie, candidateId: candidate.id)
@@ -188,7 +189,7 @@ struct RelatedRail: View {
         if !titles.isEmpty {
             Rail("Other Seasons") {
                 ForEach(titles) { card in
-                    NavigationLink(value: card.route) { PosterCardLabel(card: card) }.buttonStyle(StrataCardStyle())
+                    NavigationLink(value: card.route) { PosterCardLabel(card: card) }.cardButtonStyle()
                 }
             }
         }
@@ -203,7 +204,7 @@ struct CastRail: View {
             Rail("Cast") {
                 ForEach(cast.prefix(15)) { person in
                     NavigationLink(value: Route.person(person.id)) { member(person) }
-                        .buttonStyle(StrataCardStyle())
+                        .cardButtonStyle()
                         .accessibilityLabel([person.name, person.character].compactMap { $0 }.joined(separator: ", "))
                 }
             }
@@ -294,7 +295,7 @@ struct VideosRail: View {
                         }
                         .frame(width: Metrics.landscapeWidth)
                     }
-                    .buttonStyle(StrataCardStyle())
+                    .cardButtonStyle()
                     .accessibilityLabel("\(video.type): \(video.name)")
                 }
             }

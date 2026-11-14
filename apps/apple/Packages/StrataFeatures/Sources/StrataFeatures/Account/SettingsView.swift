@@ -76,10 +76,6 @@ struct SettingsView: View {
                         Label("Add Profile", systemImage: "plus")
                     }
                     if let active = store.active {
-                        #if os(tvOS)
-                        // The TV's tab bar has no room for My List; it lives with the profile.
-                        NavigationLink(value: Route.myList) { Label("My List", systemImage: "bookmark") }
-                        #endif
                         if libraryCount > 1 {
                             Button {
                                 showLibraries = true

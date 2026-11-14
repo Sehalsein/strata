@@ -28,8 +28,13 @@ public struct ArtworkImage: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            #if os(tvOS)
+            // In a card's borderless button, the system's focus effect lands on the art.
+            .hoverEffect(.highlight)
+            #endif
     }
 }
+
 
 /// Missing-artwork fill: three horizontal bands (the brand's layers) with the
 /// title set over them. Variant is stable per `seed`.

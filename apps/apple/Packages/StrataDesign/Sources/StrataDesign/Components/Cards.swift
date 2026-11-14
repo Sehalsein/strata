@@ -11,6 +11,18 @@ public enum ProviderKind: String, Hashable, Sendable {
 
 /// Press/focus treatment for artwork cards: a lift with shadow on tvOS focus,
 /// a slight shrink on touch.
+public extension View {
+    /// A card's button: on the TV the system's own focus (the artwork lifts with Liquid
+    /// Glass highlight and parallax, like the TV app's posters); elsewhere `StrataCardStyle`.
+    @ViewBuilder func cardButtonStyle() -> some View {
+        #if os(tvOS)
+        buttonStyle(.borderless)
+        #else
+        buttonStyle(StrataCardStyle())
+        #endif
+    }
+}
+
 public struct StrataCardStyle: ButtonStyle {
     public init() {}
     public func makeBody(configuration: Configuration) -> some View {
@@ -57,11 +69,11 @@ public struct PosterCard: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.space2) {
+        VStack(alignment: .leading, spacing: Metrics.cardCaptionGap) {
             Button(action: action) {
                 ArtworkImage(url: imageURL, aspectRatio: 2 / 3, seed: id, title: imageURL == nil ? title : nil)
             }
-            .buttonStyle(StrataCardStyle())
+            .cardButtonStyle()
             .accessibilityLabel(title)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -110,7 +122,7 @@ public struct ContinueCard: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.space2) {
+        VStack(alignment: .leading, spacing: Metrics.cardCaptionGap) {
             Button(action: action) {
                 ArtworkImage(url: imageURL, aspectRatio: 16 / 9, seed: id, title: imageURL == nil ? (artworkTitle ?? title) : nil)
                     .overlay(alignment: .bottom) {
@@ -127,7 +139,7 @@ public struct ContinueCard: View {
                             .opacity(0.9)
                     }
             }
-            .buttonStyle(StrataCardStyle())
+            .cardButtonStyle()
             .accessibilityLabel("Play \(title)")
 
             VStack(alignment: .leading, spacing: 2) {

@@ -49,7 +49,7 @@ public struct SubtitleOverlay: View {
     }
 
     #if os(tvOS)
-    private static let raisedInset: CGFloat = 260
+    private static let raisedInset: CGFloat = 400
     #else
     private static let raisedInset: CGFloat = 180
     #endif
@@ -79,7 +79,7 @@ public struct SubtitleOverlay: View {
                     .transition(.opacity)
             }
         }
-        .padding(.bottom, raised ? 180 : 48)
+        .padding(.bottom, raised ? Self.raisedInset : 48)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.easeOut(duration: 0.15), value: engine.activeCueText)
         .allowsHitTesting(false)

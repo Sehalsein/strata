@@ -17,7 +17,7 @@ struct AnimeView: View {
                     HeroCarousel(cards: hero.items)
                 }
                 #if os(tvOS)
-                if hero == nil { Color.clear.frame(height: 120) } // clear the top tab bar
+                if hero == nil { Color.clear.frame(height: 120) } // clear the sidebar button
                 if !categories.isEmpty {
                     // A full-width section: pressing down from the tab bar (or the hero)
                     // lands here first, rather than on whichever poster sits under it.
@@ -106,6 +106,7 @@ struct AnimeListView: View {
 
     var body: some View {
         ScrollView {
+            TVPageHeader(title: title)
             switch items {
             case .loading: ProgressView().padding(Metrics.space12)
             case .failed(let message):
@@ -115,7 +116,7 @@ struct AnimeListView: View {
             case .loaded(let cards):
                 PosterGrid {
                     ForEach(cards) { card in
-                        NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.buttonStyle(StrataCardStyle())
+                        NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.cardButtonStyle()
                     }
                 }
                 .padding(.vertical, Metrics.space4)
@@ -123,7 +124,7 @@ struct AnimeListView: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
-        .navigationTitle(title)
+        .pageTitle(title)
         #if !os(tvOS)
         .refreshable { await load(force: true) }
         #endif
