@@ -18,6 +18,16 @@ public struct RootView: View {
         #endif
     }
 
+    /// `-StrataWhoIsWatching YES` (debug builds) opens on "Who's watching?" without signing
+    /// out, for screenshots.
+    private static var debugWhoIsWatching: Bool {
+        #if DEBUG
+        UserDefaults.standard.bool(forKey: "StrataWhoIsWatching")
+        #else
+        false
+        #endif
+    }
+
     public var body: some View {
         Group {
             if services.store.signIns.isEmpty {
@@ -26,7 +36,7 @@ public struct RootView: View {
                 #if os(iOS)
                 OfflineDownloadsView()
                 #endif
-            } else if !services.store.isSignedIn {
+            } else if !services.store.isSignedIn || Self.debugWhoIsWatching {
                 WhoIsWatchingView()
             } else if services.store.active?.mustChangePassword == true {
                 ChooseNewPasswordView()
