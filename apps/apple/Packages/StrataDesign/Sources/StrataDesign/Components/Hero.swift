@@ -24,17 +24,20 @@ public struct HeroBillboard<Actions: View>: View {
     let featured: Bool
     /// "Starring …", "Director …": at the bottom right of the featured layout.
     let credits: [HeroCredit]
+    /// Partway through: a bar and what's left, under the featured layout's buttons.
+    let progress: HeroProgress?
     @ViewBuilder let actions: () -> Actions
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    public init(id: String, backdropURL: URL?, fallbackURL: URL? = nil, eyebrow: String? = nil, title: String, meta: [String] = [], badges: [String] = [], ratings: [ExternalRating] = [], overview: String? = nil, paged: Bool = false, featured: Bool = false, credits: [HeroCredit] = [], @ViewBuilder actions: @escaping () -> Actions) {
+    public init(id: String, backdropURL: URL?, fallbackURL: URL? = nil, eyebrow: String? = nil, title: String, meta: [String] = [], badges: [String] = [], ratings: [ExternalRating] = [], overview: String? = nil, paged: Bool = false, featured: Bool = false, credits: [HeroCredit] = [], progress: HeroProgress? = nil, @ViewBuilder actions: @escaping () -> Actions) {
         self.id = id
         // Full size: list-sized TMDB art (w780) is soft across a whole screen.
         self.backdropURL = backdropURL.map(TMDBImage.original)
         self.paged = paged
         self.featured = featured
         self.credits = credits
+        self.progress = progress
         self.fallbackURL = fallbackURL
         self.eyebrow = eyebrow
         self.title = title
@@ -326,7 +329,17 @@ public struct HeroBillboard<Actions: View>: View {
                     .frame(maxWidth: featuredOverviewWidth, alignment: .leading)
             }
             badgeRow
-            actionRow.padding(.top, Metrics.space3)
+            // A clear break between what it is and what you can do with it.
+            actionRow.padding(.top, Metrics.isTV ? Metrics.space8 : Metrics.space5)
+            if let progress {
+                HStack(spacing: Metrics.space3) {
+                    ProgressBar(progress.fraction).frame(maxWidth: 240)
+                    if let label = progress.label {
+                        Text(label).font(.stFootnote).foregroundStyle(heroText.opacity(0.7))
+                    }
+                }
+                .padding(.top, Metrics.space2)
+            }
         }
         .frame(maxWidth: featuredWidth, alignment: .leading)
         .padding(.horizontal, Metrics.gutter)
@@ -379,6 +392,16 @@ public struct HeroBillboard<Actions: View>: View {
         .padding(.bottom, Metrics.space2)
     }
     #endif
+}
+
+/// How far through a title is, for the hero.
+public struct HeroProgress: Hashable, Sendable {
+    public let fraction: Double
+    public let label: String?
+    public init(fraction: Double, label: String?) {
+        self.fraction = fraction
+        self.label = label
+    }
 }
 
 /// A line of credits for the hero: "Starring" and the first few names.

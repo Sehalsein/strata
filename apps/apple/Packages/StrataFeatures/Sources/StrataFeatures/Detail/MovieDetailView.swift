@@ -59,7 +59,8 @@ struct MovieDetailView: View {
                           badges: movie.sources.first?.specLabels.prefix(3).map { $0 } ?? [],
                           ratings: movie.ratings.badges,
                           overview: movie.overview, featured: Metrics.isTV,
-                          credits: [HeroCredit("Starring", movie.cast.prefix(3).map(\.name)), HeroCredit("Director", movie.directors)].filter { !$0.names.isEmpty }) {
+                          credits: [HeroCredit("Starring", movie.cast.prefix(3).map(\.name)), HeroCredit("Director", movie.directors)].filter { !$0.names.isEmpty },
+                          progress: movie.progress.flatMap { $0.isResumable ? HeroProgress(fraction: $0.fraction, label: Formatting.remaining(ms: $0.remainingMs)) : nil }) {
                 // Plays when it's in the library or the server lists a source for it.
                 if let choice = playChoice(movie) {
                     PlayButton(choice.label, size: Metrics.heroControlSize) { services.play(choice, title: movie.title, artworkURL: movie.backdropUrl ?? movie.posterUrl) }
@@ -95,16 +96,13 @@ struct MovieDetailView: View {
                 AvailabilityLabel(.unavailable).padding(.horizontal, Metrics.gutter)
             }
 
-            if let progress = movie.progress, progress.isResumable {
+            // On the TV, under the hero's buttons (see `heroProgress`).
+            if !Metrics.isTV, let progress = movie.progress, progress.isResumable {
                 HStack(spacing: Metrics.space3) {
                     ProgressBar(progress.fraction).frame(maxWidth: 240)
                     Text(Formatting.remaining(ms: progress.remainingMs) ?? "").font(.stFootnote).foregroundStyle(Theme.ink3)
                 }
                 .padding(.horizontal, Metrics.gutter)
-            }
-
-            if let tagline = movie.tagline {
-                Text(tagline).font(.stCallout.italic()).foregroundStyle(Theme.ink2).padding(.horizontal, Metrics.gutter)
             }
 
             CastRail(cast: movie.cast)
@@ -219,11 +217,19 @@ struct CastRail: View {
             }
             .frame(width: avatar, height: avatar)
             .clipShape(Circle())
-            Text(person.name).font(.stFootnote.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+            Text(person.name).font(.stFootnote.weight(.semibold)).foregroundStyle(Theme.ink)
+                .lineLimit(Metrics.isTV ? 2 : 1).multilineTextAlignment(.center)
             if let character = person.character { Text(character).font(.caption).foregroundStyle(Theme.ink3).lineLimit(1) }
         }
-        .frame(width: avatar + 16)
+        .frame(width: avatar + Self.columnExtra)
     }
+
+    /// Room past the photo for the name: on the TV, enough that most names fit.
+    #if os(tvOS)
+    static let columnExtra: CGFloat = 70
+    #else
+    static let columnExtra: CGFloat = 16
+    #endif
 
     private var avatar: CGFloat { Self.avatar }
 
