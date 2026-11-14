@@ -45,3 +45,28 @@ extension View {
         #endif
     }
 }
+
+#if os(tvOS)
+/// The top of a tab's own page on the TV when it has no spotlight: below the sidebar's
+/// button, the page's title with its filter (genre, category) beside it.
+struct TVTabHeader<Accessory: View>: View {
+    let title: String
+    @ViewBuilder let accessory: () -> Accessory
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Metrics.space8) {
+            Text(title)
+                .font(.stTitle1)
+                .titleTracking()
+                .foregroundStyle(Theme.ink)
+                .accessibilityAddTraits(.isHeader)
+            accessory()
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.top, 140)
+        // Full width, so down from the sidebar button lands on the filter.
+        .focusSection()
+    }
+}
+#endif

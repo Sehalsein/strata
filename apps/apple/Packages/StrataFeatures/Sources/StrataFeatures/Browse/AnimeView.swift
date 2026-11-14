@@ -17,8 +17,10 @@ struct AnimeView: View {
                     HeroCarousel(cards: hero.items)
                 }
                 #if os(tvOS)
-                if hero == nil { Color.clear.frame(height: 120) } // clear the sidebar button
-                if !categories.isEmpty {
+                if hero == nil {
+                    // No spotlight (a category): the page's title, with the menu beside it.
+                    TVTabHeader(title: "Anime") { if !categories.isEmpty { menu } }
+                } else if !categories.isEmpty {
                     // A full-width section: pressing down from the tab bar (or the hero)
                     // lands here first, rather than on whichever poster sits under it.
                     HStack { menu; Spacer() }

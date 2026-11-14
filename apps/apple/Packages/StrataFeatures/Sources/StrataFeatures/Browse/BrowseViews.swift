@@ -28,12 +28,16 @@ struct BrowseView: View {
                     HeroCarousel(cards: hero.items)
                 }
                 #if os(tvOS)
-                if hero == nil || genre != nil { Color.clear.frame(height: 120) } // clear the sidebar button
-                if !genres.isEmpty {
-                    // Full width, so down from the tab bar reaches it (see AnimeView).
+                if hero == nil || genre != nil {
+                    // No spotlight: the page's title, with the genre filter beside it.
+                    TVTabHeader(title: title) {
+                        if !genres.isEmpty { GenreMenu(genres: genres, selected: $genre) }
+                    }
+                } else if !genres.isEmpty {
+                    // Full width, so down from the hero reaches it (see AnimeView).
                     HStack { GenreMenu(genres: genres, selected: $genre); Spacer() }
                         .padding(.horizontal, Metrics.gutter)
-                        .tvFilterRow(underHero: hero != nil && genre == nil)
+                        .tvFilterRow(underHero: true)
                         .focusSection()
                 }
                 #endif
