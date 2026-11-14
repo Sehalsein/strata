@@ -379,7 +379,11 @@ struct HeroCarousel: View {
                 // After the buttons are in place, so the focus engine can find them.
                 try? await Task.sleep(for: .milliseconds(150))
                 guard visible, services.coordinator.pendingRoute == nil else { return }
-                if focus == nil { focus = hasPlay(cards[min(index, cards.count - 1)]) ? .play : .add }
+                // Play is the button to start on; until it's known, "+" holds focus for it.
+                if focus == nil {
+                    chosen = .play
+                    place(hasPlay(cards[min(index, cards.count - 1)]) ? .play : .add)
+                }
             }
             #endif
             .onDisappear { onScreen = false }
