@@ -39,6 +39,7 @@ export const queryKeys = {
   /** Every device in the household (its admins). */
   devices: ["admin", "devices"] as const,
   deviceCode: (code: string) => ["auth", "device", code] as const,
+  playReports: ["admin", "play-reports"] as const,
   logs: (limit: number) => ["admin", "logs", limit] as const,
   files: (filters: LibraryFilters) => ["admin", "files", filters] as const,
   filesAll: ["admin", "files"] as const,

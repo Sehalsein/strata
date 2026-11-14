@@ -52,8 +52,13 @@ final class FileByteSource: ByteSource {
 /// A file behind an HTTP(S) link (TorBox), fetched in blocks with ranged requests through
 /// URLSession, so it uses the system's networking (proxies, HTTP/2, VPNs). Blocks are kept
 /// in a small LRU and the next ones are fetched ahead while the player reads forward.
-/// A link that stops working (401/403/404/410) is replaced once through `refresh`; a
-/// dropped connection, timeout or 5xx is tried again a few times before the read fails.
+/// A link that stops working (401/403/404/410) is replaced once through `refresh`, and one
+/// whose server won't answer is replaced up to `maxHostSwaps` times (a new link can point at
+/// another server); a dropped connection, timeout or 5xx is tried again a few times first.
+/// Told (on an arbitrary thread) each time a link's file server didn't answer and a new
+/// link was asked for: the server's host name and the error.
+public typealias LinkProblemHandler = @Sendable (_ host: String, _ error: String) -> Void
+
 final class HTTPByteSource: ByteSource, @unchecked Sendable {
     static let blockSize = 2 << 20
     /// About 64 MB: enough read-ahead for a 4K remux without holding much of the file.
@@ -64,8 +69,14 @@ final class HTTPByteSource: ByteSource, @unchecked Sendable {
     /// Tries for a block after the first, with a growing pause between them.
     static let retries = 3
 
+    /// New links asked for because the link's server didn't answer, at most.
+    static let maxHostSwaps = 3
+
     private var url: URL
+    private var hostSwaps = 0
+    private var swapping = false
     private let refresh: (@Sendable () async throws -> URL)?
+    private let onProblem: LinkProblemHandler?
     private let session: URLSession
     private let lock = NSLock()
     private var blocks: [Int64: Data] = [:]
@@ -78,9 +89,10 @@ final class HTTPByteSource: ByteSource, @unchecked Sendable {
     /// Bytes fetched so far, for Stream Details.
     private(set) var bytesFetched: Int64 = 0
 
-    init(url: URL, refresh: (@Sendable () async throws -> URL)?) throws {
+    init(url: URL, refresh: (@Sendable () async throws -> URL)?, onProblem: LinkProblemHandler? = nil) throws {
         self.url = url
         self.refresh = refresh
+        self.onProblem = onProblem
         let config = URLSessionConfiguration.default
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.urlCache = nil
@@ -164,6 +176,7 @@ final class HTTPByteSource: ByteSource, @unchecked Sendable {
         }
         var request = URLRequest(url: url)
         request.setValue("bytes=\(from)-\(size > 0 ? min(to, size - 1) : to)", forHTTPHeaderField: "Range")
+        let used = url
         session.dataTask(with: request) { [weak self] data, response, error in
             guard let self else { return }
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -178,6 +191,33 @@ final class HTTPByteSource: ByteSource, @unchecked Sendable {
                     }
                 }
                 return
+            }
+            if attempt >= 1, Self.isUnreachable(error), let refresh = self.refresh {
+                // The link's server won't answer (TorBox has nodes that refuse connections
+                // for hours). Each new link can land on another node, so ask for one.
+                switch self.claimSwap(from: used) {
+                case .done:
+                    self.fetch(index, retried: retried, attempt: 0)
+                    return
+                case .busy:
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { self.fetch(index, retried: retried, attempt: attempt) }
+                    return
+                case .mine:
+                    // The host only: the link itself carries the account key.
+                    self.onProblem?(used.host ?? "unknown host", error?.localizedDescription ?? "No answer")
+                    Task {
+                        let new = try? await refresh()
+                        self.endSwap(new)
+                        if new != nil {
+                            self.fetch(index, retried: retried, attempt: 0)
+                        } else {
+                            self.finish(index, .failure(RemuxError.network(error?.localizedDescription ?? "Couldn't connect.")))
+                        }
+                    }
+                    return
+                case .exhausted:
+                    break
+                }
             }
             if attempt < Self.retries, Self.isTransient(error, status: status) {
                 let pause = 0.5 * Double(1 << attempt)
@@ -210,6 +250,33 @@ final class HTTPByteSource: ByteSource, @unchecked Sendable {
         }
         if error != nil { return false }
         return status == 408 || status == 429 || (500...599).contains(status)
+    }
+
+    /// Its host refused or never answered: a fresh link may point at a server that does.
+    private static func isUnreachable(_ error: Error?) -> Bool {
+        guard let error = error as? URLError else { return false }
+        return [.cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .timedOut, .secureConnectionFailed].contains(error.code)
+    }
+
+    private enum Swap { case mine, busy, done, exhausted }
+
+    /// Whether the block that failed on `failed` should ask for a new link itself (`mine`),
+    /// wait for another block that is (`busy`), or just retry on the one it got (`done`).
+    private func claimSwap(from failed: URL) -> Swap {
+        lock.lock(); defer { lock.unlock() }
+        if failed != url { return .done }
+        if swapping { return .busy }
+        if hostSwaps >= Self.maxHostSwaps { return .exhausted }
+        swapping = true
+        hostSwaps += 1
+        return .mine
+    }
+
+    private func endSwap(_ new: URL?) {
+        lock.lock()
+        swapping = false
+        if let new { url = new } else { hostSwaps = Self.maxHostSwaps }
+        lock.unlock()
     }
 
     private func setURL(_ new: URL) {

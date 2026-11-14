@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, FileSearch, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, FileSearch, Play, Search, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatBytes, relativeTime, resolutionLabel } from "@/lib/format";
 import { queryKeys, useApiMutation } from "@/lib/query";
@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FixMatchDialog } from "./fix-match-dialog";
+import { PlayDialog } from "./play-dialog";
 import { DEFAULT_STATE, PAGE_SIZES, SORTS, STATUS_TABS, defaultDirection, directionLabels, isFiltered, readUrlState, writeUrlState, type LibraryState } from "./filters";
 
 const STATUS_VARIANT: Record<MatchStatus, "success" | "warning" | "secondary" | "accent"> = {
@@ -33,6 +34,7 @@ export default function LibraryPage() {
   const [state, setState] = useState<LibraryState>(() => readUrlState(location.search));
   const [query, setQuery] = useState(state.q);
   const [fixing, setFixing] = useState<LibraryFile | null>(null);
+  const [playing, setPlaying] = useState<LibraryFile | null>(null);
 
   /** Any filter change returns to the first page. */
   const update = (patch: Partial<LibraryState>) => setState((s) => ({ ...s, page: 0, ...patch }));
@@ -224,6 +226,9 @@ export default function LibraryPage() {
                   </TableCell>
                   <TableCell className="pr-4">
                     <div className="flex justify-end gap-1">
+                      <Button variant="outline" size="sm" onClick={() => setPlaying(f)} aria-label={`Play ${f.name}`}>
+                        <Play /> Play
+                      </Button>
                       <Button variant="outline" size="sm" onClick={() => setFixing(f)}>
                         Fix match
                       </Button>
@@ -275,6 +280,7 @@ export default function LibraryPage() {
       )}
 
       <FixMatchDialog file={fixing} onOpenChange={(o) => !o && setFixing(null)} />
+      <PlayDialog file={playing} onOpenChange={(o) => !o && setPlaying(null)} />
     </Page>
   );
 }

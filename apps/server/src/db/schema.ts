@@ -390,3 +390,36 @@ export const playSessions = pgTable(
   },
   (t) => [index("play_sessions_organization").on(t.organizationId)],
 );
+
+/**
+ * Plays that failed, or only started after the app switched copies or file servers, as
+ * the apps report them: for the household's admins to see what went wrong. Pruned to
+ * the last few hundred per household.
+ */
+export const playReports = pgTable(
+  "play_reports",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    source: text("source").$type<TitleSource>().notNull(),
+    mediaType: text("media_type").$type<"movie" | "episode">().notNull(),
+    titleId: integer("title_id").notNull(),
+    season: integer("season"),
+    episode: integer("episode"),
+    /** "failed" (nothing played) or "recovered" (it played after problems). */
+    outcome: text("outcome").$type<"failed" | "recovered">().notNull(),
+    /** What the app showed, or would have. */
+    message: text("message").notNull(),
+    /** PlayAttempt[]: each copy tried and what went wrong with it. */
+    attemptsJson: text("attempts_json").notNull(),
+    deviceName: text("device_name"),
+    deviceModel: text("device_model"),
+    appVersion: text("app_version"),
+    location: text("location"),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [index("play_reports_recent").on(t.organizationId, t.createdAt)],
+);

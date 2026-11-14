@@ -32,6 +32,8 @@ export const SETUP_PER_ADDRESS: ThrottleRule = { limit: 10, windowMs: 15 * MINUT
  * for browsing, not for scraping.
  */
 export const SEARCHES_PER_HOUSEHOLD: ThrottleRule = { limit: 300, windowMs: 60 * MINUTE, lockMs: 30 * MINUTE };
+/** Playback problem reports one person's apps send in an hour: enough for a bad evening, not to flood the admins' list. */
+export const PLAY_REPORTS_PER_USER: ThrottleRule = { limit: 30, windowMs: 60 * MINUTE, lockMs: 60 * MINUTE };
 /** Releases one household's discovery adds to its TorBox in a day. */
 export const ADDS_PER_HOUSEHOLD: ThrottleRule = { limit: 60, windowMs: 24 * 60 * MINUTE, lockMs: 60 * MINUTE };
 
