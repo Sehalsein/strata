@@ -123,12 +123,13 @@ struct RailTitleButtonStyle: ButtonStyle {
 public struct PosterGrid<Content: View>: View {
     @ViewBuilder let content: () -> Content
     /// Side inset; 0 where the page already keeps to the safe area (TV Search).
-    var inset: CGFloat = Metrics.gutter
+    let inset: CGFloat
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
-    public init(inset: CGFloat = Metrics.gutter, @ViewBuilder content: @escaping () -> Content) {
-        self.inset = inset
+    /// `inset` defaults to the gutter.
+    @MainActor public init(inset: CGFloat? = nil, @ViewBuilder content: @escaping () -> Content) {
+        self.inset = inset ?? Metrics.gutter
         self.content = content
     }
 
