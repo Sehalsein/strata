@@ -32,7 +32,8 @@ export class SharedWork<K, V> {
     this.share = options.shareInFlight ?? shareInFlight;
   }
 
-  get(key: K, work: () => Promise<V>): Promise<V> {
+  /** `keep` (with `remember`) says whether a finished value may be remembered; by default all are. */
+  get(key: K, work: () => Promise<V>, keep: (value: V) => boolean = () => true): Promise<V> {
     const kept = this.done.get(key);
     if (kept && (this.options.ttlMs === undefined || Date.now() - kept.at < this.options.ttlMs)) return Promise.resolve(kept.value);
     if (kept) this.done.delete(key);
@@ -49,6 +50,7 @@ export class SharedWork<K, V> {
     if (this.options.remember) {
       started.then(
         (value) => {
+          if (!keep(value)) return;
           this.done.delete(key);
           this.done.set(key, { value, at: Date.now() });
           // Maps keep insertion order: the first key is the oldest.

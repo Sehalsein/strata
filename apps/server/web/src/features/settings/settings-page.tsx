@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Cable, Compass, Globe, Library, LoaderCircle, Network, RefreshCw, Server } from "lucide-react";
+import { ArrowDown, ArrowUp, Blocks, Cable, Compass, Globe, Library, LoaderCircle, Network, RefreshCw, Server } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
@@ -14,6 +14,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { NumberInput, type SetFn } from "./fields";
 import { MediaFolders } from "./media-folders";
 import { Connections } from "./connections";
+import { AddonsSection } from "./addons";
 import { SettingRow, SettingsSection, ToggleRow } from "./layout";
 import { UpdatesCard } from "./updates-card";
 import { useSession } from "@/app/session";
@@ -21,7 +22,7 @@ import { navigate } from "@/lib/router";
 
 const PROVIDER_LABEL: Record<Provider, string> = { local: "Local folders", torbox: "TorBox" };
 
-type SectionId = "general" | "library" | "discovery" | "connections" | "server" | "network" | "updates";
+type SectionId = "general" | "library" | "discovery" | "addons" | "connections" | "server" | "network" | "updates";
 interface Section {
   id: SectionId;
   label: string;
@@ -51,6 +52,7 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
       { id: "general", label: "General", icon: Globe, group: "household" },
       { id: "library", label: "Library", icon: Library, group: "household" },
       { id: "discovery", label: "Discovery", icon: Compass, group: "household" },
+      { id: "addons", label: "Add-ons", icon: Blocks, group: "household" },
       { id: "connections", label: "Connections", icon: Cable, group: "household" },
       ...(isServerAdmin
         ? ([
@@ -142,7 +144,8 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
         {sections.length > 1 && <SettingsNav sections={sections} current={section} onChange={go} />}
 
         <div className="flex min-w-0 flex-1 flex-col gap-6">
-          {sections.length > 1 && <h2 className="text-xl font-semibold">{current.label}</h2>}
+          {/* Add-ons draws its own heading, with its count and actions. */}
+          {sections.length > 1 && section !== "addons" && <h2 className="text-xl font-semibold">{current.label}</h2>}
 
           {section === "general" && (
             <SettingsSection title="Catalog" description="How titles and dates are shown.">
@@ -191,15 +194,37 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
           )}
 
           {section === "discovery" && (
-            <SettingsSection title="Finding releases" description="Playable releases for titles that aren't in the library yet.">
+            <SettingsSection
+              title="Finding releases"
+              description="Playable releases for titles that aren't in the library yet. Cached releases come first, then ones in the household's language (from General), then ones within your limits."
+            >
               <ToggleRow label="Find releases" description="Look for TorBox releases of titles that aren't in the library." checked={draft.discoveryEnabled} onChange={(v) => set("discoveryEnabled", v)} />
-              <ToggleRow label="Use TorBox search" description="Also ask TorBox's own search." checked={draft.useTorboxSearch} onChange={(v) => set("useTorboxSearch", v)} />
+              <ToggleRow label="Use TorBox search" description={<>Also ask TorBox's own search, alongside your <a href="#addons">add-ons</a>.</>} checked={draft.useTorboxSearch} onChange={(v) => set("useTorboxSearch", v)} />
+              <SettingRow
+                label="Order releases by"
+                description={
+                  draft.releaseOrder === "addons"
+                    ? "The order your add-ons give, top add-on first: for ones set up to sort the way you like, like AIOStreams."
+                    : "Strata's own: resolution, single episodes before season packs, then source and seeders."
+                }
+              >
+                <ToggleGroup type="single" variant="outline" value={draft.releaseOrder} onValueChange={(v) => v && set("releaseOrder", v as Settings["releaseOrder"])} aria-label="Order releases by">
+                  <ToggleGroupItem value="strata" className="px-3">
+                    Strata
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="addons" className="px-3">
+                    Add-ons
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              </SettingRow>
               <ToggleRow label="Show uncached releases" description="Offer releases TorBox hasn't cached yet. They download before they can play." checked={draft.showUncached} onChange={(v) => set("showUncached", v)} />
               <SettingRow label="Largest automatic pick" htmlFor="max-size" description="Discovery won't pick a bigger release by itself. 0 means no limit.">
                 <NumberInput id="max-size" min={0} step={0.5} suffix="GB" value={draft.maxReleaseSizeGb} onChange={(v) => set("maxReleaseSizeGb", v)} />
               </SettingRow>
             </SettingsSection>
           )}
+
+          {section === "addons" && <AddonsSection />}
 
           {section === "connections" && <Connections secrets={data.secrets} />}
 
@@ -332,12 +357,12 @@ function ServerSections({ draft, set, localMedia }: { draft: Settings; set: SetF
           </SettingRow>
         )}
         <SettingRow
-          label="Stream addon"
-          htmlFor="addon-url"
-          description="A Torrentio-compatible Stremio addon that discovery searches. Empty turns it off."
+          label="Default add-on"
+          htmlFor="default-addon-url"
+          description="The Torrentio-compatible add-on households search with until they set up their own under Add-ons. Empty means none."
           error={urlInvalid ? "Enter a full http(s) address." : null}
         >
-          <Input id="addon-url" className="font-mono sm:w-72" type="url" placeholder="https://torrentio.strem.fun" value={draft.torrentioUrl} onChange={(e) => set("torrentioUrl", e.target.value.trim())} spellCheck={false} autoCapitalize="off" />
+          <Input id="default-addon-url" className="font-mono sm:w-72" type="url" placeholder="https://torrentio.strem.fun" value={draft.torrentioUrl} onChange={(e) => set("torrentioUrl", e.target.value.trim())} spellCheck={false} autoCapitalize="off" />
         </SettingRow>
       </SettingsSection>
       {localMedia && (

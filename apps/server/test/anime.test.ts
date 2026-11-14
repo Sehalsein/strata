@@ -153,7 +153,7 @@ test("films map to TMDB (the list gives movie ids as an array)", () => {
   expect(ids().anilist(21519)?.tmdbMovie).toBe(372058);
 });
 
-describe("Torrentio anime ids", () => {
+describe("add-on anime ids", () => {
   test("TMDB episodes become the Kitsu entry and its own episode number", () => {
     const map = ids();
     const frieren = [{ season: 1, episodes: 38 }];
@@ -164,8 +164,8 @@ describe("Torrentio anime ids", () => {
     expect(kitsuEpisode(map.show(99999), 1, 1, frieren)).toBeNull();
   });
 
-  test("Torrentio's anime picks count as the episode whatever their own numbering", () => {
-    const release = (title: string, targeted: boolean): Release => ({ hash: "a".repeat(40), title, origin: "torrentio", cached: false, isPack: false, targeted, parsed: parseFileName(title) });
+  test("add-ons' anime picks count as the episode whatever their own numbering", () => {
+    const release = (title: string, targeted: boolean): Release => ({ hash: "a".repeat(40), title, origin: "addon", cached: false, isPack: false, targeted, parsed: parseFileName(title) });
     const target = { source: "tmdb" as const, mediaType: "episode" as const, titleId: 209867, season: 1, episode: 30 };
     expect(relevant(release("[SubsPlease] Sousou no Frieren - 02 (1080p)", true), target)).toBe(true);
     expect(relevant(release("[SubsPlease] Sousou no Frieren - 02 (1080p)", false), target)).toBe(false);

@@ -22,6 +22,7 @@ import type { ProgressStore } from "./progress";
 import type { SecretBox } from "./secrets";
 import { householdSettingsSchema, HOUSEHOLD_SECRET_KEYS, SettingsStore, type HouseholdSettingsStore, type ServerSettingsStore, type Settings } from "./settings";
 import { Discovery } from "./sources/discovery";
+import { AddonError, defaultAddons, inspectAddon, streamAddonListSchema, type StreamAddon } from "./sources/addons";
 import { TorboxHousekeeping } from "./sources/torbox/cleanup";
 import { TorboxClient } from "./sources/torbox/client";
 import { syncTorbox } from "./sources/torbox/sync";
@@ -104,7 +105,8 @@ export class Household {
     this.playReports = new PlayReports(db, organizationId);
     const torbox = () => this.torbox();
     this.discovery = new Discovery(tmdb, this.library, settings, torbox, shared.fetch, (id, hash, name) => this.housekeeping.recordAdded(id, hash, name), shared.anime.ids,
-      () => shared.throttle.spend(`adds:${organizationId}`, ADDS_PER_HOUSEHOLD, "This household has added a lot of releases to TorBox today."));
+      () => shared.throttle.spend(`adds:${organizationId}`, ADDS_PER_HOUSEHOLD, "This household has added a lot of releases to TorBox today."),
+      () => this.addons());
     this.playback = new PlaybackService(this.library, shared.sessions, shared.progress, settings, shared.ffmpeg, torbox, this.discovery, (show, s, e) => this.catalog.nextEpisode(show, s, e), (id) => this.housekeeping.recordPlayed(id));
   }
 
@@ -181,6 +183,92 @@ export class Household {
     if (key === "tmdbApiKey") runtime.background(this.library.matchPending());
   }
 
+  /**
+   * The Stremio add-ons the household finds releases with, in the order it lists them.
+   * Until it changes the list, that's the server's Torrentio.
+   */
+  addons(): StreamAddon[] {
+    const raw = this.settingsStore.getSecret("streamAddons");
+    if (raw === undefined) return defaultAddons(this.shared.serverSettings.get().torrentioUrl);
+    const parsed = streamAddonListSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : [];
+  }
+
+  /**
+   * Adds an add-on by its manifest URL, after checking it finds streams; throws AddonError.
+   * `allowPrivate` (the server's admin only) lets it be on this machine or the home network.
+   */
+  async addAddon(url: string, allowPrivate = false): Promise<StreamAddon> {
+    const found = await inspectAddon(url, this.shared.fetch, allowPrivate);
+    const list = this.addons();
+    if (list.some((a) => a.url === found.url)) throw new AddonError("That add-on is already in the list.");
+    if (list.length >= MAX_ADDONS) throw new AddonError(`A household can have up to ${MAX_ADDONS} add-ons.`);
+    const addon: StreamAddon = { ...found, id: crypto.randomUUID(), enabled: true };
+    await this.saveAddons([...list, addon]);
+    return addon;
+  }
+
+  /** Turns an add-on on or off, or moves it (`index`); false when there's no such add-on. */
+  async updateAddon(id: string, patch: { enabled?: boolean; index?: number }): Promise<boolean> {
+    const list = this.addons();
+    const at = list.findIndex((a) => a.id === id);
+    if (at < 0) return false;
+    const [addon] = list.splice(at, 1);
+    if (patch.enabled !== undefined) addon!.enabled = patch.enabled;
+    list.splice(Math.max(0, Math.min(patch.index ?? at, list.length)), 0, addon!);
+    await this.saveAddons(list);
+    return true;
+  }
+
+  /** Points an add-on at another manifest URL (re-checked), keeping its place and switch. */
+  async replaceAddon(id: string, url: string, allowPrivate = false): Promise<StreamAddon | null> {
+    const list = this.addons();
+    const at = list.findIndex((a) => a.id === id);
+    if (at < 0) return null;
+    const found = await inspectAddon(url, this.shared.fetch, allowPrivate);
+    if (list.some((a, i) => i !== at && a.url === found.url)) throw new AddonError("That add-on is already in the list.");
+    // A new id: it's no longer the server's default once it points somewhere else.
+    const addon: StreamAddon = { ...found, id: found.url === list[at]!.url ? id : crypto.randomUUID(), enabled: list[at]!.enabled };
+    list[at] = addon;
+    await this.saveAddons(list);
+    return addon;
+  }
+
+  /** Reads every add-on's manifest again (names, what it answers for); returns the ones that didn't answer. */
+  async refreshAddons(): Promise<string[]> {
+    const list = this.addons();
+    const failed: string[] = [];
+    const next = await Promise.all(
+      list.map(async (a) => {
+        try {
+          return { ...a, ...(await inspectAddon(a.url, this.shared.fetch, a.allowPrivate)), id: a.id, enabled: a.enabled };
+        } catch {
+          failed.push(a.name);
+          return a;
+        }
+      }),
+    );
+    await this.saveAddons(next);
+    return failed;
+  }
+
+  async removeAllAddons(): Promise<void> {
+    await this.saveAddons([]);
+  }
+
+  async removeAddon(id: string): Promise<boolean> {
+    const list = this.addons();
+    if (!list.some((a) => a.id === id)) return false;
+    await this.saveAddons(list.filter((a) => a.id !== id));
+    return true;
+  }
+
+  private async saveAddons(list: StreamAddon[]) {
+    // An empty list is kept too: no add-ons is a choice, not "use the default".
+    await this.settingsStore.setSecret("streamAddons", JSON.stringify(list));
+    this.discovery.forget();
+  }
+
   /** The server's settings with the household's on top. */
   settings(): Settings {
     return { ...this.shared.serverSettings.get(), ...this.settingsStore.get() };
@@ -194,6 +282,9 @@ export class Household {
     return this.torboxClient.client;
   }
 }
+
+/** Add-ons a household can list (each is asked on every search). */
+const MAX_ADDONS = 10;
 
 /** Households kept built at once; past this, the least recently used is let go. */
 const KEPT_HOUSEHOLDS = 200;

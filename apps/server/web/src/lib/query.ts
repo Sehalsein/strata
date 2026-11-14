@@ -27,6 +27,7 @@ export const queryKeys = {
   me: ["auth", "me"] as const,
   status: ["admin", "status"] as const,
   settings: ["admin", "settings"] as const,
+  addons: ["admin", "addons"] as const,
   /** Better Auth: the active household with members and invitations. */
   household: ["auth", "household"] as const,
   /** Households the account belongs to. */

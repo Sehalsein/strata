@@ -224,3 +224,64 @@ describe("releases for AniList titles", () => {
     expect(await discovery.releases({ source: "anilist", mediaType: "episode", titleId: 999, season: 1, episode: 1 })).toEqual([]);
   });
 });
+
+describe("slow add-ons", () => {
+  test("once cached releases are in, a slow add-on gets a few seconds; its answer is there for the next look", async () => {
+    const { Discovery } = await import("../src/sources/discovery");
+    const { settingsSchema } = await import("../src/settings");
+    const { setResolverForTests } = await import("../src/sources/addons");
+    setResolverForTests(async () => ["93.184.215.14"]);
+    let slowCalls = 0;
+    let releaseSlow!: () => void;
+    const slowGate = new Promise<void>((r) => (releaseSlow = r));
+    const fetchImpl = (async (input: string) => {
+      const url = new URL(input);
+      if (url.hostname === "fast.example") return Response.json({ streams: [{ name: "[TB+] Fast", title: "Film.2008.1080p.WEB", infoHash: "a".repeat(40) }] });
+      slowCalls++;
+      await slowGate;
+      return Response.json({ streams: [{ name: "Slow", title: "Film.2008.2160p.WEB", infoHash: "b".repeat(40) }] });
+    }) as unknown as typeof fetch;
+    const tmdb = { movie: async () => ({ id: 1, imdb_id: "tt1" }) } as never;
+    const settings = settingsSchema.parse({ useTorboxSearch: false });
+    const addons = [
+      { id: "fast", url: "https://fast.example/manifest.json", name: "Fast", enabled: true, idPrefixes: ["tt"], kind: "stremio" as const, configurable: false, allowPrivate: false },
+      { id: "slow", url: "https://slow.example/manifest.json", name: "Slow", enabled: true, idPrefixes: ["tt"], kind: "stremio" as const, configurable: false, allowPrivate: false },
+    ];
+    const discovery = new Discovery(tmdb, {} as never, () => settings as never, () => null, fetchImpl, () => {}, undefined, async () => {}, () => addons);
+    const target = { source: "tmdb" as const, mediaType: "movie" as const, titleId: 1 };
+
+    const started = Date.now();
+    const first = await discovery.releases(target);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(first.map((r) => r.hash[0])).toEqual(["a"]);
+
+    releaseSlow();
+    await Bun.sleep(50);
+    const second = await discovery.releases(target);
+    expect(second.map((r) => r.hash[0]).sort()).toEqual(["a", "b"]);
+    expect(slowCalls).toBe(1); // the slow add-on's answer came from its own cache
+  }, 15_000);
+});
+
+describe("an add-on's word on what's cached", () => {
+  test("TorBox's answer decides; the add-on's is only the fallback when TorBox can't be asked", async () => {
+    const { Discovery } = await import("../src/sources/discovery");
+    const { settingsSchema } = await import("../src/settings");
+    const { setResolverForTests } = await import("../src/sources/addons");
+    setResolverForTests(async () => ["93.184.215.14"]);
+    const fetchImpl = (async () => Response.json({ streams: [{ name: "[TB+] Torrentio", title: "Film.2008.1080p.WEB", infoHash: "a".repeat(40) }] })) as unknown as typeof fetch;
+    const tmdb = { movie: async () => ({ id: 1, imdb_id: "tt1" }) } as never;
+    const settings = settingsSchema.parse({ useTorboxSearch: false });
+    const addons = [{ id: "t", url: "https://t.example/manifest.json", name: "T", enabled: true, idPrefixes: ["tt"], kind: "stremio" as const, configurable: false, allowPrivate: false }];
+    const target = { source: "tmdb" as const, mediaType: "movie" as const, titleId: 1 };
+    const library = { knownHashes: async () => new Set<string>() } as never;
+
+    const saysNo = { checkCached: async () => new Set<string>() } as never;
+    const disagree = new Discovery(tmdb, library, () => settings as never, () => saysNo, fetchImpl, () => {}, undefined, async () => {}, () => addons);
+    expect((await disagree.releases(target))[0]!.cached).toBe(false);
+
+    const down = { checkCached: async () => Promise.reject(new Error("TorBox is down")) } as never;
+    const fallback = new Discovery(tmdb, library, () => settings as never, () => down, fetchImpl, () => {}, undefined, async () => {}, () => addons);
+    expect((await fallback.releases(target))[0]!.cached).toBe(true);
+  });
+});
