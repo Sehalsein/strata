@@ -7,7 +7,9 @@
 // iPhone/iPad: the Strata mark's three bands as SVG layers of AppIcon.icon (Icon
 // Composer), each marked as glass; iOS renders the Liquid Glass. Apple TV: the layered
 // icon (back: charcoal; front: the bands, which the TV lifts and moves for parallax) and
-// both Top Shelf images, as PNGs in Assets.xcassets.
+// both Top Shelf images, as PNGs in Assets.xcassets. The Mac server app: one 1024 px PNG
+// in macOS's rounded square (apps/macos/StrataLauncher), which its packaging turns into
+// an .icns.
 
 import CoreGraphics
 import Foundation
@@ -66,7 +68,7 @@ func render(_ width: Int, _ height: Int, to path: String, draw: (CGContext, CGSi
     ctx.translateBy(x: 0, y: CGFloat(height))
     ctx.scaleBy(x: 1, y: -1)
     draw(ctx, CGSize(width: width, height: height))
-    let url = assets.appendingPathComponent(path)
+    let url = path.hasPrefix("/") ? URL(fileURLWithPath: path) : assets.appendingPathComponent(path)
     let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)!
     CGImageDestinationAddImage(dest, ctx.makeImage()!, nil)
     precondition(CGImageDestinationFinalize(dest), "couldn't write \(path)")
@@ -117,3 +119,28 @@ render(1920, 720, to: "\(stack)/Top Shelf Image.imageset/top-shelf-1920.png", dr
 render(3840, 1440, to: "\(stack)/Top Shelf Image.imageset/top-shelf-3840.png", draw: topShelf)
 render(2320, 720, to: "\(stack)/Top Shelf Image Wide.imageset/top-shelf-wide-2320.png", draw: topShelf)
 render(4640, 1440, to: "\(stack)/Top Shelf Image Wide.imageset/top-shelf-wide-4640.png", draw: topShelf)
+
+// MARK: Mac server app
+
+/// macOS's icon grid: an 824 px rounded square centred on the 1024 canvas, charcoal, with
+/// the mark's bands. Flat, as for the other icons; macOS adds nothing itself here, so a
+/// soft shadow under the square is drawn in, as Apple's template has.
+let macIcon = resources.deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("macos/StrataLauncher/AppIcon-1024.png").path
+render(1024, 1024, to: macIcon) { ctx, size in
+    let square = CGRect(x: 100, y: 100, width: 824, height: 824)
+    let shape = CGPath(roundedRect: square, cornerWidth: 185.4, cornerHeight: 185.4, transform: nil)
+    ctx.saveGState()
+    ctx.setShadow(offset: CGSize(width: 0, height: 10), blur: 28, color: color(0x000000, 0.3))
+    ctx.addPath(shape); ctx.setFillColor(color(charcoal.bottom)); ctx.fillPath()
+    ctx.restoreGState()
+    ctx.saveGState()
+    ctx.addPath(shape); ctx.clip()
+    let gradient = CGGradient(colorsSpace: space, colors: [color(charcoal.top), color(charcoal.bottom)] as CFArray, locations: [0, 1])!
+    ctx.drawLinearGradient(gradient, start: CGPoint(x: 0, y: square.minY), end: CGPoint(x: 0, y: square.maxY), options: [])
+    let height = square.height * markHeight / 1024
+    for (points, tint) in zip(bands(height: height, centre: CGPoint(x: size.width / 2, y: size.height / 2)), tints) {
+        fill(ctx, points, tint, stroke: cornerStroke * height / 500)
+    }
+    ctx.restoreGState()
+}
