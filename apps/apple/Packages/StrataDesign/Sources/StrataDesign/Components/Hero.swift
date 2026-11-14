@@ -11,6 +11,9 @@ public struct HeroBillboard<Actions: View>: View {
     let fallbackURL: URL?
     let eyebrow: String?
     let title: String
+    /// The title as artwork (the film's own logo), shown in place of `title` once it
+    /// loads; the name stays as the fallback and for VoiceOver.
+    let logoURL: URL?
     let meta: [String]
     let badges: [String]
     /// IMDb / Rotten Tomatoes, after the metadata line.
@@ -39,7 +42,7 @@ public struct HeroBillboard<Actions: View>: View {
     @ScaledMetric(relativeTo: .largeTitle) private var featuredTitleSize: CGFloat = 52
     #endif
 
-    public init(id: String, backdropURL: URL?, fallbackURL: URL? = nil, eyebrow: String? = nil, title: String, meta: [String] = [], badges: [String] = [], ratings: [ExternalRating] = [], overview: String? = nil, paged: Bool = false, featured: Bool = false, credits: [HeroCredit] = [], progress: HeroProgress? = nil, @ViewBuilder actions: @escaping () -> Actions) {
+    public init(id: String, backdropURL: URL?, fallbackURL: URL? = nil, eyebrow: String? = nil, title: String, logoURL: URL? = nil, meta: [String] = [], badges: [String] = [], ratings: [ExternalRating] = [], overview: String? = nil, paged: Bool = false, featured: Bool = false, credits: [HeroCredit] = [], progress: HeroProgress? = nil, @ViewBuilder actions: @escaping () -> Actions) {
         self.id = id
         self.backdropURL = backdropURL.map(HeroArt.backdrop)
         self.paged = paged
@@ -49,11 +52,21 @@ public struct HeroBillboard<Actions: View>: View {
         self.fallbackURL = fallbackURL
         self.eyebrow = eyebrow
         self.title = title
+        self.logoURL = logoURL
         self.meta = meta
         self.badges = badges
         self.ratings = ratings
         self.overview = overview
         self.actions = actions
+    }
+
+    /// The box a logo fits in: wide and short, like the TV app's.
+    static func logoSize(featured: Bool) -> CGSize {
+        #if os(tvOS)
+        featured ? CGSize(width: 620, height: 210) : CGSize(width: 560, height: 190)
+        #else
+        Metrics.isPad ? CGSize(width: 440, height: 150) : CGSize(width: 260, height: 100)
+        #endif
     }
 
     /// How far the art lags behind a page as it slides, as a fraction of the page width.
@@ -225,13 +238,14 @@ public struct HeroBillboard<Actions: View>: View {
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: Metrics.space3) {
             if let eyebrow { Text(eyebrow).eyebrowStyle(heroText.opacity(0.75)) }
-            Text(title)
-                .font(titleFont)
-                .titleTracking()
-                .foregroundStyle(heroText)
-                .lineLimit(2)
-                .minimumScaleFactor(0.6)
-                .accessibilityAddTraits(.isHeader)
+            HeroTitle(title: title, logoURL: logoURL, maxLogo: Self.logoSize(featured: false)) {
+                Text(title)
+                    .font(titleFont)
+                    .titleTracking()
+                    .foregroundStyle(heroText)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.6)
+            }
             if !meta.isEmpty || !badges.isEmpty || !ratings.isEmpty {
                 // One line when it fits; on a phone the badges wrap under the metadata.
                 ViewThatFits(in: .horizontal) {
@@ -303,14 +317,15 @@ public struct HeroBillboard<Actions: View>: View {
                     .padding(.vertical, Metrics.space1)
                     .overlay(Capsule().strokeBorder(heroText.opacity(0.7), lineWidth: 2))
             }
-            Text(title)
-                .font(featuredTitleFont)
-                .titleTracking()
-                .foregroundStyle(heroText)
-                .lineLimit(2)
-                .minimumScaleFactor(0.5)
-                .shadow(color: .black.opacity(colorScheme == .light ? 0 : 0.35), radius: 12, y: 4)
-                .accessibilityAddTraits(.isHeader)
+            HeroTitle(title: title, logoURL: logoURL, maxLogo: Self.logoSize(featured: true)) {
+                Text(title)
+                    .font(featuredTitleFont)
+                    .titleTracking()
+                    .foregroundStyle(heroText)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.5)
+            }
+            .shadow(color: .black.opacity(colorScheme == .light ? 0 : 0.35), radius: 12, y: 4)
             // Like the TV app: the facts, the synopsis, then the ratings and specs.
             if !meta.isEmpty {
                 Text(meta.joined(separator: " · "))
@@ -786,5 +801,41 @@ public extension Metrics {
         #else
         isPad
         #endif
+    }
+}
+
+
+/// A hero's title: the film's logo when there is one and it loads, else the name in the
+/// hero's type. While the logo loads, the name holds its place unseen, so the text under
+/// it doesn't jump. Light mode (iPhone and iPad) keeps the name: logos are made for dark.
+struct HeroTitle<Fallback: View>: View {
+    let title: String
+    let logoURL: URL?
+    let maxLogo: CGSize
+    @ViewBuilder let fallback: () -> Fallback
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Group {
+            if let logoURL, colorScheme == .dark {
+                AsyncImage(url: logoURL, transaction: Transaction(animation: .easeOut(duration: 0.25))) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFit()
+                            .frame(maxWidth: maxLogo.width, maxHeight: maxLogo.height, alignment: .bottomLeading)
+                            .transition(.opacity)
+                    case .failure:
+                        fallback()
+                    default:
+                        fallback().hidden()
+                    }
+                }
+            } else {
+                fallback()
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(.isHeader)
     }
 }

@@ -43,9 +43,12 @@ public struct TitleCard: Codable, Sendable, Hashable, Identifiable {
     public var eyebrow: String? = nil
     /// A short label from the server, shown as is ("Episode 12", "TV · 24 episodes").
     public var badge: String? = nil
+    /// On hero cards: the title's logo, shown in place of its name. Absent from older
+    /// servers and for titles without one.
+    public var logoUrl: URL? = nil
 
     enum CodingKeys: String, CodingKey {
-        case type, tmdbId, title, year, overview, posterUrl, backdropUrl, rating, available, episode, positionMs, durationMs, role, eyebrow, badge
+        case type, tmdbId, title, year, overview, posterUrl, backdropUrl, rating, available, episode, positionMs, durationMs, role, eyebrow, badge, logoUrl
         case sentRef = "ref"
     }
 
@@ -335,6 +338,8 @@ public struct MovieDetail: Codable, Sendable, Hashable, Identifiable {
     public var certification: String?
     public var posterUrl: URL?
     public var backdropUrl: URL?
+    /// The title's logo for the page's hero; absent from older servers and titles without one.
+    public var logoUrl: URL?
     public var cast: [CastMember]
     public var directors: [String]
     public var trailer: Trailer?
@@ -354,7 +359,7 @@ public struct MovieDetail: Codable, Sendable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case type, tmdbId, imdbId, title, tagline, overview, year, releaseDate, runtimeMinutes, genres, rating, ratings, certification
-        case posterUrl, backdropUrl, cast, directors, trailer, videos, anime, collection, related, recommendations, available, sources
+        case posterUrl, backdropUrl, logoUrl, cast, directors, trailer, videos, anime, collection, related, recommendations, available, sources
         case progress, inWatchlist
         case sentRef = "ref"
     }
@@ -421,6 +426,8 @@ public struct ShowDetail: Codable, Sendable, Hashable, Identifiable {
     public var certification: String?
     public var posterUrl: URL?
     public var backdropUrl: URL?
+    /// The title's logo for the page's hero; absent from older servers and titles without one.
+    public var logoUrl: URL?
     public var cast: [CastMember]
     public var trailer: Trailer?
     /// Absent from older servers.
@@ -437,7 +444,7 @@ public struct ShowDetail: Codable, Sendable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case type, tmdbId, imdbId, title, tagline, overview, year, firstAirDate, lastAirDate, status, genres, rating, ratings
-        case certification, posterUrl, backdropUrl, cast, trailer, videos, anime, seasons, related, recommendations, available
+        case certification, posterUrl, backdropUrl, logoUrl, cast, trailer, videos, anime, seasons, related, recommendations, available
         case upNext, inWatchlist
         case sentRef = "ref"
     }

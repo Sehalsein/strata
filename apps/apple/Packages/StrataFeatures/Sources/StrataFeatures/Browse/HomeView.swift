@@ -539,7 +539,7 @@ struct HeroCarousel: View {
     private func hero(_ card: TitleCard) -> some View {
         // Just the name on iPhone: the carousel is for picking, the title page has the
         // details. Apple TV and iPad have room for a line of facts and the synopsis.
-        HeroBillboard(id: card.id, backdropURL: card.backdropUrl, fallbackURL: card.posterUrl, eyebrow: card.eyebrow, title: card.title,
+        HeroBillboard(id: card.id, backdropURL: card.backdropUrl, fallbackURL: card.posterUrl, eyebrow: card.eyebrow, title: card.title, logoURL: card.logoUrl,
                       meta: roomy ? meta(card) : [], badges: roomy ? card.badge.map { [$0] } ?? [] : [],
                       overview: roomy ? card.overview : nil, paged: true, featured: true) {
             // Play when the server can play it now; otherwise the wide button opens it.

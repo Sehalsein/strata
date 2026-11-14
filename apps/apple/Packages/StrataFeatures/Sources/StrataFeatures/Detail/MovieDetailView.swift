@@ -55,6 +55,7 @@ struct MovieDetailView: View {
                           fallbackURL: movie.posterUrl,
                           eyebrow: movie.availabilityLabel ?? String(localized: "Movie", bundle: .module),
                           title: movie.title,
+                          logoURL: movie.logoUrl,
                           meta: [movie.genres.first, movie.yearText, movie.runtimeText, movie.certification, movie.ratings.tmdbStar(movie.ratingText)].compactMap { $0 },
                           badges: movie.sources.first?.specLabels.prefix(3).map { $0 } ?? [],
                           ratings: movie.ratings.badges,

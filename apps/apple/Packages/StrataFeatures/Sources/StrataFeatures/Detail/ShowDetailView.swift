@@ -70,6 +70,7 @@ struct ShowDetailView: View {
                           fallbackURL: show.posterUrl,
                           eyebrow: show.availabilityLabel ?? String(localized: "Show", bundle: .module),
                           title: show.title,
+                          logoURL: show.logoUrl,
                           meta: [show.genres.first, show.yearRangeText, show.certification, seasonCount(show), show.ratings.tmdbStar(show.ratingText)].compactMap { $0 },
                           ratings: show.ratings.badges,
                           overview: show.overview, featured: Metrics.isTV,
