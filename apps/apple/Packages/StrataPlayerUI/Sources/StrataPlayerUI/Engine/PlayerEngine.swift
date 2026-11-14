@@ -396,6 +396,18 @@ public final class PlayerEngine {
         }
     }
 
+    /// Why a copy's link wouldn't open. When its host doesn't answer, says so: that's the
+    /// copy's own server (TorBox's, say), not your Strata server.
+    nonisolated static func openFailure(_ error: Error) -> String {
+        let ns = error as NSError
+        let unreachable = ns.domain == NSURLErrorDomain && [NSURLErrorCannotConnectToHost, NSURLErrorTimedOut,
+            NSURLErrorCannotFindHost, NSURLErrorNetworkConnectionLost, NSURLErrorDNSLookupFailed].contains(ns.code)
+        if unreachable || error.localizedDescription.lowercased().contains("connect") {
+            return "This copy's server didn't answer. Choose another source."
+        }
+        return "This copy couldn't be opened (\(error.localizedDescription)). Choose another source."
+    }
+
     /// What the player says while it switches: why the last copy was passed over, and
     /// which one it's trying ("That copy couldn't be reached. Switching to 1080p · WEB (2 of 4)…").
     private static func fallbackNote(after failure: DeviceFailure, next: Candidate, attempt: Int) -> String {
@@ -497,7 +509,7 @@ public final class PlayerEngine {
             } catch {
                 local.stop()
                 guard gen == generation else { throw CancellationError() }
-                throw DeviceFailure(message: "This file couldn't be opened (\(error.localizedDescription)). Pick another source.")
+                throw DeviceFailure(message: Self.openFailure(error))
             }
             guard gen == generation else { local.stop(); throw CancellationError() }
             newRemux = local
