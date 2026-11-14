@@ -1,18 +1,24 @@
 # Strata Server
 
-A self-hosted media server. You browse one catalog (from TMDB), and each title plays from
-your local folders or your TorBox account. It runs headless and is configured from a web
-dashboard in your browser. See [DESIGN.md](DESIGN.md) for the architecture.
+The self-hosted server behind Strata. You browse one catalog (from TMDB), and each title plays from your local folders or your TorBox account. It runs headless and you configure it from a web dashboard.
+
+This file covers installing, running, updating and building it. The architecture is in [DESIGN.md](DESIGN.md).
+
+## Quick start
+
+```sh
+./strata-server            # http://localhost:8420; the first visit runs setup
+```
+
+Get `strata-server` from [Install](#install) below, or run it from source (see [Develop](#develop)).
 
 ## Install
 
-Prebuilt binaries for Linux (x64, arm64) and macOS (Apple silicon), with the dashboard built
-in and automatic updates available, are on the
-[releases page](https://github.com/Sehalsein/strata/releases).
+Prebuilt binaries for Linux (x64, arm64) and macOS (Apple silicon) are on the [releases page](https://github.com/Sehalsein/strata/releases). They include the dashboard and can update themselves.
 
-**Mac:** download [Strata.dmg](https://github.com/Sehalsein/strata/releases/download/server-stable/Strata.dmg),
-drag Strata to Applications and open it. It runs from the menu bar, starts at login, sets up
-ffmpeg and updates itself. Or with Homebrew:
+### Mac
+
+Download [Strata.dmg](https://github.com/Sehalsein/strata/releases/download/server-stable/Strata.dmg), drag Strata to Applications and open it. It runs from the menu bar, starts at login, sets up ffmpeg and updates itself. Or use Homebrew:
 
 ```sh
 brew tap sehalsein/strata https://github.com/Sehalsein/strata
@@ -20,7 +26,7 @@ brew trust sehalsein/strata   # Homebrew asks before loading casks from other ta
 brew install --cask strata
 ```
 
-**Linux** (or a Mac without the app):
+### Linux (or a Mac without the app)
 
 ```sh
 curl -fLo strata-server https://github.com/Sehalsein/strata/releases/download/server-stable/strata-server-linux-x64
@@ -28,17 +34,24 @@ chmod +x strata-server
 sudo ./strata-server service install --system   # macOS: ./strata-server service install
 ```
 
-Then open `http://<server>:8420` to run setup. ffmpeg comes with it (set up on first start).
-On Linux, `sudo apt install avahi-utils` lets the apps find the server on the network.
+Then open `http://<server>:8420` to run setup. ffmpeg is set up on first start.
 
-Other builds: `strata-server-linux-arm64`, `strata-server-darwin-arm64`. For the nightly
-channel, download from `server-nightly` instead of `server-stable`. Each of those releases
-has a `SHA256SUMS` to check the download against.
+On Linux, `sudo apt install avahi-utils` lets the apps find the server on your network.
+
+### Other builds
+
+| File | Platform |
+|---|---|
+| `strata-server-linux-x64` | Linux, x64 |
+| `strata-server-linux-arm64` | Linux, arm64 |
+| `strata-server-darwin-arm64` | macOS, Apple silicon |
+
+For the nightly channel, download from `server-nightly` instead of `server-stable`. Each release has a `SHA256SUMS` file to check the download against.
 
 ## Run
 
 ```sh
-./strata-server                      # http://localhost:8420; the first visit runs setup
+./strata-server
 ./strata-server --port 9000 --data-dir /srv/strata
 ./strata-server --version
 ./strata-server help
@@ -49,26 +62,14 @@ has a `SHA256SUMS` to check the download against.
 | `--port` | `STRATA_PORT` | `8420` |
 | `--host` | `STRATA_HOST` | `0.0.0.0` |
 | `--data-dir` | `STRATA_DATA_DIR` | `~/Library/Application Support/Strata` (macOS), `~/.local/share/strata` (Linux) |
-| `--web-dir` | `STRATA_WEB_DIR` | embedded dashboard |
-| | `TMDB_API_KEY`, `TORBOX_API_KEY`, `OMDB_API_KEY` | override keys saved in the dashboard (OMDb is optional: IMDb and Rotten Tomatoes ratings) |
-| | `STRATA_DEBUG=1` | debug logging (includes ffmpeg command lines) |
+| `--web-dir` | `STRATA_WEB_DIR` | The embedded dashboard |
+| `--database-url` | `DATABASE_URL` | The bundled database in the data folder |
+| | `STRATA_DEBUG=1` | Off. Turns on debug logging, including ffmpeg command lines. |
+| | `STRATA_NO_FFMPEG_DOWNLOAD=1` | Off. Stops a source run from downloading ffmpeg. |
 
-The binary is self-contained: the dashboard, the database (Postgres, as PGlite) and ffmpeg
-are all inside it, and it sets them up in its data folder on first start. ffmpeg and
-ffprobe (for probing, remuxing and transcoding) are
-[jellyfin-ffmpeg](https://github.com/jellyfin/jellyfin-ffmpeg) (static, with VideoToolbox,
-VAAPI and QSV), pinned by version and SHA-256 (`src/platform/ffmpegInstall.ts`), embedded
-gzipped by `scripts/build.ts` and unpacked into `<data-dir>/bin` with their licence notice
-(they're GPL). Run from source, the server looks in `<data-dir>/bin`, `$PATH`,
-`/opt/homebrew/bin` and `/usr/local/bin`, and downloads the same build when there's none;
-`STRATA_NO_FFMPEG_DOWNLOAD=1` turns that off.
+Port and bind address are set only on the command line or in env, never in the dashboard (it shows them read-only). That way a settings change can't cut the dashboard off.
 
-Port and bind address are deliberately CLI/env-only (the dashboard shows them read-only), so
-a settings change can never cut the dashboard off. The server advertises itself on the LAN
-as `_strata._tcp` (TXT `version`, `api`, `id`) through `dns-sd` on macOS or
-`avahi-publish-service` on Linux (`apt install avahi-utils`); turn it off under
-Settings → Network. `id` is a stable per-install id kept in `<data-dir>/server-id` and also
-returned by `GET /api/info`.
+API keys (TMDB, TorBox, and optionally OMDb for IMDb and Rotten Tomatoes ratings) are entered in the dashboard.
 
 ## Run as a service
 
@@ -80,102 +81,63 @@ returned by `GET /api/info`.
 ./strata-server service install --dry-run  # print the plist/unit, change nothing
 ```
 
-`install` copies the running binary to `~/.local/bin/strata-server` (unless it already runs
-from there) so self-update can replace it in place, then registers that copy with the
-port/host/data dir given at install time:
+`install` copies the running binary to `~/.local/bin/strata-server` (unless it already runs from there), so self-update can replace it. It registers that copy with the port, host and data dir you give.
 
-- **macOS**: a per-user LaunchAgent, `~/Library/LaunchAgents/com.strata.server.plist`
-  (`RunAtLoad`, `KeepAlive`), loaded with `launchctl bootstrap gui/$UID`. stdout/stderr go to
-  `<data-dir>/logs/service.{out,err}.log`; the server's own log is `<data-dir>/logs/strata.log`.
-- **Linux**: a systemd user unit, `~/.config/systemd/user/strata-server.service`, enabled with
-  `systemctl --user enable --now`. User services stop at logout unless you run
-  `sudo loginctl enable-linger $USER`. Logs: `journalctl --user -u strata-server`.
-- **Linux, system-wide**: `sudo ./strata-server service install --system [--user NAME]` writes
-  `/etc/systemd/system/strata-server.service`, runs as `NAME` (default: the sudo user), keeps the
-  binary at `/usr/local/lib/strata/strata-server` (owned by that user, for self-update) and the
-  data in `/var/lib/strata` unless `--data-dir` is given. Without root it prints the `sudo`
-  command instead of escalating.
+| Platform | What it sets up | Logs |
+|---|---|---|
+| macOS | A per-user LaunchAgent, `~/Library/LaunchAgents/com.strata.server.plist` (`RunAtLoad`, `KeepAlive`), loaded with `launchctl bootstrap gui/$UID` | `<data-dir>/logs/service.{out,err}.log`, and the server's own `<data-dir>/logs/strata.log` |
+| Linux | A systemd user unit, `~/.config/systemd/user/strata-server.service`, enabled with `systemctl --user enable --now` | `journalctl --user -u strata-server` |
+| Linux, system-wide | `sudo ./strata-server service install --system [--user NAME]` writes `/etc/systemd/system/strata-server.service` | |
 
-The service manager restarts the server when it exits; self-update relies on that (exit code 75).
+Notes:
+
+- Linux user services stop at logout unless you run `sudo loginctl enable-linger $USER`.
+- A system-wide service runs as `NAME` (default: the sudo user). It keeps the binary at `/usr/local/lib/strata/strata-server` (owned by that user, for self-update) and data in `/var/lib/strata` unless you pass `--data-dir`.
+- Without root, `--system` prints the `sudo` command instead of escalating.
+- The service manager restarts the server when it exits. Self-update relies on that (exit code 75).
 
 ## Updates
 
-Two channels, **stable** and **nightly** (Settings → Updates). The server polls a signed
-`manifest.json` for its channel every 6 hours and on **Check now**. With **Install updates
-automatically** off (the default) the dashboard shows "Update available" and an **Update**
-button.
+There are two channels, **stable** and **nightly**, chosen under Settings → Updates. The server checks for updates every 6 hours and when you press **Check now**.
 
-Where the manifest lives:
+**Install updates automatically** is off by default. Until you turn it on, the dashboard shows "Update available" and an **Update** button.
 
-- **Built-in feed.** `scripts/build.ts --update-url <base>` (or `STRATA_UPDATE_URL` at build
-  time) bakes a feed into the binary: stable reads `<base>/manifest.json`, nightly
-  `<base>/nightly/manifest.json`. A base ending in `/nightly` marks a nightly build, which also
-  makes nightly its default channel.
-- **Override.** Settings → Updates → Advanced → *Manifest URL override* (`updateManifestUrl`);
-  `{channel}` is replaced with the channel. Handy for testing against a local server.
-- **Neither** (any build without `--update-url`, e.g. `bun run build`): the Updates card says
-  "Updates not configured" and nothing is fetched.
-
-The manifest is `{ version, channel, publishedAt, minClientApi, platforms: { "darwin-arm64":
-{ url, sha256, size }, … } }`, and `manifest.json.sig` next to it holds a base64 Ed25519
-signature over its exact bytes. The server only accepts manifests signed with the key compiled
-into it (`src/update/publicKey.ts`) and for the channel it asked for, so the host serving them
-doesn't need to be trusted and no token is involved.
-
-Applying an update: download the platform binary to `<binary>.new` → verify size and SHA-256
-→ ad-hoc `codesign` it (macOS) → run it with `--version` to make sure it starts → wait until
-no stream is playing → back up the DB to `<data-dir>/backups/` → write
-`<data-dir>/pending-update.json` → move the running binary to `<binary>.old` and the new one into
-place → exit and get restarted. In the foreground (no service manager) the old process stays
-on as a small supervisor that starts the new binary in the same terminal.
-
-If the new version fails to start twice (it hasn't stayed up for 30 seconds), the next start
-restores `<binary>.old` and the DB backup, records the failure in `<data-dir>/last-update.json`
-(shown in the dashboard), and automatic updates skip that version.
-
-Downgrades are refused, with one exception: a nightly build on the stable channel is offered
-the stable release even though semver ranks it lower (that is how you leave nightly). If that
-release can't open a database a nightly already migrated, it fails to start and the rollback
-above puts the nightly back.
-
-From the command line: `strata-server update --check` reports, `strata-server update` installs
-immediately (it can't see active streams from there) and restarts the service if one is
-installed. Self-update is disabled when running from source.
-
-### Signing a release by hand
+From the command line:
 
 ```sh
-bun scripts/keygen.ts --private-out ~/strata-update.key --write-public   # once; commits nothing secret
-bun scripts/build.ts --all --version 0.2.0 --update-url https://updates.example.com/server
-bun scripts/release-manifest.ts --version 0.2.0 --channel stable --dir dist \
-  --base-url https://updates.example.com/server --out dist/feed --key-file ~/strata-update.key
-# upload dist/strata-server-<platform> as <base>/strata-server-0.2.0-<platform>,
-# then dist/feed/manifest.json and manifest.json.sig (binaries first)
+strata-server update --check   # report only
+strata-server update           # install now and restart the service, if there is one
 ```
 
-The public key in `src/update/publicKey.ts` is compiled into every binary; commit it. The
-private key (base64 PKCS#8 DER from keygen, or a PEM block) must never be committed; keep an
-offline backup, since without it no update will be accepted by existing servers.
-`release-manifest.ts` refuses to sign with a key that doesn't match the embedded public key.
+`update` from the command line can't see active streams. Self-update is off when running from source.
 
-### Releases
+### How an update is applied
 
-`.github/workflows/server-release.yml` publishes GitHub releases (the repository is public, so
-servers download them without a login):
+1. Download the platform binary to `<binary>.new` and check its size and SHA-256.
+2. Ad-hoc `codesign` it (macOS) and run it with `--version` to make sure it starts.
+3. Wait until no stream is playing, then back up the database to `<data-dir>/backups/`.
+4. Write `<data-dir>/pending-update.json`, move the running binary to `<binary>.old` and the new one into place.
+5. Exit and get restarted. Without a service manager, the old process stays on as a small supervisor that starts the new binary in the same terminal.
 
-- **Nightly** on every server change merged to `main`: version `<next patch>-nightly.<run>`,
-  in the rolling `server-nightly` prerelease.
-- **Stable** when `apps/server/package.json` has a version with no `server-v<version>` tag: a
-  `server-v<version>` release with the binaries, and its manifest in the rolling
-  `server-stable` release. To ship one, bump that version and merge.
+**Rollback:** if the new version fails to start twice (it doesn't stay up for 30 seconds), the next start restores `<binary>.old` and the database backup. The failure is recorded in `<data-dir>/last-update.json` (shown in the dashboard), and automatic updates skip that version.
 
-Builds use the feed `https://github.com/Sehalsein/strata/releases/download/server-{channel}`
-(`--update-url … --channel <channel>`), so a server reads `server-<channel>/manifest.json`.
-Manifests are signed in CI with `STRATA_UPDATE_PRIVATE_KEY`, a secret of the
-`server-release` environment, which only `main` can deploy to; signing only runs when
-publishing. A manual run (Actions → Server Release) builds without signing or publishing
-unless *Publish* is ticked. `.github/workflows/server-ci.yml` typechecks, tests and
-build-checks every server change.
+**Downgrades** are refused, with one exception: a nightly build on the stable channel is offered the stable release, which is how you leave nightly. If that release can't open a database the nightly already migrated, it fails to start and the rollback puts the nightly back.
+
+### Where updates come from
+
+The server reads a signed `manifest.json` for its channel:
+
+- **Built-in feed.** `scripts/build.ts --update-url <base>` (or `STRATA_UPDATE_URL` at build time) bakes a feed into the binary. Stable reads `<base>/manifest.json`, nightly `<base>/nightly/manifest.json`. A base ending in `/nightly` marks a nightly build, which also makes nightly its default channel.
+- **Override.** Settings → Updates → Advanced → *Manifest URL override* (`updateManifestUrl`). `{channel}` is replaced with the channel. Handy for testing against a local server.
+- **Neither** (any build without `--update-url`, such as `bun run build`): the Updates card says "Updates not configured" and nothing is fetched.
+
+The manifest looks like this:
+
+```
+{ version, channel, publishedAt, minClientApi, platforms: { "darwin-arm64": { url, sha256, size }, … } }
+```
+
+`manifest.json.sig` next to it holds a base64 Ed25519 signature over the manifest's exact bytes. The server only accepts manifests signed with the key compiled into it (`src/update/publicKey.ts`) and for the channel it asked for. So the host serving them doesn't need to be trusted, and no token is involved.
 
 ## Develop
 
@@ -183,10 +145,13 @@ build-checks every server change.
 cd apps/server
 bun install
 bun run dev          # API on :8420 with --watch, data in ./.data
-cd web && bun install && bun run dev   # dashboard on Vite, proxies /api to :8420
 bun test             # unit + API tests (generates small ffmpeg fixtures in $TMPDIR)
 bun run typecheck
 ```
+
+For the dashboard, run `bun install && bun run dev` in `web/` too. It runs on Vite and proxies `/api` to `:8420`. See [web/README.md](web/README.md).
+
+Run from source, the server looks for ffmpeg in `<data-dir>/bin`, `$PATH`, `/opt/homebrew/bin` and `/usr/local/bin`. If there's none, it downloads the same build the binaries bundle (unless `STRATA_NO_FFMPEG_DOWNLOAD=1`).
 
 ## Build
 
@@ -197,31 +162,62 @@ bun scripts/build.ts --skip-web --version 0.2.0   # reuse web/dist; stamp a vers
 bun scripts/build.ts --update-url https://updates.example.com/server   # bake an update feed
 ```
 
-The build compiles the dashboard (`web/`), embeds `web/dist` in the binary, compiles with
-`bun build --compile`, and re-signs darwin builds ad hoc. Without that re-sign, current
-macOS kills them on launch.
+The build:
 
-## Phase 1 status
+- compiles the dashboard (`web/`) and embeds `web/dist` in the binary,
+- compiles with `bun build --compile`,
+- re-signs darwin builds ad hoc. Without that, current macOS kills them on launch.
 
-Working and covered by tests:
-- setup wizard API, login, profiles with PINs
-- settings, with encrypted secrets
-- TMDB catalog: home shelves, browse, search, movie/show/season detail
-- local folder scan with filename parsing and TMDB matching, plus manual fix-up
-- TorBox library sync
-- source ranking
-- direct play with byte ranges; HLS remux, audio transcode and full transcode
-  (VideoToolbox / VAAPI / QSV / x264)
-- resume, progress, Continue Watching, Next Up, watchlist
-- keep-awake on macOS while streaming
+### What's inside the binary
 
-Known gaps:
-- The TorBox integration has only been exercised against the API docs, not a live account.
-- HLS uses an EVENT playlist that grows as ffmpeg works. Seeking past what has been produced
-  means starting a new play session at that `startMs`, and the client offsets its timeline
-  by `startOffsetMs`. With stream copy, the real start snaps to the previous keyframe
-  (up to ~1 segment early).
-- Subtitles are not served yet (tracks are listed in the play response).
-- The HLS output has been validated with ffprobe/ffmpeg, but not yet on a real AVPlayer device.
-- Phase 2 (done): Bonjour, self-update with rollback, `service install`.
-  Since then: release CI and the update feed, and ffmpeg built into the binary.
+The binary is self-contained. The dashboard, the database (Postgres, as PGlite) and ffmpeg are all inside, and it sets them up in its data folder on first start.
+
+ffmpeg and ffprobe are [jellyfin-ffmpeg](https://github.com/jellyfin/jellyfin-ffmpeg) (static, with VideoToolbox, VAAPI and QSV). They are:
+
+- pinned by version and SHA-256 in `src/platform/ffmpegInstall.ts`,
+- embedded gzipped by `scripts/build.ts`,
+- unpacked into `<data-dir>/bin` with their licence notice (they're GPL).
+
+## Releases
+
+`.github/workflows/server-release.yml` publishes GitHub releases. The repository is public, so servers download them without a login.
+
+| Channel | When | Version | Where |
+|---|---|---|---|
+| Nightly | Every server change merged to `main` | `<next patch>-nightly.<run>` | The rolling `server-nightly` prerelease |
+| Stable | `apps/server/package.json` has a version with no `server-v<version>` tag | `<version>` | A `server-v<version>` release with the binaries, and its manifest in the rolling `server-stable` release |
+
+To ship a stable release, bump the version in `apps/server/package.json` and merge.
+
+- Builds use the feed `https://github.com/Sehalsein/strata/releases/download/server-{channel}` (`--update-url … --channel <channel>`), so a server reads `server-<channel>/manifest.json`.
+- Manifests are signed in CI with `STRATA_UPDATE_PRIVATE_KEY`, a secret of the `server-release` environment, which only `main` can deploy to. Signing only runs when publishing.
+- A manual run (Actions → Server Release) builds without signing or publishing unless *Publish* is ticked.
+- `.github/workflows/server-ci.yml` typechecks, tests and build-checks every server change.
+
+### Signing a release by hand
+
+```sh
+bun scripts/keygen.ts --private-out ~/strata-update.key --write-public   # once; commits nothing secret
+bun scripts/build.ts --all --version 0.2.0 --update-url https://updates.example.com/server
+bun scripts/release-manifest.ts --version 0.2.0 --channel stable --dir dist \
+  --base-url https://updates.example.com/server --out dist/feed --key-file ~/strata-update.key
+```
+
+Then upload `dist/strata-server-<platform>` as `<base>/strata-server-0.2.0-<platform>`, followed by `dist/feed/manifest.json` and `manifest.json.sig`. Upload the binaries first.
+
+About the keys:
+
+- The public key in `src/update/publicKey.ts` is compiled into every binary. Commit it.
+- Never commit the private key (base64 PKCS#8 DER from keygen, or a PEM block). Keep an offline backup: without it, existing servers won't accept any update.
+- `release-manifest.ts` refuses to sign with a key that doesn't match the embedded public key.
+
+## Network discovery
+
+The server advertises itself on the LAN as `_strata._tcp` (TXT `version`, `api`, `id`). It uses `dns-sd` on macOS and `avahi-publish-service` on Linux (`apt install avahi-utils`). Turn it off under Settings → Network.
+
+`id` is a stable per-install id, kept in `<data-dir>/server-id` and also returned by `GET /api/info`.
+
+## Known limitations
+
+- The TorBox integration has only been checked against the API docs, not a live account.
+- HLS uses an EVENT playlist that grows as ffmpeg works. Seeking past what's been produced starts a new play session at that `startMs`, and the client offsets its timeline by `startOffsetMs`. With stream copy, the real start snaps to the previous keyframe (up to about one segment early).

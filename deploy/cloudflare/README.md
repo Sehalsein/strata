@@ -1,8 +1,27 @@
 # Strata on Cloudflare Workers
 
-The cloud server: the same code as the home server, running on Workers
-(`apps/server/src/worker.ts`) with Neon as its database. Stateless: everything lasting
-is in Postgres, so any number of Worker instances serve it.
+The cloud server: the same code as the home server, running on Workers (`apps/server/src/worker.ts`) with Neon as its database. This file is for deploying and configuring it.
+
+It's stateless. Everything lasting is in Postgres, so any number of Worker instances can serve it.
+
+## Quick start
+
+Every merge to `main` deploys through Cloudflare's Workers Builds. To deploy by hand the first time:
+
+```sh
+cd deploy/cloudflare
+npx wrangler secret put DATABASE_URL         # Neon connection string (sslmode=require)
+npx wrangler secret put STRATA_SECRET_KEY    # openssl rand -base64 32 — keep it safe
+DATABASE_URL='postgres://…' bash deploy.sh   # migrate, then deploy
+```
+
+Then create the server admin:
+
+1. Run `npx wrangler tail` and make a request. The log shows a **setup code**.
+2. Open the dashboard and enter the code to create the server admin.
+3. Add households (the household switcher at the top of the sidebar) and invite their owners.
+
+## At a glance
 
 | | |
 |---|---|
@@ -13,17 +32,24 @@ is in Postgres, so any number of Worker instances serve it.
 | Accounts | Better Auth: invite-only households, TV sign-in by code |
 | Cost | Workers Paid ($5/month) + Neon's free tier for a household |
 
-## Deploy
+## How deploys work
 
-Every merge to main deploys, through Cloudflare's Workers Builds (nothing runs on GitHub):
-[`deploy.sh`](deploy.sh) typechecks, builds the dashboard and bundles the Worker, migrates
-Neon (`apps/server/scripts/migrate.ts`), then deploys. Workers never migrate or check the
-schema themselves, so deploy with `deploy.sh`, not plain `wrangler deploy`. The previous
-Worker runs on the new schema until the deploy is live, so migrations only add.
+[`deploy.sh`](deploy.sh) does it all:
 
-Workers Builds settings (Worker `strata` › Settings › Builds):
+1. Typechecks the server.
+2. Builds the dashboard and bundles the Worker (a broken build stops here, with Neon untouched).
+3. Migrates Neon (`apps/server/scripts/migrate.ts`).
+4. Deploys the Worker.
 
-| | |
+Always deploy with `deploy.sh`, not plain `wrangler deploy`. Workers never migrate or check the schema themselves.
+
+The previous Worker runs on the new schema until the deploy is live, so migrations may only add.
+
+### Workers Builds settings
+
+Under Worker `strata` › Settings › Builds:
+
+| Setting | Value |
 |---|---|
 | Repository, branch | `Sehalsein/strata`, `main`; builds for other branches off |
 | Root directory | `/` |
@@ -32,37 +58,24 @@ Workers Builds settings (Worker `strata` › Settings › Builds):
 | Build watch paths | `apps/server/**`, `deploy/cloudflare/**`, `package.json`, `bun.lock` |
 | Variables | `BUN_VERSION` = `1.2.20`; `DATABASE_URL` (secret) = Neon's pooled connection string |
 
-By hand, the first time:
+## Configuration
 
-```sh
-cd deploy/cloudflare
-npx wrangler secret put DATABASE_URL         # Neon connection string (sslmode=require)
-npx wrangler secret put STRATA_SECRET_KEY    # openssl rand -base64 32 — keep it safe
-DATABASE_URL='postgres://…' bash deploy.sh   # migrate, then deploy
-```
+Set secrets with `npx wrangler secret put <NAME>`. Plain vars live in `wrangler.jsonc`.
 
-Optional: `STRATA_PUBLIC_URL` (in `wrangler.jsonc` vars) once it has a domain. Provider
-keys (TMDB, TorBox, OMDb) are each household's own, set in the dashboard under Settings ›
-Connections; the server keeps none for them.
+| Name | Kind | Needed for |
+|---|---|---|
+| `DATABASE_URL` | Secret, required | Neon |
+| `STRATA_SECRET_KEY` | Secret, required | Encrypting stored API keys |
+| `STRATA_PUBLIC_URL` | Var | The server's address: passkeys, Google's callback, email links and the apps' QR codes |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Secrets | Sign in with Google |
+| `RESEND_API_KEY` | Secret | Password-reset email, with `STRATA_EMAIL_FROM` (a var) |
+| `STRATA_OPERATOR`, `STRATA_PRIVACY_CONTACT` | Secrets | The privacy page |
+| `STRATA_ADMIN_EMAILS` | Secret | Emails whose accounts run the server (comma-separated) |
+| `SENTRY_DSN` | Secret | Error reports |
+| `ANILIST_RELAY_URL`, `ANILIST_RELAY_SECRET` | Secrets | Reaching AniList (see [anilist-relay](../anilist-relay/README.md)) |
 
-Sign in with Google and passkeys are off unless set up, and the sign-in page only shows
-what's on:
-- **Google:** `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (secrets) (a Google Cloud OAuth client,
-  redirect URI `<STRATA_PUBLIC_URL>/api/auth/callback/google`). People connect Google to
-  their account first, from the dashboard's account menu; it never creates accounts.
-- **Passkeys:** `STRATA_PUBLIC_URL` on HTTPS (browsers only allow passkeys there).
+Setting up Google, Resend email and the privacy page works the same as for Docker: see [deploy/cloud](../cloud/README.md#sign-in-with-google-and-passkeys). Google and passkeys stay off unless set up, and the sign-in page only shows what's on.
 
-**Email** (for "Forgot password?"): in [Resend](https://resend.com), verify the domain you'll
-send from and create an API key with sending access only. Then set `RESEND_API_KEY` and
-`STRATA_EMAIL_FROM` (e.g. `Strata <no-reply@yourdomain.com>`, on that domain). Without them
-Strata sends no email and the link doesn't show.
+Provider keys (TMDB, TorBox, OMDb) belong to each household. They're set in the dashboard under Settings › Connections, and the server keeps none of its own.
 
-**Privacy page** (`/privacy`): set `STRATA_OPERATOR` (who runs the server, e.g. your name
-or company) and `STRATA_PRIVACY_CONTACT` (an email address or URL for privacy requests).
-
-On the first request the server creates its tables and logs a **setup code**
-(`npx wrangler tail`): the dashboard asks for it to create the server admin. Then add
-households (the household switcher at the top of the sidebar) and invite their owners.
-
-`STRATA_SECRET_KEY` encrypts the API keys stored in the database. Keep it the same
-across deploys; a different key can't read them (they'd need entering again).
+**Keep `STRATA_SECRET_KEY` the same across deploys.** A different key can't read the stored API keys, and they'd need entering again.
