@@ -18,7 +18,8 @@ import { join } from "node:path";
 const ROOT = join(import.meta.dir, "..");
 const DIST = join(ROOT, "dist");
 const LAUNCHER = join(ROOT, "..", "macos", "StrataLauncher");
-const ICON_SOURCE = join(ROOT, "..", "apple", "Resources", "Assets.xcassets", "AppIcon.appiconset", "icon-ios-1024.png");
+// Drawn by apps/apple/Resources/make-icons.swift (the iPhone icon is an Icon Composer icon, with no PNG to use).
+const ICON_SOURCE = join(ROOT, "..", "macos", "StrataLauncher", "AppIcon-1024.png");
 const SERVER = join(DIST, "strata-server-darwin-arm64");
 const APP = join(DIST, "Strata.app");
 
