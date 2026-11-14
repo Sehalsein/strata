@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isVideoFile } from "../media/parse";
 import { globalFetch } from "../net";
+import { runtime } from "#runtime";
 
 /**
  * A Stremio stream add-on a household searches for releases (Torrentio, AIOStreams, Comet,
@@ -19,6 +20,11 @@ export const streamAddonSchema = z.object({
   kind: z.enum(["stremio", "aiostreams"]).default("stremio"),
   /** It has a configure page (<base>/configure), per its manifest. */
   configurable: z.boolean().default(false),
+  /**
+   * It may be on this machine or the home network: only the server's admin can add one
+   * like that (a household's admin mustn't make the server reach its private network).
+   */
+  allowPrivate: z.boolean().default(false),
 });
 export type StreamAddon = z.infer<typeof streamAddonSchema>;
 export const streamAddonListSchema = z.array(streamAddonSchema);
@@ -26,7 +32,7 @@ export const streamAddonListSchema = z.array(streamAddonSchema);
 /** What a household searches with before it sets up its own list: the server's Torrentio. */
 export function defaultAddons(torrentioUrl: string): StreamAddon[] {
   if (!torrentioUrl) return [];
-  return [{ id: "default", url: manifestUrl(torrentioUrl), name: "Torrentio", enabled: true, idPrefixes: ["tt", "kitsu"], kind: "stremio", configurable: true }];
+  return [{ id: "default", url: manifestUrl(torrentioUrl), name: "Torrentio", enabled: true, idPrefixes: ["tt", "kitsu"], kind: "stremio", configurable: true, allowPrivate: true }];
 }
 
 /** A pasted add-on address as its manifest URL: stremio:// becomes https://, /manifest.json is added. */
@@ -55,6 +61,104 @@ export function addonOrigin(url: string): string {
 
 export class AddonError extends Error {}
 
+/** Largest answer read from an add-on (a manifest, or a title's streams). */
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Fetches from an add-on. Unless it may be private, its host must be public (checked
+ * again on every request, since DNS can change), and redirects aren't followed: one
+ * could lead anywhere.
+ */
+async function addonFetch(url: string, allowPrivate: boolean, fetchImpl: typeof fetch, init: RequestInit = {}): Promise<Response> {
+  if (!allowPrivate) await assertPublicHost(url);
+  const res = await fetchImpl(url, { ...init, redirect: "manual", signal: init.signal ?? AbortSignal.timeout(15_000) });
+  if (res.status >= 300 && res.status < 400) throw new AddonError("That add-on redirected elsewhere, which Strata doesn't follow. Use the address it redirects to.");
+  return res;
+}
+
+/** The body as JSON, refusing one past MAX_BODY_BYTES. */
+async function readJson(res: Response): Promise<unknown> {
+  const declared = Number(res.headers.get("content-length") ?? 0);
+  if (declared > MAX_BODY_BYTES) throw new Error("Add-on answer too large");
+  if (!res.body) return null;
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_BODY_BYTES) {
+      await reader.cancel();
+      throw new Error("Add-on answer too large");
+    }
+    chunks.push(value);
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    all.set(c, at);
+    at += c.byteLength;
+  }
+  return JSON.parse(new TextDecoder().decode(all));
+}
+
+/**
+ * Refuses an address on this machine, the home network or the cloud host's own network
+ * (loopback, private, link-local, CGNAT, multicast, metadata), by name or by what the name
+ * resolves to, and addresses with a user name or password in them.
+ */
+export async function assertPublicHost(url: string): Promise<void> {
+  const u = new URL(url);
+  const refuse = () => {
+    throw new AddonError("Add-ons on this server or its home network can only be added by the server's admin.");
+  };
+  if (u.username || u.password) throw new AddonError("Leave the user name and password out of the address.");
+  const host = u.hostname.toLowerCase().replace(/^\[(.*)\]$/, "$1").replace(/\.$/, "");
+  if (host === "localhost" || host.endsWith(".localhost") || (!host.includes(".") && !host.includes(":"))) refuse();
+  if (/\.(local|lan|home|internal|home\.arpa|localdomain)$/.test(host)) refuse();
+  if (isIpLiteral(host)) {
+    if (!isPublicAddress(host)) refuse();
+    return;
+  }
+  // Workers can't reach private networks at all; on Bun, look at what the name points to.
+  if (runtime.name !== "bun") return;
+  let addresses: string[];
+  try {
+    const { lookup } = await import("node:dns/promises");
+    addresses = (await lookup(host, { all: true })).map((a) => a.address);
+  } catch {
+    return; // doesn't resolve: the fetch fails on its own
+  }
+  if (addresses.some((a) => !isPublicAddress(a))) refuse();
+}
+
+function isIpLiteral(host: string): boolean {
+  return /^\d+\.\d+\.\d+\.\d+$/.test(host) || host.includes(":");
+}
+
+/** Whether an IP address is on the public internet. */
+export function isPublicAddress(raw: string): boolean {
+  let address = raw.toLowerCase();
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(address);
+  if (mapped) address = mapped[1]!;
+  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(address);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    if (a === 0 || a === 10 || a === 127 || a >= 224) return false; // this network, private, loopback, multicast/reserved
+    if (a === 100 && b >= 64 && b <= 127) return false; // carrier-grade NAT
+    if (a === 169 && b === 254) return false; // link-local, cloud metadata
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 192 && b === 168) return false;
+    if (a === 198 && (b === 18 || b === 19)) return false; // benchmarking
+    return true;
+  }
+  if (address === "::" || address === "::1") return false;
+  if (/^f[cd]/.test(address) || /^fe[89ab]/.test(address) || /^ff/.test(address)) return false; // unique-local, link-local, multicast
+  if (/^::ffff:/.test(address) || /^64:ff9b:/.test(address)) return false; // other mapped / NAT64 forms
+  return true;
+}
+
 const manifestSchema = z.object({
   id: z.string().optional(),
   name: z.string().optional(),
@@ -65,16 +169,17 @@ const manifestSchema = z.object({
 });
 
 /** Reads an add-on's manifest and checks it can find streams for movies or shows. */
-export async function inspectAddon(input: string, fetchImpl: typeof fetch = globalFetch): Promise<Omit<StreamAddon, "id" | "enabled">> {
+export async function inspectAddon(input: string, fetchImpl: typeof fetch = globalFetch, allowPrivate = false): Promise<Omit<StreamAddon, "id" | "enabled">> {
   const url = manifestUrl(input);
   let res: Response;
   try {
-    res = await fetchImpl(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(10_000) });
-  } catch {
+    res = await addonFetch(url, allowPrivate, fetchImpl, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(10_000) });
+  } catch (err) {
+    if (err instanceof AddonError) throw err;
     throw new AddonError("Couldn't reach that add-on.");
   }
   if (!res.ok) throw new AddonError(`That add-on answered ${res.status}. Check the address (and that it's set up, for ones that need it).`);
-  const parsed = manifestSchema.safeParse(await res.json().catch(() => null));
+  const parsed = manifestSchema.safeParse(await readJson(res).catch(() => null));
   if (!parsed.success) throw new AddonError("That address isn't a Stremio add-on manifest.");
   const m = parsed.data;
   const stream = m.resources.find((r) => (typeof r === "string" ? r : r.name) === "stream");
@@ -83,7 +188,7 @@ export async function inspectAddon(input: string, fetchImpl: typeof fetch = glob
   if (!types.some((t) => t === "movie" || t === "series")) throw new AddonError(`${m.name ?? "That add-on"} doesn't have movies or shows.`);
   const idPrefixes = (typeof stream === "object" && stream.idPrefixes) || m.idPrefixes || null;
   const aio = /aiostreams/i.test(`${m.id ?? ""} ${m.name ?? ""}`) && aioCredentials(url) !== null;
-  return { url, name: (m.name ?? addonOrigin(url)).slice(0, 100), idPrefixes, kind: aio ? "aiostreams" : "stremio", configurable: !!m.behaviorHints?.configurable };
+  return { url, name: (m.name ?? addonOrigin(url)).slice(0, 100), idPrefixes, kind: aio ? "aiostreams" : "stremio", configurable: !!m.behaviorHints?.configurable, allowPrivate };
 }
 
 /** A stream an add-on found, as far as discovery cares: a torrent, with what's known about it. */
@@ -105,10 +210,10 @@ export async function addonStreams(addon: StreamAddon, type: "movie" | "series",
     const viaSearch = await aioSearch(addon, type, id, fetchImpl);
     if (viaSearch) return viaSearch;
   }
-  const res = await fetchImpl(`${addonBase(addon.url)}/stream/${type}/${id}.json`, { headers: { Accept: "application/json" } });
+  const res = await addonFetch(`${addonBase(addon.url)}/stream/${type}/${id}.json`, addon.allowPrivate, fetchImpl, { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`${addon.name} ${res.status}`);
-  const body = (await res.json()) as { streams?: StremioStream[] };
-  return (body.streams ?? []).flatMap((s) => {
+  const body = (await readJson(res)) as { streams?: StremioStream[] } | null;
+  return (body?.streams ?? []).flatMap((s) => {
     const hash = streamHash(s);
     if (!hash) return [];
     const lines = (s.title ?? s.description ?? "").split("\n");
@@ -188,13 +293,13 @@ async function aioSearch(addon: StreamAddon, type: "movie" | "series", id: strin
   const creds = aioCredentials(addon.url);
   if (!creds) return null;
   const params = new URLSearchParams({ type, id, requiredFields: "infoHash" });
-  const res = await fetchImpl(`${creds.root}/api/v1/search?${params}`, {
+  const res = await addonFetch(`${creds.root}/api/v1/search?${params}`, addon.allowPrivate, fetchImpl, {
     headers: { Accept: "application/json", Authorization: `Basic ${btoa(`${creds.uuid}:${creds.password}`)}` },
   });
   if (res.status === 403 || res.status === 404) return null;
   if (!res.ok) throw new Error(`${addon.name} ${res.status}`);
-  const body = (await res.json()) as { success?: boolean; data?: { results?: AioResult[] } | null; error?: { message?: string } | null };
-  if (!body.success) throw new Error(`${addon.name}: ${body.error?.message ?? "search failed"}`);
+  const body = (await readJson(res)) as { success?: boolean; data?: { results?: AioResult[] } | null; error?: { message?: string } | null } | null;
+  if (!body?.success) throw new Error(`${addon.name}: ${body?.error?.message ?? "search failed"}`);
   return (body.data?.results ?? []).flatMap((r) => {
     const hash = r.infoHash?.toLowerCase();
     if (!hash || !isInfoHash(hash)) return [];

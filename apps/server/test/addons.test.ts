@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { addonStreams, AddonError, inspectAddon, manifestUrl, type StreamAddon } from "../src/sources/addons";
+import { addonStreams, AddonError, assertPublicHost, inspectAddon, isPublicAddress, manifestUrl, type StreamAddon } from "../src/sources/addons";
 import { fakeTmdb, startTestServer, type TestServer } from "./helpers";
 
 const H = (c: string) => c.repeat(40);
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
-const addon = (over: Partial<StreamAddon> = {}): StreamAddon => ({ id: "x", url: "https://addon.example/cfg/manifest.json", name: "Addon", enabled: true, idPrefixes: null, kind: "stremio", configurable: false, ...over });
+const addon = (over: Partial<StreamAddon> = {}): StreamAddon => ({ id: "x", url: "https://addon.example/cfg/manifest.json", name: "Addon", enabled: true, idPrefixes: null, kind: "stremio", configurable: false, allowPrivate: false, ...over });
 
 describe("add-on addresses", () => {
   test("pasted addresses become manifest URLs", () => {
@@ -24,10 +24,42 @@ describe("add-on addresses", () => {
       return m ? json(m) : new Response("nope", { status: 404 });
     }) as unknown as typeof fetch;
 
-    expect(await inspectAddon("https://t.example", fetchImpl)).toEqual({ url: "https://t.example/manifest.json", name: "Torrentio", idPrefixes: ["tt", "kitsu"], kind: "stremio", configurable: true });
+    expect(await inspectAddon("https://t.example", fetchImpl)).toEqual({ url: "https://t.example/manifest.json", name: "Torrentio", idPrefixes: ["tt", "kitsu"], kind: "stremio", configurable: true, allowPrivate: false });
     expect(await inspectAddon("https://a.example/stremio/u-1/enc%3Apw/manifest.json", fetchImpl)).toMatchObject({ name: "AIOStreams", idPrefixes: ["tt"], kind: "aiostreams" });
     await expect(inspectAddon("https://c.example/catalog/manifest.json", fetchImpl)).rejects.toThrow("doesn't find streams");
     await expect(inspectAddon("https://c.example/missing", fetchImpl)).rejects.toThrow("answered 404");
+  });
+});
+
+describe("add-on hosts", () => {
+  test("public and private addresses", () => {
+    for (const a of ["8.8.8.8", "1.1.1.1", "2606:4700::1111", "172.32.0.1"]) expect(isPublicAddress(a)).toBe(true);
+    for (const a of ["127.0.0.1", "10.0.0.5", "172.16.3.4", "192.168.1.10", "169.254.169.254", "100.64.0.1", "0.0.0.0", "224.0.0.1", "::1", "::", "fd00::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:7f00:1"])
+      expect(isPublicAddress(a)).toBe(false);
+  });
+
+  test("a household's admin can't point the server at itself or its network", async () => {
+    for (const url of ["http://localhost:8080/manifest.json", "http://127.0.0.1/manifest.json", "http://[::1]/manifest.json", "http://169.254.169.254/latest/manifest.json", "http://nas.local/manifest.json", "http://jackett/manifest.json", "http://user:pw@addon.example/manifest.json"])
+      await expect(assertPublicHost(url)).rejects.toThrow(AddonError);
+    // Not even asked, unless the server's admin added it.
+    let asked = 0;
+    const fetchImpl = (async () => {
+      asked++;
+      return json({ name: "Local", resources: ["stream"], types: ["movie"] });
+    }) as unknown as typeof fetch;
+    await expect(inspectAddon("http://192.168.1.20:7000", fetchImpl)).rejects.toThrow("server's admin");
+    expect(asked).toBe(0);
+    expect(await inspectAddon("http://192.168.1.20:7000", fetchImpl, true)).toMatchObject({ name: "Local", allowPrivate: true });
+    await expect(addonStreams(addon({ url: "http://10.0.0.2/manifest.json" }), "movie", "tt1", fetchImpl)).rejects.toThrow(AddonError);
+    expect(asked).toBe(1);
+  });
+
+  test("redirects aren't followed", async () => {
+    const fetchImpl = (async (_: string, init?: RequestInit) => {
+      expect(init?.redirect).toBe("manual");
+      return new Response(null, { status: 302, headers: { Location: "http://169.254.169.254/" } });
+    }) as unknown as typeof fetch;
+    await expect(inspectAddon("https://addon.example", fetchImpl)).rejects.toThrow("redirected");
   });
 });
 
@@ -113,6 +145,7 @@ describe("add-ons in the dashboard", () => {
     const configure = await server.request("/api/admin/addons/default/configure", { token, redirect: "manual" });
     expect(configure.status).toBe(302);
     expect(configure.headers.get("Location")).toBe("https://torrentio.strem.fun/configure");
+    expect(configure.headers.get("Referrer-Policy")).toBe("no-referrer");
 
     // Edit points it elsewhere, in the same place and with the same switch.
     const edited = await server.request(`/api/admin/addons/${comet.id}`, { method: "PATCH", token, json: { url: "https://comet.example/OTHER" } });

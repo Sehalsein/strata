@@ -194,9 +194,12 @@ export class Household {
     return parsed.success ? parsed.data : [];
   }
 
-  /** Adds an add-on by its manifest URL, after checking it finds streams; throws AddonError. */
-  async addAddon(url: string): Promise<StreamAddon> {
-    const found = await inspectAddon(url, this.shared.fetch);
+  /**
+   * Adds an add-on by its manifest URL, after checking it finds streams; throws AddonError.
+   * `allowPrivate` (the server's admin only) lets it be on this machine or the home network.
+   */
+  async addAddon(url: string, allowPrivate = false): Promise<StreamAddon> {
+    const found = await inspectAddon(url, this.shared.fetch, allowPrivate);
     const list = this.addons();
     if (list.some((a) => a.url === found.url)) throw new AddonError("That add-on is already in the list.");
     if (list.length >= MAX_ADDONS) throw new AddonError(`A household can have up to ${MAX_ADDONS} add-ons.`);
@@ -218,11 +221,11 @@ export class Household {
   }
 
   /** Points an add-on at another manifest URL (re-checked), keeping its place and switch. */
-  async replaceAddon(id: string, url: string): Promise<StreamAddon | null> {
+  async replaceAddon(id: string, url: string, allowPrivate = false): Promise<StreamAddon | null> {
     const list = this.addons();
     const at = list.findIndex((a) => a.id === id);
     if (at < 0) return null;
-    const found = await inspectAddon(url, this.shared.fetch);
+    const found = await inspectAddon(url, this.shared.fetch, allowPrivate);
     if (list.some((a, i) => i !== at && a.url === found.url)) throw new AddonError("That add-on is already in the list.");
     // A new id: it's no longer the server's default once it points somewhere else.
     const addon: StreamAddon = { ...found, id: found.url === list[at]!.url ? id : crypto.randomUUID(), enabled: list[at]!.enabled };
@@ -238,7 +241,7 @@ export class Household {
     const next = await Promise.all(
       list.map(async (a) => {
         try {
-          return { ...a, ...(await inspectAddon(a.url, this.shared.fetch)), id: a.id, enabled: a.enabled };
+          return { ...a, ...(await inspectAddon(a.url, this.shared.fetch, a.allowPrivate)), id: a.id, enabled: a.enabled };
         } catch {
           failed.push(a.name);
           return a;

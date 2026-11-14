@@ -161,7 +161,7 @@ export const adminRoutes = new Hono<Env>()
   .post("/addons", async (c) => {
     const { url } = await body(c, z.object({ url: z.string().trim().min(1).max(2048) }));
     try {
-      return c.json(addonDto(await c.var.household.addAddon(url)), 201);
+      return c.json(addonDto(await c.var.household.addAddon(url, permissions(c).administerServer)), 201);
     } catch (err) {
       if (err instanceof AddonError) throw new HTTPException(400, { message: err.message });
       throw err;
@@ -181,7 +181,7 @@ export const adminRoutes = new Hono<Env>()
     let id = c.req.param("id");
     if (url !== undefined) {
       try {
-        const replaced = await h.replaceAddon(id, url);
+        const replaced = await h.replaceAddon(id, url, permissions(c).administerServer);
         if (!replaced) throw new HTTPException(404, { message: "No such add-on" });
         id = replaced.id;
       } catch (err) {
@@ -198,7 +198,12 @@ export const adminRoutes = new Hono<Env>()
   .get("/addons/:id/configure", (c) => {
     const addon = c.var.household.addons().find((a) => a.id === c.req.param("id"));
     if (!addon) throw new HTTPException(404, { message: "No such add-on" });
-    return c.redirect(`${addonBase(addon.url)}/configure`, 302);
+    const target = new URL(`${addonBase(addon.url)}/configure`);
+    if (!/^https?:$/.test(target.protocol) || target.username || target.password) throw new HTTPException(400, { message: "That add-on's address can't be opened" });
+    // The path may hold the add-on's password: don't pass this page on as the referrer either.
+    c.header("Referrer-Policy", "no-referrer");
+    c.header("Cache-Control", "no-store");
+    return c.redirect(target.toString(), 302);
   })
 
   .delete("/addons", async (c) => {
