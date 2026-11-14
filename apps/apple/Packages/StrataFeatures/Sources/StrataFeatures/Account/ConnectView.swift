@@ -201,6 +201,17 @@ struct ConnectView: View {
                         }
                     }
                 }
+                if !rows.isEmpty {
+                    // Right under the servers it takes off the list; hidden ones can come back.
+                    Button {
+                        services.store.hideServers(rows.map(\.id))
+                    } label: {
+                        Label(rows.count == 1 ? String(localized: "Remove This Server from List", bundle: .module)
+                                              : String(localized: "Remove These Servers from List", bundle: .module),
+                              systemImage: "minus.circle")
+                    }
+                    .disabled(probing != nil)
+                }
                 let hidden = services.store.hiddenServerIDs.count
                 if hidden > 0 {
                     Button {
@@ -214,6 +225,8 @@ struct ConnectView: View {
             } footer: {
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.danger)
+                } else if !rows.isEmpty {
+                    Text("Removing a server only hides it on this Apple TV. Signing in to it again brings it back.", bundle: .module)
                 }
             }
             Section {
@@ -229,12 +242,6 @@ struct ConnectView: View {
                 .disabled(probing != nil)
             } header: {
                 Text(rows.isEmpty ? String(localized: "Or sign in another way", bundle: .module) : String(localized: "Other ways to sign in", bundle: .module))
-            }
-            if !rows.isEmpty {
-                Section {
-                    // Takes every server shown off the list; hidden ones can come back.
-                    Button(String(localized: "Clear List", bundle: .module)) { services.store.hideServers(rows.map(\.id)) }
-                }
             }
         }
     }
