@@ -530,27 +530,41 @@ public struct EpisodeRow<Trailing: View>: View {
     }
 
     #if os(tvOS)
-    private let stillWidth: CGFloat = 320
+    private let stillWidth: CGFloat = 288
+    private let titleFont = Font.system(size: 34, weight: .semibold)
+    private let overviewFont = Font.system(size: 24)
+    private let footFont = Font.system(size: 22)
+    private let inset = Metrics.space5
+    private let gap = Metrics.space6
     #else
     private var stillWidth: CGFloat { Metrics.isPad ? 220 : 140 }
+    private let titleFont = Font.stHeadline
+    private let overviewFont = Font.stCallout
+    private let footFont = Font.stFootnote
+    private let inset = Metrics.space4
+    private let gap = Metrics.space4
     #endif
 
     public var body: some View {
-        HStack(alignment: .top, spacing: Metrics.space4) {
+        HStack(alignment: .top, spacing: gap) {
             ArtworkImage(url: stillURL, aspectRatio: 16 / 9, seed: id, cornerRadius: Metrics.radiusSM)
                 .frame(width: stillWidth)
+                #if os(tvOS)
+                // The row lifts as a whole; the still's own focus lift would pull it to the edge.
+                .hoverEffectDisabled()
+                #endif
                 .overlay(alignment: .bottom) {
                     if let progress, progress > 0 { ProgressBar(progress, track: .white.opacity(0.25)).padding(6) }
                 }
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Metrics.isTV ? 6 : 2) {
                 if isCurrent { Text("Up Next").eyebrowStyle(Theme.accentText).padding(.bottom, 2) }
-                Text("\(number). \(title)").font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(2)
+                Text("\(number). \(title)").font(titleFont).foregroundStyle(Theme.ink).lineLimit(2)
                 if let overview, !overview.isEmpty {
-                    Text(overview).font(.stCallout).foregroundStyle(Theme.ink2).lineLimit(Metrics.isPadOrTV ? 2 : 1)
+                    Text(overview).font(overviewFont).foregroundStyle(Theme.ink2).lineLimit(Metrics.isPadOrTV ? 2 : 1)
                 }
                 if foot != nil || imdbRating != nil {
                     HStack(spacing: Metrics.space2) {
-                        if let foot { Text(foot).font(.stFootnote).foregroundStyle(Theme.ink3) }
+                        if let foot { Text(foot).font(footFont).foregroundStyle(Theme.ink3) }
                         if let imdbRating { RatingBadge(.imdb(imdbRating)) }
                     }
                     .padding(.top, imdbRating != nil ? 2 : 0)
@@ -559,8 +573,8 @@ public struct EpisodeRow<Trailing: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             trailing()
         }
-        .padding(.vertical, Metrics.space3)
-        .padding(.horizontal, Metrics.space4)
+        .padding(.vertical, Metrics.isTV ? inset : Metrics.space3)
+        .padding(.horizontal, inset)
         .contentShape(Rectangle())
     }
 }

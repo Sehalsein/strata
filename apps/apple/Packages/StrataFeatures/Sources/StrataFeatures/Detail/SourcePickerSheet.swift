@@ -16,6 +16,8 @@ struct SourcePickerSheet: View {
     var lookFurther = true
     /// Picking what to play, or what to download (sizes and free space matter more).
     var purpose: Purpose = .play
+    /// The copy playing now (from the player): marked, and listed first.
+    var current: String? = nil
     let onChoose: (Candidate) -> Void
 
     enum Purpose { case play, download }
@@ -90,6 +92,14 @@ struct SourcePickerSheet: View {
         sources = .loaded(found.isEmpty ? known : found)
     }
 
+    /// The copy playing now first; the rest in the server's order.
+    private func ordered(_ list: [Candidate]) -> [Candidate] {
+        guard let current, let i = list.firstIndex(where: { $0.id == current }) else { return list }
+        var list = list
+        list.insert(list.remove(at: i), at: 0)
+        return list
+    }
+
     private func choose(_ candidate: Candidate) {
         dismiss()
         onChoose(candidate)
@@ -106,7 +116,7 @@ struct SourcePickerSheet: View {
         case .failed(let message):
             MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load sources", message: message)
         case .loaded(let all):
-            let shown = all.filter(filter.matches)
+            let shown = ordered(all.filter(filter.matches))
             if shown.isEmpty {
                 MessageView(systemImage: "rectangle.stack.badge.minus", title: "No sources", message: filter == .all ? "There's nothing to play this from." : "Try another quality.")
             } else {
@@ -115,7 +125,8 @@ struct SourcePickerSheet: View {
                 LazyVStack(spacing: Metrics.space6) {
                     ForEach(shown) { candidate in
                         Button { choose(candidate) } label: {
-                            SourceRow(candidate: candidate, isLastPicked: purpose == .play && candidate.id == lastPicked)
+                            SourceRow(candidate: candidate, isCurrent: candidate.id == current,
+                                      isLastPicked: purpose == .play && current == nil && candidate.id == lastPicked)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(.card)
@@ -126,7 +137,8 @@ struct SourcePickerSheet: View {
                 VStack(spacing: 0) {
                     ForEach(shown) { candidate in
                         Button { choose(candidate) } label: {
-                            SourceRow(candidate: candidate, isLastPicked: purpose == .play && candidate.id == lastPicked)
+                            SourceRow(candidate: candidate, isCurrent: candidate.id == current,
+                                      isLastPicked: purpose == .play && current == nil && candidate.id == lastPicked)
                         }
                         .buttonStyle(.plain)
                         if candidate.id != shown.last?.id { Divider().overlay(Theme.hairline) }
@@ -167,7 +179,7 @@ struct SourcePickerSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.bg.ignoresSafeArea())
         .task(id: sources.value?.first?.id) {
-            guard let first = sources.value?.first(where: filter.matches)?.id, focusedRow == nil else { return }
+            guard let first = ordered(sources.value?.filter(filter.matches) ?? []).first?.id, focusedRow == nil else { return }
             try? await Task.sleep(for: .milliseconds(100))
             focusedRow = first
         }
@@ -177,6 +189,7 @@ struct SourcePickerSheet: View {
 
 struct SourceRow: View {
     let candidate: Candidate
+    var isCurrent = false
     var isLastPicked = false
 
     #if os(tvOS)
@@ -195,7 +208,11 @@ struct SourceRow: View {
                 if let detail = candidate.detail ?? candidate.sizeLabel {
                     Text(detail).font(.stFootnote).foregroundStyle(Theme.ink3)
                 }
-                if isLastPicked {
+                if isCurrent {
+                    Label("Playing now", systemImage: "play.circle.fill")
+                        .font(.stFootnote.weight(.semibold))
+                        .foregroundStyle(Theme.accentText)
+                } else if isLastPicked {
                     Label("Your last pick", systemImage: "checkmark.circle.fill")
                         .font(.stFootnote)
                         .foregroundStyle(Theme.accentText)

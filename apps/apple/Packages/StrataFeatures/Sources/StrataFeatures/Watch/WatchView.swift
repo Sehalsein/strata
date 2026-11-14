@@ -131,7 +131,7 @@ struct WatchView: View {
             let meta = engine.meta ?? request.meta
             // Carries on from where it got to, not from where it started.
             let at = engine.position > 0 ? Int(engine.position * 1000) : request.startMs
-            SourcePickerSheet(target: target, title: meta.title) { candidate in
+            SourcePickerSheet(target: target, title: meta.title, current: engine.session?.candidate.id) { candidate in
                 Task { await engine.load(target: target, meta: meta, candidateId: candidate.id, startMs: at) }
             }
         }

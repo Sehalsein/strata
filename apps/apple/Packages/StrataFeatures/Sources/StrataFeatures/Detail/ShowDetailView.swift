@@ -183,7 +183,7 @@ struct ShowDetailView: View {
             case .failed(let message):
                 Text(message).font(.stCallout).foregroundStyle(Theme.danger).padding(.horizontal, Metrics.gutter)
             case .loaded(let detail):
-                LazyVStack(spacing: 0) {
+                LazyVStack(spacing: Self.episodeGap) {
                     ForEach(detail.episodes) { episode in
                         Button {
                             Task { await playEpisode(show, episode) }
@@ -213,7 +213,12 @@ struct ShowDetailView: View {
                                 }
                             }
                         }
+                        #if os(tvOS)
+                        // A native TV card per episode, which lifts on focus.
+                        .buttonStyle(.card)
+                        #else
                         .buttonStyle(FocusLiftStyle())
+                        #endif
                         // Upcoming rows stay enabled: on the TV a disabled row can't take focus,
                         // so the season's later episodes and their menu would be out of reach.
                         .contextMenu {
@@ -238,14 +243,21 @@ struct ShowDetailView: View {
                             }
                             #endif
                         }
+                        #if !os(tvOS)
                         if episode.id != detail.episodes.last?.id { Divider().overlay(Theme.hairline).padding(.leading, Metrics.space4) }
+                        #endif
                     }
                 }
+                #if !os(tvOS)
                 .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
+                #endif
                 .padding(.horizontal, Metrics.gutter)
             }
         }
     }
+
+    /// Separate cards on the TV; one panel with dividers elsewhere.
+    private static var episodeGap: CGFloat { Metrics.isTV ? Metrics.space5 : 0 }
 
     private func rowState(_ e: EpisodeItem) -> Availability? {
         if e.isWatched { return .watched }
