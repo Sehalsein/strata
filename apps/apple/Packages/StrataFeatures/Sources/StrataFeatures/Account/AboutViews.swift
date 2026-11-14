@@ -33,7 +33,7 @@ struct Acknowledgement: Decodable, Identifiable, Hashable {
 struct AcknowledgementsRow: View {
     var body: some View {
         NavigationLink { AcknowledgementsView() } label: {
-            Text("Acknowledgements", bundle: .module)
+            Label { Text("Acknowledgements", bundle: .module) } icon: { Image(systemName: "doc.text") }
         }
     }
 }
@@ -150,11 +150,14 @@ struct PrivacyPolicyRow: View {
 
     var body: some View {
         #if os(tvOS)
-        NavigationLink { PrivacyQRView(url: url) } label: { Text("Privacy", bundle: .module) }
+        NavigationLink { PrivacyQRView(url: url) } label: {
+            Label { Text("Privacy", bundle: .module) } icon: { Image(systemName: "hand.raised") }
+        }
         #else
         Button { openURL(url) } label: {
             HStack {
-                Text("Privacy", bundle: .module).foregroundStyle(Theme.ink)
+                Label { Text("Privacy", bundle: .module) } icon: { Image(systemName: "hand.raised") }
+                    .foregroundStyle(Theme.ink)
                 Spacer()
                 Image(systemName: "arrow.up.right").font(.stFootnote).foregroundStyle(Theme.ink3)
             }
