@@ -17,7 +17,7 @@ this server. There is no Jellyfin anywhere in the stack.
 | Distribution | Home: the Mac app (Strata.app) and `bun build --compile` binaries for macOS and Linux, with ffmpeg inside. Cloud: deployed to Workers or as a container. No home Docker image. |
 | Server UI | Web dashboard (React + Vite) served at `/`. Home: embedded in the binary, first visit runs setup. Cloud: static assets. |
 | Accounts | Better Auth. Households are organizations with owner/admin/member roles; a server admin runs the server. |
-| Sources | Local folders (home only) + TorBox. TorBox discovery via built-in scrapers (Stremio-addon-style) and TorBox's own search. |
+| Sources | Local folders (home only) + TorBox. TorBox discovery via each household's add-ons (any Stremio stream add-on: Torrentio, AIOStreams, Comet…, added by manifest URL) and TorBox's own search. |
 | Player | The Apple apps keep AVPlayer. TorBox files go straight to the app; the server remuxes or transcodes local files when it has to. |
 | Jellyfin | Removed, along with the old Jellyfin-based web and Android TV apps. |
 

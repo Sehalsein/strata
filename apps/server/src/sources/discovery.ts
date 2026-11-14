@@ -3,7 +3,7 @@ import { runtime } from "#runtime";
 import type { Tmdb } from "../catalog/tmdb";
 import type { FileRow, Library } from "../library";
 import { logger } from "../log";
-import { isVideoFile, parseFileName, type ParsedName } from "../media/parse";
+import { parseFileName, type ParsedName } from "../media/parse";
 import type { Settings } from "../settings";
 import { detailLabel, type Candidate } from "./resolver";
 import type { TorboxClient, TorboxItem } from "./torbox/client";
@@ -11,6 +11,9 @@ import { ingestItem } from "./torbox/sync";
 import { SharedWork } from "../inFlight";
 import { globalFetch } from "../net";
 import { targetRef, type TitleTarget } from "../catalog/ref";
+import { addonStreams, defaultAddons, isInfoHash, type StreamAddon } from "./addons";
+
+export { isInfoHash, parseSize } from "./addons";
 
 const log = logger("discovery");
 const RELEASE_TTL_MS = 20 * 60_000;
@@ -30,12 +33,13 @@ export interface Release {
   fileName?: string;
   size?: number;
   seeders?: number;
-  origin: "torrentio" | "torbox";
+  /** Found by a Stremio add-on, or by TorBox's own search. */
+  origin: "addon" | "torbox";
   cached: boolean;
   parsed: ParsedName;
   /** The release holds a whole season (or more), not just the requested episode. */
   isPack: boolean;
-  /** The scraper resolved it to the requested episode (Torrentio's anime/kitsu streams). */
+  /** The add-on resolved it to the requested episode (asked by Kitsu id, for anime). */
   targeted?: boolean;
 }
 
@@ -71,10 +75,12 @@ export class Discovery {
     private readonly fetchImpl: typeof fetch = globalFetch,
     /** Told about every torrent discovery adds, so housekeeping can remove it later. */
     private readonly onAdded: (torrentId: number, hash: string, name?: string) => void = () => {},
-    /** Anime id list, for asking Torrentio by Kitsu id (much better anime coverage). */
+    /** Anime id list, for asking add-ons by Kitsu id (much better anime coverage). */
     private readonly animeIds?: AnimeIds,
     /** Asked before anything is added to TorBox; throws to refuse (the household's daily limit). */
     private readonly allowAdd: () => Promise<void> = async () => {},
+    /** The household's Stremio add-ons (the server's Torrentio until it sets up its own). */
+    private readonly addons: () => StreamAddon[] = () => defaultAddons(settings().torrentioUrl),
   ) {}
 
   get available(): boolean {
@@ -120,6 +126,11 @@ export class Discovery {
     const releases = (await this.releases(target)).filter((r) => r.cached);
     const fits = (r: Release) => !maxBytes || !r.size || r.size <= maxBytes;
     return [...releases.filter(fits), ...releases.filter((r) => !fits(r))];
+  }
+
+  /** Drops remembered searches (the add-ons changed). */
+  forget() {
+    this.cache.clear();
   }
 
   releases(target: DiscoveryTarget): Promise<Release[]> {
@@ -266,10 +277,13 @@ export class Discovery {
     const settings = this.settings();
     const client = this.torbox();
     const jobs: Promise<Release[]>[] = [];
-    if (settings.torrentioUrl) {
-      const base = settings.torrentioUrl;
-      if (imdbId && tmdbTarget) jobs.push(this.scrape("Torrentio", () => this.torrentio(base, imdbId, tmdbTarget)));
-      if (kitsu) jobs.push(this.scrape("Torrentio", () => this.torrentio(base, kitsu, target, true)));
+    for (const addon of this.addons()) {
+      if (!addon.enabled) continue;
+      // Asked by Kitsu id only if it says it knows them (or doesn't say).
+      const kitsuOk = !addon.idPrefixes || addon.idPrefixes.some((p) => p.startsWith("kitsu"));
+      const key = `${addon.name} (${addon.id})`;
+      if (imdbId && tmdbTarget) jobs.push(this.scrape(key, () => this.fromAddon(addon, imdbId, tmdbTarget)));
+      if (kitsu && kitsuOk) jobs.push(this.scrape(key, () => this.fromAddon(addon, kitsu, target, true)));
     }
     if (imdbId && tmdbTarget && settings.useTorboxSearch && client) jobs.push(this.scrape("TorBox search", () => this.torboxSearch(client, imdbId, tmdbTarget)));
 
@@ -280,7 +294,7 @@ export class Discovery {
       }
       for (const r of result.value) {
         const prev = byHash.get(r.hash);
-        // Prefer whichever source knows more (TorBox knows cache state; Torrentio the file).
+        // Prefer whichever source knows more (TorBox knows cache state; add-ons the file).
         byHash.set(r.hash, prev ? { ...prev, ...r, cached: prev.cached || r.cached, fileName: prev.fileName ?? r.fileName, seeders: Math.max(prev.seeders ?? 0, r.seeders ?? 0) } : r);
       }
     }
@@ -288,7 +302,7 @@ export class Discovery {
     // Releases found by IMDb id are checked against TMDB's numbering; Kitsu's are the episode.
     let releases = [...byHash.values()].filter((r) => relevant(r, tmdbTarget ?? target));
     // Fill in cache state for releases TorBox's search didn't report on.
-    const unknown = releases.filter((r) => r.origin === "torrentio" && !r.cached).map((r) => r.hash);
+    const unknown = releases.filter((r) => r.origin === "addon" && !r.cached).map((r) => r.hash);
     if (client && unknown.length) {
       try {
         const cached = await client.checkCached(unknown);
@@ -347,33 +361,24 @@ export class Discovery {
   }
 
   /** `id` is an IMDb id (episodes get ":S:E" added) or a ready "kitsu:…" id. */
-  private async torrentio(base: string, imdbId: string, target: DiscoveryTarget, anime = false): Promise<Release[]> {
+  private async fromAddon(addon: StreamAddon, imdbId: string, target: DiscoveryTarget, anime = false): Promise<Release[]> {
     const id = anime || target.mediaType === "movie" ? imdbId : `${imdbId}:${target.season}:${target.episode}`;
-    const url = `${base.replace(/\/+$/, "").replace(/\/manifest\.json$/, "")}/stream/${target.mediaType === "movie" ? "movie" : "series"}/${id}.json`;
-    const res = await this.fetchImpl(url, { headers: { Accept: "application/json" } });
-    if (!res.ok) throw new Error(`Torrentio ${res.status}`);
-    const body = (await res.json()) as { streams?: TorrentioStream[] };
-    return (body.streams ?? []).flatMap((s) => {
-      if (!s.infoHash || !isInfoHash(s.infoHash.toLowerCase())) return [];
-      const lines = (s.title ?? "").split("\n");
-      const title = lines[0]?.trim() || s.behaviorHints?.filename || "";
-      const fileName = s.behaviorHints?.filename ?? (lines[1] && isVideoFile(lines[1].trim()) ? lines[1].trim() : undefined);
-      const meta = lines.join(" ");
-      const parsed = parseFileName(fileName ?? title);
-      return [
-        {
-          hash: s.infoHash.toLowerCase(),
-          title,
-          fileName,
-          size: parseSize(meta),
-          seeders: Number(/👤\s*(\d+)/.exec(meta)?.[1] ?? 0) || undefined,
-          origin: "torrentio" as const,
-          cached: false,
-          parsed: { ...parsed, resolution: parsed.resolution ?? resolutionFromName(s.name) },
-          isPack: target.mediaType === "episode" && !!fileName && parseFileName(title).episode === undefined,
-          targeted: anime && target.mediaType === "episode",
-        },
-      ];
+    const streams = await addonStreams(addon, target.mediaType === "movie" ? "movie" : "series", id, this.fetchImpl);
+    return streams.map((s) => {
+      const parsed = parseFileName(s.fileName ?? s.title);
+      return {
+        hash: s.hash,
+        title: s.title,
+        fileName: s.fileName,
+        size: s.size,
+        seeders: s.seeders,
+        origin: "addon" as const,
+        // Only TorBox's own answer counts as cached; the add-on's is re-checked below.
+        cached: false,
+        parsed: { ...parsed, resolution: parsed.resolution ?? s.resolution },
+        isPack: target.mediaType === "episode" && !!s.fileName && parseFileName(s.title).episode === undefined,
+        targeted: anime && target.mediaType === "episode",
+      };
     });
   }
 
@@ -395,28 +400,15 @@ export class Discovery {
   }
 }
 
-interface TorrentioStream {
-  name?: string;
-  title?: string;
-  infoHash?: string;
-  fileIdx?: number;
-  behaviorHints?: { filename?: string; bingeGroup?: string };
-}
-
-/** SHA-1 (v1) or SHA-256 (v2) BitTorrent info-hash, hex. */
-export function isInfoHash(value: string): boolean {
-  return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value);
-}
-
 /** Drops cams and releases for the wrong episode/season or the wrong kind of title. */
 export function relevant(r: Release, target: DiscoveryTarget): boolean {
   if (r.parsed.source === "cam") return false;
-  // Torrentio already picked this episode (anime numbering differs from TMDB's).
+  // The add-on already picked this episode (anime numbering differs from TMDB's).
   if (r.targeted) return true;
   if (target.mediaType === "movie") return r.parsed.kind === "movie";
   const titleParse = parseFileName(r.title);
   if (r.parsed.kind === "episode" && r.fileName) {
-    // Torrentio already points at the episode's file inside the torrent.
+    // The add-on already points at the episode's file inside the torrent.
     return r.parsed.season === target.season && r.parsed.episode === target.episode;
   }
   if (titleParse.kind === "episode") {
@@ -446,20 +438,6 @@ export function rankReleases(releases: Release[], settings: Pick<Settings, "maxR
       (SOURCE_RANK[b.parsed.source ?? ""] ?? 1) - (SOURCE_RANK[a.parsed.source ?? ""] ?? 1) ||
       (b.seeders ?? 0) - (a.seeders ?? 0),
   );
-}
-
-export function parseSize(text: string): number | undefined {
-  const m = /💾\s*([\d.]+)\s*(TB|GB|MB|KB)/i.exec(text) ?? /\b([\d.]+)\s*(TB|GB|MB)\b/i.exec(text);
-  if (!m) return undefined;
-  const mult = { TB: 1024 ** 4, GB: 1024 ** 3, MB: 1024 ** 2, KB: 1024 }[m[2]!.toUpperCase() as "TB" | "GB" | "MB" | "KB"];
-  return Math.round(Number(m[1]) * mult);
-}
-
-function resolutionFromName(name?: string): number | undefined {
-  if (!name) return undefined;
-  if (/4k|2160/i.test(name)) return 2160;
-  const m = /(1080|720|480)p?/i.exec(name);
-  return m ? Number(m[1]) : undefined;
 }
 
 class ScraperTimeout extends Error {}

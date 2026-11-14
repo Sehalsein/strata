@@ -18,7 +18,10 @@ export const serverSettingsSchema = z.object({
   scanIntervalMinutes: z.number().int().min(0).default(60),
   hardwareAcceleration: z.boolean().default(true),
   maxTranscodes: z.number().int().min(1).max(16).default(3),
-  /** Base URL of a Stremio stream addon (Torrentio-compatible); empty disables it. */
+  /**
+   * The Stremio stream add-on a household searches with until it sets up its own list
+   * (Torrentio-compatible); empty means none.
+   */
   torrentioUrl: z.string().default("https://torrentio.strem.fun"),
   // Network / updates (port and bind host stay CLI/env-driven on purpose).
   /** Advertise `_strata._tcp` on the LAN so the apps find the server. */
@@ -67,9 +70,14 @@ export type HouseholdSettings = z.infer<typeof householdSettingsSchema>;
  * A household never uses another's, nor the server's.
  */
 export const SERVER_SECRET_KEYS = [] as const;
-export const HOUSEHOLD_SECRET_KEYS = ["tmdbApiKey", "omdbApiKey", "torboxApiKey"] as const;
-export const SECRET_KEYS = HOUSEHOLD_SECRET_KEYS;
+export const SECRET_KEYS = ["tmdbApiKey", "omdbApiKey", "torboxApiKey"] as const;
 export type SecretKey = (typeof SECRET_KEYS)[number];
+/**
+ * Also sealed, but not a provider key: the household's Stremio add-ons (their URLs often
+ * carry a password or a debrid key). Managed through the add-on routes, not /secrets.
+ */
+export const HOUSEHOLD_SECRET_KEYS = [...SECRET_KEYS, "streamAddons"] as const;
+export type StoredSecretKey = (typeof HOUSEHOLD_SECRET_KEYS)[number];
 
 
 type Scope = { kind: "server" } | { kind: "household"; organizationId: string };
@@ -94,7 +102,7 @@ export class SettingsStore<S extends z.ZodObject> {
     private readonly db: Db,
     private readonly box: SecretBox,
     private readonly schema: S,
-    private readonly secretKeys: readonly SecretKey[],
+    private readonly secretKeys: readonly StoredSecretKey[],
     private readonly scope: Scope = { kind: "server" },
   ) {}
 
@@ -148,15 +156,15 @@ export class SettingsStore<S extends z.ZodObject> {
     this.listeners.add(fn);
   }
 
-  getSecret(key: SecretKey): string | undefined {
+  getSecret(key: StoredSecretKey): string | undefined {
     return this.secrets.get(key);
   }
 
-  hasSecret(key: SecretKey): boolean {
+  hasSecret(key: StoredSecretKey): boolean {
     return this.getSecret(key) !== undefined;
   }
 
-  async setSecret(key: SecretKey, value: string | null) {
+  async setSecret(key: StoredSecretKey, value: string | null) {
     if (!this.secretKeys.includes(key)) throw new Error(`${key} isn't kept here`);
     if (value === null || value === "") {
       await this.remove(key);

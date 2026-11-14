@@ -8,6 +8,7 @@ import { recentLogs } from "../../log";
 import { dashboardUrls } from "../../platform/network";
 import { householdSettingsSchema, SECRET_KEYS, serverSettingsSchema, settingsSchema, type SecretKey } from "../../settings";
 import { toCandidate } from "../../sources/resolver";
+import { AddonError, addonBase, addonOrigin, type StreamAddon } from "../../sources/addons";
 import { imageUrl, yearOf } from "../../catalog/tmdb";
 import { formatRef, parseRef, targetRef, tmdbRef } from "../../catalog/ref";
 import { API_VERSION, VERSION } from "../../version";
@@ -150,6 +151,63 @@ export const adminRoutes = new Hono<Env>()
       if (err instanceof KeyRejectedError) throw new HTTPException(400, { message: err.message });
       throw err;
     }
+    return c.json({ ok: true });
+  })
+
+  // The household's add-ons, without their URLs: those often hold a password or a key.
+  .get("/addons", (c) => c.json({ items: c.var.household.addons().map(addonDto) }))
+
+  // Adds an add-on by its manifest URL, once it's answered with a manifest that finds streams.
+  .post("/addons", async (c) => {
+    const { url } = await body(c, z.object({ url: z.string().trim().min(1).max(2048) }));
+    try {
+      return c.json(addonDto(await c.var.household.addAddon(url)), 201);
+    } catch (err) {
+      if (err instanceof AddonError) throw new HTTPException(400, { message: err.message });
+      throw err;
+    }
+  })
+
+  // Reads every manifest again; says which add-ons didn't answer.
+  .post("/addons/refresh", async (c) => {
+    const failed = await c.var.household.refreshAddons();
+    return c.json({ items: c.var.household.addons().map(addonDto), failed });
+  })
+
+  // Turns an add-on on or off, moves it, or points it at another manifest URL (checked first).
+  .patch("/addons/:id", async (c) => {
+    const { url, ...patch } = await body(c, z.object({ enabled: z.boolean().optional(), index: z.number().int().min(0).optional(), url: z.string().trim().min(1).max(2048).optional() }));
+    const h = c.var.household;
+    let id = c.req.param("id");
+    if (url !== undefined) {
+      try {
+        const replaced = await h.replaceAddon(id, url);
+        if (!replaced) throw new HTTPException(404, { message: "No such add-on" });
+        id = replaced.id;
+      } catch (err) {
+        if (err instanceof AddonError) throw new HTTPException(400, { message: err.message });
+        throw err;
+      }
+    }
+    if (!(await h.updateAddon(id, patch))) throw new HTTPException(404, { message: "No such add-on" });
+    return c.json({ items: h.addons().map(addonDto) });
+  })
+
+  // The add-on's own configure page. A redirect, so its URL (and the key in it) never sits
+  // in the dashboard's data.
+  .get("/addons/:id/configure", (c) => {
+    const addon = c.var.household.addons().find((a) => a.id === c.req.param("id"));
+    if (!addon) throw new HTTPException(404, { message: "No such add-on" });
+    return c.redirect(`${addonBase(addon.url)}/configure`, 302);
+  })
+
+  .delete("/addons", async (c) => {
+    await c.var.household.removeAllAddons();
+    return c.json({ ok: true });
+  })
+
+  .delete("/addons/:id", async (c) => {
+    if (!(await c.var.household.removeAddon(c.req.param("id")))) throw new HTTPException(404, { message: "No such add-on" });
     return c.json({ ok: true });
   })
 
@@ -391,4 +449,9 @@ async function sessionDtoFor(services: Services, h: Household) {
     paused: !!s.paused,
     error: s.error ?? null,
   });
+}
+
+/** What the dashboard sees of an add-on: never its URL's path, where its secrets are. */
+function addonDto(a: StreamAddon) {
+  return { id: a.id, name: a.name, host: addonOrigin(a.url), enabled: a.enabled, kind: a.kind, configurable: a.configurable, anime: !a.idPrefixes || a.idPrefixes.some((p) => p.startsWith("kitsu")), isDefault: a.id === "default" };
 }

@@ -220,6 +220,21 @@ export interface UpdateStatus {
   lastUpdate: { result: "ok" | "rolled-back"; fromVersion: string; toVersion: string; at: string; message?: string } | null;
 }
 
+/** A Stremio stream add-on the household finds releases with (its URL stays on the server). */
+export interface StreamAddon {
+  id: string;
+  name: string;
+  host: string;
+  enabled: boolean;
+  kind: "stremio" | "aiostreams";
+  /** It has its own configure page (opened through /api/admin/addons/:id/configure). */
+  configurable: boolean;
+  /** It's asked for anime by Kitsu id too. */
+  anime: boolean;
+  /** The server's Torrentio, until the household changes its list. */
+  isDefault: boolean;
+}
+
 export type SecretKey = "tmdbApiKey" | "torboxApiKey" | "omdbApiKey";
 
 export interface SettingsResponse {

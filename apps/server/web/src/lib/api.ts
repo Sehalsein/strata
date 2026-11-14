@@ -1,4 +1,5 @@
 import type {
+  StreamAddon,
   AnilistResult,
   AdminStatus,
   FsListing,
@@ -103,6 +104,14 @@ export const api = {
   updateSettings: (patch: Partial<Settings>) => request<{ settings: Settings }>("PATCH", "/admin/settings", patch),
   setSecret: (key: SecretKey, value: string | null) => request<{ ok: true }>("PUT", `/admin/secrets/${key}`, { value }),
   torboxAccount: () => request<TorboxAccount>("GET", "/admin/torbox/account"),
+  addons: () => request<{ items: StreamAddon[] }>("GET", "/admin/addons"),
+  addAddon: (url: string) => request<StreamAddon>("POST", "/admin/addons", { url }),
+  updateAddon: (id: string, patch: { enabled?: boolean; index?: number; url?: string }) => request<{ items: StreamAddon[] }>("PATCH", `/admin/addons/${encodeURIComponent(id)}`, patch),
+  removeAddon: (id: string) => request<{ ok: true }>("DELETE", `/admin/addons/${encodeURIComponent(id)}`),
+  removeAllAddons: () => request<{ ok: true }>("DELETE", "/admin/addons"),
+  refreshAddons: () => request<{ items: StreamAddon[]; failed: string[] }>("POST", "/admin/addons/refresh"),
+  /** Where the add-on's own configure page opens (a redirect, so its URL never reaches the page). */
+  addonConfigureUrl: (id: string) => `/api/admin/addons/${encodeURIComponent(id)}/configure`,
   fs: (path?: string) => request<FsListing>("GET", `/admin/fs${q({ path })}`),
   runJob: (name: string) => request<{ ok: true }>("POST", `/admin/jobs/${encodeURIComponent(name)}/run`),
 
