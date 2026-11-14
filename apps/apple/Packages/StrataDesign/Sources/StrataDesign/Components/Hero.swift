@@ -31,6 +31,10 @@ public struct HeroBillboard<Actions: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
+    #elseif os(macOS)
+    private let sizeClass: MacSizeClass? = .regular
+    #endif
+    #if !os(tvOS)
     /// The featured title follows Dynamic Type from its 52pt default.
     @ScaledMetric(relativeTo: .largeTitle) private var featuredTitleSize: CGFloat = 52
     #endif
@@ -469,6 +473,11 @@ public enum HeroArt {
 }
 
 /// How tall a hero is.
+#if os(macOS)
+/// The Mac (where the package tests build) has no size classes: it lays out as iPad does.
+enum MacSizeClass { case compact, regular }
+#endif
+
 public enum HeroLayout {
     /// Apple TV's screen is 1920×1080 points whatever the panel, and the hero is sized
     /// to the whole screen, safe areas included.
@@ -489,12 +498,17 @@ public enum HeroLayout {
     }
 }
 
-#if os(iOS)
-/// A hero's height on iPhone and iPad: its share of the page, or all of a pager's page.
+#if !os(tvOS)
+/// A hero's height on iPhone and iPad (and the Mac the package tests build for): its
+/// share of the page, or all of a pager's page.
 struct HeroHeight: ViewModifier {
     let featured: Bool
     let fills: Bool
+    #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
+    #else
+    private let sizeClass: MacSizeClass? = .regular
+    #endif
 
     func body(content: Content) -> some View {
         if fills {

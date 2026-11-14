@@ -75,7 +75,8 @@ final class ProbeFlowTests: XCTestCase {
         guard case .failed(let message) = engine.status else { return XCTFail("\(engine.status)") }
         XCTAssertTrue(message.hasPrefix("This file couldn't be read ("), message)
         XCTAssertTrue(message.hasSuffix("). Pick another source."), message)
-        XCTAssertEqual(ServerStub.recorded.map { $0.url!.path }, ["/api/play"], "nothing reported")
+        // Nothing reported; the player then asks for other copies to fall back to (none here).
+        XCTAssertEqual(ServerStub.recorded.map { $0.url!.path }, ["/api/play", "/api/sources"], "nothing reported")
     }
 
     func testProbesAFileOnlyOncePerLoad() async throws {
@@ -85,7 +86,8 @@ final class ProbeFlowTests: XCTestCase {
         }
         let engine = engine()
         await engine.load(target: .movie(.tmdb(.movie, 10378)), meta: PlaybackMeta(title: "t"))
-        XCTAssertEqual(ServerStub.recorded.map { $0.url!.path }, ["/api/play", "/api/files/42/probe", "/api/play"])
+        // Probed once; then the player asks for other copies to fall back to (none here).
+        XCTAssertEqual(ServerStub.recorded.map { $0.url!.path }, ["/api/play", "/api/files/42/probe", "/api/play", "/api/sources"])
         guard case .failed = engine.status else { return XCTFail("\(engine.status)") }
     }
 }
