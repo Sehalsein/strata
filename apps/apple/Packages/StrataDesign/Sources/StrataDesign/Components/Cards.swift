@@ -74,7 +74,9 @@ public struct PosterCard: View {
                 ArtworkImage(url: imageURL, aspectRatio: 2 / 3, seed: id, title: imageURL == nil ? title : nil)
             }
             .cardButtonStyle()
+            // One element for VoiceOver: the button says it all, the caption is for the eye.
             .accessibilityLabel(title)
+            .accessibilityValue(CardSpeech.join([subtitle, providers.first.map { "On \($0.label)" }, CardSpeech.watched(progress)]))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -84,7 +86,6 @@ public struct PosterCard: View {
                 HStack(spacing: Metrics.space2) {
                     if let provider = providers.first {
                         Circle().fill(provider.color).frame(width: 6, height: 6)
-                            .accessibilityLabel("On \(provider.label)")
                     }
                     if let subtitle { Text(subtitle) }
                 }
@@ -92,8 +93,21 @@ public struct PosterCard: View {
                 .foregroundStyle(Theme.ink3)
                 if let progress, progress > 0 { ProgressBar(progress).padding(.top, 4) }
             }
+            .accessibilityHidden(true)
         }
         .frame(width: width)
+    }
+}
+
+/// What a card's button says beyond its title.
+enum CardSpeech {
+    static func watched(_ progress: Double?) -> String? {
+        guard let progress, progress > 0 else { return nil }
+        return "\(Int((min(progress, 1) * 100).rounded())) percent watched"
+    }
+
+    static func join(_ parts: [String?]) -> String {
+        parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 }
 
@@ -135,18 +149,22 @@ public struct ContinueCard: View {
                             .font(.title2)
                             .foregroundStyle(Theme.onArtwork)
                             .padding(14)
-                            .glassEffect(.regular.interactive(), in: .circle)
+                            // Not interactive: the card is the control, the glyph only marks it.
+                            .glassEffect(.regular, in: .circle)
                             .opacity(0.9)
                     }
             }
             .cardButtonStyle()
-            .accessibilityLabel("Play \(title)")
+            // The episode and how far through, not just "Play" and a name.
+            .accessibilityLabel(CardSpeech.join(["Play \(title)", overline, CardSpeech.watched(progress)]))
+            .accessibilityValue(subtitle ?? "")
 
             VStack(alignment: .leading, spacing: 2) {
                 if let overline { Text(overline).eyebrowStyle() }
                 Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                 if let subtitle { Text(subtitle).font(.stFootnote).foregroundStyle(Theme.ink3).lineLimit(1) }
             }
+            .accessibilityHidden(true)
         }
         .frame(width: width)
     }

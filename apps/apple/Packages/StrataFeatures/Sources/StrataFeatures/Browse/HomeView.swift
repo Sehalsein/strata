@@ -239,8 +239,11 @@ struct PosterCardLabel: View {
         .frame(width: width)
         .frame(maxWidth: width == nil ? .infinity : nil)
         .contentShape(Rectangle())
+        // One element: the title, then what the caption and the badge say.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([card.title, card.yearText, card.providerKinds.first.map { "on \($0.label)" }].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel(card.title)
+        .accessibilityValue([card.role, card.yearText, card.badge, card.providerKinds.first.map { "on \($0.label)" }]
+            .compactMap { $0 }.joined(separator: ", "))
     }
 }
 
@@ -311,12 +314,19 @@ struct HeroCarousel: View {
     /// What Play does for each title the carousel has shown, once the server has said.
     @State private var plays: [String: PlayOptions] = [:]
     @State private var index = 0
-    /// When the current title started its turn, for the progress in its dot.
-    @State private var turnStarted = Date.now
-    /// Only moves on while it's on screen and the app is active (Home stays alive under
-    /// other tabs and pushed pages).
-    @State private var visible = false
+    /// Only moves on while it's on screen and the app is active: Home stays alive under
+    /// other tabs and pushed pages (`onScreen`), and on the TV the page stack isn't lazy,
+    /// so scrolling down to the rails doesn't take the hero away (`inView`).
+    @State private var onScreen = false
+    @State private var inView = true
+    private var visible: Bool { onScreen && inView }
     @Environment(\.scenePhase) private var scenePhase
+    /// Titles changing by themselves are hard to follow with VoiceOver and are motion.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
     #if os(tvOS)
     @FocusState private var focus: HeroButton?
     enum HeroButton: Hashable { case play, add, info, next }
@@ -329,14 +339,23 @@ struct HeroCarousel: View {
 
     private static let interval: Double = 8
 
-    private struct AdvanceKey: Equatable {
+    private struct AdvanceKey: Hashable {
         let index: Int
         let running: Bool
     }
 
     /// Moves on while on screen, buttons focused or not (as the TV app's does); focus stays
-    /// on the same button for the next title.
-    private var running: Bool { visible && scenePhase == .active }
+    /// on the same button for the next title. Never with Reduce Motion or VoiceOver on.
+    private var running: Bool { visible && scenePhase == .active && !reduceMotion && !voiceOver }
+
+    /// iPad's roomier layout, with the facts and the synopsis; always on the TV.
+    private var roomy: Bool {
+        #if os(iOS)
+        sizeClass == .regular
+        #else
+        Metrics.isPadOrTV
+        #endif
+    }
 
     var body: some View {
         // On the TV the dots sit over the art; on iPhone and iPad, in their own row under
@@ -349,7 +368,8 @@ struct HeroCarousel: View {
         stack
             .onChange(of: cards.count) { if index >= cards.count { index = 0 } }
             .onChange(of: watchlist) { listed = [:] }
-            .onAppear { visible = true }
+            .onAppear { onScreen = true }
+            .onScrollVisibilityChange(threshold: 0.3) { inView = $0 }
             #if os(tvOS)
             .task {
                 // Not when the app opened on a link: that page goes over Home and keeps focus.
@@ -362,7 +382,7 @@ struct HeroCarousel: View {
                 if focus == nil { focus = hasPlay(cards[min(index, cards.count - 1)]) ? .play : .add }
             }
             #endif
-            .onDisappear { visible = false }
+            .onDisappear { onScreen = false }
             // Only the title on screen: asking about all of them would send the server
             // looking for sources for ten titles at once.
             // After watching, Up Next moves on: ask again.
@@ -371,18 +391,30 @@ struct HeroCarousel: View {
                 guard !cards.isEmpty else { return }
                 await resolvePlay(cards[min(index, cards.count - 1)])
             }
+            // The next title's art, so it's there when the carousel moves on.
+            .onChange(of: index, initial: true) {
+                guard cards.count > 1 else { return }
+                let next = cards[(min(index, cards.count - 1) + 1) % cards.count]
+                HeroArt.prefetch(backdropURL: next.backdropUrl, fallbackURL: next.posterUrl)
+            }
             // Restarts on every change, manual or not, so a swipe gets a full interval.
             .task(id: AdvanceKey(index: index, running: running)) {
-                turnStarted = .now
                 guard running else { return }
                 try? await Task.sleep(for: .seconds(Self.interval))
                 guard !Task.isCancelled, cards.count > 1 else { return }
-                #if os(tvOS)
-                step(1)
-                #else
-                withAnimation(.easeInOut(duration: 0.6)) { index = (index + 1) % cards.count }
-                #endif
+                go(1)
             }
+    }
+
+    /// The next or previous title: the timer, the TV's "›" button, and VoiceOver's swipe
+    /// up and down on the dots.
+    private func go(_ by: Int) {
+        guard cards.count > 1 else { return }
+        #if os(tvOS)
+        step(by)
+        #else
+        withAnimation(.easeInOut(duration: 0.6)) { index = (index + by + cards.count) % cards.count }
+        #endif
     }
 
     #if os(tvOS)
@@ -445,7 +477,10 @@ struct HeroCarousel: View {
         // Clipped at the sides only, so the art can stretch up into a pulled-down page.
         .scrollClipDisabled()
         .clipShape(OpenTopRectangle())
-        .frame(height: Metrics.isPad ? 720 : 520)
+        // A share of the page's height, as HeroBillboard sizes itself; its pages fill this.
+        .containerRelativeFrame(.vertical) { length, _ in
+            HeroLayout.height(featured: roomy, regular: roomy, container: length)
+        }
     }
     #else
     private var content: some View { hero(cards[min(index, cards.count - 1)]) }
@@ -482,7 +517,7 @@ struct HeroCarousel: View {
     /// Wide like the TV app's: the row's width on iPhone, a generous fixed width on iPad.
     private var primaryWidth: CGFloat {
         #if os(iOS)
-        Metrics.isPad ? 280 : .infinity
+        roomy ? 280 : .infinity
         #else
         300
         #endif
@@ -501,8 +536,8 @@ struct HeroCarousel: View {
         // Just the name on iPhone: the carousel is for picking, the title page has the
         // details. Apple TV and iPad have room for a line of facts and the synopsis.
         HeroBillboard(id: card.id, backdropURL: card.backdropUrl, fallbackURL: card.posterUrl, eyebrow: card.eyebrow, title: card.title,
-                      meta: Metrics.isPadOrTV ? meta(card) : [], badges: Metrics.isPadOrTV ? card.badge.map { [$0] } ?? [] : [],
-                      overview: Metrics.isPadOrTV ? card.overview : nil, paged: true, featured: true) {
+                      meta: roomy ? meta(card) : [], badges: roomy ? card.badge.map { [$0] } ?? [] : [],
+                      overview: roomy ? card.overview : nil, paged: true, featured: true) {
             // Play when the server can play it now; otherwise the wide button opens it.
             if let choice = playChoice(card) {
                 PlayButton(choice.label, maxWidth: primaryWidth, size: heroControlSize) { services.play(choice, title: card.title, artworkURL: card.backdropUrl) }
@@ -590,28 +625,61 @@ struct HeroCarousel: View {
     /// Like the TV app's: the current title's dot is a bar that fills until the next one.
     @ViewBuilder private var dots: some View {
         if cards.count > 1 {
-            TimelineView(.animation(minimumInterval: 1 / 30, paused: !running)) { context in
-                let elapsed = running ? min(1, context.date.timeIntervalSince(turnStarted) / Self.interval) : 1
-                HStack(spacing: 6) {
-                    ForEach(cards.indices, id: \.self) { i in
-                        Capsule()
-                            .fill(dotColor.opacity(0.35))
-                            .frame(width: i == index ? 28 : 6, height: 6)
-                            .overlay(alignment: .leading) {
-                                if i == index {
-                                    Capsule().fill(dotColor.opacity(0.9)).frame(width: max(6, 28 * elapsed))
-                                }
+            HStack(spacing: 6) {
+                ForEach(cards.indices, id: \.self) { i in
+                    Capsule()
+                        .fill(dotColor.opacity(0.35))
+                        .frame(width: i == index ? 28 : 6, height: 6)
+                        .overlay(alignment: .leading) {
+                            if i == index {
+                                // A new fill for each turn, so it starts empty again.
+                                TurnFill(color: dotColor.opacity(0.9), running: running, duration: Self.interval)
+                                    .id(AdvanceKey(index: index, running: running))
                             }
-                    }
+                        }
                 }
             }
             .animation(.easeInOut(duration: 0.3), value: index)
             #if os(tvOS)
             .padding(.bottom, Metrics.space8)
             #endif
+            // Swipe up or down with VoiceOver for the next or previous title.
             .accessibilityElement()
-            .accessibilityLabel("Featured \(index + 1) of \(cards.count)")
+            .accessibilityLabel("Featured")
+            .accessibilityValue("\(cards[min(index, cards.count - 1)].title), \(index + 1) of \(cards.count)")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: go(1)
+                case .decrement: go(-1)
+                @unknown default: break
+                }
+            }
         }
+    }
+}
+
+/// The current dot's bar, filling over a title's turn: one animation per turn rather
+/// than redrawing every frame. Paused, it shows full.
+private struct TurnFill: View {
+    let color: Color
+    let running: Bool
+    let duration: Double
+    @State private var progress: CGFloat
+
+    init(color: Color, running: Bool, duration: Double) {
+        self.color = color
+        self.running = running
+        self.duration = duration
+        _progress = State(initialValue: running ? 0 : 1)
+    }
+
+    var body: some View {
+        Capsule().fill(color)
+            .frame(width: 6 + 22 * progress)
+            .onAppear {
+                guard running else { return }
+                withAnimation(.linear(duration: duration)) { progress = 1 }
+            }
     }
 }
 

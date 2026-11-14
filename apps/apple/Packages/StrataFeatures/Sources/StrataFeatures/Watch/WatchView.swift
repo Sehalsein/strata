@@ -20,6 +20,10 @@ struct WatchView: View {
     /// Seconds the current load has taken, for saying what's happening when it's slow.
     @State private var loadingSeconds = 0
     @State private var pip = PiPController()
+    /// With VoiceOver or Switch Control the controls stay up: hidden, there'd be nothing
+    /// to move to but the video.
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+    @Environment(\.accessibilitySwitchControlEnabled) private var switchControl
     #if os(tvOS)
     @FocusState private var surfaceFocused: Bool
     #endif
@@ -35,7 +39,8 @@ struct WatchView: View {
 
             // The title's artwork while it starts, rather than a black screen.
             if isStarting {
-                RemoteImage(url: (engine.meta ?? request.meta).artworkURL, maxPixel: 1280, blur: 24) { Color.black }
+                // Blurred, so a small image does (as the hero's blurred posters).
+                RemoteImage(url: (engine.meta ?? request.meta).artworkURL, maxPixel: 320, blur: 12, priority: .userInitiated) { Color.black }
                     .overlay(Color.black.opacity(0.55))
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
@@ -51,6 +56,11 @@ struct WatchView: View {
                     TapGesture(count: 2).onEnded { engine.toggleVideoGravity() }
                         .exclusively(before: TapGesture().onEnded { toggleChrome() })
                 )
+                // The one thing left on screen when the controls hide: say what it does.
+                .accessibilityElement()
+                .accessibilityLabel(chromeVisible ? "Hide controls" : "Show controls")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { toggleChrome() }
                 // Pinch out to fill the screen, in to see the whole picture (as in Apple's player).
                 .simultaneousGesture(
                     MagnifyGesture().onEnded { value in
@@ -95,24 +105,11 @@ struct WatchView: View {
                     .transition(.opacity)
             }
 
-            if let next = engine.nextEpisode, showUpNext {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        UpNextCard(next: next, countdown: max(0, Int(engine.duration - engine.position)), onPlay: playNext) {
-                            upNextDismissed = true
-                        }
-                    }
-                }
-                .padding(Metrics.gutter)
-                .padding(.bottom, chromeVisible ? 140 : 0)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
+            // Reads the position itself, so the ticks re-render it and not the whole player.
+            UpNextOverlay(engine: engine, dismissed: $upNextDismissed, raised: chromeVisible, onPlay: playNext)
         }
         .animation(.easeOut(duration: 0.25), value: chromeVisible)
         .animation(.easeOut(duration: 0.35), value: isStarting)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showUpNext)
         .preferredColorScheme(.dark)
         #if os(iOS)
         .statusBarHidden(!chromeVisible)
@@ -123,9 +120,10 @@ struct WatchView: View {
         .onExitCommand {
             if chromeVisible { chromeVisible = false } else { close() }
         }
-        // Moving around the controls counts as using them: keep them up a while longer.
-        .onMoveCommand { _ in if chromeVisible { scheduleHide(after: 8) } else { showChrome() } }
+        .onMoveCommand(perform: move)
         #endif
+        // Turned on mid-film: bring the controls back for good.
+        .onChange(of: voiceOver || switchControl) { _, on in if on { showChrome(autoHide: false) } }
         .pickerSheet(isPresented: $showSources) {
             let target = engine.target ?? request.target
             let meta = engine.meta ?? request.meta
@@ -194,12 +192,6 @@ struct WatchView: View {
     private static let cardIconSize: CGFloat = 40
     private static let cardButtonSize: ControlSize = .large
     #endif
-
-    /// Show Up Next in the last 30s of an episode with an available next one.
-    private var showUpNext: Bool {
-        guard !upNextDismissed, engine.nextEpisode?.available == true, engine.duration > 60 else { return false }
-        return engine.duration - engine.position <= 30 && engine.status == .playing
-    }
 
     /// Nothing to show yet: asking the server, or the first frames on their way.
     private var isStarting: Bool {
@@ -337,6 +329,24 @@ struct WatchView: View {
         Task { await engine.selectSubtitle(track) }
     }
 
+    #if os(tvOS)
+    /// Like the TV app's player: with the controls hidden, left and right skip back and
+    /// on 10 seconds (and show where that landed), down opens the info panel, up shows
+    /// the controls. With them up, moving around them keeps them up a while longer.
+    private func move(_ direction: MoveCommandDirection) {
+        if chromeVisible { scheduleHide(after: 8); return }
+        // The error and preparing cards' buttons take left and right for themselves.
+        guard !showsStateCard else { return }
+        switch direction {
+        case .left, .right:
+            if engine.duration > 0 { Task { await engine.skip(direction == .left ? -10 : 10) } }
+            showChrome()
+        case .down: showDetails = true
+        default: showChrome()
+        }
+    }
+    #endif
+
     private func toggleChrome() {
         if chromeVisible { chromeVisible = false } else { showChrome() }
     }
@@ -348,11 +358,47 @@ struct WatchView: View {
 
     private func scheduleHide(after seconds: Double = 3.5) {
         hideTask?.cancel()
+        guard !voiceOver, !switchControl else { return }
         hideTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(seconds))
             guard !Task.isCancelled, engine.status == .playing, !showDetails else { return }
             chromeVisible = false
         }
+    }
+}
+
+/// Up Next in the last 30s of an episode with an available next one. Its own view
+/// because it reads the playhead, which moves several times a second.
+private struct UpNextOverlay: View {
+    let engine: PlayerEngine
+    @Binding var dismissed: Bool
+    /// Above the controls while they show.
+    let raised: Bool
+    let onPlay: () -> Void
+
+    private var shows: Bool {
+        guard !dismissed, engine.nextEpisode?.available == true, engine.duration > 60 else { return false }
+        return engine.duration - engine.position <= 30 && engine.status == .playing
+    }
+
+    var body: some View {
+        ZStack {
+            if let next = engine.nextEpisode, shows {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        UpNextCard(next: next, countdown: max(0, Int(engine.duration - engine.position)), onPlay: onPlay) {
+                            dismissed = true
+                        }
+                    }
+                }
+                .padding(Metrics.gutter)
+                .padding(.bottom, raised ? 140 : 0)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: shows)
     }
 }
 

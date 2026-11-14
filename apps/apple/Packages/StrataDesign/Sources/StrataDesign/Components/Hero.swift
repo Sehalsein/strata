@@ -29,11 +29,15 @@ public struct HeroBillboard<Actions: View>: View {
     @ViewBuilder let actions: () -> Actions
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    /// The featured title follows Dynamic Type from its 52pt default.
+    @ScaledMetric(relativeTo: .largeTitle) private var featuredTitleSize: CGFloat = 52
+    #endif
 
     public init(id: String, backdropURL: URL?, fallbackURL: URL? = nil, eyebrow: String? = nil, title: String, meta: [String] = [], badges: [String] = [], ratings: [ExternalRating] = [], overview: String? = nil, paged: Bool = false, featured: Bool = false, credits: [HeroCredit] = [], progress: HeroProgress? = nil, @ViewBuilder actions: @escaping () -> Actions) {
         self.id = id
-        // Full size: list-sized TMDB art (w780) is soft across a whole screen.
-        self.backdropURL = backdropURL.map(TMDBImage.original)
+        self.backdropURL = backdropURL.map(HeroArt.backdrop)
         self.paged = paged
         self.featured = featured
         self.credits = credits
@@ -48,13 +52,6 @@ public struct HeroBillboard<Actions: View>: View {
         self.actions = actions
     }
 
-    #if os(tvOS)
-    private static var backdropPixels: Int { 1920 }
-    #else
-    // The art fills the hero's height, so on a 3x phone it's ~2,800px wide.
-    private static var backdropPixels: Int { 2400 }
-    #endif
-
     /// How far the art lags behind a page as it slides, as a fraction of the page width.
     private static var pageParallax: CGFloat { 0.3 }
     /// How fast the art moves as the page scrolls up, relative to the page.
@@ -64,9 +61,8 @@ public struct HeroBillboard<Actions: View>: View {
     private let titleFont = Font.stDisplayTV
     private let overviewLines = 4
     #else
-    private var height: CGFloat { Metrics.isPad ? 620 : 520 }
     private let titleFont = Font.stDisplay
-    private var overviewLines: Int { Metrics.isPad ? 4 : 3 }
+    private var overviewLines: Int { sizeClass == .regular ? 4 : 3 }
     #endif
 
     public var body: some View {
@@ -86,12 +82,17 @@ public struct HeroBillboard<Actions: View>: View {
         }
         // Full width even when the art is in the background and only the text is inside.
         .frame(maxWidth: .infinity, alignment: .bottomLeading)
-        .frame(height: frameHeight, alignment: .bottom)
+        #if os(tvOS)
+        .frame(height: HeroLayout.tvHeight(featured: featured), alignment: .bottom)
         // The featured TV hero is shorter than the screen so the first rail shows below
         // it, and its art carries on under that rail to the bottom of the screen.
         .background(alignment: .top) {
-            if bleedsUnderRail { art.frame(height: Self.screenHeight) }
+            if bleedsUnderRail { art.frame(height: HeroLayout.tvScreenHeight) }
         }
+        #else
+        // A pager's page fills the height the pager was given (Home sizes it the same way).
+        .modifier(HeroHeight(featured: usesFeaturedLayout, fills: paged))
+        #endif
     }
 
     private var art: some View {
@@ -109,14 +110,15 @@ public struct HeroBillboard<Actions: View>: View {
         }
     }
 
-    #if os(tvOS)
-    private static var screenHeight: CGFloat { UIScreen.main.bounds.height }
-    #else
-    private static var screenHeight: CGFloat { 0 }
-    #endif
-
-    /// The left-weighted layout: Home's featured carousel on Apple TV and iPad.
-    private var usesFeaturedLayout: Bool { featured && Metrics.isPadOrTV }
+    /// The left-weighted layout: Home's featured carousel on Apple TV, and in a regular
+    /// width (iPad, not in a narrow Split View).
+    private var usesFeaturedLayout: Bool {
+        #if os(iOS)
+        featured && sizeClass == .regular
+        #else
+        featured && Metrics.isPadOrTV
+        #endif
+    }
 
     /// The TV's featured hero leaves the bottom of the screen to the first rail.
     private var bleedsUnderRail: Bool {
@@ -124,16 +126,6 @@ public struct HeroBillboard<Actions: View>: View {
         featured
         #else
         false
-        #endif
-    }
-
-    private var frameHeight: CGFloat {
-        #if os(tvOS)
-        // Like the TV app: the art fills the whole screen, safe areas included; on Home
-        // the first rail's title and the top of its cards show at the bottom.
-        featured ? (Self.screenHeight * 0.76).rounded() : Self.screenHeight
-        #else
-        usesFeaturedLayout ? 720 : height
         #endif
     }
 
@@ -163,7 +155,8 @@ public struct HeroBillboard<Actions: View>: View {
                     // In a pager the art is wider than the page, so it can slide within it.
                     let bleed = paged && moves ? (geo.size.width * Self.pageParallax).rounded() : 0
                     // A blurred poster needs few pixels; a backdrop, about the screen's width.
-                    RemoteImage(url: backdropURL ?? fallbackURL, maxPixel: blurred ? 320 : Self.backdropPixels, blur: blurred ? 40 : 0) {
+                    RemoteImage(url: backdropURL ?? fallbackURL, maxPixel: blurred ? HeroArt.blurredPixels : HeroArt.backdropPixels,
+                                blur: blurred ? 40 : 0, priority: .userInitiated) {
                         StrataPlaceholder.hero(seed: id)
                     }
                     .frame(width: geo.size.width + 2 * bleed, height: geo.size.height)
@@ -290,7 +283,7 @@ public struct HeroBillboard<Actions: View>: View {
     #else
     private let featuredWidth: CGFloat = 640
     private let featuredOverviewWidth: CGFloat = 460
-    private let featuredTitleFont = Font.system(size: 52, weight: .heavy)
+    private var featuredTitleFont: Font { .system(size: featuredTitleSize, weight: .heavy) }
     private let featuredBottom: CGFloat = Metrics.space10
     #endif
 
@@ -427,11 +420,93 @@ public struct OpenTopRectangle: Shape {
 public enum TMDBImage {
     /// The full-size image, for art that fills the screen. Other URLs are left as they are.
     public static func original(_ url: URL) -> URL {
+        resized(url, to: "original")
+    }
+
+    /// The smallest TMDB size that covers `maxPixel` across: w1280 up to 1280px,
+    /// else the original (which can be 4K and several megabytes).
+    public static func covering(_ url: URL, maxPixel: Int) -> URL {
+        resized(url, to: maxPixel <= 1280 ? "w1280" : "original")
+    }
+
+    private static func resized(_ url: URL, to size: String) -> URL {
         guard url.host() == "image.tmdb.org" else { return url }
-        let path = url.absoluteString.replacingOccurrences(of: #"/t/p/w\d+/"#, with: "/t/p/original/", options: .regularExpression)
+        let path = url.absoluteString.replacingOccurrences(of: #"/t/p/(w\d+|original)/"#, with: "/t/p/\(size)/", options: .regularExpression)
         return URL(string: path) ?? url
     }
 }
+
+/// The hero's artwork: which URL and how many pixels, so Home can load the next
+/// title's art ahead at exactly the size the hero will ask for.
+public enum HeroArt {
+    #if os(tvOS)
+    // The TV's 1080p frame: keep TMDB's original, w1280 is soft across the room.
+    static let backdropPixels = 1920
+    #else
+    // The art fills the hero's height, so on a 3x phone it's ~2,800px wide.
+    static let backdropPixels = 2400
+    #endif
+    /// A blurred poster standing in for a missing backdrop needs few pixels.
+    static let blurredPixels = 320
+
+    /// List-sized TMDB art (w780) is soft across a whole screen; ask for what covers it.
+    static func backdrop(_ url: URL) -> URL {
+        #if os(tvOS)
+        return TMDBImage.original(url)
+        #else
+        return TMDBImage.covering(url, maxPixel: backdropPixels)
+        #endif
+    }
+
+    /// Starts loading a hero's art before it's on screen (the carousel's next title).
+    @MainActor public static func prefetch(backdropURL: URL?, fallbackURL: URL?) {
+        if let backdropURL {
+            RemoteImage<EmptyView>.prefetch(backdrop(backdropURL), maxPixel: backdropPixels)
+        } else if let fallbackURL {
+            RemoteImage<EmptyView>.prefetch(fallbackURL, maxPixel: blurredPixels)
+        }
+    }
+}
+
+/// How tall a hero is.
+public enum HeroLayout {
+    /// Apple TV's screen is 1920×1080 points whatever the panel, and the hero is sized
+    /// to the whole screen, safe areas included.
+    static let tvScreenHeight: CGFloat = 1080
+
+    /// Like the TV app: the art fills the whole screen; on Home the first rail's title
+    /// and the top of its cards show at the bottom of the featured hero.
+    static func tvHeight(featured: Bool) -> CGFloat {
+        featured ? (tvScreenHeight * 0.76).rounded() : tvScreenHeight
+    }
+
+    /// iPhone and iPad: a share of the page's height (`containerRelativeFrame`), capped at
+    /// the sizes it has on a full-screen iPad, so a short window (landscape, Split View,
+    /// Stage Manager) gets a shorter hero. A compact width keeps the phone's 520.
+    public static func height(featured: Bool, regular: Bool, container length: CGFloat) -> CGFloat {
+        guard regular else { return 520 }
+        return featured ? min(720, max(420, length * 0.9)) : min(620, max(420, length * 0.8))
+    }
+}
+
+#if os(iOS)
+/// A hero's height on iPhone and iPad: its share of the page, or all of a pager's page.
+struct HeroHeight: ViewModifier {
+    let featured: Bool
+    let fills: Bool
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    func body(content: Content) -> some View {
+        if fills {
+            content.frame(maxHeight: .infinity, alignment: .bottom)
+        } else {
+            content.containerRelativeFrame(.vertical, alignment: .bottom) { length, _ in
+                HeroLayout.height(featured: featured, regular: sizeClass == .regular, container: length)
+            }
+        }
+    }
+}
+#endif
 
 /// The shape of a `HeroBillboard` while its page loads: same height, with bars where
 /// the eyebrow, title, metadata, overview and buttons will be, so nothing moves when
@@ -441,9 +516,19 @@ public struct SkeletonHero: View {
     /// `HeroBillboard(featured:)` lays it out: the same height and the same left column.
     let featured: Bool
 
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
+
     public init(featured: Bool = false) { self.featured = featured }
 
-    private var usesFeaturedLayout: Bool { featured && Metrics.isPadOrTV }
+    private var usesFeaturedLayout: Bool {
+        #if os(iOS)
+        featured && sizeClass == .regular
+        #else
+        featured && Metrics.isPadOrTV
+        #endif
+    }
 
     #if os(tvOS)
     private let titleSize = CGSize(width: 720, height: 76)
@@ -452,7 +537,6 @@ public struct SkeletonHero: View {
     private let featuredButton = CGSize(width: 260, height: 74)
     private let lineHeight: CGFloat = 26
     #else
-    private var height: CGFloat { Metrics.isPad ? 620 : 520 }
     private let titleSize = CGSize(width: 240, height: 36)
     private let button = CGSize(width: 120, height: 50)
     private let featuredTitle = CGSize(width: 440, height: 52)
@@ -460,21 +544,17 @@ public struct SkeletonHero: View {
     private let lineHeight: CGFloat = 15
     #endif
 
-    private var frameHeight: CGFloat {
-        #if os(tvOS)
-        featured ? (UIScreen.main.bounds.height * 0.76).rounded() : UIScreen.main.bounds.height
-        #else
-        usesFeaturedLayout ? 720 : height
-        #endif
-    }
-
     public var body: some View {
         ZStack(alignment: .bottomLeading) {
             LinearGradient(colors: [Theme.surface1, Theme.surface1, Theme.bg], startPoint: .top, endPoint: .bottom)
             if usesFeaturedLayout { featuredInfo } else { info }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: frameHeight)
+        #if os(tvOS)
+        .frame(height: HeroLayout.tvHeight(featured: featured))
+        #else
+        .modifier(HeroHeight(featured: usesFeaturedLayout, fills: false))
+        #endif
         .accessibilityElement()
         .accessibilityLabel("Loading")
     }

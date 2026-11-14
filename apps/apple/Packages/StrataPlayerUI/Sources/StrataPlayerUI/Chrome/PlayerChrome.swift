@@ -65,9 +65,7 @@ public struct PlayerChrome: View {
                             .titleTracking()
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
-                        if let chapter = engine.currentChapter?.title {
-                            Text(chapter).eyebrowStyle(Theme.onArtwork.opacity(0.75))
-                        }
+                        ChapterLabel(engine: engine)
                     }
                     Spacer(minLength: 0)
                     GlassEffectContainer(spacing: Metrics.space2) {
@@ -78,11 +76,8 @@ public struct PlayerChrome: View {
                         }
                     }
                 }
-                Scrubber(position: engine.position, duration: engine.duration, chapters: engine.chapters,
-                         isPlaying: isPlaying, onSelect: { engine.togglePlay() }, onScrubbing: onScrubbing) { target in
-                    Task { await engine.seek(to: target) }
-                }
-                .prefersDefaultFocus(true, in: focusScope)
+                PlaybackProgress(engine: engine, isPlaying: isPlaying, onSelect: { engine.togglePlay() }, onScrubbing: onScrubbing)
+                    .prefersDefaultFocus(true, in: focusScope)
                 HStack(spacing: Metrics.space4) {
                     Button(action: onDetails) {
                         Text("Info").font(.system(size: 26, weight: .semibold)).padding(.horizontal, Metrics.space1)
@@ -197,12 +192,8 @@ public struct PlayerChrome: View {
 
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: Metrics.space3) {
-            if let chapter = engine.currentChapter?.title {
-                Text(chapter).eyebrowStyle(Theme.onArtwork.opacity(0.75))
-            }
-            Scrubber(position: engine.position, duration: engine.duration, chapters: engine.chapters, onScrubbing: onScrubbing) { target in
-                Task { await engine.seek(to: target) }
-            }
+            ChapterLabel(engine: engine)
+            PlaybackProgress(engine: engine, onScrubbing: onScrubbing)
             HStack(spacing: Metrics.space2) {
                 Spacer()
                 GlassEffectContainer(spacing: Metrics.space2) {
@@ -213,6 +204,33 @@ public struct PlayerChrome: View {
                     }
                 }
             }
+        }
+    }
+}
+
+/// The scrubber, in its own view: it reads the playhead, which moves several times a
+/// second, so only it redraws on each tick rather than the whole chrome.
+private struct PlaybackProgress: View {
+    let engine: PlayerEngine
+    var isPlaying: Bool? = nil
+    var onSelect: (() -> Void)? = nil
+    let onScrubbing: (Bool) -> Void
+
+    var body: some View {
+        Scrubber(position: engine.position, duration: engine.duration, chapters: engine.chapters,
+                 isPlaying: isPlaying, onSelect: onSelect, onScrubbing: onScrubbing) { target in
+            Task { await engine.seek(to: target) }
+        }
+    }
+}
+
+/// The chapter playing, if the file has chapters; on its own for the same reason.
+private struct ChapterLabel: View {
+    let engine: PlayerEngine
+
+    var body: some View {
+        if let chapter = engine.currentChapter?.title {
+            Text(chapter).eyebrowStyle(Theme.onArtwork.opacity(0.75))
         }
     }
 }
