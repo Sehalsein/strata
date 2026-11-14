@@ -212,7 +212,7 @@ public struct ChaptersRail: View {
                         }
                         .padding(.horizontal, Metrics.space2)
                     }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.strataGlass)
                     .tint(current ? Theme.apricot : nil)
                 }
             }

@@ -518,7 +518,7 @@ struct HeroCarousel: View {
                         .padding(.horizontal, Metrics.space2)
                         .frame(maxWidth: primaryWidth, minHeight: 30)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.strataGlass)
                 .controlSize(heroControlSize)
                 .tint(Theme.ink)
                 #endif
@@ -531,7 +531,7 @@ struct HeroCarousel: View {
                     .frame(width: 30, height: 30)
                     .contentTransition(.symbolEffect(.replace))
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.strataGlass)
             .buttonBorderShape(.circle)
             .controlSize(heroControlSize)
             .tint(Theme.ink)
@@ -546,7 +546,7 @@ struct HeroCarousel: View {
                     .font(.stHeadline)
                     .frame(width: 30, height: 30)
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.strataGlass)
             .buttonBorderShape(.circle)
             .controlSize(heroControlSize)
             .tint(Theme.ink)
@@ -559,7 +559,7 @@ struct HeroCarousel: View {
                         .font(.stHeadline)
                         .frame(width: 30, height: 30)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.strataGlass)
                 .buttonBorderShape(.circle)
                 .controlSize(heroControlSize)
                 .tint(Theme.ink)

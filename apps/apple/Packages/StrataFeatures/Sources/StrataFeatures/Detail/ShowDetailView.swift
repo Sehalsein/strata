@@ -168,7 +168,7 @@ struct ShowDetailView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .buttonStyle(.glass)
+                .buttonStyle(.strataGlass)
                 .tint(Theme.ink)
                 Spacer()
                 if let summary = show.orderedSeasons.first(where: { $0.season == currentSeason(show) }), summary.availableEpisodes > 0 {

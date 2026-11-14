@@ -1,6 +1,18 @@
 import SwiftUI
 
 /// The one primary action: Liquid Glass tinted apricot, dark label.
+public extension PrimitiveButtonStyle where Self == GlassButtonStyle {
+    /// The system's Liquid Glass button. On the TV, its clear variant: the default there
+    /// reads as a flat grey platter over artwork.
+    static var strataGlass: GlassButtonStyle {
+        #if os(tvOS)
+        .glass(.clear)
+        #else
+        .glass
+        #endif
+    }
+}
+
 public extension Font {
     /// A button's label: the headline, or on the TV a small button's smaller label (the
     /// headline there is 38pt, which a small button can't hold).
@@ -38,7 +50,7 @@ public struct PlayButton: View {
                 .padding(.horizontal, Metrics.space2)
                 .frame(maxWidth: maxWidth, minHeight: 30)
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.strataGlass)
         .tint(Theme.ink)
         .controlSize(size)
         #else
@@ -115,7 +127,7 @@ public struct GlassButton: View {
             .font(Font.buttonLabel(size))
             .frame(minHeight: 30)
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.strataGlass)
         .controlSize(size)
         .buttonBorderShape(iconOnly ? .circle : .automatic)
         // Glass labels take the tint: ink, not the app's accent (apricot is for Play only).

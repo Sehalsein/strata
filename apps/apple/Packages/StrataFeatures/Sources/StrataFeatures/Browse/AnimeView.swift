@@ -23,6 +23,7 @@ struct AnimeView: View {
                     // lands here first, rather than on whichever poster sits under it.
                     HStack { menu; Spacer() }
                         .padding(.horizontal, Metrics.gutter)
+                        .tvFilterRow(underHero: hero != nil)
                         .focusSection()
                 }
                 #endif

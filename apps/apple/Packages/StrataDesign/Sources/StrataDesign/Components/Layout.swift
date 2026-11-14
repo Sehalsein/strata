@@ -277,7 +277,7 @@ public struct MessageView: View {
             if let message { Text(message) }
         } actions: {
             if let actionTitle, let action {
-                Button(actionTitle, action: action).buttonStyle(.glass)
+                Button(actionTitle, action: action).buttonStyle(.strataGlass)
             }
         }
         .foregroundStyle(Theme.ink)

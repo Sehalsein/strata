@@ -33,6 +33,7 @@ struct BrowseView: View {
                     // Full width, so down from the tab bar reaches it (see AnimeView).
                     HStack { GenreMenu(genres: genres, selected: $genre); Spacer() }
                         .padding(.horizontal, Metrics.gutter)
+                        .tvFilterRow(underHero: hero != nil && genre == nil)
                         .focusSection()
                 }
                 #endif
@@ -196,13 +197,15 @@ struct GenreMenu<Item: Hashable & Identifiable>: View {
         } label: {
             #if os(tvOS)
             Label(selected.map(name) ?? allTitle, systemImage: "line.3.horizontal.decrease")
-                .font(.stHeadline)
+                .font(.system(size: 26, weight: .semibold))
             #else
             Label(selected.map(name) ?? noun, systemImage: selected == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
             #endif
         }
         #if os(tvOS)
-        .buttonStyle(.glass)
+        // A compact filter pill, not a page-sized button.
+        .buttonStyle(.strataGlass)
+        .controlSize(.small)
         .tint(Theme.ink)
         #endif
         .accessibilityLabel(selected.map { "\(noun): \(name($0))" } ?? "Filter by \(noun.lowercased())")
@@ -212,6 +215,19 @@ struct GenreMenu<Item: Hashable & Identifiable>: View {
 extension GenreMenu where Item == Genre {
     init(genres: [Genre], selected: Binding<Genre?>) {
         self.init(genres: genres, selected: selected, name: \.name)
+    }
+}
+
+extension View {
+    /// On the TV, a filter row under a hero sits close to it, so the first row of posters
+    /// shows below; the page's usual gap would leave the posters off screen.
+    @ViewBuilder func tvFilterRow(underHero: Bool) -> some View {
+        #if os(tvOS)
+        padding(.top, underHero ? -Metrics.space12 : 0)
+            .padding(.bottom, -Metrics.space6)
+        #else
+        self
+        #endif
     }
 }
 

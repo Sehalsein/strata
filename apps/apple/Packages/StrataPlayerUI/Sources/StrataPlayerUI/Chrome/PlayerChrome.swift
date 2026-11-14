@@ -87,13 +87,13 @@ public struct PlayerChrome: View {
                     Button(action: onDetails) {
                         Text("Info").font(.system(size: 26, weight: .semibold)).padding(.horizontal, Metrics.space1)
                     }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.strataGlass)
                     .controlSize(.small)
                     if let onSources {
                         Button(action: onSources) {
                             Text("Change Source").font(.system(size: 26, weight: .semibold)).padding(.horizontal, Metrics.space1)
                         }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.strataGlass)
                         .controlSize(.small)
                     }
                 }

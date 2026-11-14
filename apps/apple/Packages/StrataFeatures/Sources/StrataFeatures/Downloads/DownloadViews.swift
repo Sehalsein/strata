@@ -70,7 +70,7 @@ struct DownloadButton: View {
                 } label: {
                     DownloadStateLabel(item: item)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.strataGlass)
             } else {
                 GlassButton(starting ? "Starting…" : "Download", systemImage: "arrow.down.circle", iconOnly: !Metrics.isPadOrTV) { choosing = true }
                     .disabled(starting)

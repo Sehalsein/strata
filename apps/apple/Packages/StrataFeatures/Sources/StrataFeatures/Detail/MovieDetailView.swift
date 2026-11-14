@@ -268,7 +268,7 @@ struct TrailerButton: View {
                 Image(systemName: "play.rectangle").font(.stHeadline).frame(minHeight: 30)
             }
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.strataGlass)
         .controlSize(.large)
         .accessibilityLabel("Trailer")
         #endif

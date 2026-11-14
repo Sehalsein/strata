@@ -22,7 +22,7 @@ public struct PlayerIconButton: View {
         Button(action: action) {
             PlayerIcon(systemImage: systemImage, size: size)
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.strataGlass)
         .buttonBorderShape(.circle)
         .accessibilityLabel(label)
     }
@@ -71,7 +71,7 @@ public struct AudioMenu: View {
         } label: {
             PlayerIcon(systemImage: "waveform", size: .regular)
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.strataGlass)
         .buttonBorderShape(.circle)
         .disabled(engine.audioTracks.count < 2)
         .accessibilityLabel("Audio")
@@ -105,7 +105,7 @@ public struct SubtitleMenu: View {
         } label: {
             PlayerIcon(systemImage: engine.captionsEnabled ? "captions.bubble.fill" : "captions.bubble", size: .regular)
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.strataGlass)
         .buttonBorderShape(.circle)
         .disabled(engine.subtitleTracks.isEmpty)
         .accessibilityLabel("Subtitles")
@@ -139,7 +139,7 @@ public struct SpeedMenu: View {
         } label: {
             PlayerIcon(systemImage: "gauge.with.dots.needle.67percent", size: .regular)
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.strataGlass)
         .buttonBorderShape(.circle)
         .accessibilityLabel("Speed")
     }
