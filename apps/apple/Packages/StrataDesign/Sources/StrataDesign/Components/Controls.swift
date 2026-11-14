@@ -1,6 +1,18 @@
 import SwiftUI
 
 /// The one primary action: Liquid Glass tinted apricot, dark label.
+public extension Font {
+    /// A button's label: the headline, or on the TV a small button's smaller label (the
+    /// headline there is 38pt, which a small button can't hold).
+    static func buttonLabel(_ size: ControlSize) -> Font {
+        #if os(tvOS)
+        size == .small || size == .mini ? .system(size: 26, weight: .semibold) : .stHeadline
+        #else
+        .stHeadline
+        #endif
+    }
+}
+
 public struct PlayButton: View {
     let title: String
     let systemImage: String
@@ -22,7 +34,7 @@ public struct PlayButton: View {
         // On the TV, translucent glass like the buttons beside it; focus turns it white.
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .font(.stHeadline)
+                .font(Font.buttonLabel(size))
                 .padding(.horizontal, Metrics.space2)
                 .frame(maxWidth: maxWidth, minHeight: 30)
         }
@@ -32,7 +44,7 @@ public struct PlayButton: View {
         #else
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .font(.stHeadline)
+                .font(Font.buttonLabel(size))
                 .foregroundStyle(Theme.onAccent)
                 .padding(.horizontal, Metrics.space2)
                 .frame(maxWidth: maxWidth, minHeight: 30)
@@ -100,7 +112,7 @@ public struct GlassButton: View {
                     Text(title)
                 }
             }
-            .font(.stHeadline)
+            .font(Font.buttonLabel(size))
             .frame(minHeight: 30)
         }
         .buttonStyle(.glass)

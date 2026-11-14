@@ -13,10 +13,8 @@ struct CalendarView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: Metrics.space6) {
-                    #if os(tvOS)
-                    Color.clear.frame(height: 120) // clear the sidebar button
-                    #endif
+                TVPageHeader(title: "Calendar")
+                VStack(alignment: .leading, spacing: Self.dayGap) {
                     content
                 }
                 .padding(.horizontal, Metrics.gutter)
@@ -32,9 +30,7 @@ struct CalendarView: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
-        #if os(tvOS)
-        .ignoresSafeArea(edges: .top)
-        #else
+        #if !os(tvOS)
         .navigationTitle("Calendar")
         .toolbar {
             if EpisodeAlerts.isAvailable {
@@ -74,9 +70,19 @@ struct CalendarView: View {
             ForEach(days, id: \.day) { day in
                 VStack(alignment: .leading, spacing: Metrics.space3) {
                     Text(Self.heading(day.day))
-                        .font(.stHeadline)
-                        .foregroundStyle(Calendar.current.isDateInToday(day.day) ? Theme.accentText : Theme.ink2)
+                        .modifier(DayHeadingStyle(isToday: Calendar.current.isDateInToday(day.day)))
                         .accessibilityAddTraits(.isHeader)
+                    #if os(tvOS)
+                    // Each episode a native TV card that lifts on focus, like the source list.
+                    VStack(spacing: Metrics.space5) {
+                        ForEach(day.episodes) { episode in
+                            NavigationLink(value: Route.title(episode.ref)) {
+                                CalendarRow(episode: episode).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.card)
+                        }
+                    }
+                    #else
                     VStack(spacing: 0) {
                         ForEach(day.episodes) { episode in
                             // A full-width row lifts like an episode row, not like a poster.
@@ -86,6 +92,7 @@ struct CalendarView: View {
                         }
                     }
                     .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
+                    #endif
                 }
                 .id(day.day)
                 #if os(tvOS)
@@ -94,6 +101,12 @@ struct CalendarView: View {
             }
         }
     }
+
+    #if os(tvOS)
+    private static let dayGap: CGFloat = Metrics.space12
+    #else
+    private static let dayGap: CGFloat = Metrics.space6
+    #endif
 
     private struct Day {
         let day: Date
@@ -129,20 +142,45 @@ struct CalendarView: View {
     }
 }
 
+/// A day's heading: the rail-title size on the TV, a headline elsewhere; today in the accent.
+private struct DayHeadingStyle: ViewModifier {
+    let isToday: Bool
+
+    func body(content: Content) -> some View {
+        #if os(tvOS)
+        content
+            .font(.system(size: 34, weight: .semibold))
+            .foregroundStyle(isToday ? Theme.accentText : Theme.ink.opacity(0.85))
+        #else
+        content
+            .font(.stHeadline)
+            .foregroundStyle(isToday ? Theme.accentText : Theme.ink2)
+        #endif
+    }
+}
+
 /// An episode on the calendar: the show's poster, its name, the episode and when it airs.
 private struct CalendarRow: View {
     let episode: CalendarEpisode
 
     #if os(tvOS)
-    private let thumbWidth: CGFloat = 80
+    private let thumbWidth: CGFloat = 96
+    private let inset = Metrics.space5
+    private let gap = Metrics.space5
     #else
     private let thumbWidth: CGFloat = 48
+    private let inset = Metrics.space3
+    private let gap = Metrics.space3
     #endif
 
     var body: some View {
-        HStack(spacing: Metrics.space3) {
+        HStack(spacing: gap) {
             ArtworkImage(url: episode.posterUrl, aspectRatio: 2 / 3, seed: episode.ref.description)
                 .frame(width: thumbWidth)
+                #if os(tvOS)
+                // The row lifts as a whole; the poster's own focus lift would pull it to the edge.
+                .hoverEffectDisabled()
+                #endif
             VStack(alignment: .leading, spacing: 3) {
                 Text(episode.title).font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(1)
                 Text([episode.code, episode.name].compactMap { $0 }.joined(separator: " · "))
@@ -158,7 +196,7 @@ private struct CalendarRow: View {
                     .font(.stCallout.monospacedDigit()).foregroundStyle(Theme.ink3)
             }
         }
-        .padding(Metrics.space3)
+        .padding(inset)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }

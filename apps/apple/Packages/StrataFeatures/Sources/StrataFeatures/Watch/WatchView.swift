@@ -176,15 +176,23 @@ struct WatchView: View {
     // The "getting it ready" and "can't play" cards: roomier on the TV, where the text is
     // read from across the room and the buttons need space for the focus lift.
     #if os(tvOS)
-    private static let cardTextWidth: CGFloat = 760
-    private static let cardPadding: CGFloat = Metrics.space12
-    private static let cardSpacing: CGFloat = Metrics.space5
-    private static let buttonGap: CGFloat = Metrics.space6
+    private static let cardTextWidth: CGFloat = 640
+    private static let cardPadding: CGFloat = Metrics.space10
+    private static let cardSpacing: CGFloat = Metrics.space4
+    private static let buttonGap: CGFloat = Metrics.space5
+    private static let cardTitleFont = Font.system(size: 40, weight: .semibold)
+    private static let cardTextFont = Font.system(size: 26)
+    private static let cardIconSize: CGFloat = 34
+    private static let cardButtonSize: ControlSize = .small
     #else
     private static let cardTextWidth: CGFloat = 420
     private static let cardPadding: CGFloat = Metrics.space8
     private static let cardSpacing: CGFloat = Metrics.space4
     private static let buttonGap: CGFloat = Metrics.space2
+    private static let cardTitleFont = Font.stTitle2
+    private static let cardTextFont = Font.stCallout
+    private static let cardIconSize: CGFloat = 40
+    private static let cardButtonSize: ControlSize = .large
     #endif
 
     /// Show Up Next in the last 30s of an episode with an available next one.
@@ -242,36 +250,36 @@ struct WatchView: View {
             .animation(.easeOut(duration: 0.25), value: loadingCaption)
         case .preparing(let status):
             VStack(spacing: Self.cardSpacing) {
-                Image(systemName: "arrow.down.circle").font(.system(size: 44)).foregroundStyle(Theme.warning)
-                Text(status.title ?? "Getting it ready").font(.stTitle2).foregroundStyle(Theme.onArtwork)
+                Image(systemName: "arrow.down.circle").font(.system(size: Self.cardIconSize + 4)).foregroundStyle(Theme.warning)
+                Text(status.title ?? "Getting it ready").font(Self.cardTitleFont).foregroundStyle(Theme.onArtwork)
                 ProgressBar(status.progress, track: .white.opacity(0.2)).frame(width: 280)
                 Text([status.percentText, status.etaText].compactMap { $0 }.joined(separator: " · "))
                     .font(.stFootnote).foregroundStyle(Theme.onArtwork.opacity(0.7))
                 Text(status.message ?? "It will start playing as soon as it's ready.")
-                    .font(.stCallout).foregroundStyle(Theme.onArtwork.opacity(0.7)).multilineTextAlignment(.center).frame(maxWidth: Self.cardTextWidth)
+                    .font(Self.cardTextFont).foregroundStyle(Theme.onArtwork.opacity(0.7)).multilineTextAlignment(.center).frame(maxWidth: Self.cardTextWidth)
                 // Why it's getting this copy ready: the first one wouldn't play.
                 if let note = engine.fallbackNote {
                     Text(note).font(.stFootnote).foregroundStyle(Theme.warning).multilineTextAlignment(.center).frame(maxWidth: Self.cardTextWidth)
                 }
-                GlassButton("Close", size: Metrics.heroControlSize, action: close)
+                GlassButton("Close", size: Self.cardButtonSize, action: close)
             }
             .padding(Self.cardPadding)
             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Metrics.radiusLG, style: .continuous))
         case .failed(let message):
             VStack(spacing: Self.cardSpacing) {
-                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 40)).foregroundStyle(Theme.danger)
-                Text("Can't play this").font(.stTitle2).foregroundStyle(Theme.onArtwork)
-                Text(message).font(.stCallout).foregroundStyle(Theme.onArtwork.opacity(0.75)).multilineTextAlignment(.center).frame(maxWidth: Self.cardTextWidth)
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: Self.cardIconSize)).foregroundStyle(Theme.danger)
+                Text("Can't play this").font(Self.cardTitleFont).foregroundStyle(Theme.onArtwork)
+                Text(message).font(Self.cardTextFont).foregroundStyle(Theme.onArtwork.opacity(0.75)).multilineTextAlignment(.center).frame(maxWidth: Self.cardTextWidth)
                 GlassEffectContainer(spacing: Metrics.space2) {
                     HStack(spacing: Self.buttonGap) {
-                        PlayButton("Try Again", systemImage: "arrow.clockwise", size: Metrics.heroControlSize) {
+                        PlayButton("Try Again", systemImage: "arrow.clockwise", size: Self.cardButtonSize) {
                             Task { await start() }
                         }
                         // The message often says to pick another source: offer the list here.
                         if request.downloadID == nil {
-                            GlassButton("Choose Source", systemImage: "rectangle.stack", size: Metrics.heroControlSize) { showSources = true }
+                            GlassButton("Choose Source", systemImage: "rectangle.stack", size: Self.cardButtonSize) { showSources = true }
                         }
-                        GlassButton("Close", size: Metrics.heroControlSize, action: close)
+                        GlassButton("Close", size: Self.cardButtonSize, action: close)
                     }
                 }
                 .padding(.top, Self.cardSpacing)

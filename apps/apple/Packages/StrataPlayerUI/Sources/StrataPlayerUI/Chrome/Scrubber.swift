@@ -45,7 +45,7 @@ public struct Scrubber: View {
     }
 
     #if os(tvOS)
-    private let trackHeight: CGFloat = 8
+    private let trackHeight: CGFloat = 7
     #else
     private let trackHeight: CGFloat = 6
     #endif
@@ -125,7 +125,7 @@ public struct Scrubber: View {
                 Spacer()
                 Text("−" + Self.format(max(0, duration - shown)))
             }
-            .font(.stTimecode)
+            .font(timeFont)
             .foregroundStyle(Theme.onArtwork.opacity(0.8))
         }
         .accessibilityElement()
@@ -134,6 +134,15 @@ public struct Scrubber: View {
         .accessibilityAdjustableAction { direction in
             onScrub(direction == .increment ? min(duration, position + 10) : max(0, position - 10))
         }
+    }
+
+    /// Small and tabular on the TV, like its player's; the footnote timecode elsewhere.
+    private var timeFont: Font {
+        #if os(tvOS)
+        .system(size: 24, weight: .semibold, design: .monospaced).monospacedDigit()
+        #else
+        .stTimecode
+        #endif
     }
 
     /// The played part: white on the TV, like its player; apricot elsewhere.

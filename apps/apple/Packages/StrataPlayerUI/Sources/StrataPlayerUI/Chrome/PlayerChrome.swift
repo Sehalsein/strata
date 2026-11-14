@@ -58,10 +58,10 @@ public struct PlayerChrome: View {
                 HStack(alignment: .bottom, spacing: Metrics.space8) {
                     VStack(alignment: .leading, spacing: Metrics.space1) {
                         if let subtitle = engine.meta?.subtitle {
-                            Text(subtitle).font(.stCallout.weight(.semibold)).opacity(0.85).lineLimit(1)
+                            Text(subtitle).font(.system(size: 26, weight: .semibold)).opacity(0.85).lineLimit(1)
                         }
                         Text(engine.meta?.title ?? "")
-                            .font(.system(size: 60, weight: .bold))
+                            .font(.system(size: 50, weight: .bold))
                             .titleTracking()
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
@@ -85,20 +85,24 @@ public struct PlayerChrome: View {
                 .prefersDefaultFocus(true, in: focusScope)
                 HStack(spacing: Metrics.space4) {
                     Button(action: onDetails) {
-                        Text("Info").font(.stHeadline).padding(.horizontal, Metrics.space2)
+                        Text("Info").font(.system(size: 26, weight: .semibold)).padding(.horizontal, Metrics.space1)
                     }
                     .buttonStyle(.glass)
+                    .controlSize(.small)
                     if let onSources {
                         Button(action: onSources) {
-                            Text("Change Source").font(.stHeadline).padding(.horizontal, Metrics.space2)
+                            Text("Change Source").font(.system(size: 26, weight: .semibold)).padding(.horizontal, Metrics.space1)
                         }
                         .buttonStyle(.glass)
+                        .controlSize(.small)
                     }
                 }
-                .padding(.top, Metrics.space2)
+                .padding(.top, Metrics.space1)
             }
+            // Like the TV app's player: nearly edge to edge, not inside the safe area too.
             .padding(.horizontal, Metrics.gutter)
-            .padding(.bottom, Metrics.space12)
+            .padding(.bottom, Metrics.space10)
+            .ignoresSafeArea(edges: [.horizontal, .bottom])
         }
         .foregroundStyle(Theme.onArtwork)
         .focusScope(focusScope)

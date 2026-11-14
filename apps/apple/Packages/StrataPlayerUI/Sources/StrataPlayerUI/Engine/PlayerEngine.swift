@@ -369,7 +369,7 @@ public final class PlayerEngine {
                 guard gen == generation else { throw CancellationError() }
                 guard candidateId == nil else { throw failure }
                 guard attempt < Self.maxFallbacks else {
-                    throw DeviceFailure(message: "Tried \(attempt + 1) copies; none would play here. " + failure.message)
+                    throw DeviceFailure(message: "Tried \(attempt + 1) copies and none would play here. Choose another source.")
                 }
                 if let res {
                     failedCandidates.insert(res.candidate.id)
@@ -384,7 +384,7 @@ public final class PlayerEngine {
                 // Ready now or shortly; not one the server would have to download first.
                 guard let next = others?.first(where: { !failedCandidates.contains($0.id) && !failedFiles.contains($0.fileId) && $0.readiness != .download }) else {
                     // Say how far it got, so "Pick another source" isn't the first you hear of it.
-                    if attempt > 0 { throw DeviceFailure(message: "Tried \(attempt + 1) copies; none would play here. " + failure.message) }
+                    if attempt > 0 { throw DeviceFailure(message: "Tried \(attempt + 1) copies and none would play here. Choose another source.") }
                     throw failure
                 }
                 Log.player.warning("copy failed (\(failure.message, privacy: .public)); trying \(next.id, privacy: .public)")
@@ -558,7 +558,10 @@ public final class PlayerEngine {
             // Played from its link or the server's stream: the copy wouldn't open (its host
             // didn't answer, say). A failure like this is the copy's, so another may play.
             guard gen == generation else { throw CancellationError() }
-            throw DeviceFailure(message: "This copy couldn't be opened (\(error.message)). Pick another source.")
+            // Not the app's "can't reach your Strata server": it's the copy's own host.
+            throw DeviceFailure(message: error.kind == .network && error.message.lowercased().contains("connect")
+                ? "This copy's server didn't answer. Choose another source."
+                : "This copy couldn't be opened (\(error.message)). Choose another source.")
         }
         guard gen == generation else { throw CancellationError() }
         #if os(tvOS)

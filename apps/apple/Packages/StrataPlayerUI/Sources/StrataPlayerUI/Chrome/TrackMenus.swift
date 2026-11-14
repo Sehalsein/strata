@@ -35,8 +35,8 @@ struct PlayerIcon: View {
     var body: some View {
         #if os(tvOS)
         // Small round buttons over the scrubber, like the TV app's player.
-        let font: Font = size == .large ? .title : .callout.weight(.semibold)
-        let side: CGFloat = size == .large ? 72 : 40
+        let font: Font = size == .large ? .title : .system(size: 24, weight: .semibold)
+        let side: CGFloat = size == .large ? 72 : 36
         #else
         let font: Font = size == .large ? .title.weight(.semibold) : .body.weight(.semibold)
         let side: CGFloat = size == .large ? 52 : 30
