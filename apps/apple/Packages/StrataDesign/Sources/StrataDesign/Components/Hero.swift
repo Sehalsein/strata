@@ -437,29 +437,71 @@ public enum TMDBImage {
 /// the eyebrow, title, metadata, overview and buttons will be, so nothing moves when
 /// the page arrives.
 public struct SkeletonHero: View {
-    public init() {}
+    /// The featured layout (Home on Apple TV and iPad, title pages on Apple TV), as
+    /// `HeroBillboard(featured:)` lays it out: the same height and the same left column.
+    let featured: Bool
+
+    public init(featured: Bool = false) { self.featured = featured }
+
+    private var usesFeaturedLayout: Bool { featured && Metrics.isPadOrTV }
 
     #if os(tvOS)
     private let titleSize = CGSize(width: 720, height: 76)
     private let button = CGSize(width: 220, height: 66)
+    private let featuredTitle = CGSize(width: 760, height: 68)
+    private let featuredButton = CGSize(width: 260, height: 74)
+    private let lineHeight: CGFloat = 26
     #else
     private var height: CGFloat { Metrics.isPad ? 620 : 520 }
     private let titleSize = CGSize(width: 240, height: 36)
     private let button = CGSize(width: 120, height: 50)
+    private let featuredTitle = CGSize(width: 440, height: 52)
+    private let featuredButton = CGSize(width: 280, height: 50)
+    private let lineHeight: CGFloat = 15
     #endif
+
+    private var frameHeight: CGFloat {
+        #if os(tvOS)
+        featured ? (UIScreen.main.bounds.height * 0.76).rounded() : UIScreen.main.bounds.height
+        #else
+        usesFeaturedLayout ? 720 : height
+        #endif
+    }
 
     public var body: some View {
         ZStack(alignment: .bottomLeading) {
             LinearGradient(colors: [Theme.surface1, Theme.surface1, Theme.bg], startPoint: .top, endPoint: .bottom)
-            info
+            if usesFeaturedLayout { featuredInfo } else { info }
         }
-        #if os(tvOS)
-        .frame(height: UIScreen.main.bounds.height)
-        #else
-        .frame(height: height)
-        #endif
+        .frame(maxWidth: .infinity)
+        .frame(height: frameHeight)
         .accessibilityElement()
         .accessibilityLabel("Loading")
+    }
+
+    /// Eyebrow pill, title, facts, three lines of synopsis, badges, then Play and the
+    /// round buttons: where `HeroBillboard`'s featured text and actions will be.
+    private var featuredInfo: some View {
+        VStack(alignment: .leading, spacing: Metrics.space4) {
+            Capsule().fill(Theme.surface2).frame(width: 150, height: lineHeight + 14)
+            SkeletonBar(width: featuredTitle.width, height: featuredTitle.height)
+            SkeletonBar(width: 320, height: lineHeight)
+            VStack(alignment: .leading, spacing: 10) {
+                SkeletonBar(height: lineHeight)
+                SkeletonBar(height: lineHeight)
+                SkeletonBar(width: 420, height: lineHeight)
+            }
+            .frame(maxWidth: Metrics.isTV ? 760 : 460, alignment: .leading)
+            HStack(spacing: Metrics.space6) {
+                Capsule().fill(Theme.surface2).frame(width: featuredButton.width, height: featuredButton.height)
+                Circle().fill(Theme.surface2).frame(width: featuredButton.height, height: featuredButton.height)
+                Circle().fill(Theme.surface2).frame(width: featuredButton.height, height: featuredButton.height)
+            }
+            .padding(.top, Metrics.isTV ? Metrics.space8 : Metrics.space5)
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.bottom, Metrics.isTV ? Metrics.space12 : Metrics.space10)
+        .skeletonPulse()
     }
 
     private var info: some View {
@@ -486,6 +528,36 @@ public struct SkeletonHero: View {
         .padding(.bottom, Metrics.space2)
         #endif
         .skeletonPulse()
+    }
+}
+
+/// A poster grid while it loads: the grid's columns, in placeholder cards.
+public struct SkeletonGrid: View {
+    let count: Int
+    let inset: CGFloat?
+    public init(count: Int = 12, inset: CGFloat? = nil) {
+        self.count = count
+        self.inset = inset
+    }
+
+    public var body: some View {
+        PosterGrid(inset: inset) {
+            ForEach(0..<count, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: Metrics.cardCaptionGap) {
+                    RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
+                        .fill(Theme.surface1)
+                        .aspectRatio(2 / 3, contentMode: .fit)
+                    VStack(alignment: .leading, spacing: 6) {
+                        SkeletonBar(width: 140, height: Metrics.isTV ? 22 : 12)
+                        SkeletonBar(width: 60, height: Metrics.isTV ? 18 : 10)
+                    }
+                }
+            }
+        }
+        .skeletonPulse()
+        .allowsHitTesting(false)
+        .accessibilityElement()
+        .accessibilityLabel("Loading")
     }
 }
 

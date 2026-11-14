@@ -26,9 +26,13 @@ struct BrowseView: View {
             PageStack {
                 if let hero, genre == nil {
                     HeroCarousel(cards: hero.items)
+                } else if loadingSpotlight {
+                    SkeletonHero(featured: true)
                 }
                 #if os(tvOS)
-                if hero == nil || genre != nil {
+                if loadingSpotlight {
+                    EmptyView()
+                } else if hero == nil || genre != nil {
                     // No spotlight: the page's title, with the genre filter beside it.
                     TVTabHeader(title: title) {
                         if !genres.isEmpty { GenreMenu(genres: genres, selected: $genre) }
@@ -107,7 +111,11 @@ struct BrowseView: View {
 
     /// The spotlight, when the server sends a Shows page with one.
     private var hero: Shelf? { page?.first { $0.style == .hero && !$0.items.isEmpty } }
-    private var showsHero: Bool { hero != nil && genre == nil }
+    private var showsHero: Bool { (hero != nil || loadingSpotlight) && genre == nil }
+
+    /// Shows has a spotlight, from the server's Shows page: its shape while that loads,
+    /// rather than the page title the spotlight then replaces.
+    private var loadingSpotlight: Bool { type == .show && genre == nil && page == nil && lists.isEmpty && error == nil }
 
     @ViewBuilder private var allContent: some View {
                 if let page {
@@ -246,7 +254,7 @@ struct BrowseListView: View {
         ScrollView {
             TVPageHeader(title: list.title)
             switch items {
-            case .loading: ProgressView().padding(Metrics.space12)
+            case .loading: SkeletonGrid().padding(.vertical, Metrics.space4)
             case .failed(let message):
                 MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load \(list.title)", message: message, actionTitle: "Try Again") {
                     Task { items = .loading; await load() }
@@ -319,7 +327,7 @@ struct SearchView: View {
                             message: "Find any movie or show to watch or add to My List.")
                     .frame(minHeight: 400)
             case .loading?:
-                ProgressView().padding(Metrics.space12)
+                SkeletonGrid(inset: Self.gridInset).padding(.vertical, Metrics.space4)
             case .failed(let message)?:
                 MessageView(systemImage: "exclamationmark.triangle", title: "Search failed", message: message)
             case .loaded(let cards)?:
@@ -382,7 +390,7 @@ struct MyListView: View {
         ScrollView {
             TVPageHeader(title: "My List")
             switch items {
-            case .loading: ProgressView().padding(Metrics.space12)
+            case .loading: SkeletonGrid().padding(.vertical, Metrics.space4)
             case .failed(let message):
                 MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load My List", message: message)
             case .loaded(let cards) where cards.isEmpty:

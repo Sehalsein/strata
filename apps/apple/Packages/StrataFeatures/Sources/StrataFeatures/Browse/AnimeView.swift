@@ -15,9 +15,13 @@ struct AnimeView: View {
             PageStack {
                 if let hero {
                     HeroCarousel(cards: hero.items)
+                } else if loadingSpotlight {
+                    SkeletonHero(featured: true)
                 }
                 #if os(tvOS)
-                if hero == nil {
+                if loadingSpotlight {
+                    EmptyView()
+                } else if hero == nil {
                     // No spotlight (a category): the page's title, with the menu beside it.
                     TVTabHeader(title: "Anime") { if !categories.isEmpty { menu } }
                 } else if !categories.isEmpty {
@@ -32,14 +36,14 @@ struct AnimeView: View {
                 content
             }
             #if !os(tvOS)
-            .padding(.top, hero == nil ? Metrics.space4 : 0)
+            .padding(.top, hero == nil && !loadingSpotlight ? Metrics.space4 : 0)
             .padding(.bottom, Metrics.space4)
             #endif
             .padding(.bottom, Metrics.space12)
         }
         #if !os(tvOS)
         // The spotlight runs to the top edge, under the bar, like Home's hero.
-        .heroUnderBar(hero != nil)
+        .heroUnderBar(hero != nil || loadingSpotlight)
         #endif
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
@@ -90,6 +94,12 @@ struct AnimeView: View {
         }
     }
 
+    /// All Anime has a spotlight: its shape while the page loads.
+    private var loadingSpotlight: Bool {
+        if category == nil, case .loading = shelves { return true }
+        return false
+    }
+
     /// The spotlight, when the server sends one (not for a category).
     private var hero: Shelf? {
         shelves.value?.first { $0.style == .hero && !$0.items.isEmpty }
@@ -111,7 +121,7 @@ struct AnimeListView: View {
         ScrollView {
             TVPageHeader(title: title)
             switch items {
-            case .loading: ProgressView().padding(Metrics.space12)
+            case .loading: SkeletonGrid().padding(.vertical, Metrics.space4)
             case .failed(let message):
                 MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load \(title)", message: message, actionTitle: "Try Again") {
                     Task { await load(force: true) }

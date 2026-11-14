@@ -245,7 +245,8 @@ struct CastRail: View {
 struct DetailSkeleton: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.railGap) {
-            SkeletonHero()
+            // Title pages use the featured layout on the TV.
+            SkeletonHero(featured: Metrics.isTV)
             SkeletonRail(width: CastRail.avatar, circle: true)
             SkeletonRail(width: Metrics.posterWidth)
         }

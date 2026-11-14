@@ -56,7 +56,10 @@ struct CalendarView: View {
     @ViewBuilder private var content: some View {
         switch episodes {
         case .loading:
-            ProgressView().frame(maxWidth: .infinity, minHeight: 300)
+            VStack(alignment: .leading, spacing: Metrics.space3) {
+                SkeletonBar(width: 160, height: Metrics.isTV ? 30 : 16).skeletonPulse()
+                SkeletonEpisodeRows(count: 5)
+            }
         case .failed(let message):
             MessageView(systemImage: "wifi.exclamationmark", title: "Couldn't load the calendar", message: message, actionTitle: "Try Again") {
                 Task { await load() }

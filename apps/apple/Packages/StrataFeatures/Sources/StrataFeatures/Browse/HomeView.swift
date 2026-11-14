@@ -23,6 +23,7 @@ struct HomeView: View {
             PageStack {
                 switch shelves {
                 case .loading:
+                    SkeletonHero(featured: true)
                     SkeletonRail(aspectRatio: 16 / 9, width: Metrics.landscapeWidth)
                     SkeletonRail(width: Metrics.posterWidth)
                 case .failed(let message):
