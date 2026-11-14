@@ -70,3 +70,24 @@ test("the dashboard's Play asks for a file's link: admins only, and only for fil
   expect((await server.request("/api/admin/files/999999/play-link", { method: "POST", token })).status).toBe(404);
   expect((await server.request("/api/admin/files/1/play-link", { method: "POST" })).status).toBe(401);
 });
+
+test("a report names file servers by host only, never a link", async () => {
+  const res = await server.request("/api/play/report", {
+    method: "POST",
+    token,
+    json: { ref: "tmdb:movie:1", outcome: "failed", message: "x", attempts: [{ servers: [{ host: "https://nexus-1.tb-cdn.io/dld/x?token=secret", error: "refused" }] }] },
+  });
+  expect(res.status).toBe(400);
+});
+
+test("reports name only this household's files, and one person can't flood the list", async () => {
+  await server.request("/api/admin/play-reports", { method: "DELETE", token });
+  const report = (n: number) =>
+    server.request("/api/play/report", { method: "POST", token, json: { ref: "tmdb:movie:1", outcome: "failed", message: `try ${n}`, attempts: [{ fileId: 987654, error: "x" }] } });
+  expect((await report(0)).status).toBe(200);
+  const { items } = await json(await server.request("/api/admin/play-reports", { token }));
+  expect(items[0].attempts[0].fileId).toBeUndefined();
+  let status = 200;
+  for (let i = 1; i <= 40 && status === 200; i++) status = (await report(i)).status;
+  expect(status).toBe(429);
+});

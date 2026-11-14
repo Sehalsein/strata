@@ -223,7 +223,8 @@ export const catalogRoutes = new Hono<Env>()
   // file servers), for the household's admins to see on the dashboard.
   .post("/play/report", async (c) => {
     const text = (max: number) => z.string().max(4000).transform((s) => s.slice(0, max));
-    const server = z.object({ host: text(255), error: text(500) });
+    // A host name only (never a URL, which could carry a TorBox key).
+    const server = z.object({ host: z.string().max(255).regex(/^[A-Za-z0-9.-]+(?::\d{1,5})?$/, "Not a host name"), error: text(500) });
     const attempt = z.object({
       fileId: z.number().int().optional(),
       copy: text(200).optional(),
@@ -240,7 +241,7 @@ export const catalogRoutes = new Hono<Env>()
     })));
     const { source, mediaType, titleId, season, episode, ...report } = input;
     const device = describeDevice(c);
-    await c.var.household.playReports.record(userOf(c), { ...report, target: { source, mediaType, titleId, season, episode } },
+    await viewer(c).reportPlay({ ...report, target: { source, mediaType, titleId, season, episode } },
       { deviceName: device.deviceName, deviceModel: device.deviceModel, location: device.location });
     return c.json({ ok: true });
   })

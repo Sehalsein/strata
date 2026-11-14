@@ -10,7 +10,7 @@ import type { Kitsu } from "./catalog/anime/kitsu";
 import { Omdb } from "./catalog/omdb";
 import { Tmdb } from "./catalog/tmdb";
 import type { ApiCache } from "./catalog/apiCache";
-import { ADDS_PER_HOUSEHOLD, SEARCHES_PER_HOUSEHOLD, type Throttle } from "./throttle";
+import { ADDS_PER_HOUSEHOLD, PLAY_REPORTS_PER_USER, SEARCHES_PER_HOUSEHOLD, type Throttle } from "./throttle";
 import type { Db } from "./db";
 import { Library } from "./library";
 import type { FfmpegInfo } from "./platform/ffmpeg";
@@ -129,6 +129,11 @@ export class Household {
     const every = this.settings().torboxSyncMinutes * MINUTE;
     if (every === 0 || Date.now() - this.lastSyncAt < every - MINUTE) return;
     await this.syncTorbox();
+  }
+
+  /** Counts a playback problem report against the person's hourly allowance; throws past it. */
+  spendPlayReport(userId: string): Promise<void> {
+    return this.shared.throttle.spend(`play-reports:${this.organizationId}:${userId}`, PLAY_REPORTS_PER_USER, "These apps have reported a lot of playback problems in the last hour.");
   }
 
   /** Counts a release search (scrapers) against the household's hourly allowance; throws past it. */

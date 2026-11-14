@@ -2,6 +2,7 @@ import { HTTPException } from "hono/http-exception";
 import type { Household } from "../household";
 import type { MediaInfo } from "../media/probe";
 import type { PlayRequest } from "../playback/service";
+import type { PlayReportDevice, PlayReportInput } from "../playback/reports";
 import type { DiscoveryTarget } from "../sources/discovery";
 import { targetRef, tmdbRef, type TitleRef, type TitleTarget } from "./ref";
 import type { BrowseList, Shelf, TitleType } from "./service";
@@ -151,6 +152,18 @@ export class Viewer {
     if (!session) return null;
     await this.household.playback.refreshLink(session);
     return this.household.playback.handOff(session);
+  }
+
+  /**
+   * A playback problem this person's app reports, for the household's admins: only about a
+   * title they may watch, within an hourly allowance, and naming only files this household has.
+   */
+  async reportPlay(input: PlayReportInput, device: PlayReportDevice) {
+    await this.assertAllowed(targetRef(input.target));
+    await this.household.spendPlayReport(this.userId);
+    const attempts = await Promise.all(input.attempts.map(async (a) =>
+      a.fileId !== undefined && !(await this.household.library.get(a.fileId)) ? { ...a, fileId: undefined } : a));
+    await this.household.playReports.record(this.userId, { ...input, attempts }, device);
   }
 
   /** Stops this person's play (someone else's, or one that's over, is left alone). */

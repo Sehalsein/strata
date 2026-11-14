@@ -68,7 +68,7 @@ export class PlayReports {
       // Links can carry the TorBox key (`token=`): none of it is kept.
       message: redactSecrets(input.message),
       attemptsJson: JSON.stringify(input.attempts.map(clean)),
-      appVersion: input.appVersion ?? null,
+      appVersion: input.appVersion ? redactSecrets(input.appVersion) : null,
       ...device,
       createdAt,
     });
@@ -96,9 +96,9 @@ export class PlayReports {
 function clean(a: PlayAttempt): PlayAttempt {
   return {
     ...(a.fileId !== undefined && { fileId: a.fileId }),
-    ...(a.copy && { copy: a.copy }),
-    ...(a.stage && { stage: a.stage }),
+    ...(a.copy && { copy: redactSecrets(a.copy) }),
+    ...(a.stage && { stage: redactSecrets(a.stage) }),
     ...(a.error && { error: redactSecrets(a.error) }),
-    ...(a.servers?.length && { servers: a.servers.map((s) => ({ host: s.host, error: redactSecrets(s.error) })) }),
+    ...(a.servers?.length && { servers: a.servers.map((s) => ({ host: redactSecrets(s.host), error: redactSecrets(s.error) })) }),
   };
 }

@@ -203,7 +203,8 @@ final class HTTPByteSource: ByteSource, @unchecked Sendable {
                     DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { self.fetch(index, retried: retried, attempt: attempt) }
                     return
                 case .mine:
-                    self.onProblem?(used.host ?? used.absoluteString, error?.localizedDescription ?? "No answer")
+                    // The host only: the link itself carries the account key.
+                    self.onProblem?(used.host ?? "unknown host", error?.localizedDescription ?? "No answer")
                     Task {
                         let new = try? await refresh()
                         self.endSwap(new)
