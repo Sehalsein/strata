@@ -9,6 +9,8 @@ struct WhoIsWatchingView: View {
     @Environment(\.dismiss) private var dismiss
     /// Shown over the app rather than in its place.
     var isSheet = false
+    /// After a profile is picked.
+    var onPicked: () -> Void = {}
 
     @State private var addAccount = false
     /// tvOS focus starts on the active profile (or the first), not on "Add Profile".
@@ -73,6 +75,7 @@ struct WhoIsWatchingView: View {
     private func pick(_ signIn: SavedSignIn) {
         store.switchTo(signIn.id)
         services.refreshClient()
+        onPicked()
         if isSheet { dismiss() }
     }
 }

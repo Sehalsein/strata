@@ -19,14 +19,14 @@ public struct RootView: View {
     }
 
     /// `-StrataWhoIsWatching YES` (debug builds) opens on "Who's watching?" without signing
-    /// out, for screenshots.
-    private static var debugWhoIsWatching: Bool {
+    /// out, for screenshots; picking a profile carries on into the app as usual.
+    @State private var debugWhoIsWatching: Bool = {
         #if DEBUG
         UserDefaults.standard.bool(forKey: "StrataWhoIsWatching")
         #else
         false
         #endif
-    }
+    }()
 
     public var body: some View {
         Group {
@@ -36,8 +36,8 @@ public struct RootView: View {
                 #if os(iOS)
                 OfflineDownloadsView()
                 #endif
-            } else if !services.store.isSignedIn || Self.debugWhoIsWatching {
-                WhoIsWatchingView()
+            } else if !services.store.isSignedIn || debugWhoIsWatching {
+                WhoIsWatchingView { debugWhoIsWatching = false }
             } else if services.store.active?.mustChangePassword == true {
                 ChooseNewPasswordView()
             } else if services.store.needsHousehold {
@@ -51,7 +51,7 @@ public struct RootView: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         #if os(tvOS)
-        // Focused tvOS controls turn white; an apricot label on white doesn't read,
+        // Focused tvOS controls turn white; an accent-coloured label on white doesn't read,
         // so tvOS keeps the system's own focus colors.
         .preferredColorScheme(.dark)
         #else

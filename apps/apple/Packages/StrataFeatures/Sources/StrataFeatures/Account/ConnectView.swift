@@ -530,6 +530,37 @@ struct SignInView: View {
     enum Field { case login, password }
 
     var body: some View {
+        #if os(tvOS)
+        // Laid out like Settings: where you're signing in on the left, the form on the right.
+        TVSettingsPage {
+            TVSettingsSide(systemImage: "person.badge.key", title: String(localized: "Sign in to \(target.info.serverName)", bundle: .module),
+                           message: String(localized: "Sign in with your Strata username and password. New here? Ask whoever runs this server for an invite.", bundle: .module))
+        } content: {
+            VStack(alignment: .leading, spacing: Metrics.space6) {
+                fields
+                if let error = services.store.lastError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
+                }
+                // The system's button: white with dark text when focused, dimmed until both are filled in.
+                Button {
+                    Task { await signIn() }
+                } label: {
+                    Group {
+                        if services.store.isAuthenticating { ProgressView() } else { Text("Sign In", bundle: .module) }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .disabled(login.isEmpty || password.isEmpty || services.store.isAuthenticating)
+            }
+            .padding(.top, Metrics.space12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .focusSection()
+        }
+        .onAppear {
+            services.store.lastError = nil
+            field = .login
+        }
+        #else
         ScrollView {
             VStack(alignment: .leading, spacing: Metrics.space6) {
                 VStack(alignment: .leading, spacing: Metrics.space2) {
@@ -537,25 +568,7 @@ struct SignInView: View {
                     Text("Sign in with your Strata username and password. New here? Ask whoever runs this server for an invite.", bundle: .module)
                         .font(.stCallout).foregroundStyle(Theme.ink2)
                 }
-                VStack(spacing: Metrics.space3) {
-                    TextField(String(localized: "Username or email", bundle: .module), text: $login)
-                        .textContentType(.username)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.emailAddress)
-                        #endif
-                        .autocorrectionDisabled()
-                        .focused($field, equals: .login)
-                        .submitLabel(.next)
-                        .onSubmit { field = .password }
-                        .modifier(FieldStyle())
-                    SecureField(String(localized: "Password", bundle: .module), text: $password)
-                        .textContentType(.password)
-                        .focused($field, equals: .password)
-                        .submitLabel(.go)
-                        .onSubmit { Task { await signIn() } }
-                        .modifier(FieldStyle())
-                }
+                fields
                 if let error = services.store.lastError {
                     Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
                 }
@@ -583,6 +596,29 @@ struct SignInView: View {
         .onAppear {
             services.store.lastError = nil
             field = .login
+        }
+        #endif
+    }
+
+    private var fields: some View {
+        VStack(spacing: Metrics.space3) {
+            TextField(String(localized: "Username or email", bundle: .module), text: $login)
+                .textContentType(.username)
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.emailAddress)
+                #endif
+                .autocorrectionDisabled()
+                .focused($field, equals: .login)
+                .submitLabel(.next)
+                .onSubmit { field = .password }
+                .modifier(FieldStyle())
+            SecureField(String(localized: "Password", bundle: .module), text: $password)
+                .textContentType(.password)
+                .focused($field, equals: .password)
+                .submitLabel(.go)
+                .onSubmit { Task { await signIn() } }
+                .modifier(FieldStyle())
         }
     }
 

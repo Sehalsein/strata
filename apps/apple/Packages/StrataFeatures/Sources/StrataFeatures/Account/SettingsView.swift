@@ -41,6 +41,12 @@ struct SettingsView: View {
                 } message: { _ in
                     Text("It's signed out here. You can add it again later.", bundle: .module)
                 }
+                #if os(tvOS)
+                // Its own page on the TV: an alert's field shows its text white on white there.
+                .pickerSheet(item: $renaming) { server in
+                    RenameServerPage(name: server.name) { store.renameServer(server.id, to: $0) }
+                }
+                #else
                 .alert(String(localized: "Rename Server", bundle: .module), isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
                     TextField(String(localized: "Name", bundle: .module), text: $newName)
                     Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
@@ -50,6 +56,7 @@ struct SettingsView: View {
                 } message: {
                     Text("Only on this device.", bundle: .module)
                 }
+                #endif
                 .routeDestinations()
                 .toolbar {
                     if !embedded {
@@ -77,16 +84,16 @@ struct SettingsView: View {
             profileColumn
                 .frame(width: 480)
                 .padding(.top, Metrics.space12)
-            // The focused row grows as it lifts: let it draw past the list's sides.
-            form.scrollClipDisabled()
+            // The focused row grows as it lifts: let it draw past the list's sides. Labels
+            // in the primary style, which turns dark on the white focused row (the app's
+            // accent doesn't read there). Not as a tint: a white tint reaches the
+            // dialogs and fields shown from here and turns their focused text white on white.
+            form.scrollClipDisabled().foregroundStyle(.primary)
         }
         .padding(.horizontal, Metrics.gutter)
         .padding(.top, 120)
         .ignoresSafeArea(edges: .top)
         .background(Theme.bg.ignoresSafeArea())
-        // Rows in the system's colours, which flip when focused (the app's apricot accent
-        // reads poorly on the white focused row).
-        .tint(.primary)
         #else
         form
             .navigationTitle(Text("Settings", bundle: .module))
@@ -259,6 +266,8 @@ struct SettingsView: View {
                 Section {
                     Button(role: .destructive) { confirmSignOut = true } label: {
                         Label(String(localized: "Sign Out \(active.name)", bundle: .module), systemImage: "rectangle.portrait.and.arrow.right")
+                            // Red, over the list's primary label style.
+                            .foregroundStyle(Theme.danger)
                     }
                     .confirmationDialog(String(localized: "Sign \(active.name) out?", bundle: .module), isPresented: $confirmSignOut, titleVisibility: .visible) {
                         Button(String(localized: "Sign Out", bundle: .module), role: .destructive) {
@@ -403,3 +412,37 @@ private extension View {
             #endif
     }
 }
+
+#if os(tvOS)
+/// The server's name on this device, on its own page: Settings' layout, a field and the
+/// two buttons. Menu cancels.
+private struct RenameServerPage: View {
+    @Environment(\.dismiss) private var dismiss
+    @State var name: String
+    let save: (String) -> Void
+
+    private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        TVSettingsPage {
+            TVSettingsSide(systemImage: "server.rack", title: String(localized: "Rename Server", bundle: .module),
+                           message: String(localized: "Only on this device. Everyone else still sees the server's own name.", bundle: .module))
+        } content: {
+            VStack(alignment: .leading, spacing: Metrics.space6) {
+                TextField(String(localized: "Name", bundle: .module), text: $name)
+                HStack(spacing: Metrics.space4) {
+                    Button(String(localized: "Cancel", bundle: .module)) { dismiss() }
+                    Button(String(localized: "Save", bundle: .module)) {
+                        save(trimmed)
+                        dismiss()
+                    }
+                    .disabled(trimmed.isEmpty)
+                }
+            }
+            .padding(.top, Metrics.space12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .focusSection()
+        }
+    }
+}
+#endif

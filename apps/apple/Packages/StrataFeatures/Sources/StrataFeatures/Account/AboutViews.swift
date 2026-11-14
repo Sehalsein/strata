@@ -176,14 +176,15 @@ struct TVSettingsPage<Side: View, Content: View>: View {
             side
                 .frame(width: 480)
                 .padding(.top, Metrics.space12)
-            // The focused row grows as it lifts: let it draw past the list's sides.
-            content.scrollClipDisabled()
+            // The focused row grows as it lifts: let it draw past the list's sides. Labels
+            // in the primary style, which turns dark on the white focused row; not as a
+            // tint, which would turn focused text in dialogs and fields white on white.
+            content.scrollClipDisabled().foregroundStyle(.primary)
         }
         .padding(.horizontal, Metrics.gutter)
         .padding(.top, 120)
         .ignoresSafeArea(edges: .top)
         .background(Theme.bg.ignoresSafeArea())
-        .tint(.primary)
         // The left column says what the page is; the bar's large title would repeat it.
         .toolbar(.hidden, for: .navigationBar)
     }
