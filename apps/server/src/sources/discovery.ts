@@ -41,6 +41,8 @@ export interface Release {
   parsed: ParsedName;
   /** The release holds a whole season (or more), not just the requested episode. */
   isPack: boolean;
+  /** The add-on says TorBox has it cached (a hint: TorBox's own answer decides). */
+  addonCached?: boolean;
   /** Where its add-on put it: the add-on's place in the list, then the result's (lower is better). */
   addonOrder?: number;
   /** Audio languages (ISO 639-1, "multi" for several), when a source says. */
@@ -68,7 +70,8 @@ export class NoPlayableFileError extends Error {
 
 export class Discovery {
   /** Releases found per title, for a few minutes (on Workers only finished searches are shared). */
-  private cache = new SharedWork<string, Release[]>({ remember: true, ttlMs: RELEASE_TTL_MS, max: RELEASE_CACHE_MAX });
+  /** Whole searches; a partial one (sources left behind) is shared while it runs but not kept. */
+  private cache = new SharedWork<string, { releases: Release[]; partial: boolean }>({ remember: true, ttlMs: RELEASE_TTL_MS, max: RELEASE_CACHE_MAX });
   /** Each source's answer on its own, so one too slow for a search is there for the next. */
   private sourceCache = new SharedWork<string, Release[]>({ remember: true, ttlMs: RELEASE_TTL_MS, max: RELEASE_CACHE_MAX * 4 });
   /** Torrents we added that weren't ready yet, by hash. */
@@ -144,7 +147,7 @@ export class Discovery {
 
   releases(target: DiscoveryTarget): Promise<Release[]> {
     const key = `${target.source}:${target.mediaType}:${target.titleId}:${target.season ?? ""}:${target.episode ?? ""}`;
-    return this.cache.get(key, () => this.search(target, key));
+    return this.cache.get(key, () => this.search(target, key), (v) => !v.partial).then((v) => v.releases);
   }
 
   /**
@@ -260,7 +263,8 @@ export class Discovery {
    */
   private async scrape(name: string, run: () => Promise<Release[]>): Promise<Release[]> {
     const downUntil = this.scraperDown.get(name) ?? 0;
-    if (Date.now() < downUntil) return [];
+    // Fails rather than answering "nothing", so the empty answer isn't kept as this source's.
+    if (Date.now() < downUntil) throw new Error(`${name} is skipped for now`);
     try {
       const releases = await timeout(run(), name);
       this.scraperDown.delete(name);
@@ -277,12 +281,12 @@ export class Discovery {
     }
   }
 
-  private async search(target: DiscoveryTarget, cacheKey: string): Promise<Release[]> {
+  private async search(target: DiscoveryTarget, cacheKey: string): Promise<{ releases: Release[]; partial: boolean }> {
     // Scrapers are asked by IMDb id (looked up on TMDB) and, for anime, by Kitsu id. An
     // AniList title's TMDB title and numbering come from the anime id list.
     const tmdbTarget = target.source === "anilist" ? await this.tmdbTargetOf(target).catch(() => null) : target;
     const [imdbId, kitsu] = await Promise.all([tmdbTarget ? this.imdbId(tmdbTarget) : null, this.kitsuId(target).catch(() => null)]);
-    if (!imdbId && !kitsu) return [];
+    if (!imdbId && !kitsu) return { releases: [], partial: false };
     const settings = this.settings();
     const client = this.torbox();
     const jobs: Promise<Release[]>[] = [];
@@ -298,10 +302,9 @@ export class Discovery {
     }
     if (imdbId && tmdbTarget && settings.useTorboxSearch && client) jobs.push(this.sourceCache.get(`torbox:${cacheKey}`, () => this.scrape("TorBox search", () => this.torboxSearch(client, imdbId, tmdbTarget))));
 
-    const { settled, partial } = await settleWithGrace(jobs, (r) => r.some((x) => x.cached), STRAGGLER_GRACE_MS);
-    // Some sources were left behind: they finish into sourceCache, and the next lookup
-    // (not this partial answer) puts them in.
-    if (partial) void Promise.allSettled(jobs).then(() => this.cache.delete(cacheKey));
+    // A partial answer isn't remembered: sources left behind finish into sourceCache, and
+    // the next lookup puts them in.
+    const { settled, partial } = await settleWithGrace(jobs, (r) => r.some((x) => x.cached || x.addonCached), STRAGGLER_GRACE_MS);
 
     const byHash = new Map<string, Release>();
     for (const result of settled) {
@@ -318,6 +321,7 @@ export class Discovery {
                 ...prev,
                 ...r,
                 cached: prev.cached || r.cached,
+                addonCached: prev.addonCached || r.addonCached,
                 fileName: prev.fileName ?? r.fileName,
                 seeders: Math.max(prev.seeders ?? 0, r.seeders ?? 0),
                 addonOrder: Math.min(prev.addonOrder ?? Infinity, r.addonOrder ?? Infinity),
@@ -332,16 +336,18 @@ export class Discovery {
     // Releases found by IMDb id are checked against TMDB's numbering; Kitsu's are the episode.
     let releases = [...byHash.values()].filter((r) => relevant(r, tmdbTarget ?? target));
     // Fill in cache state for releases TorBox's search didn't report on.
-    const unknown = releases.filter((r) => r.origin === "addon" && !r.cached).map((r) => r.hash);
+    // TorBox says what it has cached; an add-on's word for it only counts if TorBox can't be asked.
+    const unknown = releases.filter((r) => !r.cached).map((r) => r.hash);
     if (client && unknown.length) {
       try {
         const cached = await client.checkCached(unknown);
         releases = releases.map((r) => (cached.has(r.hash) ? { ...r, cached: true } : r));
       } catch (err) {
         log.warn("TorBox cache check failed", err);
+        releases = releases.map((r) => (r.addonCached ? { ...r, cached: true } : r));
       }
     }
-    return rankReleases(releases, settings);
+    return { releases: rankReleases(releases, settings), partial };
   }
 
   private async imdbId(target: DiscoveryTarget): Promise<string | null> {
@@ -403,8 +409,9 @@ export class Discovery {
         size: s.size,
         seeders: s.seeders,
         origin: "addon" as const,
-        // The add-on's word that TorBox has it (its own TorBox check); the rest are asked below.
-        cached: s.cached === true,
+        // Checked with TorBox below; the add-on's word is the fallback.
+        cached: false,
+        addonCached: s.cached === true,
         parsed: { ...parsed, resolution: parsed.resolution ?? s.resolution, hdr: parsed.hdr ?? s.hdr, videoCodec: parsed.videoCodec ?? s.videoCodec },
         addonOrder: i,
         languages: s.languages,

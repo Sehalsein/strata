@@ -262,3 +262,26 @@ describe("slow add-ons", () => {
     expect(slowCalls).toBe(1); // the slow add-on's answer came from its own cache
   }, 15_000);
 });
+
+describe("an add-on's word on what's cached", () => {
+  test("TorBox's answer decides; the add-on's is only the fallback when TorBox can't be asked", async () => {
+    const { Discovery } = await import("../src/sources/discovery");
+    const { settingsSchema } = await import("../src/settings");
+    const { setResolverForTests } = await import("../src/sources/addons");
+    setResolverForTests(async () => ["93.184.215.14"]);
+    const fetchImpl = (async () => Response.json({ streams: [{ name: "[TB+] Torrentio", title: "Film.2008.1080p.WEB", infoHash: "a".repeat(40) }] })) as unknown as typeof fetch;
+    const tmdb = { movie: async () => ({ id: 1, imdb_id: "tt1" }) } as never;
+    const settings = settingsSchema.parse({ useTorboxSearch: false });
+    const addons = [{ id: "t", url: "https://t.example/manifest.json", name: "T", enabled: true, idPrefixes: ["tt"], kind: "stremio" as const, configurable: false, allowPrivate: false }];
+    const target = { source: "tmdb" as const, mediaType: "movie" as const, titleId: 1 };
+    const library = { knownHashes: async () => new Set<string>() } as never;
+
+    const saysNo = { checkCached: async () => new Set<string>() } as never;
+    const disagree = new Discovery(tmdb, library, () => settings as never, () => saysNo, fetchImpl, () => {}, undefined, async () => {}, () => addons);
+    expect((await disagree.releases(target))[0]!.cached).toBe(false);
+
+    const down = { checkCached: async () => Promise.reject(new Error("TorBox is down")) } as never;
+    const fallback = new Discovery(tmdb, library, () => settings as never, () => down, fetchImpl, () => {}, undefined, async () => {}, () => addons);
+    expect((await fallback.releases(target))[0]!.cached).toBe(true);
+  });
+});
