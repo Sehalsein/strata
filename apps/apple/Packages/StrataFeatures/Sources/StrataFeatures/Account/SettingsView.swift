@@ -77,7 +77,8 @@ struct SettingsView: View {
             profileColumn
                 .frame(width: 480)
                 .padding(.top, Metrics.space12)
-            form
+            // The focused row grows as it lifts: let it draw past the list's sides.
+            form.scrollClipDisabled()
         }
         .padding(.horizontal, Metrics.gutter)
         .padding(.top, 120)
