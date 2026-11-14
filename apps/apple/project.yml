@@ -41,6 +41,10 @@ targets:
       - App
       - path: Resources/Assets.xcassets
         buildPhase: resources
+      # The iPhone and iPad icon, made in Icon Composer: the system renders its glass.
+      - path: Resources/AppIcon.icon
+        buildPhase: resources
+        destinationFilters: [iOS]
     info:
       path: App/Info.plist
       properties:

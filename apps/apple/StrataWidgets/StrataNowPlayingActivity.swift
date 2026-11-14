@@ -119,7 +119,7 @@ private struct ProgressBar: View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Rectangle().fill(Color.white.opacity(0.18)).frame(height: 2)
-                Rectangle().fill(Color(red: 0.91, green: 0.20, blue: 0.12))
+                Rectangle().fill(Color.white) // neutral, like the app
                     .frame(width: progress(width: geo.size.width), height: 2)
             }
         }

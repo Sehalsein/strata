@@ -24,11 +24,15 @@ public enum Theme {
 
     // MARK: Brand
     public static let sand = adaptive(dark: 0xF7C873, light: 0xF2B544)
-    /// The accent fill: Play, progress, scrubber. Labels on it use `onAccent`.
-    public static let apricot = adaptive(dark: 0xF39256, light: 0xF08A48)
+    /// The accent fill: Play, progress, scrubber. Labels on it use `onAccent`. Neutral, as
+    /// the system's own media apps are: white on the dark theme, near-black on the light
+    /// one, in Liquid Glass. (The orange stays in the Strata mark only.)
+    public static let apricot = adaptive(dark: 0xF5F3EF, light: 0x111317)
+    /// The logo's lower bar; not used for the interface.
     public static let rust = adaptive(dark: 0xD2603F, light: 0xC2502F)
-    public static let accentText = adaptive(dark: 0xF6A574, light: 0xB04F17)
-    public static let onAccent = Color(hex: 0x1A0E06)
+    /// Accent-coloured text and symbols: the same neutral as the fill.
+    public static let accentText = adaptive(dark: 0xF5F3EF, light: 0x111317)
+    public static let onAccent = adaptive(dark: 0x0B0C0F, light: 0xFFFFFF)
 
     // MARK: Status and providers (always paired with a word or symbol)
     public static let success = adaptive(dark: 0x4CD08A, light: 0x18804A)
@@ -40,7 +44,7 @@ public enum Theme {
     public static let scrim = Color.black.opacity(0.7)
 
     /// Avatar fills, picked stably per profile.
-    public static let avatarFills: [Color] = [sand, apricot, local, violet]
+    public static let avatarFills: [Color] = [sand, success, local, violet]
 
     private static func adaptive(dark: UInt32, light: UInt32, darkAlpha: Double = 1, lightAlpha: Double = 1) -> Color {
         #if os(tvOS)

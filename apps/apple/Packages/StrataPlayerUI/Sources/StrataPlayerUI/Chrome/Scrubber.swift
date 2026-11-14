@@ -174,7 +174,7 @@ public struct Scrubber: View {
         #endif
     }
 
-    /// The played part: white on the TV, like its player; apricot elsewhere.
+    /// The played part: white on the TV, like its player; the neutral accent elsewhere.
     private var fill: Color {
         #if os(tvOS)
         Theme.onArtwork

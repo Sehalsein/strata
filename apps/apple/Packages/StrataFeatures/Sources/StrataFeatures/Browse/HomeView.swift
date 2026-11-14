@@ -564,7 +564,7 @@ struct HeroCarousel: View {
                 #endif
             }
             let on = isListed(card)
-            // Ink, not the accent: glass labels take the tint, and apricot means Play.
+            // Ink: glass labels take the tint.
             Button { toggleList(card) } label: {
                 Image(systemName: on ? "checkmark" : "plus")
                     .font(.stHeadline)
