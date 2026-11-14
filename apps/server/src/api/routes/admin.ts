@@ -231,6 +231,23 @@ export const adminRoutes = new Hono<Env>()
     return c.json({ ok: true });
   })
 
+  // Play a file in the dashboard (to see what happens, live): a fresh link to it (TorBox
+  // links carry the account key; only the household's admins get here) and what it holds.
+  .post("/files/:id/play-link", async (c) => {
+    const id = intParam(c, "id");
+    const h = c.var.household;
+    const file = await h.library.get(id);
+    if (!file) throw new HTTPException(404, { message: "No such file" });
+    let url: string;
+    try {
+      url = (await h.playback.fileLink(id)) ?? `/api/files/${id}/content`;
+    } catch (err) {
+      throw new HTTPException(502, { message: `Couldn't get a link: ${err instanceof Error ? err.message : String(err)}` });
+    }
+    const host = /^https?:/.test(url) ? new URL(url).host : null;
+    return c.json({ url, host, provider: file.provider, name: file.name, size: file.size, info: file.probeJson ? JSON.parse(file.probeJson) : null });
+  })
+
   .post("/files/:id/ignore", async (c) => {
     await c.var.household.library.ignore(intParam(c, "id"));
     return c.json({ ok: true });
@@ -282,6 +299,43 @@ export const adminRoutes = new Hono<Env>()
   })
   .delete("/sessions/:id", async (c) => {
     if (!(await c.var.household.plays.stop(c.req.param("id")))) throw new HTTPException(404, { message: "No such play" });
+    return c.json({ ok: true });
+  })
+
+  // Plays that failed or had to switch copies or file servers, newest first, as the apps
+  // reported them: which copies were tried, the file servers that didn't answer, and why.
+  .get("/play-reports", async (c) => {
+    const h = c.var.household;
+    const rows = await h.playReports.list(Math.min(optionalInt(c.req.query("limit")) ?? 50, 300));
+    const names = new Map((await c.var.services.db.select({ id: user.id, name: user.name }).from(user)).map((u) => [u.id, u.name]));
+    const titles = new Map<string, string | null>();
+    const items = [];
+    for (const r of rows) {
+      const ref = targetRef({ source: r.source, mediaType: r.mediaType, titleId: r.titleId });
+      const key = formatRef(ref);
+      if (!titles.has(key)) titles.set(key, await h.library.titleOf(ref));
+      items.push({
+        id: r.id,
+        at: r.createdAt,
+        outcome: r.outcome,
+        message: r.message,
+        title: titles.get(key) ?? null,
+        ref: key,
+        mediaType: r.mediaType,
+        season: r.season,
+        episode: r.episode,
+        userName: (r.userId && names.get(r.userId)) || null,
+        deviceName: r.deviceName,
+        deviceModel: r.deviceModel,
+        appVersion: r.appVersion,
+        location: r.location,
+        attempts: JSON.parse(r.attemptsJson),
+      });
+    }
+    return c.json({ items });
+  })
+  .delete("/play-reports", async (c) => {
+    await c.var.household.playReports.clear();
     return c.json({ ok: true });
   });
 

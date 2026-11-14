@@ -95,6 +95,7 @@ public enum MediaProbe {
     /// replaces a link that stopped working, as in `RemuxSession`. Fails after `timeout`
     /// rather than hanging on a stalled server.
     public static func probe(url: URL, refresh: (@Sendable () async throws -> URL)? = nil,
+                             onLinkProblem: LinkProblemHandler? = nil,
                              timeout: TimeInterval = 20) async throws -> MediaInfo {
         let job = ProbeJob()
         return try await withTaskCancellationHandler {
@@ -102,7 +103,7 @@ public enum MediaProbe {
                 job.begin(continuation)
                 // The reads block, so they run on their own queue, never on Swift's pool.
                 DispatchQueue(label: "strata.remux.probe", qos: .userInitiated).async {
-                    job.finish(Result { try read(url: url, refresh: refresh, job: job) })
+                    job.finish(Result { try read(url: url, refresh: refresh, onLinkProblem: onLinkProblem, job: job) })
                 }
                 DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
                     job.finish(.failure(RemuxError.network("The file server took too long to answer.")))
@@ -114,8 +115,8 @@ public enum MediaProbe {
     }
 
     /// Opens the file and reads its header (on the probe's queue).
-    private static func read(url: URL, refresh: (@Sendable () async throws -> URL)?, job: ProbeJob) throws -> MediaInfo {
-        let source: ByteSource = url.isFileURL ? try FileByteSource(url: url) : try HTTPByteSource(url: url, refresh: refresh)
+    private static func read(url: URL, refresh: (@Sendable () async throws -> URL)?, onLinkProblem: LinkProblemHandler?, job: ProbeJob) throws -> MediaInfo {
+        let source: ByteSource = url.isFileURL ? try FileByteSource(url: url) : try HTTPByteSource(url: url, refresh: refresh, onProblem: onLinkProblem)
         // A probe that timed out or was cancelled while the first block loaded.
         guard job.adopt(source) else { throw CancellationError() }
         defer { source.close() }

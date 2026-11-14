@@ -263,6 +263,31 @@ export interface PlaybackSessionDto {
   error: string | null;
 }
 
+/** A play that failed or had to switch copies or file servers, as an app reported it. */
+export interface PlayReport {
+  id: number;
+  at: number;
+  outcome: "failed" | "recovered";
+  message: string;
+  title: string | null;
+  ref: string;
+  mediaType: "movie" | "episode";
+  season: number | null;
+  episode: number | null;
+  userName: string | null;
+  deviceName: string | null;
+  deviceModel: string | null;
+  appVersion: string | null;
+  location: string | null;
+  attempts: {
+    fileId?: number;
+    copy?: string;
+    stage?: string;
+    error?: string;
+    servers?: { host: string; error: string }[];
+  }[];
+}
+
 export type MatchStatus = "pending" | "matched" | "unmatched" | "manual" | "ignored";
 
 export interface LibraryStats {
@@ -317,6 +342,24 @@ export interface LibraryFilters {
   status?: MatchStatus; provider?: Provider; q?: string; searchIn?: "all" | "title" | "filename";
   mediaType?: "movie" | "episode"; accessed?: "yes" | "no"; sort?: LibrarySort; direction?: "asc" | "desc";
   limit?: number; offset?: number;
+}
+
+/** A fresh link to a library file, for playing it in the dashboard. */
+export interface PlayLink {
+  url: string;
+  /** The file server (TorBox's) the link points at; null for this server's own copy. */
+  host: string | null;
+  provider: Provider;
+  name: string;
+  size: number;
+  /** What the file holds, once an app or the server has read it. */
+  info: {
+    container?: string;
+    durationMs?: number;
+    bitrate?: number;
+    video?: { codec: string; profile?: string; width?: number; height?: number; bitDepth?: number; hdr?: string | null };
+    audio: { codec: string; channels: number; language?: string }[];
+  } | null;
 }
 
 export interface LibraryFile {

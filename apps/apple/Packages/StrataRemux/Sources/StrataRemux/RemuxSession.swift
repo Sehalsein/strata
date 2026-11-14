@@ -100,6 +100,9 @@ public final class RemuxSession: @unchecked Sendable {
     /// Called on an arbitrary thread when the loopback server fails after it started (the
     /// system can take it down while the app is suspended): the stream needs reopening.
     public var onServerLost: (@Sendable () -> Void)?
+    /// Called on an arbitrary thread each time the link's file server doesn't answer and a
+    /// new link is asked for (set before `start()`).
+    public var onLinkProblem: LinkProblemHandler?
     /// Set by `stop()` (under `lock`): nothing more is built or answered.
     private var stopped = false
 
@@ -117,7 +120,7 @@ public final class RemuxSession: @unchecked Sendable {
         let segmenter = try await onWorkQueue { () throws -> Segmenter in
             let bytes: ByteSource
             switch self.source {
-            case .remote(let url, let refresh): bytes = try HTTPByteSource(url: url, refresh: refresh)
+            case .remote(let url, let refresh): bytes = try HTTPByteSource(url: url, refresh: refresh, onProblem: self.onLinkProblem)
             case .file(let url): bytes = try FileByteSource(url: url)
             }
             self.byteSource = bytes

@@ -9,6 +9,7 @@ import { ErrorAlert, LiveIndicator, Page, PageHeader, PageSkeleton } from "@/com
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { JobsCard } from "./jobs-card";
+import { PlayReportsCard } from "./play-reports-card";
 import { SessionsCard } from "./sessions-card";
 import { SetupChecklist } from "./setup-checklist";
 import { LibraryCard, ProvidersCard } from "./status-cards";
@@ -110,6 +111,7 @@ function AdminOverview() {
       </div>
 
       <SessionsCard sessions={data.sessions} />
+      <PlayReportsCard />
       {data.jobs.length > 0 && <JobsCard jobs={data.jobs} scope="household" />}
     </Page>
   );

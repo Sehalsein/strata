@@ -80,6 +80,39 @@ final class MediaProbeTests: XCTestCase {
         XCTAssertEqual(info.video?.hdr, "hdr10")
     }
 
+    /// A port nothing listens on: connecting is refused, as by a TorBox node that's down.
+    private func refusedURL() async throws -> URL {
+        let gone = try LoopbackServer { _ in .notFound }
+        let port = try await gone.start()
+        gone.stop()
+        return URL(string: "http://127.0.0.1:\(port)/down.mkv")!
+    }
+
+    /// The link's server refuses connections: a new link (another server) is asked for.
+    func testRefusedServerGetsANewLink() async throws {
+        let file = try Data(contentsOf: fixture("hdr10_hevc_untagged.mkv"))
+        let origin = try LoopbackServer { path in path == "/good.mkv" ? .ok(file, "video/x-matroska") : .notFound }
+        let port = try await origin.start()
+        defer { origin.stop() }
+        let good = URL(string: "http://127.0.0.1:\(port)/good.mkv")!
+        let down = try await refusedURL()
+        let refreshes = Counter()
+        let info = try await MediaProbe.probe(url: down, refresh: { refreshes.add(); return good })
+        XCTAssertEqual(refreshes.value, 1)
+        XCTAssertEqual(info.container, "mkv")
+    }
+
+    /// Every new link is to a server that's down too: it gives up after a few, not forever.
+    func testRefusedServersStopAfterAFewNewLinks() async throws {
+        let down = try await refusedURL()
+        let refreshes = Counter()
+        do {
+            _ = try await MediaProbe.probe(url: down, refresh: { refreshes.add(); return down.appending(queryItems: [URLQueryItem(name: "n", value: "\(refreshes.value)")]) })
+            XCTFail("expected a failure")
+        } catch {}
+        XCTAssertEqual(refreshes.value, 3)
+    }
+
     func testAStalledServerFailsInsteadOfHanging() async throws {
         let origin = try LoopbackServer { _ in
             try? await Task.sleep(for: .seconds(10))
@@ -135,4 +168,12 @@ final class MediaProbeTests: XCTestCase {
         XCTAssertEqual(MediaProbe.container(formatName: "mov,mp4,m4a,3gp,3g2,mj2", path: "/a/Movie.mov"), "mov")
         XCTAssertEqual(MediaProbe.container(formatName: "avi", path: "/a/Movie.avi"), "avi")
     }
+}
+
+/// Counts calls from any thread.
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    var value: Int { lock.lock(); defer { lock.unlock() }; return n }
+    func add() { lock.lock(); n += 1; lock.unlock() }
 }

@@ -133,6 +133,26 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(body["durationMs"] as? Int, 1000)
     }
 
+    func testReportPlaySendsTheTitleAndWhatWentWrong() async throws {
+        StubProtocol.reset { _ in StubProtocol.Reply(status: 200, body: Data(#"{"ok":true}"#.utf8)) }
+        let report = PlayReport(outcome: .failed, message: "Tried 2 copies.", attempts: [
+            PlayReport.Attempt(fileId: 447, copy: "2160p · REMUX", stage: "connecting", error: "refused",
+                               servers: [PlayReport.Server(host: "nexus-406.ecan.tb-cdn.io", error: "Could not connect")]),
+        ], appVersion: "0.4.2")
+        try await client().reportPlay(.movie(TitleRef(source: .tmdb, type: .movie, id: 1368337)), report)
+        let req = try XCTUnwrap(StubProtocol.recorded.first)
+        XCTAssertEqual(req.httpMethod, "POST")
+        XCTAssertEqual(req.url?.path, "/api/play/report")
+        let body = try XCTUnwrap(req.jsonBody)
+        XCTAssertEqual(body["tmdbId"] as? Int, 1368337)
+        XCTAssertEqual(body["mediaType"] as? String, "movie")
+        XCTAssertEqual(body["outcome"] as? String, "failed")
+        XCTAssertEqual(body["appVersion"] as? String, "0.4.2")
+        let attempt = try XCTUnwrap((body["attempts"] as? [[String: Any]])?.first)
+        XCTAssertEqual(attempt["fileId"] as? Int, 447)
+        XCTAssertEqual((attempt["servers"] as? [[String: Any]])?.first?["host"] as? String, "nexus-406.ecan.tb-cdn.io")
+    }
+
     func testErrorShapeSurfacesServerMessage() async throws {
         StubProtocol.reset { _ in .fixture("error_404", status: 404) }
         do {

@@ -398,6 +398,12 @@ public final class StrataClient: Sendable {
         return resolve(res.url)
     }
 
+    /// Tells the household's admins what went wrong with a play (it failed, or only played
+    /// after switching copies or file servers). Best-effort: callers ignore errors.
+    public func reportPlay(_ target: PlaybackTarget, _ report: PlayReport) async throws {
+        let _: OKResponse = try await send("POST", "/api/play/report", body: Targeted(target, report))
+    }
+
     // MARK: Downloads
 
     /// A file to download and watch offline: its link and how to play it on the device.

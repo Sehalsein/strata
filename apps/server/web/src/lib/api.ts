@@ -15,6 +15,8 @@ import type {
   ContentLimit,
   HouseholdDevice,
   SignInCode,
+  PlayReport,
+  PlayLink,
 } from "./types";
 
 export class ApiError extends Error {
@@ -109,6 +111,8 @@ export const api = {
   /** By the title's ref (AniList titles; an AniList show's season is 1), or TMDB's id and type. */
   matchFile: (fileId: number, input: { ref: string; season?: number; episode?: number } | { type: "movie" | "show"; tmdbId: number; season?: number; episode?: number }) =>
     request<{ ok: true }>("POST", `/admin/files/${fileId}/match`, input),
+  /** A fresh link to play a file in the dashboard (a new TorBox link each time). */
+  playLink: (fileId: number) => request<PlayLink>("POST", `/admin/files/${fileId}/play-link`),
   ignoreFile: (fileId: number) => request<{ ok: true }>("POST", `/admin/files/${fileId}/ignore`),
   unignoreFile: (fileId: number) => request<{ ok: true }>("POST", `/admin/files/${fileId}/unignore`),
   tmdbSearch: (query: string, type: "movie" | "show") => request<{ items: TmdbResult[] }>("GET", `/admin/tmdb/search${q({ q: query, type })}`),
@@ -122,6 +126,8 @@ export const api = {
   devices: () => request<{ items: HouseholdDevice[] }>("GET", "/admin/devices"),
   signOutDevice: (id: string) => request<{ ok: true }>("DELETE", `/admin/devices/${encodeURIComponent(id)}`),
   stopSession: (id: string) => request<{ ok: true }>("DELETE", `/admin/sessions/${encodeURIComponent(id)}`),
+  playReports: (limit = 50) => request<{ items: PlayReport[] }>("GET", `/admin/play-reports${q({ limit })}`),
+  clearPlayReports: () => request<{ ok: true }>("DELETE", "/admin/play-reports"),
   logs: (limit = 500) => request<{ items: LogEntry[] }>("GET", `/admin/logs${q({ limit })}`),
 };
 

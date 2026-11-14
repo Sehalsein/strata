@@ -234,6 +234,10 @@ public final class PlayerEngine {
     private var lastProbedFile: Int?
     /// Other copies tried after the first one failed on this device, at most.
     private static let maxFallbacks = 3
+    /// This load's copies that went wrong, for the household's admins (`sendReport`).
+    @ObservationIgnored private var reportAttempts: [PlayReport.Attempt] = []
+    /// File servers that didn't answer for the copy being read now (from the reader's threads).
+    @ObservationIgnored private let linkProblems = LinkProblemLog()
     /// Device mode: waits out a stall, then reopens the stream where it stopped.
     private var stallTask: Task<Void, Never>?
     /// Times the device stream was reopened after a stall or failure, and where the last
@@ -300,6 +304,8 @@ public final class PlayerEngine {
         probedFiles = []
         lastProbedFile = nil
         recoveries = 0
+        reportAttempts = []
+        linkProblems.drain()
         self.target = target
         self.meta = meta
         status = .loading
@@ -317,11 +323,20 @@ public final class PlayerEngine {
                 Log.player.warning("device play failed: \(failure.message, privacy: .public)")
                 self.fallbackNote = nil
                 self.status = .failed(failure.message)
+                self.sendReport(.failed, message: failure.message)
             } catch {
                 guard gen == self.generation, !(error is CancellationError) else { return }
                 let e = StrataError.wrap(error)
                 self.fallbackNote = nil
-                if e.kind != .cancelled { self.status = .failed(e.message) }
+                if e.kind != .cancelled {
+                    self.status = .failed(e.message)
+                    // The Strata server's own refusal ("no copy of this yet"…); one we couldn't
+                    // reach can't hear about it either.
+                    if e.kind != .network {
+                        self.reportAttempts.append(PlayReport.Attempt(stage: "asking the server", error: e.message, servers: self.linkProblems.drain()))
+                        self.sendReport(.failed, message: e.message)
+                    }
+                }
             }
         }
         loadTask = task
@@ -390,11 +405,25 @@ public final class PlayerEngine {
                 try await start(res!, gen: gen, token: token, newTitle: true, autoplay: true)
                 fallbackNote = nil
                 loadingStep = nil
+                let servers = linkProblems.drain()
+                if !reportAttempts.isEmpty || !servers.isEmpty {
+                    reportAttempts.append(PlayReport.Attempt(fileId: res!.candidate.fileId, copy: Self.copyLabel(res!.candidate), servers: servers))
+                    let message = reportAttempts.count > 1
+                        ? "Played copy \(reportAttempts.count) after \(reportAttempts.count - 1) didn't."
+                        : "Played after \(servers.count) file server\(servers.count == 1 ? "" : "s") didn't answer."
+                    sendReport(.recovered, message: message)
+                }
                 // Your pick, or a copy that played after others didn't: start with it next time.
                 if candidateId != nil || attempt > 0 { memory.remember(res!.candidate, for: target, server: client.baseURL) }
                 return
             } catch let failure as DeviceFailure {
                 guard gen == generation else { throw CancellationError() }
+                reportAttempts.append(PlayReport.Attempt(
+                    fileId: res?.candidate.fileId ?? lastProbedFile,
+                    copy: res.map { Self.copyLabel($0.candidate) },
+                    stage: failure.stage,
+                    error: failure.detail ?? failure.message,
+                    servers: linkProblems.drain()))
                 guard candidateId == nil else { throw failure }
                 guard attempt < Self.maxFallbacks else {
                     throw DeviceFailure(message: String(localized: "Tried \(attempt + 1) copies and none would play here. Choose another source.", bundle: .module))
@@ -501,18 +530,21 @@ public final class PlayerEngine {
     private func probe(fileId: Int, url: URL, client: StrataClient, gen: Int) async throws {
         lastProbedFile = fileId
         guard probedFiles.insert(fileId).inserted else {
-            throw DeviceFailure(message: String(localized: "The server couldn't use what this file holds. Pick another source.", bundle: .module))
+            throw DeviceFailure(message: String(localized: "The server couldn't use what this file holds. Pick another source.", bundle: .module), stage: "reading")
         }
         status = .loading
         let info: MediaInfo
         do {
             // MediaProbe reads on its own queue; the main actor only waits.
             loadingStep = .reading
-            info = try await MediaProbe.probe(url: url)
+            // A link whose file server doesn't answer is swapped for a fresh one (another server).
+            info = try await MediaProbe.probe(url: url, refresh: { try await client.fileLink(fileId: fileId) },
+                                              onLinkProblem: linkProblems.handler)
         } catch {
             guard gen == generation, !(error is CancellationError) else { throw CancellationError() }
             Log.player.warning("probe failed: \(error.localizedDescription, privacy: .public)")
-            throw DeviceFailure(message: String(localized: "This file couldn't be read (\(error.localizedDescription)). Pick another source.", bundle: .module))
+            throw DeviceFailure(message: String(localized: "This file couldn't be read (\(error.localizedDescription)). Pick another source.", bundle: .module),
+                                stage: "reading", detail: error.localizedDescription)
         }
         guard gen == generation else { throw CancellationError() }
         try await client.reportProbe(fileId: fileId, info: info)
@@ -550,7 +582,7 @@ public final class PlayerEngine {
             } catch {
                 local.stop()
                 guard isCurrent(gen, token) else { throw CancellationError() }
-                throw DeviceFailure(message: Self.openFailure(error))
+                throw DeviceFailure(message: Self.openFailure(error), stage: "connecting", detail: Self.describeRaw(error))
             }
             guard isCurrent(gen, token) else { local.stop(); throw CancellationError() }
             newRemux = local
@@ -627,7 +659,8 @@ public final class PlayerEngine {
                 return try await start(res, gen: gen, token: token, newTitle: newTitle, autoplay: autoplay)
             }
             // AVPlayer refused what the device made (a codec it can't decode, say).
-            throw DeviceFailure(message: String(localized: "This file can't play on this device (\(error.message)). Pick another source.", bundle: .module))
+            throw DeviceFailure(message: String(localized: "This file can't play on this device (\(error.message)). Pick another source.", bundle: .module),
+                                stage: "starting", detail: error.message)
         } catch let error as StrataError where newTitle {
             // Played from its link or the server's stream: the copy wouldn't open (its host
             // didn't answer, say). A failure like this is the copy's, so another may play.
@@ -635,7 +668,8 @@ public final class PlayerEngine {
             // Not the app's "can't reach your Strata server": it's the copy's own host.
             throw DeviceFailure(message: error.kind == .network && error.message.lowercased().contains("connect")
                 ? String(localized: "This copy's server didn't answer. Choose another source.", bundle: .module)
-                : String(localized: "This copy couldn't be opened (\(error.message)). Choose another source.", bundle: .module))
+                : String(localized: "This copy couldn't be opened (\(error.message)). Choose another source.", bundle: .module),
+                stage: "connecting", detail: [res.url.host, error.message].compactMap { $0 }.joined(separator: ": "))
         }
         guard isCurrent(gen, token) else { throw CancellationError() }
         nativeSubtitles = res.mode == .device ? try? await item.asset.loadMediaSelectionGroup(for: .legible) : nil
@@ -973,6 +1007,9 @@ public final class PlayerEngine {
     /// The device couldn't open or play the file.
     private struct DeviceFailure: Error {
         let message: String
+        /// For the admins' report: where it went wrong, and the error as it came.
+        var stage: String?
+        var detail: String?
     }
 
     /// Audio the player takes as it is; anything else (DTS, TrueHD…) is decoded and kept lossless.
@@ -1009,6 +1046,7 @@ public final class PlayerEngine {
             stripDolbyVision: plan?.stripDolbyVision ?? false,
             videoRange: hdr == "hlg" ? "HLG" : hdr == nil || hdr == "" ? "SDR" : "PQ"
         ))
+        local.onLinkProblem = linkProblems.handler
         // Each embedded text track becomes a WebVTT track, named uniquely so it can be found.
         var names: [String: String] = [:]
         var renditions: [RemuxSession.SubtitleRendition] = []
@@ -1199,6 +1237,9 @@ public final class PlayerEngine {
             player.pause()
             isBuffering = false
             status = .failed(giveUp)
+            reportAttempts.append(PlayReport.Attempt(fileId: current.candidate.fileId, copy: Self.copyLabel(current.candidate),
+                                                     stage: "playing", error: reason, servers: linkProblems.drain()))
+            sendReport(.failed, message: giveUp)
             return
         }
         recoveries += 1
@@ -1252,6 +1293,12 @@ public final class PlayerEngine {
         stallTask?.cancel()
         stallTask = nil
         if reportFinal { reportProgress(force: true) }
+        // File servers swapped mid-play without stopping it: worth the admins knowing too.
+        let late = linkProblems.drain()
+        if !late.isEmpty, let current = session {
+            reportAttempts = [PlayReport.Attempt(fileId: current.candidate.fileId, copy: Self.copyLabel(current.candidate), stage: "playing", servers: late)]
+            sendReport(.recovered, message: "Kept playing after \(late.count) file server\(late.count == 1 ? "" : "s") stopped answering.")
+        }
         wantsToPlay = false
         if let session { stopSession(session.sessionId) }
         removeObservers()
@@ -1500,6 +1547,29 @@ public final class PlayerEngine {
         endObserver = nil
     }
 
+    /// The error as it came, with its code, for the admins' report (not shown to people).
+    nonisolated static func describeRaw(_ error: Error) -> String {
+        let ns = error as NSError
+        let url = (ns.userInfo[NSURLErrorFailingURLErrorKey] as? URL)?.host
+        return [url, "\(ns.localizedDescription) (\(ns.domain) \(ns.code))"].compactMap { $0 }.joined(separator: ": ")
+    }
+
+    /// How a report names a copy: "2160p · REMUX · HDR10".
+    static func copyLabel(_ c: Candidate) -> String {
+        let parts = [c.resolutionLabel, c.source?.uppercased(), c.hdrLabel].compactMap { $0 }
+        return parts.isEmpty ? c.name : parts.joined(separator: " · ")
+    }
+
+    /// Tells the household's admins what went wrong on this load (best-effort, in the
+    /// background), then starts a fresh list.
+    private func sendReport(_ outcome: PlayReport.Outcome, message: String) {
+        let attempts = reportAttempts
+        reportAttempts = []
+        guard let client, let target else { return }
+        let report = PlayReport(outcome: outcome, message: message, attempts: attempts)
+        Task.detached(priority: .utility) { try? await client.reportPlay(target, report) }
+    }
+
     nonisolated private static func describe(_ error: Error?) -> String {
         guard let error else { return String(localized: "Playback failed.", bundle: .module) }
         let ns = error as NSError
@@ -1553,5 +1623,31 @@ private final class ReadyWaiter: @unchecked Sendable {
         lock.unlock()
         observation?.invalidate()
         continuation?.resume(with: result)
+    }
+}
+
+/// File servers that didn't answer, as the readers report them from their own threads.
+final class LinkProblemLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var servers: [PlayReport.Server] = []
+
+    /// What a reader calls (`RemuxSession.onLinkProblem`, `MediaProbe.probe`).
+    var handler: LinkProblemHandler {
+        { [weak self] host, error in self?.add(host: host, error: error) }
+    }
+
+    private func add(host: String, error: String) {
+        lock.lock()
+        if servers.count < 10 { servers.append(PlayReport.Server(host: host, error: error)) }
+        lock.unlock()
+    }
+
+    /// Everything so far, and a fresh start.
+    @discardableResult
+    func drain() -> [PlayReport.Server] {
+        lock.lock(); defer { lock.unlock() }
+        let all = servers
+        servers = []
+        return all
     }
 }

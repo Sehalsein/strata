@@ -4,6 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { body, cacheFor, DAY, HOUR, intParam, optionalInt, requireAuth, requireHousehold, userOf, type Env } from "../context";
 import { capsSchema } from "../../playback/decide";
+import { describeDevice } from "../deviceInfo";
 import { NeedsProbeError } from "../../playback/service";
 import { mediaInfoSchema } from "../../media/probe";
 import { parseRef, tmdbRef, type TitleRef, type TitleTarget } from "../../catalog/ref";
@@ -216,6 +217,32 @@ export const catalogRoutes = new Hono<Env>()
     const url = await viewer(c).refreshPlayLink(c.req.param("sessionId"));
     if (!url) throw new HTTPException(404, { message: "No such session" });
     return c.json({ url });
+  })
+
+  // What went wrong with a play (it failed, or played only after switching copies or
+  // file servers), for the household's admins to see on the dashboard.
+  .post("/play/report", async (c) => {
+    const text = (max: number) => z.string().max(4000).transform((s) => s.slice(0, max));
+    const server = z.object({ host: text(255), error: text(500) });
+    const attempt = z.object({
+      fileId: z.number().int().optional(),
+      copy: text(200).optional(),
+      stage: text(40).optional(),
+      error: text(1000).optional(),
+      servers: z.array(server).max(10).optional(),
+    });
+    const input = toTarget(await body(c, z.object({
+      ...targetFields,
+      outcome: z.enum(["failed", "recovered"]),
+      message: text(1000),
+      attempts: z.array(attempt).max(10).default([]),
+      appVersion: text(40).optional(),
+    })));
+    const { source, mediaType, titleId, season, episode, ...report } = input;
+    const device = describeDevice(c);
+    await c.var.household.playReports.record(userOf(c), { ...report, target: { source, mediaType, titleId, season, episode } },
+      { deviceName: device.deviceName, deviceModel: device.deviceModel, location: device.location });
+    return c.json({ ok: true });
   })
 
   .delete("/play/:sessionId", async (c) => {

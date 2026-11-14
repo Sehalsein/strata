@@ -16,6 +16,7 @@ import { Library } from "./library";
 import type { FfmpegInfo } from "./platform/ffmpeg";
 import { PlaybackService } from "./playback/service";
 import { HouseholdPlays } from "./playback/plays";
+import { PlayReports } from "./playback/reports";
 import type { SessionManager } from "./playback/sessions";
 import type { ProgressStore } from "./progress";
 import type { SecretBox } from "./secrets";
@@ -74,6 +75,8 @@ export class Household {
   readonly playback: PlaybackService;
   /** The household's own plays (the server keeps everyone's). */
   readonly plays: HouseholdPlays;
+  /** What went wrong with its plays, as its apps report it (for its admins). */
+  readonly playReports: PlayReports;
   /** TMDB in the household's language, with its key (or the server's). */
   readonly tmdb: Tmdb;
   /** OMDb ratings, with its key (or the server's). */
@@ -98,6 +101,7 @@ export class Household {
     this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, show) => this.content.allowed(userId, show));
     this.housekeeping = new TorboxHousekeeping(db, organizationId, this.library);
     this.plays = new HouseholdPlays(shared.sessions, organizationId, this.library);
+    this.playReports = new PlayReports(db, organizationId);
     const torbox = () => this.torbox();
     this.discovery = new Discovery(tmdb, this.library, settings, torbox, shared.fetch, (id, hash, name) => this.housekeeping.recordAdded(id, hash, name), shared.anime.ids,
       () => shared.throttle.spend(`adds:${organizationId}`, ADDS_PER_HOUSEHOLD, "This household has added a lot of releases to TorBox today."));
