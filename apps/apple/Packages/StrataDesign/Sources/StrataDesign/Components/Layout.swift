@@ -122,10 +122,15 @@ struct RailTitleButtonStyle: ButtonStyle {
 /// A responsive grid of poster cards (Movies, Shows, search results, My List).
 public struct PosterGrid<Content: View>: View {
     @ViewBuilder let content: () -> Content
+    /// Side inset; 0 where the page already keeps to the safe area (TV Search).
+    var inset: CGFloat = Metrics.gutter
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
-    public init(@ViewBuilder content: @escaping () -> Content) { self.content = content }
+    public init(inset: CGFloat = Metrics.gutter, @ViewBuilder content: @escaping () -> Content) {
+        self.inset = inset
+        self.content = content
+    }
 
     /// Three columns on an iPhone and in a narrow iPad window, rather than two (or one)
     /// oversized ones; the rails' poster size elsewhere.
@@ -142,7 +147,7 @@ public struct PosterGrid<Content: View>: View {
                   alignment: .leading, spacing: Metrics.gridRowGap) {
             content()
         }
-        .padding(.horizontal, Metrics.gutter)
+        .padding(.horizontal, inset)
     }
 }
 

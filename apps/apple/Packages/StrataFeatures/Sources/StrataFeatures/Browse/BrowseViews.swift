@@ -271,7 +271,14 @@ struct SearchTab: View {
         #if os(iOS)
         StackHost(tab: .search) { SearchView(query: $query).searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Movies and shows") }
         #else
-        StackHost(tab: .search) { SearchView(query: $query).searchable(text: $query, prompt: "Movies and shows") }
+        StackHost(tab: .search) {
+            SearchView(query: $query)
+                .searchable(text: $query, prompt: "Movies and shows")
+                #if os(tvOS)
+                // Below the sidebar's "‹ Search" button, which otherwise sits on the typed text.
+                .padding(.top, 72)
+                #endif
+        }
         #endif
     }
 }
@@ -280,6 +287,9 @@ struct SearchView: View {
     @Environment(AppServices.self) private var services
     @Binding var query: String
     @State private var results: Loadable<[TitleCard]>?
+
+    /// The page keeps to the safe area on the TV, which already insets it.
+    private static var gridInset: CGFloat { Metrics.isTV ? 0 : Metrics.gutter }
 
     var body: some View {
         ScrollView {
@@ -296,7 +306,7 @@ struct SearchView: View {
                 if cards.isEmpty {
                     MessageView(systemImage: "magnifyingglass", title: "No results for “\(query)”").frame(minHeight: 400)
                 } else {
-                    PosterGrid {
+                    PosterGrid(inset: Self.gridInset) {
                         ForEach(cards) { card in
                             NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.cardButtonStyle()
                         }
@@ -306,8 +316,9 @@ struct SearchView: View {
             }
         }
         .background(Theme.bg.ignoresSafeArea())
-        .fullBleedOnTV()
-        .navigationTitle("Search")
+        // Not full bleed on the TV: the system's search field and keyboard keep to the
+        // safe area, and its own title stands in for a pinned "Search" over the keyboard.
+        .pageTitle("Search")
         .task(id: query) {
             let q = query.trimmingCharacters(in: .whitespaces)
             guard q.count >= 2 else { results = nil; return }
