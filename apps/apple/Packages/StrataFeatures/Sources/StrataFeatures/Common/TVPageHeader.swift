@@ -27,8 +27,10 @@ struct TVPageHeader: View {
         .padding(.horizontal, Metrics.gutter)
         // A tab's own page has the sidebar's "‹ Title" button in the top corner: start
         // below it. A pushed page's back button takes that place instead.
-        .padding(.top, isPresented ? 0 : 72)
-        .padding(.bottom, Metrics.space4)
+        // Lined up with the Movies and Anime titles (`TVTabHeader`).
+        .padding(.top, isPresented ? 0 : 20)
+        // Room for the first row's focus lift under the title.
+        .padding(.bottom, Metrics.space10)
         // The back button and the grid are separate stops for the focus engine.
         .focusSection()
         #endif
