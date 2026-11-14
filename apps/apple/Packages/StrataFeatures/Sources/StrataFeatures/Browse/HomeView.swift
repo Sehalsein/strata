@@ -319,6 +319,11 @@ struct HeroCarousel: View {
     #if os(tvOS)
     @FocusState private var focus: HeroButton?
     enum HeroButton: Hashable { case play, add, info, next }
+    /// The button you chose, which focus goes back to as titles change (Play, when the
+    /// next title has one, even if the last one didn't).
+    @State private var chosen: HeroButton?
+    /// Where the carousel itself last put focus, so that move isn't taken as your choice.
+    @State private var placed: HeroButton?
     #endif
 
     private static let interval: Double = 8
@@ -328,14 +333,9 @@ struct HeroCarousel: View {
         let running: Bool
     }
 
-    private var running: Bool {
-        #if os(tvOS)
-        // Not while someone's on a button: the title would change under them.
-        visible && scenePhase == .active && focus == nil
-        #else
-        visible && scenePhase == .active
-        #endif
-    }
+    /// Moves on while on screen, buttons focused or not (as the TV app's does); focus stays
+    /// on the same button for the next title.
+    private var running: Bool { visible && scenePhase == .active }
 
     var body: some View {
         // On the TV the dots sit over the art; on iPhone and iPad, in their own row under
@@ -376,7 +376,11 @@ struct HeroCarousel: View {
                 guard running else { return }
                 try? await Task.sleep(for: .seconds(Self.interval))
                 guard !Task.isCancelled, cards.count > 1 else { return }
+                #if os(tvOS)
+                step(1)
+                #else
                 withAnimation(.easeInOut(duration: 0.6)) { index = (index + 1) % cards.count }
+                #endif
             }
     }
 
@@ -386,13 +390,33 @@ struct HeroCarousel: View {
             .id(index)
             .transition(.opacity)
             .focusSection()
+            .background(trackChoice())
     }
 
     private func step(_ by: Int) {
-        let keep = focus
+        // Only while focus is in the hero; from the rows below, it stays where it is.
+        let want = focus == nil ? nil : (chosen ?? focus)
         withAnimation(.easeInOut(duration: 0.4)) { index = (index + by + cards.count) % cards.count }
-        // The new title's buttons replace the old ones: keep focus on the same kind.
-        DispatchQueue.main.async { focus = keep == .play && !hasPlay(cards[index]) ? .add : keep }
+        // The new title's buttons replace the old ones: focus the same kind.
+        DispatchQueue.main.async { if let want { place(want == .play && !hasPlay(cards[index]) ? .add : want) } }
+    }
+
+    private func place(_ button: HeroButton) {
+        placed = button
+        focus = button
+    }
+
+    /// Remembers the button you moved to, and puts you back on Play once the title on
+    /// screen turns out to have one.
+    private func trackChoice() -> some View {
+        Color.clear
+            .onChange(of: focus) { _, new in
+                guard let new else { return }
+                if new == placed { placed = nil } else { chosen = new }
+            }
+            .onChange(of: plays) {
+                if chosen == .play, focus == .add, hasPlay(cards[min(index, cards.count - 1)]) { place(.play) }
+            }
     }
     #elseif os(iOS)
     private var content: some View {
