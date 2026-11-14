@@ -20,7 +20,7 @@ struct SettingsView: View {
     @State private var newName = ""
     /// How many libraries the profile can watch: "Library" only shows with several.
     @State private var libraryCount = 0
-    /// iPad, full width: the profile beside the list, which keeps to a readable width.
+    /// iPad, full width: the list keeps to a readable width.
     @State private var wide = false
     /// Shown as a tab (tvOS) rather than a sheet: no Done button.
     var embedded = false
@@ -97,41 +97,26 @@ struct SettingsView: View {
         .ignoresSafeArea(edges: .top)
         .background(Theme.bg.ignoresSafeArea())
         #else
-        Group {
-            if wide {
-                // As on the TV: the profile on the left, the settings beside it at a
-                // readable width rather than stretched across the whole iPad.
-                HStack(alignment: .top, spacing: Metrics.space12) {
-                    VStack(spacing: Metrics.space5) {
-                        profileColumn
-                        if store.active != nil {
-                            Button(String(localized: "Edit Profile", bundle: .module)) { showEditProfile = true }
-                                .buttonStyle(.glass)
-                                .controlSize(.large)
-                        }
-                    }
-                    .frame(width: 300)
-                    .padding(.top, Metrics.space8)
-                    form.frame(maxWidth: 640)
-                }
-                .frame(maxWidth: 1000)
-                .frame(maxWidth: .infinity)
-            } else {
-                form
-            }
-        }
+        // One list, as in the system's Settings; on a wide iPad it keeps to a readable
+        // width in the middle rather than running edge to edge.
+        form
+            .frame(maxWidth: wide ? 720 : .infinity)
+            .frame(maxWidth: .infinity)
         .navigationTitle(Text("Settings", bundle: .module))
+        // The large title would sit at the window's edge, away from the centred list.
+        .navigationBarTitleDisplayMode(wide ? .inline : .automatic)
         .scrollContentBackground(.hidden)
         .background(Theme.bg)
         .onGeometryChange(for: Bool.self) { $0.size.width >= 900 } action: { wide = $0 }
         #endif
     }
 
+    #if os(tvOS)
     /// The profile in use, large: picture, name, where it's signed in, and what it can do.
     @ViewBuilder private var profileColumn: some View {
         if let active = store.active {
             VStack(spacing: Metrics.space4) {
-                ProfileAvatar(name: active.name, seed: active.id, size: Metrics.isTV ? 240 : 140, imageURL: store.imageURL(for: active))
+                ProfileAvatar(name: active.name, seed: active.id, size: 240, imageURL: store.imageURL(for: active))
                     .padding(.bottom, Metrics.space2)
                 Text(active.name).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink).multilineTextAlignment(.center)
                 Text(profileLine(active)).font(.stCallout).foregroundStyle(Theme.ink3).multilineTextAlignment(.center)
@@ -144,13 +129,13 @@ struct SettingsView: View {
             .accessibilityElement(children: .combine)
         }
     }
+    #endif
 
     private var form: some View {
         Form {
             #if !os(tvOS)
-            // The profile card, like the account at the top of the system's Settings
-            // (on a wide iPad the profile has its own column instead).
-            if let active = store.active, !wide {
+            // The profile card, like the account at the top of the system's Settings.
+            if let active = store.active {
                 Section {
                     Button { showEditProfile = true } label: {
                         HStack(spacing: Metrics.space4) {
