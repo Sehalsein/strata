@@ -53,9 +53,10 @@ test("TMDB logos: the server's language first, then English, then textless; PNGs
 });
 
 test("TMDB details ask for logos in the server's language, English and textless", async () => {
-  const db = await openDatabase("memory");
+  // No database: a cache that always asks, so the test only sees the requests.
+  const passThrough = { get: (_key: string, _options: unknown, load: () => Promise<unknown>) => load() } as unknown as ApiCache;
   const seen: string[] = [];
-  const tmdb = new Tmdb(new ApiCache(db), () => "key", () => "fr-FR", (async (input: string | URL) => {
+  const tmdb = new Tmdb(passThrough, () => "key", () => "fr-FR", (async (input: string | URL) => {
     seen.push(String(input));
     return Response.json({ id: 1, title: "X", genres: [], seasons: [] });
   }) as unknown as typeof fetch);
