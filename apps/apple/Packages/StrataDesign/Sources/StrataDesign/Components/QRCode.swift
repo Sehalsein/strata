@@ -26,7 +26,7 @@ public struct QRCodeView: View {
         .frame(width: size, height: size)
         .padding(size * 0.06)
         .background(.white, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
-        .accessibilityLabel("QR code")
+        .accessibilityLabel(Text("QR code", bundle: .module))
     }
 
     private static let context = CIContext()

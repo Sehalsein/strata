@@ -144,24 +144,24 @@ struct MainShell: View {
                 SearchTab()
             }
             #endif
-            Tab("Home", systemImage: "house", value: AppTab.home) {
+            Tab(String(localized: "Home", bundle: .module), systemImage: "house", value: AppTab.home) {
                 StackHost(tab: .home) { HomeView() }
             }
-            Tab("Movies", systemImage: "film", value: AppTab.movies) {
+            Tab(String(localized: "Movies", bundle: .module), systemImage: "film", value: AppTab.movies) {
                 StackHost(tab: .movies) { BrowseView(type: .movie) }
             }
-            Tab("Shows", systemImage: "tv", value: AppTab.shows) {
+            Tab(String(localized: "Shows", bundle: .module), systemImage: "tv", value: AppTab.shows) {
                 StackHost(tab: .shows) { BrowseView(type: .show) }
             }
-            Tab("Anime", image: "StrawHat", value: AppTab.anime) {
+            Tab(String(localized: "Anime", bundle: .module), image: "StrawHat", value: AppTab.anime) {
                 StackHost(tab: .anime) { AnimeView() }
             }
             #if os(tvOS)
-            TabSection("Library") {
-                Tab("My List", systemImage: "bookmark", value: AppTab.myList) {
+            TabSection(String(localized: "Library", bundle: .module)) {
+                Tab(String(localized: "My List", bundle: .module), systemImage: "bookmark", value: AppTab.myList) {
                     StackHost(tab: .myList) { MyListView() }
                 }
-                Tab("Calendar", systemImage: "calendar", value: AppTab.calendar) {
+                Tab(String(localized: "Calendar", bundle: .module), systemImage: "calendar", value: AppTab.calendar) {
                     StackHost(tab: .calendar) { CalendarView() }
                 }
             }
@@ -172,14 +172,14 @@ struct MainShell: View {
             #endif
             #if os(iOS)
             if Self.sidebar {
-                TabSection("Library") {
-                    Tab("My List", systemImage: "bookmark", value: AppTab.myList) {
+                TabSection(String(localized: "Library", bundle: .module)) {
+                    Tab(String(localized: "My List", bundle: .module), systemImage: "bookmark", value: AppTab.myList) {
                         StackHost(tab: .myList) { MyListView() }
                     }
-                    Tab("Calendar", systemImage: "calendar", value: AppTab.calendar) {
+                    Tab(String(localized: "Calendar", bundle: .module), systemImage: "calendar", value: AppTab.calendar) {
                         StackHost(tab: .calendar) { CalendarView() }
                     }
-                    Tab("Downloads", systemImage: "arrow.down.circle", value: AppTab.downloads) {
+                    Tab(String(localized: "Downloads", bundle: .module), systemImage: "arrow.down.circle", value: AppTab.downloads) {
                         StackHost(tab: .downloads) { DownloadsView() }
                     }
                 }
@@ -315,7 +315,7 @@ struct ProfileToolbarButton: View {
             ProfileAvatar(name: services.store.active?.name ?? "?", seed: services.store.activeID ?? "", size: 30,
                           imageURL: services.store.active.flatMap(services.store.imageURL(for:)))
         }
-        .accessibilityLabel("Settings")
+        .accessibilityLabel(Text("Settings", bundle: .module))
         .sheet(isPresented: $showSettings) { SettingsView() }
     }
 }

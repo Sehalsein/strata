@@ -80,13 +80,13 @@ public struct PlayerChrome: View {
                     .prefersDefaultFocus(true, in: focusScope)
                 HStack(spacing: Metrics.space4) {
                     Button(action: onDetails) {
-                        Text("Info").font(.system(size: 26, weight: .semibold)).padding(.horizontal, Metrics.space1)
+                        Text("Info", bundle: .module).font(.system(size: 26, weight: .semibold)).padding(.horizontal, Metrics.space1)
                     }
                     .buttonStyle(.strataGlass)
                     .controlSize(.small)
                     if let onSources {
                         Button(action: onSources) {
-                            Text("Change Source").font(.system(size: 26, weight: .semibold)).padding(.horizontal, Metrics.space1)
+                            Text("Change Source", bundle: .module).font(.system(size: 26, weight: .semibold)).padding(.horizontal, Metrics.space1)
                         }
                         .buttonStyle(.strataGlass)
                         .controlSize(.small)
@@ -134,7 +134,7 @@ public struct PlayerChrome: View {
     private var topBar: some View {
         HStack(alignment: .center, spacing: Metrics.space3) {
             #if !os(tvOS)
-            PlayerIconButton("Close", systemImage: "xmark", action: onClose)
+            PlayerIconButton(String(localized: "Close", bundle: .module), systemImage: "xmark", action: onClose)
             #endif
             VStack(alignment: .leading, spacing: 2) {
                 Text(engine.meta?.title ?? "").font(.stHeadline).lineLimit(1)
@@ -147,18 +147,18 @@ public struct PlayerChrome: View {
                 HStack(spacing: Metrics.space2) {
                     #if !os(tvOS)
                     // Fit shows the whole picture; fill crops to the screen (also pinch or double-tap).
-                    PlayerIconButton(isFilled ? "Fit to Screen" : "Fill Screen",
+                    PlayerIconButton(isFilled ? String(localized: "Fit to Screen", bundle: .module) : String(localized: "Fill Screen", bundle: .module),
                                      systemImage: isFilled ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") {
                         engine.toggleVideoGravity()
                     }
-                    if let onPiP { PlayerIconButton("Picture in Picture", systemImage: "pip.enter", action: onPiP) }
+                    if let onPiP { PlayerIconButton(String(localized: "Picture in Picture", bundle: .module), systemImage: "pip.enter", action: onPiP) }
                     AirPlayRoutePicker()
                         .frame(width: 30, height: 30)
                         .padding(7)
                         .glassEffect(.regular.interactive(), in: .circle)
                     #endif
-                    if let onSources { PlayerIconButton("Change Source", systemImage: "rectangle.stack", action: onSources) }
-                    PlayerIconButton("Stream Details", systemImage: "info", action: onDetails)
+                    if let onSources { PlayerIconButton(String(localized: "Change Source", bundle: .module), systemImage: "rectangle.stack", action: onSources) }
+                    PlayerIconButton(String(localized: "Stream Details", bundle: .module), systemImage: "info", action: onDetails)
                 }
             }
         }
@@ -168,7 +168,7 @@ public struct PlayerChrome: View {
     private var centerControls: some View {
         GlassEffectContainer(spacing: Metrics.space6) {
             HStack(spacing: Metrics.space6) {
-                PlayerIconButton("Back 10 seconds", systemImage: "gobackward.10") { Task { await engine.skip(-10) } }
+                PlayerIconButton(String(localized: "Back 10 seconds", bundle: .module), systemImage: "gobackward.10") { Task { await engine.skip(-10) } }
                 if isWaiting {
                     // One spinner, in the play button's place, while loading or buffering.
                     ProgressView()
@@ -176,11 +176,11 @@ public struct PlayerChrome: View {
                         .tint(.white)
                         .frame(width: 76, height: 76)
                         .glassEffect(.regular, in: .circle)
-                        .accessibilityLabel("Loading")
+                        .accessibilityLabel(Text("Loading", bundle: .module))
                 } else {
-                    PlayerIconButton(isPlaying ? "Pause" : "Play", systemImage: isPlaying ? "pause.fill" : "play.fill", size: .large) { engine.togglePlay() }
+                    PlayerIconButton(isPlaying ? String(localized: "Pause", bundle: .module) : String(localized: "Play", bundle: .module), systemImage: isPlaying ? "pause.fill" : "play.fill", size: .large) { engine.togglePlay() }
                 }
-                PlayerIconButton("Forward 10 seconds", systemImage: "goforward.10") { Task { await engine.skip(10) } }
+                PlayerIconButton(String(localized: "Forward 10 seconds", bundle: .module), systemImage: "goforward.10") { Task { await engine.skip(10) } }
             }
         }
     }

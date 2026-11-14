@@ -136,14 +136,14 @@ public struct Scrubber: View {
                 }
                 Spacer()
                 // Time left, with a minus sign as Apple's players show it.
-                Text("\u{2212}\(Self.format(max(0, duration - shown)))")
+                Text(verbatim: "\u{2212}\(Self.format(max(0, duration - shown)))")
             }
             .font(timeFont)
             .foregroundStyle(Theme.onArtwork.opacity(0.8))
         }
         .accessibilityElement()
-        .accessibilityLabel("Playback position")
-        .accessibilityValue("\(Self.spoken(position)) of \(Self.spoken(duration))")
+        .accessibilityLabel(Text("Playback position", bundle: .module))
+        .accessibilityValue(Text("\(Self.spoken(position)) of \(Self.spoken(duration))", bundle: .module))
         .accessibilityAdjustableAction { direction in
             onScrub(direction == .increment ? min(duration, position + 10) : max(0, position - 10))
         }

@@ -202,7 +202,7 @@ public final class DownloadStore {
         guard let item = item(id: id) else { return }
         let count = refreshes[id, default: 0]
         guard count < 3, let client = clientFor?(item.signInID) else {
-            update(id) { $0.state = .failed("The download's link stopped working. Connect to your server and try again.") }
+            update(id) { $0.state = .failed(String(localized: "The download's link stopped working. Connect to your server and try again.", bundle: .module)) }
             save()
             return
         }
@@ -246,7 +246,7 @@ public final class DownloadStore {
             // The link expired: ask the server for a fresh one.
             Task { await restartWithFreshLink(id) }
         } else {
-            update(id) { $0.state = .failed("The download failed (HTTP \(status)).") }
+            update(id) { $0.state = .failed(String(localized: "The download failed (HTTP \(status)).", bundle: .module)) }
         }
         save()
     }

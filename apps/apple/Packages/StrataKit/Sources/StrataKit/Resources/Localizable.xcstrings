@@ -1,0 +1,306 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    " (Forced)" : {
+
+    },
+    " at %@" : {
+
+    },
+    "%@ hasn't been set up yet. Open its dashboard in a browser to create the admin account." : {
+
+    },
+    "%@ is reached over HTTPS, so its other addresses must be too (or on your local network)." : {
+
+    },
+    "%@ isn't a Strata server." : {
+
+    },
+    "%@ left" : {
+
+    },
+    "%@ runs a newer Strata (%@). Update this app to connect." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ runs a newer Strata (%2$@). Update this app to connect."
+          }
+        }
+      }
+    },
+    "%@ runs an older Strata (%@). Update the server to connect." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ runs an older Strata (%2$@). Update the server to connect."
+          }
+        }
+      }
+    },
+    "%@ · External" : {
+
+    },
+    "%@'s session on %@ has expired. Sign in again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@'s session on %2$@ has expired. Sign in again."
+          }
+        }
+      }
+    },
+    "%lldh" : {
+      "comment" : "Runtime in hours"
+    },
+    "%lldh %lldm" : {
+      "comment" : "Runtime in hours and minutes",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lldh %2$lldm"
+          }
+        }
+      }
+    },
+    "%lldm" : {
+      "comment" : "Runtime in minutes"
+    },
+    "%llds left" : {
+
+    },
+    "Admin" : {
+
+    },
+    "Allow Local Network access for Strata in Settings so it can find your TV." : {
+
+    },
+    "Best Available" : {
+
+    },
+    "Born %@" : {
+
+    },
+    "Born %@ in %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Born %1$@ in %2$@"
+          }
+        }
+      }
+    },
+    "Born in %@" : {
+
+    },
+    "Can't connect to the server%@. Make sure Strata is running and the address is right." : {
+
+    },
+    "Can't find the server%@. Check the address." : {
+
+    },
+    "Can't reach %@ at any of its addresses." : {
+
+    },
+    "Cancelled." : {
+
+    },
+    "Couldn't establish a secure connection to the server%@." : {
+
+    },
+    "Couldn't find your TV. Make sure it's on the same Wi-Fi as this phone and still showing the code." : {
+
+    },
+    "Couldn't reach the server%@. (%@)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Couldn't reach the server%1$@. (%2$@)"
+          }
+        }
+      }
+    },
+    "Direct Play" : {
+
+    },
+    "Direct Stream" : {
+
+    },
+    "Downloaded" : {
+
+    },
+    "Episode %lld" : {
+
+    },
+    "Episode %lld · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Episode %1$lld · %2$@"
+          }
+        }
+      }
+    },
+    "Latest Releases" : {
+
+    },
+    "Library" : {
+
+    },
+    "Member" : {
+
+    },
+    "Mono" : {
+
+    },
+    "Movie" : {
+
+    },
+    "New in Theaters" : {
+
+    },
+    "Not connected to a server." : {
+
+    },
+    "Not found." : {
+
+    },
+    "Not saved on this device yet." : {
+
+    },
+    "Not signed in." : {
+
+    },
+    "Owner" : {
+
+    },
+    "Play" : {
+
+    },
+    "Play %@" : {
+
+    },
+    "Popular" : {
+
+    },
+    "Remux (HLS)" : {
+
+    },
+    "Request failed (%lld)." : {
+
+    },
+    "Resume" : {
+
+    },
+    "Resume %@" : {
+
+    },
+    "S%lld · E%lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "S%1$lld · E%2$lld"
+          }
+        }
+      }
+    },
+    "Show" : {
+
+    },
+    "Stereo" : {
+
+    },
+    "Subtitles are still being prepared. Try again in a moment." : {
+
+    },
+    "That address belongs to a different server (%@)." : {
+
+    },
+    "That code has expired or was already used. Show a new one and scan it again." : {
+
+    },
+    "That conflicts with the server's current state." : {
+
+    },
+    "That doesn't look like a valid server address." : {
+
+    },
+    "That wasn't a Strata request." : {
+
+    },
+    "The connection to the server was lost. Try again." : {
+
+    },
+    "The download failed (HTTP %lld)." : {
+
+    },
+    "The download's link stopped working. Connect to your server and try again." : {
+
+    },
+    "The server ran into a problem (%lld)." : {
+
+    },
+    "The server sent a response this app doesn't understand. Is the app up to date?" : {
+
+    },
+    "The server sent an invalid response." : {
+
+    },
+    "The server signed you in but sent no session. Is the app up to date?" : {
+
+    },
+    "The server%@ took too long to respond." : {
+
+    },
+    "This TV is already signing in." : {
+
+    },
+    "This address needs HTTPS, or the app must allow local HTTP connections." : {
+
+    },
+    "Too many attempts. Wait a few minutes and try again." : {
+
+    },
+    "Top Rated" : {
+
+    },
+    "Track %@" : {
+
+    },
+    "Track %lld" : {
+
+    },
+    "Transcode (HLS)" : {
+
+    },
+    "Trending" : {
+
+    },
+    "Up to 1080p" : {
+
+    },
+    "Up to 720p" : {
+
+    },
+    "Wrong username or password." : {
+
+    },
+    "You don't have access to that." : {
+
+    },
+    "You're offline. Check your network connection." : {
+
+    },
+    "Your session has expired. Sign in again." : {
+
+    }
+  },
+  "version" : "1.0"
+}

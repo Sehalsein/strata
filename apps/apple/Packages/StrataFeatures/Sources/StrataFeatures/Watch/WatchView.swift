@@ -58,7 +58,7 @@ struct WatchView: View {
                 )
                 // The one thing left on screen when the controls hide: say what it does.
                 .accessibilityElement()
-                .accessibilityLabel(chromeVisible ? "Hide controls" : "Show controls")
+                .accessibilityLabel(chromeVisible ? Text("Hide controls", bundle: .module) : Text("Show controls", bundle: .module))
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAction { toggleChrome() }
                 // Pinch out to fill the screen, in to see the whole picture (as in Apple's player).
@@ -246,35 +246,35 @@ struct WatchView: View {
         case .preparing(let status):
             VStack(spacing: Self.cardSpacing) {
                 Image(systemName: "arrow.down.circle").font(.system(size: Self.cardIconSize + 4)).foregroundStyle(Theme.warning)
-                Text(status.title ?? "Getting it ready").font(Self.cardTitleFont).foregroundStyle(Theme.onArtwork)
+                Text(status.title ?? String(localized: "Getting it ready", bundle: .module)).font(Self.cardTitleFont).foregroundStyle(Theme.onArtwork)
                 ProgressBar(status.progress, track: .white.opacity(0.2)).frame(width: 280)
                 Text([status.percentText, status.etaText].compactMap { $0 }.joined(separator: " · "))
                     .font(.stFootnote).foregroundStyle(Theme.onArtwork.opacity(0.7))
-                Text(status.message ?? "It will start playing as soon as it's ready.")
+                Text(status.message ?? String(localized: "It will start playing as soon as it's ready.", bundle: .module))
                     .font(Self.cardTextFont).foregroundStyle(Theme.onArtwork.opacity(0.7)).multilineTextAlignment(.center).frame(maxWidth: Self.cardTextWidth)
                 // Why it's getting this copy ready: the first one wouldn't play.
                 if let note = engine.fallbackNote {
                     Text(note).font(.stFootnote).foregroundStyle(Theme.warning).multilineTextAlignment(.center).frame(maxWidth: Self.cardTextWidth)
                 }
-                GlassButton("Close", size: Self.cardButtonSize, action: close)
+                GlassButton(String(localized: "Close", bundle: .module), size: Self.cardButtonSize, action: close)
             }
             .padding(Self.cardPadding)
             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Metrics.radiusLG, style: .continuous))
         case .failed(let message):
             VStack(spacing: Self.cardSpacing) {
                 Image(systemName: "exclamationmark.triangle.fill").font(.system(size: Self.cardIconSize)).foregroundStyle(Theme.danger)
-                Text("Can't play this").font(Self.cardTitleFont).foregroundStyle(Theme.onArtwork)
+                Text("Can't play this", bundle: .module).font(Self.cardTitleFont).foregroundStyle(Theme.onArtwork)
                 Text(message).font(Self.cardTextFont).foregroundStyle(Theme.onArtwork.opacity(0.75)).multilineTextAlignment(.center).frame(maxWidth: Self.cardTextWidth)
                 GlassEffectContainer(spacing: Metrics.space2) {
                     HStack(spacing: Self.buttonGap) {
-                        PlayButton("Try Again", systemImage: "arrow.clockwise", size: Self.cardButtonSize) {
+                        PlayButton(String(localized: "Try Again", bundle: .module), systemImage: "arrow.clockwise", size: Self.cardButtonSize) {
                             Task { await start() }
                         }
                         // The message often says to pick another source: offer the list here.
                         if request.downloadID == nil {
-                            GlassButton("Choose Source", systemImage: "rectangle.stack", size: Self.cardButtonSize) { showSources = true }
+                            GlassButton(String(localized: "Choose Source", bundle: .module), systemImage: "rectangle.stack", size: Self.cardButtonSize) { showSources = true }
                         }
-                        GlassButton("Close", size: Self.cardButtonSize, action: close)
+                        GlassButton(String(localized: "Close", bundle: .module), size: Self.cardButtonSize, action: close)
                     }
                 }
                 .padding(.top, Self.cardSpacing)
@@ -316,7 +316,7 @@ struct WatchView: View {
     private func playNext() {
         upNextDismissed = false
         guard let next = engine.nextEpisode else { return }
-        let meta = PlaybackMeta(title: request.meta.title, subtitle: "S\(next.season) · E\(next.episode) · \(next.name)", artworkURL: next.stillUrl ?? request.meta.artworkURL)
+        let meta = PlaybackMeta(title: request.meta.title, subtitle: String(localized: "S\(next.season) · E\(next.episode) · \(next.name)", bundle: .module), artworkURL: next.stillUrl ?? request.meta.artworkURL)
         Task { await engine.playNext(meta: meta) }
     }
 

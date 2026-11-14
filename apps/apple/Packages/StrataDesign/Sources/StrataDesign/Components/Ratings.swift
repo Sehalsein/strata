@@ -16,8 +16,8 @@ public enum ExternalRating: Hashable, Sendable {
 
     var accessibilityText: String {
         switch self {
-        case .imdb: "IMDb rating \(value) out of 10"
-        case .rottenTomatoes: "Rotten Tomatoes \(value)"
+        case .imdb: String(localized: "IMDb rating \(value) out of 10", bundle: .module)
+        case .rottenTomatoes: String(localized: "Rotten Tomatoes \(value)", bundle: .module)
         }
     }
 }
@@ -34,13 +34,13 @@ public struct RatingBadge: View {
         HStack(spacing: 4) {
             switch rating {
             case .imdb:
-                Text("IMDb")
+                Text(verbatim: "IMDb")
                     .font(.stSpec.weight(.heavy))
                     .foregroundStyle(.black)
                     .padding(.horizontal, 3)
                     .background(RoundedRectangle(cornerRadius: 2, style: .continuous).fill(Self.imdbYellow))
             case .rottenTomatoes:
-                Text("🍅").font(.stSpec)
+                Text(verbatim: "🍅").font(.stSpec)
             }
             Text(rating.value).font(.stSpec).foregroundStyle(Theme.ink2)
         }

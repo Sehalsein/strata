@@ -32,7 +32,7 @@ public struct Rail<Content: View>: View {
             }
             .buttonStyle(RailTitleButtonStyle())
             .accessibilityAddTraits(.isHeader)
-            .accessibilityHint("Shows the full list"))
+            .accessibilityHint(Text("Shows the full list", bundle: .module)))
         }
         self.content = content
     }
@@ -88,7 +88,7 @@ extension Rail {
             }
             .buttonStyle(.plain)
             .accessibilityAddTraits(.isHeader)
-            .accessibilityHint("Shows all")
+            .accessibilityHint(Text("Shows all", bundle: .module))
         } else {
             Text(title).railHeaderStyle().accessibilityAddTraits(.isHeader)
         }
@@ -190,7 +190,7 @@ public struct SkeletonRail: View {
         }
         .skeletonPulse()
         .accessibilityElement()
-        .accessibilityLabel("Loading")
+        .accessibilityLabel(Text("Loading", bundle: .module))
     }
 }
 

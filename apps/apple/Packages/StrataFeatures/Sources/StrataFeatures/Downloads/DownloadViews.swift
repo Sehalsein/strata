@@ -11,25 +11,25 @@ extension AppServices {
     /// Asks the server for a title's file and starts downloading it for the profile in
     /// use. Returns a message to show when it can't.
     func download(_ target: PlaybackTarget, candidateId: String?, title: String, subtitle: String?, artworkURL: URL?) async -> String? {
-        guard let client, let signInID = store.activeID else { return "Not connected to a server." }
+        guard let client, let signInID = store.activeID else { return String(localized: "Not connected to a server.", bundle: .module) }
         var probed = Set<Int>()
         do {
             while true {
                 switch try await client.prepareDownload(target, candidateId: candidateId) {
                 case .ready(let response):
                     if let free = DownloadStore.freeSpace, Int64(response.candidate.size) > free {
-                        let need = Formatting.size(bytes: response.candidate.size) ?? "more space"
-                        let have = Formatting.size(bytes: Int(free)) ?? "less"
-                        return "This needs \(need) and the device has \(have) free. Pick a smaller source, or free up space."
+                        let need = Formatting.size(bytes: response.candidate.size) ?? String(localized: "more space", bundle: .module)
+                        let have = Formatting.size(bytes: Int(free)) ?? String(localized: "less", bundle: .module)
+                        return String(localized: "This needs \(need) and the device has \(have) free. Pick a smaller source, or free up space.", bundle: .module)
                     }
                     DownloadStore.shared.start(signInID: signInID, target: target, title: title, subtitle: subtitle, artworkURL: artworkURL,
                                                response: response, client: client)
                     return nil
                 case .preparing(let status):
-                    return status.message ?? "The server is getting this source ready. Try downloading it again in a few minutes."
+                    return status.message ?? String(localized: "The server is getting this source ready. Try downloading it again in a few minutes.", bundle: .module)
                 case .needsProbe(let fileId, let url):
                     // The server can't read files itself: read the file's details here, once.
-                    guard probed.insert(fileId).inserted else { return "The server couldn't use what this file holds. Pick another source." }
+                    guard probed.insert(fileId).inserted else { return String(localized: "The server couldn't use what this file holds. Pick another source.", bundle: .module) }
                     try await FileInfoReader.report(fileId: fileId, url: url, client: client)
                 }
             }
@@ -72,7 +72,7 @@ struct DownloadButton: View {
                 }
                 .buttonStyle(.strataGlass)
             } else {
-                GlassButton(starting ? "Starting…" : "Download", systemImage: "arrow.down.circle", iconOnly: !Metrics.isPadOrTV) { choosing = true }
+                GlassButton(starting ? "Starting…" : String(localized: "Download", bundle: .module), systemImage: "arrow.down.circle", iconOnly: !Metrics.isPadOrTV) { choosing = true }
                     .disabled(starting)
             }
         }
@@ -82,7 +82,7 @@ struct DownloadButton: View {
             }
         }
         .alert(notice ?? "", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
-            Button("OK", role: .cancel) { notice = nil }
+            Button(String(localized: "OK", bundle: .module), role: .cancel) { notice = nil }
         }
     }
 
@@ -102,13 +102,13 @@ struct DownloadStateLabel: View {
     var body: some View {
         switch item.state {
         case .done:
-            Label("Downloaded", systemImage: "checkmark.circle.fill").labelStyle(.iconOnly)
+            Label(String(localized: "Downloaded", bundle: .module), systemImage: "checkmark.circle.fill").labelStyle(.iconOnly)
         case .downloading:
-            ProgressRing(fraction: item.progress).frame(width: 20, height: 20).accessibilityLabel("Downloading, \(Int(item.progress * 100))%")
+            ProgressRing(fraction: item.progress).frame(width: 20, height: 20).accessibilityLabel(Text("Downloading, \(Int(item.progress * 100))%", bundle: .module))
         case .paused:
-            Label("Paused", systemImage: "pause.circle").labelStyle(.iconOnly)
+            Label(String(localized: "Paused", bundle: .module), systemImage: "pause.circle").labelStyle(.iconOnly)
         case .failed:
-            Label("Download failed", systemImage: "exclamationmark.circle").labelStyle(.iconOnly).foregroundStyle(Theme.danger)
+            Label(String(localized: "Download failed", bundle: .module), systemImage: "exclamationmark.circle").labelStyle(.iconOnly).foregroundStyle(Theme.danger)
         }
     }
 }
@@ -122,14 +122,14 @@ struct DownloadActions: View {
         let store = DownloadStore.shared
         switch item.state {
         case .done:
-            Button { services.play(item) } label: { Label("Play Download", systemImage: "play.fill") }
+            Button { services.play(item) } label: { Label(String(localized: "Play Download", bundle: .module), systemImage: "play.fill") }
             if item.positionMs ?? 0 > 0 {
-                Button { services.play(item, fromStart: true) } label: { Label("Play from Beginning", systemImage: "arrow.counterclockwise") }
+                Button { services.play(item, fromStart: true) } label: { Label(String(localized: "Play from Beginning", bundle: .module), systemImage: "arrow.counterclockwise") }
             }
         case .downloading:
-            Button { store.pause(item) } label: { Label("Pause Download", systemImage: "pause") }
+            Button { store.pause(item) } label: { Label(String(localized: "Pause Download", bundle: .module), systemImage: "pause") }
         case .paused, .failed:
-            Button { store.resume(item) } label: { Label("Resume Download", systemImage: "arrow.down.circle") }
+            Button { store.resume(item) } label: { Label(String(localized: "Resume Download", bundle: .module), systemImage: "arrow.down.circle") }
         }
         Button(role: .destructive) { store.remove(item) } label: {
             Label(item.isDone ? "Remove Download" : "Cancel Download", systemImage: "trash")
@@ -146,8 +146,8 @@ struct DownloadsView: View {
     var body: some View {
         Group {
             if items.isEmpty {
-                MessageView(systemImage: "arrow.down.circle", title: "No downloads",
-                            message: "Download movies and episodes from their page to watch them without a connection.")
+                MessageView(systemImage: "arrow.down.circle", title: String(localized: "No downloads", bundle: .module),
+                            message: String(localized: "Download movies and episodes from their page to watch them without a connection.", bundle: .module))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
@@ -169,7 +169,7 @@ struct DownloadsView: View {
             }
         }
         .background(Theme.bg.ignoresSafeArea())
-        .navigationTitle("Downloads")
+        .navigationTitle(Text("Downloads", bundle: .module))
     }
 }
 
@@ -189,9 +189,9 @@ struct DownloadRow: View {
                         Text([Formatting.size(bytes: Int(item.bytesExpected)), item.response.candidate.resolutionLabel].compactMap { $0 }.joined(separator: " · "))
                     case .downloading:
                         ProgressBar(item.progress).frame(maxWidth: 200)
-                        Text("\(Formatting.size(bytes: Int(item.bytesWritten)) ?? "0") of \(Formatting.size(bytes: Int(item.bytesExpected)) ?? "?")")
+                        Text("\(Formatting.size(bytes: Int(item.bytesWritten)) ?? "0") of \(Formatting.size(bytes: Int(item.bytesExpected)) ?? "?")", bundle: .module)
                     case .paused:
-                        Text("Paused · \(Int(item.progress * 100))%")
+                        Text("Paused · \(Int(item.progress * 100))%", bundle: .module)
                     case .failed(let message):
                         Text(message).foregroundStyle(Theme.danger).lineLimit(2)
                     }
@@ -212,7 +212,7 @@ struct OfflineDownloadsView: View {
         NavigationStack {
             DownloadsView()
                 .safeAreaInset(edge: .top) {
-                    Label("You're offline. Your downloads still play.", systemImage: "wifi.slash")
+                    Label(String(localized: "You're offline. Your downloads still play.", bundle: .module), systemImage: "wifi.slash")
                         .font(.stFootnote).foregroundStyle(Theme.ink2)
                         .padding(.vertical, Metrics.space2)
                 }

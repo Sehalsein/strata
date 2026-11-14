@@ -20,7 +20,7 @@ struct WhoIsWatchingView: View {
 
     var body: some View {
         VStack(spacing: Metrics.space8) {
-            Text("Who's watching?").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+            Text("Who's watching?", bundle: .module).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
             if let error = store.lastError {
                 Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
                     .padding(.horizontal, Metrics.gutter)
@@ -38,7 +38,7 @@ struct WhoIsWatchingView: View {
                     .focused($focused, equals: signIn.id)
                     #if !os(tvOS)
                     .contextMenu {
-                        Button("Remove from This Device", systemImage: "minus.circle", role: .destructive) {
+                        Button(String(localized: "Remove from This Device", bundle: .module), systemImage: "minus.circle", role: .destructive) {
                             store.remove(signIn.id)
                             services.refreshClient()
                         }
@@ -58,7 +58,7 @@ struct WhoIsWatchingView: View {
         .background(Theme.bg.ignoresSafeArea())
         .toolbar {
             if isSheet {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
             }
         }
         .onAppear { focused = store.activeID ?? store.signIns.first?.id ?? "add" }
@@ -90,8 +90,8 @@ struct HouseholdPickerView: View {
     var body: some View {
         VStack(spacing: Metrics.space8) {
             VStack(spacing: Metrics.space2) {
-                Text("Choose a library").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                Text("\(services.store.active?.name ?? "This profile") can watch more than one. Each has its own titles and lists.")
+                Text("Choose a library", bundle: .module).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                Text("\(services.store.active?.name ?? "This profile") can watch more than one. Each has its own titles and lists.", bundle: .module)
                     .font(.stCallout).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
             }
             .padding(.horizontal, Metrics.gutter)
@@ -99,7 +99,7 @@ struct HouseholdPickerView: View {
             case .loading:
                 ProgressView()
             case .failed(let message):
-                MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load libraries", message: message, actionTitle: "Try Again") {
+                MessageView(systemImage: "exclamationmark.triangle", title: String(localized: "Couldn't load libraries", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                     Task { await load() }
                 }
             case .loaded(let list):
@@ -138,7 +138,7 @@ struct HouseholdPickerView: View {
                 Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
             }
             if !isSheet {
-                Button("Switch Profile") { services.store.deactivate() }
+                Button(String(localized: "Switch Profile", bundle: .module)) { services.store.deactivate() }
                     .font(.stCallout)
                     #if !os(tvOS)
                     .buttonStyle(.plain)
@@ -150,7 +150,7 @@ struct HouseholdPickerView: View {
         .background(Theme.bg.ignoresSafeArea())
         .toolbar {
             if isSheet {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
             }
         }
         .task { await load() }
@@ -197,7 +197,7 @@ struct JoinMemberPickerView: View {
     var body: some View {
         VStack(spacing: Metrics.space8) {
             VStack(spacing: Metrics.space2) {
-                Text("Who's watching?").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                Text("Who's watching?", bundle: .module).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
                 Text(target.info.serverName)
                     .font(.stCallout).foregroundStyle(Theme.ink2)
             }
@@ -205,7 +205,7 @@ struct JoinMemberPickerView: View {
             case .loading:
                 ProgressView()
             case .failed(let message):
-                MessageView(systemImage: "person.crop.circle.badge.exclamationmark", title: "Couldn't load profiles", message: message, actionTitle: "Try Again") {
+                MessageView(systemImage: "person.crop.circle.badge.exclamationmark", title: String(localized: "Couldn't load profiles", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                     Task { await load() }
                 }
             case .loaded(let home):
@@ -227,7 +227,7 @@ struct JoinMemberPickerView: View {
             if let error = services.store.lastError, joining == nil, choices.value != nil {
                 Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
             }
-            Button("Sign In with a Password") { usePassword = true }
+            Button(String(localized: "Sign In with a Password", bundle: .module)) { usePassword = true }
                 .font(.stCallout)
                 #if !os(tvOS)
                 .buttonStyle(.plain)
@@ -329,7 +329,7 @@ private struct AvatarTile: View {
                 Text(detail).font(.stFootnote).foregroundStyle(Theme.ink3)
             }
             if isKids {
-                Text("Kids").eyebrowStyle(Theme.accentText)
+                Text("Kids", bundle: .module).eyebrowStyle(Theme.accentText)
             }
         }
         .lineLimit(1)

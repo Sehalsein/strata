@@ -65,22 +65,22 @@ public final class PlayerEngine {
 
         public var label: String {
             switch self {
-            case .finding: "Asking the server for the best copy…"
-            case .reading: "Checking the file's video and audio…"
-            case .connecting: "Connecting to the file…"
-            case .preparingStream: "The server is getting the stream ready…"
-            case .buffering: "Starting playback…"
+            case .finding: String(localized: "Asking the server for the best copy…", bundle: .module)
+            case .reading: String(localized: "Checking the file's video and audio…", bundle: .module)
+            case .connecting: String(localized: "Connecting to the file…", bundle: .module)
+            case .preparingStream: String(localized: "The server is getting the stream ready…", bundle: .module)
+            case .buffering: String(localized: "Starting playback…", bundle: .module)
             }
         }
 
         /// Said instead once the step has run long.
         public var slowLabel: String {
             switch self {
-            case .finding: "The server is still looking for a copy. This can take a moment."
-            case .reading: "Still checking the file. Large files take longer."
-            case .connecting: "Still connecting to the file. The server holding it is slow to answer."
-            case .preparingStream: "The server is still getting the stream ready. This can take a moment."
-            case .buffering: "Still buffering. The connection is slow right now."
+            case .finding: String(localized: "The server is still looking for a copy. This can take a moment.", bundle: .module)
+            case .reading: String(localized: "Still checking the file. Large files take longer.", bundle: .module)
+            case .connecting: String(localized: "Still connecting to the file. The server holding it is slow to answer.", bundle: .module)
+            case .preparingStream: String(localized: "The server is still getting the stream ready. This can take a moment.", bundle: .module)
+            case .buffering: String(localized: "Still buffering. The connection is slow right now.", bundle: .module)
             }
         }
     }
@@ -174,7 +174,7 @@ public final class PlayerEngine {
     public enum SleepOption: Int, CaseIterable, Identifiable, Sendable {
         case off = 0, m15 = 15, m30 = 30, m45 = 45, m60 = 60
         public var id: Int { rawValue }
-        public var label: String { self == .off ? "Off" : "\(rawValue) min" }
+        public var label: String { self == .off ? String(localized: "Off", bundle: .module) : String(localized: "\(rawValue) min", bundle: .module) }
     }
 
     /// `.resizeAspect` (default) letterboxes; `.resizeAspectFill` crops to fill. Persisted.
@@ -290,7 +290,7 @@ public final class PlayerEngine {
     /// playback has started, failed, or the load was superseded (`unload()` / another `load`).
     public func load(target: PlaybackTarget, meta: PlaybackMeta, candidateId: String? = nil, startMs: Int? = nil) async {
         loadToken += 1
-        guard let client else { status = .failed("Not connected to a server."); return }
+        guard let client else { status = .failed(String(localized: "Not connected to a server.", bundle: .module)); return }
         await teardown(reportFinal: true)
         generation += 1
         let gen = generation
@@ -397,7 +397,7 @@ public final class PlayerEngine {
                 guard gen == generation else { throw CancellationError() }
                 guard candidateId == nil else { throw failure }
                 guard attempt < Self.maxFallbacks else {
-                    throw DeviceFailure(message: "Tried \(attempt + 1) copies and none would play here. Choose another source.")
+                    throw DeviceFailure(message: String(localized: "Tried \(attempt + 1) copies and none would play here. Choose another source.", bundle: .module))
                 }
                 if let res {
                     failedCandidates.insert(res.candidate.id)
@@ -412,7 +412,7 @@ public final class PlayerEngine {
                 // Ready now or shortly; not one the server would have to download first.
                 guard let next = others?.first(where: { !failedCandidates.contains($0.id) && !failedFiles.contains($0.fileId) && $0.readiness != .download }) else {
                     // Say how far it got, so "Pick another source" isn't the first you hear of it.
-                    if attempt > 0 { throw DeviceFailure(message: "Tried \(attempt + 1) copies and none would play here. Choose another source.") }
+                    if attempt > 0 { throw DeviceFailure(message: String(localized: "Tried \(attempt + 1) copies and none would play here. Choose another source.", bundle: .module)) }
                     throw failure
                 }
                 Log.player.warning("copy failed (\(failure.message, privacy: .public)); trying \(next.id, privacy: .public)")
@@ -431,9 +431,9 @@ public final class PlayerEngine {
         let unreachable = ns.domain == NSURLErrorDomain && [NSURLErrorCannotConnectToHost, NSURLErrorTimedOut,
             NSURLErrorCannotFindHost, NSURLErrorNetworkConnectionLost, NSURLErrorDNSLookupFailed].contains(ns.code)
         if unreachable || error.localizedDescription.lowercased().contains("connect") {
-            return "This copy's server didn't answer. Choose another source."
+            return String(localized: "This copy's server didn't answer. Choose another source.", bundle: .module)
         }
-        return "This copy couldn't be opened (\(error.localizedDescription)). Choose another source."
+        return String(localized: "This copy couldn't be opened (\(error.localizedDescription)). Choose another source.", bundle: .module)
     }
 
     /// What the player says while it switches: why the last copy was passed over, and
@@ -441,13 +441,13 @@ public final class PlayerEngine {
     private static func fallbackNote(after failure: DeviceFailure, next: Candidate, attempt: Int) -> String {
         let text = failure.message.lowercased()
         let why = text.contains("connect") || text.contains("timed out") || text.contains("network")
-            ? "That copy couldn't be reached."
+            ? String(localized: "That copy couldn't be reached.", bundle: .module)
             : text.contains("can't play on this device") || text.contains("dolby vision") || text.contains("hdr")
-            ? "That copy won't play on this device."
-            : "That copy wouldn't open."
+            ? String(localized: "That copy won't play on this device.", bundle: .module)
+            : String(localized: "That copy wouldn't open.", bundle: .module)
         let label = [next.resolutionLabel, next.source?.uppercased()].compactMap { $0 }.joined(separator: " · ")
-        let what = label.isEmpty ? "another source" : label
-        return "\(why) Switching to \(what) (try \(attempt + 1) of \(maxFallbacks + 1))…"
+        let what = label.isEmpty ? String(localized: "another source", bundle: .module) : label
+        return String(localized: "\(why) Switching to \(what) (try \(attempt + 1) of \(maxFallbacks + 1))…", bundle: .module)
     }
 
     /// The source you chose for `target` before, or for a show the episode's copy most like
@@ -501,7 +501,7 @@ public final class PlayerEngine {
     private func probe(fileId: Int, url: URL, client: StrataClient, gen: Int) async throws {
         lastProbedFile = fileId
         guard probedFiles.insert(fileId).inserted else {
-            throw DeviceFailure(message: "The server couldn't use what this file holds. Pick another source.")
+            throw DeviceFailure(message: String(localized: "The server couldn't use what this file holds. Pick another source.", bundle: .module))
         }
         status = .loading
         let info: MediaInfo
@@ -512,7 +512,7 @@ public final class PlayerEngine {
         } catch {
             guard gen == generation, !(error is CancellationError) else { throw CancellationError() }
             Log.player.warning("probe failed: \(error.localizedDescription, privacy: .public)")
-            throw DeviceFailure(message: "This file couldn't be read (\(error.localizedDescription)). Pick another source.")
+            throw DeviceFailure(message: String(localized: "This file couldn't be read (\(error.localizedDescription)). Pick another source.", bundle: .module))
         }
         guard gen == generation else { throw CancellationError() }
         try await client.reportProbe(fileId: fileId, info: info)
@@ -627,15 +627,15 @@ public final class PlayerEngine {
                 return try await start(res, gen: gen, token: token, newTitle: newTitle, autoplay: autoplay)
             }
             // AVPlayer refused what the device made (a codec it can't decode, say).
-            throw DeviceFailure(message: "This file can't play on this device (\(error.message)). Pick another source.")
+            throw DeviceFailure(message: String(localized: "This file can't play on this device (\(error.message)). Pick another source.", bundle: .module))
         } catch let error as StrataError where newTitle {
             // Played from its link or the server's stream: the copy wouldn't open (its host
             // didn't answer, say). A failure like this is the copy's, so another may play.
             guard isCurrent(gen, token) else { throw CancellationError() }
             // Not the app's "can't reach your Strata server": it's the copy's own host.
             throw DeviceFailure(message: error.kind == .network && error.message.lowercased().contains("connect")
-                ? "This copy's server didn't answer. Choose another source."
-                : "This copy couldn't be opened (\(error.message)). Choose another source.")
+                ? String(localized: "This copy's server didn't answer. Choose another source.", bundle: .module)
+                : String(localized: "This copy couldn't be opened (\(error.message)). Choose another source.", bundle: .module))
         }
         guard isCurrent(gen, token) else { throw CancellationError() }
         nativeSubtitles = res.mode == .device ? try? await item.asset.loadMediaSelectionGroup(for: .legible) : nil
@@ -733,7 +733,7 @@ public final class PlayerEngine {
                     }
                 })
                 DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [waiter] in
-                    waiter.finish(.failure(StrataError(kind: .network, message: "The stream didn't start in time. Try again.")))
+                    waiter.finish(.failure(StrataError(kind: .network, message: String(localized: "The stream didn't start in time. Try again.", bundle: .module))))
                 }
             }
         } onCancel: {
@@ -930,7 +930,7 @@ public final class PlayerEngine {
             return
         }
         guard let url = track.url else {
-            subtitleError = "\(track.displayTitle) is an image-based subtitle and can't be shown yet."
+            subtitleError = String(localized: "\(track.displayTitle) is an image-based subtitle and can't be shown yet.", bundle: .module)
             return
         }
         guard let client else { return }
@@ -1186,7 +1186,7 @@ public final class PlayerEngine {
             self.stallTask = nil
             guard gen == self.generation, self.player.currentItem === item,
                   self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate else { return }
-            self.recoverDevice("stalled for \(Int(limit))s", giveUp: "Playback stalled and couldn't pick up again. Check the connection and try again, or pick another source.")
+            self.recoverDevice("stalled for \(Int(limit))s", giveUp: String(localized: "Playback stalled and couldn't pick up again. Check the connection and try again, or pick another source.", bundle: .module))
         }
     }
 
@@ -1501,7 +1501,7 @@ public final class PlayerEngine {
     }
 
     nonisolated private static func describe(_ error: Error?) -> String {
-        guard let error else { return "Playback failed." }
+        guard let error else { return String(localized: "Playback failed.", bundle: .module) }
         let ns = error as NSError
         if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError, underlying.domain == NSURLErrorDomain {
             return StrataError.wrap(URLError(URLError.Code(rawValue: underlying.code))).message

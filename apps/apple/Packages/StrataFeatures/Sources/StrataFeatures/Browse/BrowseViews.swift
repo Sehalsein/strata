@@ -19,7 +19,7 @@ struct BrowseView: View {
 
     /// Movies have what's newly out to rent or buy after Trending, and what's in cinemas last.
     private var order: [BrowseList] { type == .movie ? [.trending, .latestReleases, .popular, .topRated, .inTheaters] : [.trending, .popular, .topRated] }
-    private var title: String { type == .movie ? "Movies" : "Shows" }
+    private var title: String { type == .movie ? String(localized: "Movies", bundle: .module) : String(localized: "Shows", bundle: .module) }
 
     var body: some View {
         ScrollView {
@@ -98,12 +98,12 @@ struct BrowseView: View {
             SkeletonRail(width: Metrics.posterWidth)
             SkeletonRail(width: Metrics.posterWidth)
         case .failed(let message):
-            MessageView(systemImage: "wifi.exclamationmark", title: "Couldn't load \(genre.name)", message: message, actionTitle: "Try Again") {
+            MessageView(systemImage: "wifi.exclamationmark", title: String(localized: "Couldn't load \(genre.name)", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                 Task { await loadGenre(genre) }
             }
             .frame(minHeight: 300)
         case .loaded(let shelves) where shelves.isEmpty:
-            MessageView(systemImage: "film.stack", title: "Nothing in \(genre.name) yet").frame(minHeight: 300)
+            MessageView(systemImage: "film.stack", title: String(localized: "Nothing in \(genre.name) yet", bundle: .module)).frame(minHeight: 300)
         case .loaded(let shelves):
             ForEach(shelves) { shelf in ShelfRail(shelf: shelf) }
         }
@@ -131,7 +131,7 @@ struct BrowseView: View {
                     SkeletonRail(width: Metrics.posterWidth)
                 }
                 if let error, lists.isEmpty {
-                    MessageView(systemImage: "wifi.exclamationmark", title: "Couldn't load \(title)", message: error, actionTitle: "Try Again") {
+                    MessageView(systemImage: "wifi.exclamationmark", title: String(localized: "Couldn't load \(title)", bundle: .module), message: error, actionTitle: String(localized: "Try Again", bundle: .module)) {
                         Task { await load() }
                     }
                     .frame(minHeight: 400)
@@ -154,9 +154,9 @@ struct BrowseView: View {
 
     private func railTitle(_ list: BrowseList) -> String {
         switch list {
-        case .library: "In Your Library"
+        case .library: String(localized: "In Your Library", bundle: .module)
         case .latestReleases, .inTheaters, .popular, .topRated: list.title
-        case .trending: "Trending"
+        case .trending: String(localized: "Trending", bundle: .module)
         }
     }
 
@@ -196,8 +196,8 @@ struct GenreMenu<Item: Hashable & Identifiable>: View {
     let genres: [Item]
     @Binding var selected: Item?
     let name: (Item) -> String
-    var noun = "Genre"
-    var allTitle = "All Genres"
+    var noun = String(localized: "Genre", bundle: .module)
+    var allTitle = String(localized: "All Genres", bundle: .module)
 
     var body: some View {
         Menu {
@@ -220,7 +220,7 @@ struct GenreMenu<Item: Hashable & Identifiable>: View {
         .controlSize(.small)
         .tint(Theme.ink)
         #endif
-        .accessibilityLabel(selected.map { "\(noun): \(name($0))" } ?? "Filter by \(noun.lowercased())")
+        .accessibilityLabel(selected.map { String(localized: "\(noun): \(name($0))", bundle: .module) } ?? String(localized: "Filter by \(noun.lowercased())", bundle: .module))
     }
 }
 
@@ -256,12 +256,12 @@ struct BrowseListView: View {
             switch items {
             case .loading: SkeletonGrid().padding(.vertical, Metrics.space4)
             case .failed(let message):
-                MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load \(list.title)", message: message, actionTitle: "Try Again") {
+                MessageView(systemImage: "exclamationmark.triangle", title: String(localized: "Couldn't load \(list.title)", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                     Task { items = .loading; await load() }
                 }
                 .frame(minHeight: 400)
             case .loaded(let cards) where cards.isEmpty:
-                MessageView(systemImage: "film.stack", title: "Nothing here yet").frame(minHeight: 400)
+                MessageView(systemImage: "film.stack", title: String(localized: "Nothing here yet", bundle: .module)).frame(minHeight: 400)
             case .loaded(let cards):
                 PosterGrid {
                     ForEach(cards) { card in
@@ -297,11 +297,11 @@ struct SearchTab: View {
 
     var body: some View {
         #if os(iOS)
-        StackHost(tab: .search) { SearchView(query: $query).searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Movies and shows") }
+        StackHost(tab: .search) { SearchView(query: $query).searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: String(localized: "Movies and shows", bundle: .module)) }
         #else
         StackHost(tab: .search) {
             SearchView(query: $query)
-                .searchable(text: $query, prompt: "Movies and shows")
+                .searchable(text: $query, prompt: String(localized: "Movies and shows", bundle: .module))
                 #if os(tvOS)
                 // Below the sidebar's "‹ Search" button, which otherwise sits on the typed text.
                 .padding(.top, 72)
@@ -323,16 +323,16 @@ struct SearchView: View {
         ScrollView {
             switch results {
             case nil:
-                MessageView(systemImage: "magnifyingglass", title: "Search movies and shows",
-                            message: "Find any movie or show to watch or add to My List.")
+                MessageView(systemImage: "magnifyingglass", title: String(localized: "Search movies and shows", bundle: .module),
+                            message: String(localized: "Find any movie or show to watch or add to My List.", bundle: .module))
                     .frame(minHeight: 400)
             case .loading?:
                 SkeletonGrid(inset: Self.gridInset).padding(.vertical, Metrics.space4)
             case .failed(let message)?:
-                MessageView(systemImage: "exclamationmark.triangle", title: "Search failed", message: message)
+                MessageView(systemImage: "exclamationmark.triangle", title: String(localized: "Search failed", bundle: .module), message: message)
             case .loaded(let cards)?:
                 if cards.isEmpty {
-                    MessageView(systemImage: "magnifyingglass", title: "No results for “\(query)”").frame(minHeight: 400)
+                    MessageView(systemImage: "magnifyingglass", title: String(localized: "No results for “\(query)”", bundle: .module)).frame(minHeight: 400)
                 } else {
                     PosterGrid(inset: Self.gridInset) {
                         ForEach(cards) { card in
@@ -346,7 +346,7 @@ struct SearchView: View {
         .background(Theme.bg.ignoresSafeArea())
         // Not full bleed on the TV: the system's search field and keyboard keep to the
         // safe area, and its own title stands in for a pinned "Search" over the keyboard.
-        .pageTitle("Search")
+        .pageTitle(String(localized: "Search", bundle: .module))
         .task(id: query) {
             let q = query.trimmingCharacters(in: .whitespaces)
             guard q.count >= 2 else { results = nil; return }
@@ -388,13 +388,13 @@ struct MyListView: View {
 
     var body: some View {
         ScrollView {
-            TVPageHeader(title: "My List")
+            TVPageHeader(title: String(localized: "My List", bundle: .module))
             switch items {
             case .loading: SkeletonGrid().padding(.vertical, Metrics.space4)
             case .failed(let message):
-                MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load My List", message: message)
+                MessageView(systemImage: "exclamationmark.triangle", title: String(localized: "Couldn't load My List", bundle: .module), message: message)
             case .loaded(let cards) where cards.isEmpty:
-                MessageView(systemImage: "bookmark", title: "Your list is empty", message: "Add movies and shows with My List on their page.")
+                MessageView(systemImage: "bookmark", title: String(localized: "Your list is empty", bundle: .module), message: String(localized: "Add movies and shows with My List on their page.", bundle: .module))
                     .frame(minHeight: 400)
             case .loaded(let cards):
                 PosterGrid {
@@ -407,13 +407,13 @@ struct MyListView: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
-        .pageTitle("My List")
+        .pageTitle(String(localized: "My List", bundle: .module))
         #if os(iOS)
         // The iPad sidebar has Downloads.
         .toolbar {
             if !showsSidebar {
                 ToolbarItem(placement: .primaryAction) {
-                    NavigationLink { DownloadsView() } label: { Label("Downloads", systemImage: "arrow.down.circle") }
+                    NavigationLink { DownloadsView() } label: { Label(String(localized: "Downloads", bundle: .module), systemImage: "arrow.down.circle") }
                 }
             }
         }

@@ -194,8 +194,8 @@ public struct PersonDetail: Codable, Sendable, Hashable, Identifiable {
             let years = [Formatting.date(birthday), died].compactMap { $0 }.map { String(Calendar.current.component(.year, from: $0)) }
             return years.joined(separator: " – ")
         }
-        guard let born else { return placeOfBirth.map { "Born in \($0)" } }
-        return placeOfBirth.map { "Born \(born) in \($0)" } ?? "Born \(born)"
+        guard let born else { return placeOfBirth.map { String(localized: "Born in \($0)", bundle: .module) } }
+        return placeOfBirth.map { String(localized: "Born \(born) in \($0)", bundle: .module) } ?? String(localized: "Born \(born)", bundle: .module)
     }
 }
 
@@ -208,12 +208,12 @@ public enum BrowseList: String, Codable, Sendable, Hashable, CaseIterable {
 
     public var title: String {
         switch self {
-        case .latestReleases: "Latest Releases"
-        case .inTheaters: "New in Theaters"
-        case .trending: "Trending"
-        case .popular: "Popular"
-        case .topRated: "Top Rated"
-        case .library: "Library"
+        case .latestReleases: String(localized: "Latest Releases", bundle: .module)
+        case .inTheaters: String(localized: "New in Theaters", bundle: .module)
+        case .trending: String(localized: "Trending", bundle: .module)
+        case .popular: String(localized: "Popular", bundle: .module)
+        case .topRated: String(localized: "Top Rated", bundle: .module)
+        case .library: String(localized: "Library", bundle: .module)
         }
     }
 }
@@ -266,7 +266,7 @@ public struct AnimeInfo: Codable, Sendable, Hashable {
     public var scoreText: String? { score.map { "\($0)%" } }
 
     public var nextEpisodeText: String? {
-        nextEpisode.map { "Episode \($0.episode) · \($0.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))" }
+        nextEpisode.map { String(localized: "Episode \($0.episode) · \($0.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))", bundle: .module) }
     }
 }
 
@@ -550,8 +550,8 @@ public struct CalendarEpisode: Codable, Sendable, Hashable, Identifiable {
 
     /// "S2 · E3" or "Episode 32".
     public var code: String {
-        if let season { return "S\(season) · E\(episode)" }
-        return "Episode \(episode)"
+        if let season { return String(localized: "S\(season) · E\(episode)", bundle: .module) }
+        return String(localized: "Episode \(episode)", bundle: .module)
     }
 
     private static func instant(_ s: String) -> Date? {

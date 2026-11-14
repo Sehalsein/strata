@@ -19,7 +19,7 @@ struct MovieDetailView: View {
             case .loading:
                 DetailSkeleton()
             case .failed(let message):
-                MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load this movie", message: message, actionTitle: "Try Again") {
+                MessageView(systemImage: "exclamationmark.triangle", title: String(localized: "Couldn't load this movie", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                     Task { await load() }
                 }
                 .frame(minHeight: 500)
@@ -53,13 +53,13 @@ struct MovieDetailView: View {
             HeroBillboard(id: movie.id,
                           backdropURL: movie.backdropUrl,
                           fallbackURL: movie.posterUrl,
-                          eyebrow: movie.availabilityLabel ?? "Movie",
+                          eyebrow: movie.availabilityLabel ?? String(localized: "Movie", bundle: .module),
                           title: movie.title,
                           meta: [movie.genres.first, movie.yearText, movie.runtimeText, movie.certification, movie.ratings.tmdbStar(movie.ratingText)].compactMap { $0 },
                           badges: movie.sources.first?.specLabels.prefix(3).map { $0 } ?? [],
                           ratings: movie.ratings.badges,
                           overview: movie.overview, featured: Metrics.isTV,
-                          credits: [HeroCredit("Starring", movie.cast.prefix(3).map(\.name)), HeroCredit("Director", movie.directors)].filter { !$0.names.isEmpty },
+                          credits: [HeroCredit(String(localized: "Starring", bundle: .module), movie.cast.prefix(3).map(\.name)), HeroCredit(String(localized: "Director", bundle: .module), movie.directors)].filter { !$0.names.isEmpty },
                           progress: movie.progress.flatMap { $0.isResumable ? HeroProgress(fraction: $0.fraction, label: Formatting.remaining(ms: $0.remainingMs)) : nil }) {
                 // Plays when it's in the library or the server lists a source for it.
                 if let choice = playChoice(movie) {
@@ -69,7 +69,7 @@ struct MovieDetailView: View {
                         .focused($heroFocus, equals: .play)
                         #endif
                 }
-                GlassButton(inWatchlist ? "In My List" : "My List", systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV || Metrics.isTV, size: Metrics.heroControlSize) {
+                GlassButton(inWatchlist ? String(localized: "In My List", bundle: .module) : String(localized: "My List", bundle: .module), systemImage: inWatchlist ? "checkmark" : "plus", iconOnly: !Metrics.isPadOrTV || Metrics.isTV, size: Metrics.heroControlSize) {
                     Task { await toggleWatchlist(movie) }
                 }
                 #if os(tvOS)
@@ -77,7 +77,7 @@ struct MovieDetailView: View {
                 #endif
                 // Only when the server has sources to show.
                 if let sources = playOptions?.sources, !sources.isEmpty {
-                    GlassButton("Sources", systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV || Metrics.isTV, size: Metrics.heroControlSize) { showSources = true }
+                    GlassButton(String(localized: "Sources", bundle: .module), systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV || Metrics.isTV, size: Metrics.heroControlSize) { showSources = true }
                 }
                 #if os(iOS)
                 if playChoice(movie) != nil {
@@ -112,7 +112,7 @@ struct MovieDetailView: View {
             RelatedRail(titles: movie.related)
 
             if !movie.recommendations.isEmpty {
-                Rail("More Like This") {
+                Rail(String(localized: "More Like This", bundle: .module)) {
                     ForEach(movie.recommendations) { card in
                         NavigationLink(value: card.route) { PosterCardLabel(card: card) }.cardButtonStyle()
                     }
@@ -120,13 +120,13 @@ struct MovieDetailView: View {
             }
 
             InfoGrid(rows: [
-                ("Original Title", movie.anime?.originalTitle ?? ""),
-                ("Studio", movie.anime?.studios.joined(separator: ", ") ?? ""),
-                ("Directed by", movie.directors.joined(separator: ", ")),
-                ("Genres", movie.genres.joined(separator: ", ")),
-                ("Released", Formatting.date(movie.releaseDate)?.formatted(date: .abbreviated, time: .omitted) ?? ""),
-                ("Rating", movie.ratingText.map { "\($0) / 10" } ?? ""),
-                ("AniList score", movie.anime?.scoreText ?? ""),
+                (String(localized: "Original Title", bundle: .module), movie.anime?.originalTitle ?? ""),
+                (String(localized: "Studio", bundle: .module), movie.anime?.studios.joined(separator: ", ") ?? ""),
+                (String(localized: "Directed by", bundle: .module), movie.directors.joined(separator: ", ")),
+                (String(localized: "Genres", bundle: .module), movie.genres.joined(separator: ", ")),
+                (String(localized: "Released", bundle: .module), Formatting.date(movie.releaseDate)?.formatted(date: .abbreviated, time: .omitted) ?? ""),
+                (String(localized: "Rating", bundle: .module), movie.ratingText.map { "\($0) / 10" } ?? ""),
+                (String(localized: "AniList score", bundle: .module), movie.anime?.scoreText ?? ""),
             ])
         }
         .padding(.bottom, Metrics.space12)
@@ -185,7 +185,7 @@ struct RelatedRail: View {
 
     var body: some View {
         if !titles.isEmpty {
-            Rail("Other Seasons") {
+            Rail(String(localized: "Other Seasons", bundle: .module)) {
                 ForEach(titles) { card in
                     NavigationLink(value: card.route) { PosterCardLabel(card: card) }.cardButtonStyle()
                 }
@@ -199,7 +199,7 @@ struct CastRail: View {
 
     var body: some View {
         if !cast.isEmpty {
-            Rail("Cast") {
+            Rail(String(localized: "Cast", bundle: .module)) {
                 ForEach(cast.prefix(15)) { person in
                     NavigationLink(value: Route.person(person.id)) { member(person) }
                         .cardButtonStyle()
@@ -264,14 +264,14 @@ struct TrailerButton: View {
         #if !os(tvOS)
         Link(destination: url) {
             if Metrics.isPad {
-                Label("Trailer", systemImage: "play.rectangle").font(.stHeadline).frame(minHeight: 30)
+                Label(String(localized: "Trailer", bundle: .module), systemImage: "play.rectangle").font(.stHeadline).frame(minHeight: 30)
             } else {
                 Image(systemName: "play.rectangle").font(.stHeadline).frame(minHeight: 30)
             }
         }
         .buttonStyle(.strataGlass)
         .controlSize(.large)
-        .accessibilityLabel("Trailer")
+        .accessibilityLabel(Text("Trailer", bundle: .module))
         #endif
     }
 }
@@ -283,7 +283,7 @@ struct VideosRail: View {
     var body: some View {
         #if !os(tvOS)
         if !videos.isEmpty {
-            Rail("Trailers & Extras") {
+            Rail(String(localized: "Trailers & Extras", bundle: .module)) {
                 ForEach(videos.filter { $0.watchURL != nil }) { video in
                     Link(destination: video.watchURL!) {
                         VStack(alignment: .leading, spacing: Metrics.space2) {
@@ -303,7 +303,7 @@ struct VideosRail: View {
                         .frame(width: Metrics.landscapeWidth)
                     }
                     .cardButtonStyle()
-                    .accessibilityLabel("\(video.type): \(video.name)")
+                    .accessibilityLabel("\(video.type): \(video.name)" as String)
                 }
             }
         }
@@ -318,7 +318,7 @@ struct InfoGrid: View {
         let filled = rows.filter { !$0.1.isEmpty }
         if !filled.isEmpty {
             VStack(alignment: .leading, spacing: Metrics.space3) {
-                Text("Information").railHeaderStyle()
+                Text("Information", bundle: .module).railHeaderStyle()
                 Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Metrics.space6, verticalSpacing: Metrics.space2) {
                     ForEach(filled, id: \.0) { row in
                         GridRow {
@@ -347,7 +347,7 @@ struct TVBackButton: View {
     var body: some View {
         // Lines up with the title's left edge (the page bleeds under the side safe
         // area, so the gutter alone is the inset) and sits at the top safe margin.
-        GlassButton("Back", systemImage: "chevron.left", iconOnly: true, action: action)
+        GlassButton(String(localized: "Back", bundle: .module), systemImage: "chevron.left", iconOnly: true, action: action)
             .padding(.leading, Metrics.gutter)
             .padding(.top, 60)
             .ignoresSafeArea()

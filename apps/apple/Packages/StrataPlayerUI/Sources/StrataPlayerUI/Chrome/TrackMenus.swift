@@ -55,7 +55,7 @@ public struct AudioMenu: View {
 
     public var body: some View {
         Menu {
-            Picker("Audio", selection: Binding(
+            Picker(String(localized: "Audio", bundle: .module), selection: Binding(
                 get: { engine.activeAudioIndex ?? -1 },
                 set: { index in
                     if let track = engine.audioTracks.first(where: { $0.index == index }) {
@@ -74,7 +74,7 @@ public struct AudioMenu: View {
         .buttonStyle(.strataGlass)
         .buttonBorderShape(.circle)
         .disabled(engine.audioTracks.count < 2)
-        .accessibilityLabel("Audio")
+        .accessibilityLabel(Text("Audio", bundle: .module))
     }
 }
 
@@ -86,21 +86,21 @@ public struct SubtitleMenu: View {
 
     public var body: some View {
         Menu {
-            Picker("Subtitles", selection: Binding(
+            Picker(String(localized: "Subtitles", bundle: .module), selection: Binding(
                 get: { engine.activeSubtitleId ?? "" },
                 set: { id in
                     let track = engine.subtitleTracks.first { $0.id == id }
                     Task { await engine.selectSubtitle(track) }
                 }
             )) {
-                Text("Off").tag("")
+                Text("Off", bundle: .module).tag("")
                 ForEach(engine.subtitleTracks.filter(\.isShowable)) { track in
                     Text(track.displayTitle).tag(track.id)
                 }
             }
             .pickerStyle(.inline)
             if engine.subtitleTracks.contains(where: { !$0.isShowable }) {
-                Text("Some subtitle tracks are images and can't be shown yet.")
+                Text("Some subtitle tracks are images and can't be shown yet.", bundle: .module)
             }
         } label: {
             PlayerIcon(systemImage: engine.captionsEnabled ? "captions.bubble.fill" : "captions.bubble", size: .regular)
@@ -108,7 +108,7 @@ public struct SubtitleMenu: View {
         .buttonStyle(.strataGlass)
         .buttonBorderShape(.circle)
         .disabled(engine.subtitleTracks.isEmpty)
-        .accessibilityLabel("Subtitles")
+        .accessibilityLabel(Text("Subtitles", bundle: .module))
     }
 }
 
@@ -121,13 +121,13 @@ public struct SpeedMenu: View {
 
     public var body: some View {
         Menu {
-            Picker("Speed", selection: $engine.rate) {
+            Picker(String(localized: "Speed", bundle: .module), selection: $engine.rate) {
                 ForEach(Self.rates, id: \.self) { rate in
-                    Text(rate == 1 ? "Normal" : String(format: "%g×", rate)).tag(rate)
+                    (rate == 1 ? Text("Normal", bundle: .module) : Text("\(Double(rate).formatted())×", bundle: .module)).tag(rate)
                 }
             }
             .pickerStyle(.inline)
-            Picker("Sleep Timer", selection: Binding(
+            Picker(String(localized: "Sleep Timer", bundle: .module), selection: Binding(
                 get: { engine.sleepOption },
                 set: { engine.setSleepTimer($0) }
             )) {
@@ -141,6 +141,6 @@ public struct SpeedMenu: View {
         }
         .buttonStyle(.strataGlass)
         .buttonBorderShape(.circle)
-        .accessibilityLabel("Speed")
+        .accessibilityLabel(Text("Speed", bundle: .module))
     }
 }

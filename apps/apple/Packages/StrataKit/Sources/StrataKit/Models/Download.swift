@@ -89,7 +89,7 @@ public struct DownloadItem: Codable, Sendable, Hashable, Identifiable {
         return PlayResponse(sessionId: "offline-\(id)", mode: response.mode, url: fileURL, remux: response.remux,
                             startOffsetMs: 0, seekToMs: start, durationMs: response.durationMs, candidate: response.candidate,
                             audioTracks: response.audioTracks, subtitleTracks: response.subtitleTracks, chapters: response.chapters,
-                            reasons: ["Downloaded"], nextEpisode: nil)
+                            reasons: [String(localized: "Downloaded", bundle: .module)], nextEpisode: nil)
     }
 }
 

@@ -98,7 +98,7 @@ public final class AppServices {
     /// Runs a request and turns failures into a readable message, letting the
     /// store fail over to another address, sign out on 401, or ask for a household (409).
     public func load<T>(_ work: (StrataClient) async throws -> T) async -> Loadable<T> {
-        guard let client = store.client else { return .failed("Not connected to a server.") }
+        guard let client = store.client else { return .failed(String(localized: "Not connected to a server.", bundle: .module)) }
         do {
             return .loaded(try await work(client))
         } catch is CancellationError {

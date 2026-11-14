@@ -25,15 +25,15 @@ struct SignInCodeView: View {
                     .font(.system(size: 56, weight: .regular))
                     .foregroundStyle(Theme.accentText)
                 VStack(spacing: Metrics.space2) {
-                    Text("Sign in to \(serverName ?? "Strata")?").font(.stTitle2).multilineTextAlignment(.center)
-                    Text("This code signs this device in to \(address) as the person it was made for, able to watch.")
+                    Text("Sign in to \(serverName ?? "Strata")?", bundle: .module).font(.stTitle2).multilineTextAlignment(.center)
+                    Text("This code signs this device in to \(address) as the person it was made for, able to watch.", bundle: .module)
                         .font(.stCallout).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
                 }
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
                         .multilineTextAlignment(.center)
                 }
-                PrimaryButton("Sign In", isLoading: signingIn) {
+                PrimaryButton(String(localized: "Sign In", bundle: .module), isLoading: signingIn) {
                     Task { await signIn() }
                 }
                 .disabled(signingIn)
@@ -43,7 +43,7 @@ struct SignInCodeView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.bg.ignoresSafeArea())
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
             }
             .task {
                 serverName = try? await StrataClient(baseURL: request.server, cacheTTL: 0).info().serverName
@@ -61,7 +61,7 @@ struct SignInCodeView: View {
             dismiss()
             onSignedIn()
         } else {
-            error = services.store.lastError ?? "Couldn't sign in."
+            error = services.store.lastError ?? String(localized: "Couldn't sign in.", bundle: .module)
         }
     }
 }

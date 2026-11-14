@@ -33,8 +33,9 @@ public struct PlayButton: View {
     let size: ControlSize
     let action: () -> Void
 
-    public init(_ title: String = "Play", systemImage: String = "play.fill", maxWidth: CGFloat? = nil, size: ControlSize = Metrics.heroControlSize, action: @escaping () -> Void) {
-        self.title = title
+    /// No `title`: "Play".
+    public init(_ title: String? = nil, systemImage: String = "play.fill", maxWidth: CGFloat? = nil, size: ControlSize = Metrics.heroControlSize, action: @escaping () -> Void) {
+        self.title = title ?? String(localized: "Play", bundle: .module)
         self.systemImage = systemImage
         self.maxWidth = maxWidth
         self.size = size
@@ -198,12 +199,12 @@ public enum Availability: Equatable, Sendable {
 
     public var title: String {
         switch self {
-        case .ready: "Ready"
-        case .instant: "Instant"
-        case .downloading(let p): "Downloading \(Int(p * 100))%"
-        case .download: "Download"
-        case .unavailable: "Not in your library"
-        case .watched: "Watched"
+        case .ready: String(localized: "Ready", bundle: .module)
+        case .instant: String(localized: "Instant", bundle: .module)
+        case .downloading(let p): String(localized: "Downloading \(Int(p * 100))%", bundle: .module)
+        case .download: String(localized: "Download", bundle: .module)
+        case .unavailable: String(localized: "Not in your library", bundle: .module)
+        case .watched: String(localized: "Watched", bundle: .module)
         }
     }
 

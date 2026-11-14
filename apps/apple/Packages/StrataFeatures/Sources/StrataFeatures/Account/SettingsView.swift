@@ -43,8 +43,8 @@ struct SettingsView: View {
                                     Text(profileLine(active)).font(.stFootnote).foregroundStyle(Theme.ink3)
                                 }
                                 Spacer(minLength: 0)
-                                if active.isKids { Text("Kids").eyebrowStyle(Theme.accentText) }
-                                Text("Edit").font(.stFootnote).foregroundStyle(Theme.accentText)
+                                if active.isKids { Text("Kids", bundle: .module).eyebrowStyle(Theme.accentText) }
+                                Text("Edit", bundle: .module).font(.stFootnote).foregroundStyle(Theme.accentText)
                             }
                             .padding(.vertical, Metrics.space1)
                         }
@@ -64,8 +64,8 @@ struct SettingsView: View {
                                     }
                                 }
                                 Spacer()
-                                if signIn.isKids { Text("Kids").eyebrowStyle(Theme.ink3) }
-                                Text("Switch").font(.stFootnote).foregroundStyle(Theme.accentText)
+                                if signIn.isKids { Text("Kids", bundle: .module).eyebrowStyle(Theme.ink3) }
+                                Text("Switch", bundle: .module).font(.stFootnote).foregroundStyle(Theme.accentText)
                             }
                         }
                         .profileActions(signIn, rename: startRename, remove: { removing = $0 }, store: store)
@@ -73,24 +73,24 @@ struct SettingsView: View {
                     Button {
                         showAddProfile = true
                     } label: {
-                        Label("Add Profile", systemImage: "plus")
+                        Label(String(localized: "Add Profile", bundle: .module), systemImage: "plus")
                     }
                     if let active = store.active {
                         if libraryCount > 1 {
                             Button {
                                 showLibraries = true
                             } label: {
-                                LabeledContent("Library", value: active.household?.name ?? "Choose")
+                                LabeledContent(String(localized: "Library", bundle: .module), value: active.household?.name ?? String(localized: "Choose", bundle: .module))
                             }
                         }
                         #if os(iOS)
                         if !active.viewerOnly {
-                            Button("Change Password") { showChangePassword = true }
+                            Button(String(localized: "Change Password", bundle: .module)) { showChangePassword = true }
                         }
                         #endif
-                        Button("Sign Out \(active.name)", role: .destructive) { confirmSignOut = true }
-                            .confirmationDialog("Sign \(active.name) out?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-                                Button("Sign Out", role: .destructive) {
+                        Button(String(localized: "Sign Out \(active.name)", bundle: .module), role: .destructive) { confirmSignOut = true }
+                            .confirmationDialog(String(localized: "Sign \(active.name) out?", bundle: .module), isPresented: $confirmSignOut, titleVisibility: .visible) {
+                                Button(String(localized: "Sign Out", bundle: .module), role: .destructive) {
                                     Task {
                                         await store.signOut()
                                         services.refreshClient()
@@ -98,15 +98,15 @@ struct SettingsView: View {
                                     }
                                 }
                             } message: {
-                                Text("\(active.name) is removed from this device. You can sign in again later.")
+                                Text("\(active.name) is removed from this device. You can sign in again later.", bundle: .module)
                             }
                     }
                 } footer: {
                     if let active = store.active {
                         if active.isKids {
-                            Text("A kids profile only sees titles within its age limit.")
+                            Text("A kids profile only sees titles within its age limit.", bundle: .module)
                         } else if active.viewerOnly {
-                            Text("Opened on this device without a password: \(active.name) can watch here, but changing settings needs the password.")
+                            Text("Opened on this device without a password: \(active.name) can watch here, but changing settings needs the password.", bundle: .module)
                         }
                     }
                 }
@@ -117,10 +117,10 @@ struct SettingsView: View {
                         Button {
                             showLinkTV = true
                         } label: {
-                            Label("Link a TV", systemImage: "appletv")
+                            Label(String(localized: "Link a TV", bundle: .module), systemImage: "appletv")
                         }
                     } footer: {
-                        Text("Sign in an Apple TV as \(store.active?.name ?? "you") by approving the code it shows.")
+                        Text("Sign in an Apple TV as \(store.active?.name ?? "you") by approving the code it shows.", bundle: .module)
                     }
                 }
                 #endif
@@ -132,7 +132,7 @@ struct SettingsView: View {
                     if let server = store.activeServer {
                         // The name is this device's own; the server keeps its name for everyone else.
                         Button { startRename(server) } label: {
-                            LabeledContent("Name") {
+                            LabeledContent(String(localized: "Name", bundle: .module)) {
                                 HStack(spacing: Metrics.space2) {
                                     Text(server.name)
                                     Image(systemName: "pencil").font(.stFootnote)
@@ -140,51 +140,51 @@ struct SettingsView: View {
                             }
                         }
                         .foregroundStyle(Theme.ink)
-                        LabeledContent("Address") {
+                        LabeledContent(String(localized: "Address", bundle: .module)) {
                             Text(Self.address(server.url))
                                 #if !os(tvOS)
                                 .textSelection(.enabled)
                                 #endif
                         }
                     } else {
-                        LabeledContent("Name", value: "—")
+                        LabeledContent(String(localized: "Name", bundle: .module), value: "—")
                     }
-                    LabeledContent("Version", value: store.activeServer?.version ?? "—")
+                    LabeledContent(String(localized: "Version", bundle: .module), value: store.activeServer?.version ?? "—")
                 } header: {
-                    Text("Server")
+                    Text("Server", bundle: .module)
                 }
 
                 Section {
-                    LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+                    LabeledContent(String(localized: "Version", bundle: .module), value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
                     if let server = store.activeServer {
                         PrivacyPolicyRow(server: server.url)
                     }
                     AcknowledgementsRow()
                 } header: {
-                    Text("App")
+                    Text("App", bundle: .module)
                 }
             }
-            .confirmationDialog("Remove \(removing?.name ?? "this profile") from this device?",
+            .confirmationDialog(String(localized: "Remove \(removing?.name ?? "this profile") from this device?", bundle: .module),
                                 isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
                                 titleVisibility: .visible, presenting: removing) { signIn in
-                Button("Remove", role: .destructive) {
+                Button(String(localized: "Remove", bundle: .module), role: .destructive) {
                     store.remove(signIn.id)
                     services.refreshClient()
                 }
-                Button("Cancel", role: .cancel) {}
+                Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
             } message: { _ in
-                Text("It's signed out here. You can add it again later.")
+                Text("It's signed out here. You can add it again later.", bundle: .module)
             }
-            .alert("Rename Server", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-                TextField("Name", text: $newName)
-                Button("Cancel", role: .cancel) {}
-                Button("Save") {
+            .alert(String(localized: "Rename Server", bundle: .module), isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+                TextField(String(localized: "Name", bundle: .module), text: $newName)
+                Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+                Button(String(localized: "Save", bundle: .module)) {
                     if let renaming { store.renameServer(renaming.id, to: newName) }
                 }
             } message: {
-                Text("Only on this device.")
+                Text("Only on this device.", bundle: .module)
             }
-            .navigationTitle("Settings")
+            .navigationTitle(Text("Settings", bundle: .module))
             .routeDestinations()
             #if !os(tvOS)
             .scrollContentBackground(.hidden)
@@ -192,7 +192,7 @@ struct SettingsView: View {
             #endif
             .toolbar {
                 if !embedded {
-                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) { Button(String(localized: "Done", bundle: .module)) { dismiss() } }
                 }
             }
             .task(id: store.activeID) {
@@ -210,7 +210,7 @@ struct SettingsView: View {
 
     /// "@sam on Home Server", or just the server.
     private func profileLine(_ signIn: SavedSignIn) -> String {
-        let server = store.server(for: signIn)?.name ?? "this server"
+        let server = store.server(for: signIn)?.name ?? String(localized: "this server", bundle: .module)
         return signIn.username.map { "@\($0) · \(server)" } ?? server
     }
 
@@ -244,8 +244,8 @@ struct ChangePasswordView: View {
 
     private var problem: String? {
         if new.isEmpty { return nil }
-        if new.count < Self.minimumLength { return "Use at least \(Self.minimumLength) characters." }
-        if !confirm.isEmpty && confirm != new { return "The new passwords don't match." }
+        if new.count < Self.minimumLength { return String(localized: "Use at least \(Self.minimumLength) characters.", bundle: .module) }
+        if !confirm.isEmpty && confirm != new { return String(localized: "The new passwords don't match.", bundle: .module) }
         return nil
     }
 
@@ -253,13 +253,13 @@ struct ChangePasswordView: View {
         NavigationStack {
             Form {
                 Section {
-                    SecureField("Current password", text: $current).textContentType(.password)
+                    SecureField(String(localized: "Current password", bundle: .module), text: $current).textContentType(.password)
                 } footer: {
-                    Text("Other devices signed in as \(services.store.active?.name ?? "you") will be signed out.")
+                    Text("Other devices signed in as \(services.store.active?.name ?? "you") will be signed out.", bundle: .module)
                 }
                 Section {
-                    SecureField("New password", text: $new).textContentType(.newPassword)
-                    SecureField("Confirm new password", text: $confirm).textContentType(.newPassword)
+                    SecureField(String(localized: "New password", bundle: .module), text: $new).textContentType(.newPassword)
+                    SecureField(String(localized: "Confirm new password", bundle: .module), text: $confirm).textContentType(.newPassword)
                 } footer: {
                     if let message = error ?? problem {
                         Text(message).foregroundStyle(Theme.danger)
@@ -268,15 +268,15 @@ struct ChangePasswordView: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.bg)
-            .navigationTitle("Change Password")
+            .navigationTitle(Text("Change Password", bundle: .module))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     if saving {
                         ProgressView()
                     } else {
-                        Button("Save") { Task { await save() } }
+                        Button(String(localized: "Save", bundle: .module)) { Task { await save() } }
                             .disabled(current.isEmpty || new.count < Self.minimumLength || confirm != new)
                     }
                 }
@@ -294,7 +294,7 @@ struct ChangePasswordView: View {
             dismiss()
         } catch {
             let e = StrataError.wrap(error)
-            self.error = e.code == "INVALID_PASSWORD" ? "The current password isn't right." : e.message
+            self.error = e.code == "INVALID_PASSWORD" ? String(localized: "The current password isn't right.", bundle: .module) : e.message
         }
     }
 
@@ -308,15 +308,15 @@ private extension View {
         self
             .contextMenu {
                 if let server = store.server(for: signIn) {
-                    Button { rename(server) } label: { Label("Rename Server", systemImage: "pencil") }
+                    Button { rename(server) } label: { Label(String(localized: "Rename Server", bundle: .module), systemImage: "pencil") }
                 }
-                Button(role: .destructive) { remove(signIn) } label: { Label("Remove from This Device", systemImage: "minus.circle") }
+                Button(role: .destructive) { remove(signIn) } label: { Label(String(localized: "Remove from This Device", bundle: .module), systemImage: "minus.circle") }
             }
             #if !os(tvOS)
             // No full swipe, and no destructive role: that animates the row away before
             // anyone has confirmed, and it springs back if they cancel.
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button { remove(signIn) } label: { Label("Remove", systemImage: "minus.circle") }
+                Button { remove(signIn) } label: { Label(String(localized: "Remove", bundle: .module), systemImage: "minus.circle") }
                     .tint(.red)
             }
             #endif

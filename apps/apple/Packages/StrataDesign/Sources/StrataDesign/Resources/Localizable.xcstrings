@@ -1,0 +1,70 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%lld percent watched" : {
+
+    },
+    "%lld. %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld. %2$@"
+          }
+        }
+      }
+    },
+    "Download" : {
+
+    },
+    "Downloading %lld%%" : {
+
+    },
+    "IMDb rating %@ out of 10" : {
+
+    },
+    "Instant" : {
+
+    },
+    "Library" : {
+
+    },
+    "Loading" : {
+
+    },
+    "Not in your library" : {
+
+    },
+    "On %@" : {
+
+    },
+    "Play" : {
+
+    },
+    "Play %@" : {
+
+    },
+    "QR code" : {
+
+    },
+    "Ready" : {
+
+    },
+    "Rotten Tomatoes %@" : {
+
+    },
+    "Shows all" : {
+
+    },
+    "Shows the full list" : {
+
+    },
+    "Up Next" : {
+
+    },
+    "Watched" : {
+
+    }
+  },
+  "version" : "1.0"
+}

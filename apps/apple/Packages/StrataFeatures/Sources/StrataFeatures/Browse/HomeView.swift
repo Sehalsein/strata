@@ -27,7 +27,7 @@ struct HomeView: View {
                     SkeletonRail(aspectRatio: 16 / 9, width: Metrics.landscapeWidth)
                     SkeletonRail(width: Metrics.posterWidth)
                 case .failed(let message):
-                    MessageView(systemImage: "wifi.exclamationmark", title: "Couldn't load Home", message: message, actionTitle: "Try Again") {
+                    MessageView(systemImage: "wifi.exclamationmark", title: String(localized: "Couldn't load Home", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                         Task { await load(force: true) }
                     }
                     .frame(minHeight: 400)
@@ -40,8 +40,8 @@ struct HomeView: View {
                         #endif
                     }
                     if list.isEmpty {
-                        MessageView(systemImage: "film.stack", title: "Nothing here yet",
-                                    message: "Add media folders in your server's dashboard.")
+                        MessageView(systemImage: "film.stack", title: String(localized: "Nothing here yet", bundle: .module),
+                                    message: String(localized: "Add media folders in your server's dashboard.", bundle: .module))
                             .frame(minHeight: 400)
                     }
                     ForEach(Self.rails(list)) { shelf in
@@ -57,7 +57,7 @@ struct HomeView: View {
         // The hero runs to the top edge, under the bar, like a title page.
         .heroUnderBar(hasHero)
         #if !os(tvOS)
-        .navigationTitle("Home")
+        .navigationTitle(Text("Home", bundle: .module))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -65,7 +65,7 @@ struct HomeView: View {
             // With the iPad sidebar, My List and the profile are there.
             if !showsSidebar {
                 ToolbarItem(placement: .primaryAction) {
-                    NavigationLink(value: Route.myList) { Label("My List", systemImage: "bookmark") }
+                    NavigationLink(value: Route.myList) { Label(String(localized: "My List", bundle: .module), systemImage: "bookmark") }
                 }
             }
             ProfileToolbarItems()
@@ -86,7 +86,7 @@ struct HomeView: View {
         var rails = list.filter { $0.id != "featured" }
         guard let first = rails.firstIndex(where: { resume.map(\.id).contains($0.id) }) else { return rails }
         rails.removeAll { resume.map(\.id).contains($0.id) }
-        rails.insert(Shelf(id: "continue", title: "Continue Watching", kind: .continue, items: resume.flatMap(\.items)), at: first)
+        rails.insert(Shelf(id: "continue", title: String(localized: "Continue Watching", bundle: .module), kind: .continue, items: resume.flatMap(\.items)), at: first)
         return rails
     }
 
@@ -165,13 +165,13 @@ struct ShelfRail: View {
                     .contextMenu {
                         // A Button, not a NavigationLink: menu items sit outside the stack.
                         Button { pushRoute(card.route) } label: { Label(card.type == .show ? "Go to Show" : "Go to Movie", systemImage: "info.circle") }
-                        Button { if let r = card.watchRequest(restart: true) { services.play(r) } } label: { Label("Play from Beginning", systemImage: "arrow.counterclockwise") }
+                        Button { if let r = card.watchRequest(restart: true) { services.play(r) } } label: { Label(String(localized: "Play from Beginning", bundle: .module), systemImage: "arrow.counterclockwise") }
                         if let target = card.watchRequest()?.target {
-                            Button { setWatched(target, true) } label: { Label("Mark as Watched", systemImage: "checkmark.circle") }
+                            Button { setWatched(target, true) } label: { Label(String(localized: "Mark as Watched", bundle: .module), systemImage: "checkmark.circle") }
                         }
                         // Off the rail until it's watched again; progress is kept.
                         Button(role: .destructive) { hide(card) } label: {
-                            Label("Remove from Continue Watching", systemImage: "minus.circle")
+                            Label(String(localized: "Remove from Continue Watching", bundle: .module), systemImage: "minus.circle")
                         }
                     }
                 } else {
@@ -242,7 +242,7 @@ struct PosterCardLabel: View {
         // One element: the title, then what the caption and the badge say.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(card.title)
-        .accessibilityValue([card.role, card.yearText, card.badge, card.providerKinds.first.map { "on \($0.label)" }]
+        .accessibilityValue([card.role, card.yearText, card.badge, card.providerKinds.first.map { String(localized: "on \($0.label)", bundle: .module) }]
             .compactMap { $0 }.joined(separator: ", "))
     }
 }
@@ -254,7 +254,7 @@ struct ComingUpRail: View {
 
     var body: some View {
         if !episodes.isEmpty {
-            Rail("Upcoming Episodes", seeAll: { pushRoute(.calendar) }) {
+            Rail(String(localized: "Upcoming Episodes", bundle: .module), seeAll: { pushRoute(.calendar) }) {
                 ForEach(episodes) { episode in
                     NavigationLink(value: Route.title(episode.ref)) { ComingUpCard(episode: episode) }
                         .cardButtonStyle()
@@ -287,8 +287,8 @@ private struct ComingUpCard: View {
     private var when: String {
         let calendar = Calendar.current
         let time = episode.hasTime ? " " + episode.date.formatted(date: .omitted, time: .shortened) : ""
-        if calendar.isDateInToday(episode.date) { return "Today" + time }
-        if calendar.isDateInTomorrow(episode.date) { return "Tomorrow" + time }
+        if calendar.isDateInToday(episode.date) { return String(localized: "Today", bundle: .module) + time }
+        if calendar.isDateInTomorrow(episode.date) { return String(localized: "Tomorrow", bundle: .module) + time }
         let inWeek = episode.date < calendar.date(byAdding: .day, value: 6, to: calendar.startOfDay(for: .now))!
         return episode.date.formatted(inWeek ? .dateTime.weekday(.wide) : .dateTime.month(.abbreviated).day())
     }
@@ -467,7 +467,7 @@ struct HeroCarousel: View {
                         .containerRelativeFrame(.horizontal)
                         .contentShape(Rectangle())
                         .onTapGesture { pushRoute(card.route) }
-                        .accessibilityAction(named: card.type == .movie ? "Go to Movie" : "Go to Show") { pushRoute(card.route) }
+                        .accessibilityAction(named: card.type == .movie ? Text("Go to Movie", bundle: .module) : Text("Go to Show", bundle: .module)) { pushRoute(card.route) }
                         .id(i)
                 }
             }
@@ -514,7 +514,7 @@ struct HeroCarousel: View {
 
     /// "Movie · 2026 · ★ 7.8", for the featured layout.
     private func meta(_ card: TitleCard) -> [String] {
-        [card.type == .movie ? "Movie" : "TV Show", card.yearText, card.ratingText.map { "★ \($0)" }].compactMap { $0 }
+        [card.type == .movie ? String(localized: "Movie", bundle: .module) : String(localized: "TV Show", bundle: .module), card.yearText, card.ratingText.map { "★ \($0)" }].compactMap { $0 }
     }
     private func isListed(_ card: TitleCard) -> Bool { listed[key(card)] ?? watchlist.contains(key(card)) }
 
@@ -575,7 +575,7 @@ struct HeroCarousel: View {
             .buttonBorderShape(.circle)
             .controlSize(heroControlSize)
             .tint(Theme.ink)
-            .accessibilityLabel(on ? "Remove from My List" : "Add to My List")
+            .accessibilityLabel(on ? Text("Remove from My List", bundle: .module) : Text("Add to My List", bundle: .module))
             #if os(tvOS)
             .focused($focus, equals: .add)
             #endif
@@ -590,7 +590,7 @@ struct HeroCarousel: View {
             .buttonBorderShape(.circle)
             .controlSize(heroControlSize)
             .tint(Theme.ink)
-            .accessibilityLabel("More Info")
+            .accessibilityLabel(Text("More Info", bundle: .module))
             .focused($focus, equals: .info)
             // The next featured title; focus stays here, so it can be pressed again.
             if cards.count > 1 {
@@ -603,7 +603,7 @@ struct HeroCarousel: View {
                 .buttonBorderShape(.circle)
                 .controlSize(heroControlSize)
                 .tint(Theme.ink)
-                .accessibilityLabel("Next")
+                .accessibilityLabel(Text("Next", bundle: .module))
                 .focused($focus, equals: .next)
             }
             #endif
@@ -649,8 +649,8 @@ struct HeroCarousel: View {
             #endif
             // Swipe up or down with VoiceOver for the next or previous title.
             .accessibilityElement()
-            .accessibilityLabel("Featured")
-            .accessibilityValue("\(cards[min(index, cards.count - 1)].title), \(index + 1) of \(cards.count)")
+            .accessibilityLabel(Text("Featured", bundle: .module))
+            .accessibilityValue(Text("\(cards[min(index, cards.count - 1)].title), \(index + 1) of \(cards.count)", bundle: .module))
             .accessibilityAdjustableAction { direction in
                 switch direction {
                 case .increment: go(1)

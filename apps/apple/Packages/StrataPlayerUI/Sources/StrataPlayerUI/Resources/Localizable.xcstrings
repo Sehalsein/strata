@@ -1,0 +1,262 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@ Switching to %@ (try %lld of %lld)…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ Switching to %2$@ (try %3$lld of %4$lld)…"
+          }
+        }
+      }
+    },
+    "%@ is an image-based subtitle and can't be shown yet." : {
+
+    },
+    "%@ of %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ of %2$@"
+          }
+        }
+      }
+    },
+    "%@ → Lossless (ALAC)" : {
+
+    },
+    "%@×" : {
+
+    },
+    "%lld min" : {
+
+    },
+    "Asking the server for the best copy…" : {
+
+    },
+    "Audio" : {
+
+    },
+    "Back 10 seconds" : {
+
+    },
+    "Cancel" : {
+
+    },
+    "Change Source" : {
+
+    },
+    "Chapter %lld" : {
+
+    },
+    "Checking the file's video and audio…" : {
+
+    },
+    "Close" : {
+
+    },
+    "Connecting to the file…" : {
+
+    },
+    "Cycle Speed" : {
+
+    },
+    "File" : {
+
+    },
+    "Fill Screen" : {
+
+    },
+    "Fit to Screen" : {
+
+    },
+    "Forward 10 seconds" : {
+
+    },
+    "Info" : {
+
+    },
+    "Loading" : {
+
+    },
+    "Mute" : {
+
+    },
+    "Normal" : {
+
+    },
+    "Not connected to a server." : {
+
+    },
+    "Nothing is playing." : {
+
+    },
+    "Off" : {
+
+    },
+    "Pause" : {
+
+    },
+    "Picture in Picture" : {
+
+    },
+    "Play" : {
+
+    },
+    "Play / Pause" : {
+
+    },
+    "Play Now" : {
+
+    },
+    "Playback" : {
+
+    },
+    "Playback failed." : {
+
+    },
+    "Playback position" : {
+
+    },
+    "Playback stalled and couldn't pick up again. Check the connection and try again, or pick another source." : {
+
+    },
+    "Read" : {
+
+    },
+    "Size" : {
+
+    },
+    "Skip Back 10s" : {
+
+    },
+    "Skip Back 5s" : {
+
+    },
+    "Skip Forward 10s" : {
+
+    },
+    "Skip Forward 5s" : {
+
+    },
+    "Sleep Timer" : {
+
+    },
+    "Some subtitle tracks are images and can't be shown yet." : {
+
+    },
+    "Source" : {
+
+    },
+    "Speed" : {
+
+    },
+    "Starting playback…" : {
+
+    },
+    "Still buffering. The connection is slow right now." : {
+
+    },
+    "Still checking the file. Large files take longer." : {
+
+    },
+    "Still connecting to the file. The server holding it is slow to answer." : {
+
+    },
+    "Stream Details" : {
+
+    },
+    "Subtitles" : {
+
+    },
+    "That copy couldn't be reached." : {
+
+    },
+    "That copy won't play on this device." : {
+
+    },
+    "That copy wouldn't open." : {
+
+    },
+    "The server couldn't use what this file holds. Pick another source." : {
+
+    },
+    "The server is getting the stream ready…" : {
+
+    },
+    "The server is still getting the stream ready. This can take a moment." : {
+
+    },
+    "The server is still looking for a copy. This can take a moment." : {
+
+    },
+    "The stream didn't start in time. Try again." : {
+
+    },
+    "This copy couldn't be opened (%@). Choose another source." : {
+
+    },
+    "This copy's server didn't answer. Choose another source." : {
+
+    },
+    "This file can't play on this device (%@). Pick another source." : {
+
+    },
+    "This file couldn't be read (%@). Pick another source." : {
+
+    },
+    "Tried %lld copies and none would play here. Choose another source." : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Tried %lld copy and none would play here. Choose another source."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Tried %lld copies and none would play here. Choose another source."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Up Next in %llds" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Up Next in %llds"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Up Next in %llds"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Video" : {
+
+    },
+    "another source" : {
+
+    }
+  },
+  "version" : "1.0"
+}

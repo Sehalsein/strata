@@ -33,7 +33,7 @@ struct Acknowledgement: Decodable, Identifiable, Hashable {
 struct AcknowledgementsRow: View {
     var body: some View {
         NavigationLink { AcknowledgementsView() } label: {
-            Text("Acknowledgements")
+            Text("Acknowledgements", bundle: .module)
         }
     }
 }
@@ -47,15 +47,15 @@ struct AcknowledgementsView: View {
                     NavigationLink { AcknowledgementDetailView(item: item) } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.name).foregroundStyle(Theme.ink)
-                            Text("\(item.version) · \(item.license)").font(.stFootnote).foregroundStyle(Theme.ink3)
+                            Text(verbatim: "\(item.version) · \(item.license)").font(.stFootnote).foregroundStyle(Theme.ink3)
                         }
                     }
                 }
             } footer: {
-                Text("Strata includes the following third-party software.")
+                Text("Strata includes the following third-party software.", bundle: .module)
             }
         }
-        .navigationTitle("Acknowledgements")
+        .navigationTitle(Text("Acknowledgements", bundle: .module))
         #if !os(tvOS)
         .navigationBarTitleDisplayMode(.inline)
         .scrollContentBackground(.hidden)
@@ -71,15 +71,15 @@ struct AcknowledgementDetailView: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Version", value: item.version)
-                LabeledContent("Licence", value: item.license)
+                LabeledContent(String(localized: "Version", bundle: .module), value: item.version)
+                LabeledContent(String(localized: "Licence", bundle: .module), value: item.license)
             }
             Section {
                 ForEach(Self.paragraphs(item.notice), id: \.self) { paragraph in
                     Text(paragraph).font(.stCallout).readable()
                 }
             } header: {
-                Text("Notice")
+                Text("Notice", bundle: .module)
             }
             if let source = item.source {
                 Section {
@@ -93,9 +93,9 @@ struct AcknowledgementDetailView: View {
                     Link(source.absoluteString, destination: source)
                     #endif
                 } header: {
-                    Text("Source Code")
+                    Text("Source Code", bundle: .module)
                 } footer: {
-                    Text("The exact source this build of \(item.name) was made from.")
+                    Text("The exact source this build of \(item.name) was made from.", bundle: .module)
                 }
             }
             if let flags = item.configureFlags {
@@ -107,7 +107,7 @@ struct AcknowledgementDetailView: View {
                         #endif
                         .readable()
                 } header: {
-                    Text("Configure Flags")
+                    Text("Configure Flags", bundle: .module)
                 }
             }
             Section {
@@ -117,7 +117,7 @@ struct AcknowledgementDetailView: View {
                         .readable()
                 }
             } header: {
-                Text("Licence Text")
+                Text("Licence Text", bundle: .module)
             }
         }
         .navigationTitle(item.name)
@@ -150,11 +150,11 @@ struct PrivacyPolicyRow: View {
 
     var body: some View {
         #if os(tvOS)
-        NavigationLink { PrivacyQRView(url: url) } label: { Text("Privacy") }
+        NavigationLink { PrivacyQRView(url: url) } label: { Text("Privacy", bundle: .module) }
         #else
         Button { openURL(url) } label: {
             HStack {
-                Text("Privacy").foregroundStyle(Theme.ink)
+                Text("Privacy", bundle: .module).foregroundStyle(Theme.ink)
                 Spacer()
                 Image(systemName: "arrow.up.right").font(.stFootnote).foregroundStyle(Theme.ink3)
             }
@@ -171,7 +171,7 @@ struct PrivacyQRView: View {
     var body: some View {
         VStack(spacing: Metrics.space6) {
             QRCodeView(url.absoluteString, size: 360)
-            Text("Scan with your phone to read this server's privacy policy.")
+            Text("Scan with your phone to read this server's privacy policy.", bundle: .module)
                 .font(.stHeadline)
             Text(url.absoluteString)
                 .font(.stCallout)
@@ -179,7 +179,7 @@ struct PrivacyQRView: View {
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle("Privacy")
+        .navigationTitle(Text("Privacy", bundle: .module))
     }
 }
 #endif

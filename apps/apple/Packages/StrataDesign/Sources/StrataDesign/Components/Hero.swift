@@ -570,7 +570,7 @@ public struct SkeletonHero: View {
         .modifier(HeroHeight(featured: usesFeaturedLayout, fills: false))
         #endif
         .accessibilityElement()
-        .accessibilityLabel("Loading")
+        .accessibilityLabel(Text("Loading", bundle: .module))
     }
 
     /// Eyebrow pill, title, facts, three lines of synopsis, badges, then Play and the
@@ -651,7 +651,7 @@ public struct SkeletonGrid: View {
         .skeletonPulse()
         .allowsHitTesting(false)
         .accessibilityElement()
-        .accessibilityLabel("Loading")
+        .accessibilityLabel(Text("Loading", bundle: .module))
     }
 }
 
@@ -687,7 +687,7 @@ public struct SkeletonEpisodeRows: View {
         }
         .skeletonPulse()
         .accessibilityElement()
-        .accessibilityLabel("Loading")
+        .accessibilityLabel(Text("Loading", bundle: .module))
     }
 }
 
@@ -746,8 +746,8 @@ public struct EpisodeRow<Trailing: View>: View {
                     if let progress, progress > 0 { ProgressBar(progress, track: .white.opacity(0.25)).padding(6) }
                 }
             VStack(alignment: .leading, spacing: Metrics.isTV ? 6 : 2) {
-                if isCurrent { Text("Up Next").eyebrowStyle(Theme.accentText).padding(.bottom, 2) }
-                Text("\(number). \(title)").font(titleFont).foregroundStyle(Theme.ink).lineLimit(2)
+                if isCurrent { Text("Up Next", bundle: .module).eyebrowStyle(Theme.accentText).padding(.bottom, 2) }
+                Text("\(number). \(title)", bundle: .module).font(titleFont).foregroundStyle(Theme.ink).lineLimit(2)
                 if let overview, !overview.isEmpty {
                     Text(overview).font(overviewFont).foregroundStyle(Theme.ink2).lineLimit(Metrics.isPadOrTV ? 2 : 1)
                 }

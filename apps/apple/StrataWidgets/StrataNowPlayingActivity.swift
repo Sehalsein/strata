@@ -73,9 +73,7 @@ struct StrataNowPlayingActivity: Widget {
 
     private func formatRemaining(state: StrataNowPlayingAttributes.ContentState) -> String {
         let remaining = max(0, state.duration - state.position)
-        let total = Int(remaining)
-        let m = total / 60, s = total % 60
-        return String(format: "%02d:%02d", m, s)
+        return Duration.seconds(Int(remaining)).formatted(.time(pattern: .minuteSecond(padMinuteToLength: 2)))
     }
 }
 

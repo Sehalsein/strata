@@ -15,7 +15,7 @@ struct TVPageHeader: View {
         #if os(tvOS)
         VStack(alignment: .leading, spacing: Metrics.space6) {
             if isPresented {
-                GlassButton("Back", systemImage: "chevron.left", iconOnly: true, size: Metrics.heroControlSize) { dismiss() }
+                GlassButton(String(localized: "Back", bundle: .module), systemImage: "chevron.left", iconOnly: true, size: Metrics.heroControlSize) { dismiss() }
             }
             Text(title)
                 .font(.stTitle1)

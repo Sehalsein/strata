@@ -16,15 +16,15 @@ struct PersonView: View {
             case .loading:
                 ProgressView().frame(maxWidth: .infinity, minHeight: 400)
             case .failed(let message):
-                MessageView(systemImage: "person.crop.circle.badge.exclamationmark", title: "Couldn't load this person", message: message, actionTitle: "Try Again") {
+                MessageView(systemImage: "person.crop.circle.badge.exclamationmark", title: String(localized: "Couldn't load this person", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                     Task { await load() }
                 }
                 .frame(minHeight: 400)
             case .loaded(let p):
                 VStack(alignment: .leading, spacing: Metrics.railGap) {
                     header(p)
-                    credits("Movies", p.movies)
-                    credits("Shows", p.shows)
+                    credits(String(localized: "Movies", bundle: .module), p.movies)
+                    credits(String(localized: "Shows", bundle: .module), p.shows)
                 }
                 .padding(.vertical, Metrics.space6)
             }
@@ -50,7 +50,7 @@ struct PersonView: View {
             .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: Metrics.space2) {
-                if let role = p.knownFor { Text(role == "Acting" ? "Actor" : role).eyebrowStyle() }
+                if let role = p.knownFor { Text(role == "Acting" ? String(localized: "Actor", bundle: .module) : role).eyebrowStyle() }
                 Text(p.name).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
                 if let life = p.lifeText { Text(life).font(.stCallout).foregroundStyle(Theme.ink2) }
                 if let bio = p.biography {
@@ -61,7 +61,7 @@ struct PersonView: View {
                                 .foregroundStyle(Theme.ink2)
                                 .lineLimit(bioExpanded ? nil : bioLines)
                                 .multilineTextAlignment(.leading)
-                            Text(bioExpanded ? "Less" : "More").font(.stFootnote.weight(.semibold)).foregroundStyle(Theme.accentText)
+                            Text(bioExpanded ? String(localized: "Less", bundle: .module) : String(localized: "More", bundle: .module)).font(.stFootnote.weight(.semibold)).foregroundStyle(Theme.accentText)
                         }
                         .frame(maxWidth: 760, alignment: .leading)
                     }

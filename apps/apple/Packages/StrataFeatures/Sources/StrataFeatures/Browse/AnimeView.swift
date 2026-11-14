@@ -23,7 +23,7 @@ struct AnimeView: View {
                     EmptyView()
                 } else if hero == nil {
                     // No spotlight (a category): the page's title, with the menu beside it.
-                    TVTabHeader(title: "Anime") { if !categories.isEmpty { menu } }
+                    TVTabHeader(title: String(localized: "Anime", bundle: .module)) { if !categories.isEmpty { menu } }
                 } else if !categories.isEmpty {
                     // A full-width section: pressing down from the tab bar (or the hero)
                     // lands here first, rather than on whichever poster sits under it.
@@ -50,7 +50,7 @@ struct AnimeView: View {
         #if os(tvOS)
         .ignoresSafeArea(edges: .top)
         #else
-        .navigationTitle("Anime")
+        .navigationTitle(Text("Anime", bundle: .module))
         .navigationSubtitle(category?.name ?? "")
         #if os(iOS)
         .navigationBarTitleDisplayMode(hero == nil ? .automatic : .inline)
@@ -73,7 +73,7 @@ struct AnimeView: View {
     }
 
     private var menu: some View {
-        GenreMenu(genres: categories, selected: $category, name: \.name, noun: "Category", allTitle: "All Anime")
+        GenreMenu(genres: categories, selected: $category, name: \.name, noun: String(localized: "Category", bundle: .module), allTitle: String(localized: "All Anime", bundle: .module))
     }
 
     @ViewBuilder private var content: some View {
@@ -82,12 +82,12 @@ struct AnimeView: View {
             SkeletonRail(width: Metrics.posterWidth)
             SkeletonRail(width: Metrics.posterWidth)
         case .failed(let message):
-            MessageView(systemImage: "wifi.exclamationmark", title: "Couldn't load Anime", message: message, actionTitle: "Try Again") {
+            MessageView(systemImage: "wifi.exclamationmark", title: String(localized: "Couldn't load Anime", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                 Task { await load() }
             }
             .frame(minHeight: 400)
         case .loaded(let list) where list.isEmpty:
-            MessageView(systemImage: "film.stack", title: "Nothing in \(category?.name ?? "Anime") yet").frame(minHeight: 400)
+            MessageView(systemImage: "film.stack", title: String(localized: "Nothing in \(category?.name ?? "Anime") yet", bundle: .module)).frame(minHeight: 400)
         case .loaded(let list):
             // The hero sits above the category menu.
             ForEach(list.filter { $0.style != .hero }) { shelf in ShelfRail(shelf: shelf) }
@@ -123,7 +123,7 @@ struct AnimeListView: View {
             switch items {
             case .loading: SkeletonGrid().padding(.vertical, Metrics.space4)
             case .failed(let message):
-                MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load \(title)", message: message, actionTitle: "Try Again") {
+                MessageView(systemImage: "exclamationmark.triangle", title: String(localized: "Couldn't load \(title)", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                     Task { await load(force: true) }
                 }
             case .loaded(let cards):

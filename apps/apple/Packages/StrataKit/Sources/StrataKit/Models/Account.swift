@@ -73,7 +73,7 @@ public struct Household: Codable, Sendable, Hashable, Identifiable {
     /// Owner or admin: runs the household (from the web dashboard).
     public var isAdmin: Bool { isOwner || roles.contains("admin") }
     /// "Owner", "Admin" or "Member", for display.
-    public var roleLabel: String { isOwner ? "Owner" : isAdmin ? "Admin" : "Member" }
+    public var roleLabel: String { isOwner ? String(localized: "Owner", bundle: .module) : isAdmin ? String(localized: "Admin", bundle: .module) : String(localized: "Member", bundle: .module) }
 }
 
 /// `GET /api/me`: the signed-in account, and its household on this device.

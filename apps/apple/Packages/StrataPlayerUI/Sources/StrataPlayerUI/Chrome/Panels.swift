@@ -205,13 +205,13 @@ public struct UpNextCard: View {
             ArtworkImage(url: next.stillUrl, aspectRatio: 16 / 9, seed: next.code, cornerRadius: Metrics.radiusSM)
                 .frame(width: 160)
             VStack(alignment: .leading, spacing: Metrics.space1) {
-                Text("Up Next in \(countdown)s").eyebrowStyle(Theme.accentText)
+                Text("Up Next in \(countdown)s", bundle: .module).eyebrowStyle(Theme.accentText)
                 Text(next.name).font(.stHeadline).foregroundStyle(Theme.onArtwork).lineLimit(2)
                 Text(next.code).font(.stFootnote).foregroundStyle(Theme.onArtwork.opacity(0.7))
                 GlassEffectContainer(spacing: Metrics.space2) {
                     HStack(spacing: Metrics.space2) {
-                        PlayButton("Play Now", systemImage: "forward.fill", action: onPlay)
-                        GlassButton("Cancel", action: onDismiss)
+                        PlayButton(String(localized: "Play Now", bundle: .module), systemImage: "forward.fill", action: onPlay)
+                        GlassButton(String(localized: "Cancel", bundle: .module), action: onDismiss)
                     }
                 }
                 .padding(.top, Metrics.space2)
@@ -243,12 +243,12 @@ public struct StreamDetailsPanel: View {
     private func audio(_ session: PlayResponse) -> String {
         let title = session.selectedAudio?.displayTitle ?? "—"
         guard session.mode == .device, let plan = session.remux, plan.audio != "copy" else { return title }
-        return title + " → Lossless (ALAC)"
+        return String(localized: "\(title) → Lossless (ALAC)", bundle: .module)
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space4) {
-            Text("Stream Details").font(.stTitle2).foregroundStyle(Theme.ink)
+            Text("Stream Details", bundle: .module).font(.stTitle2).foregroundStyle(Theme.ink)
             if let session {
                 let c = session.candidate
                 Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Metrics.space4, verticalSpacing: Metrics.space3) {
@@ -268,7 +268,7 @@ public struct StreamDetailsPanel: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Text("Nothing is playing.").font(.stCallout).foregroundStyle(.secondary)
+                Text("Nothing is playing.", bundle: .module).font(.stCallout).foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, Metrics.space6)
@@ -280,9 +280,9 @@ public struct StreamDetailsPanel: View {
     }
 
     // Labels use the vibrant secondary color: the sheet is glass, where ink-3 doesn't read.
-    private func row(_ label: String, _ value: String) -> some View {
+    private func row(_ label: LocalizedStringKey, _ value: String) -> some View {
         GridRow {
-            Text(label).font(.stFootnote).foregroundStyle(.secondary)
+            Text(label, bundle: .module).font(.stFootnote).foregroundStyle(.secondary)
             Text(value.isEmpty ? "—" : value).font(.stCallout).foregroundStyle(Theme.ink)
                 #if !os(tvOS)
                 .textSelection(.enabled)
@@ -312,7 +312,7 @@ public struct ChaptersRail: View {
                         onSelect(chapter.start)
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(chapter.title ?? "Chapter \(index + 1)").font(.stCallout.weight(.semibold)).lineLimit(1)
+                            Text(chapter.title ?? String(localized: "Chapter \(index + 1)", bundle: .module)).font(.stCallout.weight(.semibold)).lineLimit(1)
                             Text(Scrubber.format(chapter.start)).font(.stTimecode).opacity(0.7)
                         }
                         .padding(.horizontal, Metrics.space2)

@@ -37,6 +37,7 @@ struct SourcePickerSheet: View {
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", uhd = "4K", hd = "1080p", sd = "720p"
         var id: String { rawValue }
+        var title: String { self == .all ? String(localized: "All", bundle: .module) : rawValue }
         func matches(_ c: Candidate) -> Bool {
             switch self {
             case .all: true
@@ -58,7 +59,7 @@ struct SourcePickerSheet: View {
                     filterPicker
                     #if os(iOS)
                     if purpose == .download, let free = DownloadStore.freeSpace, let text = Formatting.size(bytes: Int(free)) {
-                        Text("\(text) free on this device").font(.stFootnote).foregroundStyle(Theme.ink3)
+                        Text("\(text) free on this device", bundle: .module).font(.stFootnote).foregroundStyle(Theme.ink3)
                     }
                     #endif
                     list
@@ -69,18 +70,18 @@ struct SourcePickerSheet: View {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } } }
         }
         .presentationDetents([.medium, .large])
         .task { await load() }
         #endif
     }
 
-    private var heading: String { purpose == .download ? "Download" : "Choose Source" }
+    private var heading: String { purpose == .download ? String(localized: "Download", bundle: .module) : String(localized: "Choose Source", bundle: .module) }
 
     private var filterPicker: some View {
-        Picker("Quality", selection: $filter) {
-            ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
+        Picker(String(localized: "Quality", bundle: .module), selection: $filter) {
+            ForEach(Filter.allCases) { Text($0.title).tag($0) }
         }
         .pickerStyle(.segmented)
     }
@@ -110,15 +111,15 @@ struct SourcePickerSheet: View {
         case .loading:
             HStack(spacing: Metrics.space3) {
                 ProgressView()
-                Text("Looking for sources…").font(.stCallout).foregroundStyle(Theme.ink2)
+                Text("Looking for sources…", bundle: .module).font(.stCallout).foregroundStyle(Theme.ink2)
             }
             .padding(.vertical, Metrics.space8)
         case .failed(let message):
-            MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load sources", message: message)
+            MessageView(systemImage: "exclamationmark.triangle", title: String(localized: "Couldn't load sources", bundle: .module), message: message)
         case .loaded(let all):
             let shown = ordered(all.filter(filter.matches))
             if shown.isEmpty {
-                MessageView(systemImage: "rectangle.stack.badge.minus", title: "No sources", message: filter == .all ? "There's nothing to play this from." : "Try another quality.")
+                MessageView(systemImage: "rectangle.stack.badge.minus", title: String(localized: "No sources", bundle: .module), message: filter == .all ? String(localized: "There's nothing to play this from.", bundle: .module) : String(localized: "Try another quality.", bundle: .module))
             } else {
                 #if os(tvOS)
                 // Native TV cards: each copy lifts with the system's focus effect.
@@ -160,7 +161,7 @@ struct SourcePickerSheet: View {
                 Text(title).font(.stHeadline).foregroundStyle(Theme.ink2).lineLimit(3)
                 filterPicker.padding(.top, Metrics.space4)
                 if let count = sources.value?.filter(filter.matches).count, count > 0 {
-                    Text(count == 1 ? "1 copy" : "\(count) copies").font(.stFootnote).foregroundStyle(Theme.ink3)
+                    Text("\(count) copies", bundle: .module).font(.stFootnote).foregroundStyle(Theme.ink3)
                 }
             }
             .frame(width: 560, alignment: .leading)
@@ -209,18 +210,18 @@ struct SourceRow: View {
                     Text(detail).font(.stFootnote).foregroundStyle(Theme.ink3)
                 }
                 if isCurrent {
-                    Label("Playing now", systemImage: "play.circle.fill")
+                    Label(String(localized: "Playing now", bundle: .module), systemImage: "play.circle.fill")
                         .font(.stFootnote.weight(.semibold))
                         .foregroundStyle(Theme.accentText)
                 } else if isLastPicked {
-                    Label("Your last pick", systemImage: "checkmark.circle.fill")
+                    Label(String(localized: "Your last pick", bundle: .module), systemImage: "checkmark.circle.fill")
                         .font(.stFootnote)
                         .foregroundStyle(Theme.accentText)
                 }
             }
             Spacer(minLength: Metrics.space2)
             switch candidate.readiness {
-            case .ready: OriginBadge(candidate.originLabel ?? "Library")
+            case .ready: OriginBadge(candidate.originLabel ?? String(localized: "Library", bundle: .module))
             case .instant: AvailabilityLabel(.instant)
             case .download: AvailabilityLabel(.download)
             }

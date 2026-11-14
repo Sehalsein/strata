@@ -4,7 +4,7 @@ import SwiftUI
 public enum ProviderKind: String, Hashable, Sendable {
     case library
 
-    public var label: String { "Library" }
+    public var label: String { String(localized: "Library", bundle: .module) }
     public var systemImage: String { "externaldrive.fill" }
     public var color: Color { Theme.local }
 }
@@ -76,7 +76,7 @@ public struct PosterCard: View {
             .cardButtonStyle()
             // One element for VoiceOver: the button says it all, the caption is for the eye.
             .accessibilityLabel(title)
-            .accessibilityValue(CardSpeech.join([subtitle, providers.first.map { "On \($0.label)" }, CardSpeech.watched(progress)]))
+            .accessibilityValue(CardSpeech.join([subtitle, providers.first.map { String(localized: "On \($0.label)", bundle: .module) }, CardSpeech.watched(progress)]))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -103,7 +103,7 @@ public struct PosterCard: View {
 enum CardSpeech {
     static func watched(_ progress: Double?) -> String? {
         guard let progress, progress > 0 else { return nil }
-        return "\(Int((min(progress, 1) * 100).rounded())) percent watched"
+        return String(localized: "\(Int((min(progress, 1) * 100).rounded())) percent watched", bundle: .module)
     }
 
     static func join(_ parts: [String?]) -> String {
@@ -156,7 +156,7 @@ public struct ContinueCard: View {
             }
             .cardButtonStyle()
             // The episode and how far through, not just "Play" and a name.
-            .accessibilityLabel(CardSpeech.join(["Play \(title)", overline, CardSpeech.watched(progress)]))
+            .accessibilityLabel(CardSpeech.join([String(localized: "Play \(title)", bundle: .module), overline, CardSpeech.watched(progress)]))
             .accessibilityValue(subtitle ?? "")
 
             VStack(alignment: .leading, spacing: 2) {

@@ -169,8 +169,8 @@ public struct Candidate: Codable, Sendable, Hashable, Identifiable {
 
     static func channelLayout(_ channels: Int) -> String {
         switch channels {
-        case 1: "Mono"
-        case 2: "Stereo"
+        case 1: String(localized: "Mono", bundle: .module)
+        case 2: String(localized: "Stereo", bundle: .module)
         case 6: "5.1"
         case 8: "7.1"
         default: "\(channels)ch"
@@ -230,7 +230,7 @@ public struct AudioTrack: Codable, Sendable, Hashable, Identifiable {
     /// "English · 5.1 · EAC3", falling back to the title or "Track n".
     public var displayTitle: String {
         let lang = language.flatMap(LanguageName.display)
-        let head = title?.isEmpty == false ? title! : (lang ?? "Track \(index)")
+        let head = title?.isEmpty == false ? title! : (lang ?? String(localized: "Track \(index)", bundle: .module))
         var parts = [head]
         if let lang, title?.isEmpty == false, !head.localizedCaseInsensitiveContains(lang) { parts.append(lang) }
         parts.append(Candidate.channelLayout(channels))
@@ -266,9 +266,9 @@ public struct SubtitleTrack: Codable, Sendable, Hashable, Identifiable {
     public var isShowable: Bool { isTextBased || isPicture }
     public var displayTitle: String {
         let lang = language.flatMap(LanguageName.display)
-        var head = title?.isEmpty == false ? title! : (lang ?? "Track \(id)")
-        if forced, !head.localizedCaseInsensitiveContains("forced") { head += " (Forced)" }
-        return external ? "\(head) · External" : head
+        var head = title?.isEmpty == false ? title! : (lang ?? String(localized: "Track \(id)", bundle: .module))
+        if forced, !head.localizedCaseInsensitiveContains("forced") { head += String(localized: " (Forced)", bundle: .module) }
+        return external ? String(localized: "\(head) · External", bundle: .module) : head
     }
 }
 
@@ -292,10 +292,10 @@ public struct PlayResponse: Codable, Sendable, Hashable {
         public var isHLS: Bool { self == .remux || self == .transcode }
         public var label: String {
             switch self {
-            case .direct: "Direct Play"
-            case .device: "Direct Stream"
-            case .remux: "Remux (HLS)"
-            case .transcode: "Transcode (HLS)"
+            case .direct: String(localized: "Direct Play", bundle: .module)
+            case .device: String(localized: "Direct Stream", bundle: .module)
+            case .remux: String(localized: "Remux (HLS)", bundle: .module)
+            case .transcode: String(localized: "Transcode (HLS)", bundle: .module)
             }
         }
     }
@@ -352,7 +352,7 @@ public struct PreparingStatus: Codable, Sendable, Hashable {
     public var percentText: String { "\(Int((min(1, max(0, progress)) * 100).rounded()))%" }
     public var etaText: String? {
         guard let etaSeconds, etaSeconds > 0 else { return nil }
-        if etaSeconds < 60 { return "\(etaSeconds)s left" }
+        if etaSeconds < 60 { return String(localized: "\(etaSeconds)s left", bundle: .module) }
         return Formatting.remaining(ms: etaSeconds * 1000)
     }
 }

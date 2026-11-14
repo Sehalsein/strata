@@ -63,7 +63,7 @@ struct ConnectView: View {
             .background(Theme.bg.ignoresSafeArea())
             .toolbar {
                 if isAdding {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
                 }
             }
             .navigationDestination(item: $signInTarget) { target in
@@ -132,9 +132,9 @@ struct ConnectView: View {
 
     private static func subtitle(isAdding: Bool) -> String {
         #if os(iOS)
-        isAdding ? "Scan a code from your admin, or pick the server it's on." : "Scan a code from your admin, or pick a server on your network."
+        isAdding ? String(localized: "Scan a code from your admin, or pick the server it's on.", bundle: .module) : String(localized: "Scan a code from your admin, or pick a server on your network.", bundle: .module)
         #else
-        isAdding ? "Choose the server the profile is on." : "Choose how to sign in this Apple TV."
+        isAdding ? String(localized: "Choose the server the profile is on.", bundle: .module) : String(localized: "Choose how to sign in this Apple TV.", bundle: .module)
         #endif
     }
 
@@ -145,7 +145,7 @@ struct ConnectView: View {
             #else
             StrataMark().frame(height: 44).padding(.bottom, Metrics.space2)
             #endif
-            Text(isAdding ? "Add a profile" : "Connect to Strata")
+            Text(isAdding ? String(localized: "Add a profile", bundle: .module) : String(localized: "Connect to Strata", bundle: .module))
                 .font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
             Text(Self.subtitle(isAdding: isAdding))
                 .font(.stCallout).foregroundStyle(Theme.ink2)
@@ -159,16 +159,16 @@ struct ConnectView: View {
     private var tvOptions: some View {
         VStack(alignment: .leading, spacing: Metrics.space12) {
             VStack(alignment: .leading, spacing: Metrics.space4) {
-                sectionTitle("On your network")
+                sectionTitle(String(localized: "On your network", bundle: .module))
                 serverList
             }
             VStack(alignment: .leading, spacing: Metrics.space4) {
-                sectionTitle(rows.isEmpty ? "Or sign in another way" : "Other ways to sign in")
+                sectionTitle(rows.isEmpty ? String(localized: "Or sign in another way", bundle: .module) : String(localized: "Other ways to sign in", bundle: .module))
                 HStack(spacing: Metrics.space8) {
-                    optionCard("Sign In with Your Phone", detail: "Scan a code. Nothing to type.", systemImage: "iphone") {
+                    optionCard("Sign In with Your Phone", detail: String(localized: "Scan a code. Nothing to type.", bundle: .module), systemImage: "iphone") {
                         showPhoneSignIn = true
                     }
-                    optionCard("Enter Address", detail: "Type the server's address.", systemImage: "keyboard") {
+                    optionCard("Enter Address", detail: String(localized: "Type the server's address.", bundle: .module), systemImage: "keyboard") {
                         showAddressEntry = true
                     }
                 }
@@ -212,8 +212,8 @@ struct ConnectView: View {
                     .font(.system(size: 44, weight: .medium))
                     .foregroundStyle(Theme.accentText)
                     .padding(.bottom, Metrics.space2)
-                Text("Enter the server address").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                Text("It's on the server's dashboard, like 192.168.1.20 or strata.example.com.")
+                Text("Enter the server address", bundle: .module).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                Text("It's on the server's dashboard, like 192.168.1.20 or strata.example.com.", bundle: .module)
                     .font(.stCallout).foregroundStyle(Theme.ink2)
                     .multilineTextAlignment(.center)
             }
@@ -247,10 +247,10 @@ struct ConnectView: View {
                 HStack(spacing: Metrics.space3) {
                     if services.browser.state == .denied {
                         Image(systemName: "wifi.exclamationmark").foregroundStyle(Theme.warning)
-                        Text("Allow Local Network access in Settings to find servers automatically.")
+                        Text("Allow Local Network access in Settings to find servers automatically.", bundle: .module)
                     } else {
                         ProgressView()
-                        Text("Looking for servers…")
+                        Text("Looking for servers…", bundle: .module)
                     }
                 }
                 .font(.stCallout)
@@ -281,7 +281,7 @@ struct ConnectView: View {
                 .contextMenu {
                     // Off this list on this device; signing in to it again brings it back.
                     Button(role: .destructive) { services.store.hideServer(server.id) } label: {
-                        Label("Remove from List", systemImage: "minus.circle")
+                        Label(String(localized: "Remove from List", bundle: .module), systemImage: "minus.circle")
                     }
                 }
             }
@@ -295,10 +295,10 @@ struct ConnectView: View {
         if !rows.isEmpty || hidden > 0 {
             HStack(spacing: Metrics.space6) {
                 if !rows.isEmpty {
-                    Button("Clear List") { services.store.hideServers(rows.map(\.id)) }
+                    Button(String(localized: "Clear List", bundle: .module)) { services.store.hideServers(rows.map(\.id)) }
                 }
                 if hidden > 0 {
-                    Button(hidden == 1 ? "Show 1 Hidden Server" : "Show \(hidden) Hidden Servers") { services.store.showHiddenServers() }
+                    Button(String(localized: "Show \(hidden) Hidden Servers", bundle: .module)) { services.store.showHiddenServers() }
                 }
             }
             #if os(tvOS)
@@ -352,7 +352,7 @@ struct ConnectView: View {
             if probing == server.url.absoluteString {
                 ProgressView()
             } else if !server.isCompatible {
-                Text("Update needed").font(.stFootnote).foregroundStyle(Theme.warning)
+                Text("Update needed", bundle: .module).font(.stFootnote).foregroundStyle(Theme.warning)
             } else {
                 Image(systemName: "chevron.right").font(.stFootnote.weight(.semibold)).foregroundStyle(Theme.ink3)
             }
@@ -376,8 +376,8 @@ struct ConnectView: View {
                     .frame(width: 44, height: 44)
                     .background(Theme.apricot, in: RoundedRectangle(cornerRadius: Metrics.radiusSM, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Scan QR Code").font(.stHeadline).foregroundStyle(Theme.ink)
-                    Text("Sign-in code or server address")
+                    Text("Scan QR Code", bundle: .module).font(.stHeadline).foregroundStyle(Theme.ink)
+                    Text("Sign-in code or server address", bundle: .module)
                         .font(.stFootnote).foregroundStyle(Theme.ink3)
                 }
                 Spacer(minLength: Metrics.space2)
@@ -402,18 +402,18 @@ struct ConnectView: View {
             self.address = address
             Task { await probe(address) }
         case .tvLink:
-            error = "That's a TV's code. To sign a TV in, open Settings › Link a TV."
+            error = String(localized: "That's a TV's code. To sign a TV in, open Settings › Link a TV.", bundle: .module)
         case .tvPhoneLink:
-            error = "That's a TV's code. Sign in on this phone first, then scan it again to sign the TV in."
+            error = String(localized: "That's a TV's code. Sign in on this phone first, then scan it again to sign the TV in.", bundle: .module)
         case .unknown:
-            error = "That QR code isn't from Strata. Scan a sign-in code from Members, or the server's address."
+            error = String(localized: "That QR code isn't from Strata. Scan a sign-in code from Members, or the server's address.", bundle: .module)
         }
     }
     #endif
 
     private var addressEntry: some View {
         VStack(alignment: .leading, spacing: Metrics.space3) {
-            TextField("Server address", text: $address, prompt: Text("Server address, like 192.168.1.20"))
+            TextField(String(localized: "Server address", bundle: .module), text: $address, prompt: Text("Server address, like 192.168.1.20", bundle: .module))
                 .textContentType(.URL)
                 #if os(iOS)
                 .keyboardType(.URL)
@@ -428,7 +428,7 @@ struct ConnectView: View {
                     .font(.stFootnote).foregroundStyle(Theme.danger)
             }
             if !address.trimmingCharacters(in: .whitespaces).isEmpty {
-                PrimaryButton("Continue", isLoading: probing == address) {
+                PrimaryButton(String(localized: "Continue", bundle: .module), isLoading: probing == address) {
                     Task { await probe(address) }
                 }
                 .disabled(probing != nil)
@@ -446,8 +446,8 @@ struct ConnectView: View {
         do {
             let (url, info) = try await services.store.probeServer(value)
             if info.setupRequired {
-                let code = info.setupCodeRequired == false ? "" : " You'll need the setup code from the server's log."
-                error = "\(info.serverName) isn't set up yet. Open \(url.absoluteString) in a browser to create the first account, then try again.\(code)"
+                let code = info.setupCodeRequired == false ? "" : String(localized: " You'll need the setup code from the server's log.", bundle: .module)
+                error = String(localized: "\(info.serverName) isn't set up yet. Open \(url.absoluteString) in a browser to create the first account, then try again.\(code)", bundle: .module)
                 return
             }
             let target = ServerTarget(url: url, info: info)
@@ -479,12 +479,12 @@ struct SignInView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Metrics.space6) {
                 VStack(alignment: .leading, spacing: Metrics.space2) {
-                    Text("Sign in to \(target.info.serverName)").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                    Text("Sign in with your Strata username and password. New here? Ask whoever runs this server for an invite.")
+                    Text("Sign in to \(target.info.serverName)", bundle: .module).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                    Text("Sign in with your Strata username and password. New here? Ask whoever runs this server for an invite.", bundle: .module)
                         .font(.stCallout).foregroundStyle(Theme.ink2)
                 }
                 VStack(spacing: Metrics.space3) {
-                    TextField("Username or email", text: $login)
+                    TextField(String(localized: "Username or email", bundle: .module), text: $login)
                         .textContentType(.username)
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
@@ -495,7 +495,7 @@ struct SignInView: View {
                         .submitLabel(.next)
                         .onSubmit { field = .password }
                         .modifier(FieldStyle())
-                    SecureField("Password", text: $password)
+                    SecureField(String(localized: "Password", bundle: .module), text: $password)
                         .textContentType(.password)
                         .focused($field, equals: .password)
                         .submitLabel(.go)
@@ -505,14 +505,14 @@ struct SignInView: View {
                 if let error = services.store.lastError {
                     Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
                 }
-                PrimaryButton("Sign In", isLoading: services.store.isAuthenticating) {
+                PrimaryButton(String(localized: "Sign In", bundle: .module), isLoading: services.store.isAuthenticating) {
                     Task { await signIn() }
                 }
                 .disabled(login.isEmpty || password.isEmpty || services.store.isAuthenticating)
                 #if os(iOS)
                 // The server emails a reset link; its page asks for the address.
                 if target.info.signIn?.passwordReset == true {
-                    Button("Forgot password?") { openURL(target.url.appending(path: "forgot-password")) }
+                    Button(String(localized: "Forgot password?", bundle: .module)) { openURL(target.url.appending(path: "forgot-password")) }
                         .font(.stFootnote)
                         .buttonStyle(.plain)
                         .foregroundStyle(Theme.accentText)

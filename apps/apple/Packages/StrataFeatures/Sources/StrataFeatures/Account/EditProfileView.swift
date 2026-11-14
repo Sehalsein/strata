@@ -32,7 +32,7 @@ struct EditProfileView: View {
                 VStack(spacing: Metrics.space5) {
                     ProfileAvatar(name: trimmed.isEmpty ? "?" : trimmed, seed: active?.id ?? "", size: preview, imageURL: url(image))
                         .animation(.snappy, value: image)
-                    TextField("Name", text: $name)
+                    TextField(String(localized: "Name", bundle: .module), text: $name)
                         .textContentType(.name)
                         .multilineTextAlignment(.center)
                         .font(.stTitle2)
@@ -51,17 +51,17 @@ struct EditProfileView: View {
                 .padding(Metrics.space5)
             }
             .background(Theme.bg)
-            .navigationTitle("Edit Profile")
+            .navigationTitle(Text("Edit Profile", bundle: .module))
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     if saving {
                         ProgressView()
                     } else {
-                        Button("Save") { Task { await save() } }.disabled(trimmed.isEmpty || !changed)
+                        Button(String(localized: "Save", bundle: .module)) { Task { await save() } }.disabled(trimmed.isEmpty || !changed)
                     }
                 }
             }
@@ -80,7 +80,7 @@ struct EditProfileView: View {
             ProgressView().padding(.top, Metrics.space5)
         } else {
             VStack(alignment: .leading, spacing: Metrics.space5) {
-                choice(nil, label: "Initial") {
+                choice(nil, label: String(localized: "Initial", bundle: .module)) {
                     ProfileAvatar(name: trimmed.isEmpty ? "?" : trimmed, seed: active?.id ?? "", size: tile)
                 }
                 ForEach(groups) { group in
@@ -125,7 +125,7 @@ struct EditProfileView: View {
         do {
             groups = try await client.avatars()
         } catch {
-            loadError = "Couldn't load the pictures. \(StrataError.wrap(error).message)"
+            loadError = String(localized: "Couldn't load the pictures. \(StrataError.wrap(error).message)", bundle: .module)
         }
     }
 

@@ -120,6 +120,6 @@ public struct ProgressBar: View {
         }
         .frame(height: 4)
         .accessibilityElement()
-        .accessibilityLabel("\(Int(fraction * 100)) percent watched")
+        .accessibilityLabel(Text("\(Int(fraction * 100)) percent watched", bundle: .module))
     }
 }
