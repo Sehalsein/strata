@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 import { Baby, Check, Download, Folder, FolderPlus, Lock, MonitorSmartphone, Pause, Smartphone, Sparkles, Tv, UserPlus, Zap } from "lucide-react";
-import { BrandMark } from "@/components/brand-mark";
 import { Poster } from "@/components/poster-wall";
 import { cn } from "@/lib/utils";
 import { Reveal } from "./sections";
+import { GlassMark, Glow, Heading } from "./ui";
 
 /** Some of the server's own profile pictures (this site passes /api through to it). */
 const AVATARS = [
@@ -14,23 +14,13 @@ const AVATARS = [
   { id: "dino", name: "Kai" },
 ];
 
-function Heading({ eyebrow, title, lede, center }: { eyebrow: string; title: string; lede?: string; center?: boolean }) {
-  return (
-    <Reveal className={cn("mb-14 max-w-2xl", center && "mx-auto text-center")}>
-      <p className="text-brand-text mb-3 text-xs font-semibold tracking-[0.14em] uppercase">{eyebrow}</p>
-      <h2 className="text-3xl font-semibold tracking-tight text-balance sm:text-5xl">{title}</h2>
-      {lede && <p className="text-muted-foreground mt-4 text-lg text-pretty">{lede}</p>}
-    </Reveal>
-  );
-}
-
 /* ---------- How it works ---------- */
 
 /** A step's picture: a little window with the part of Strata that step is about. */
 function Stage({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn("relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-2xl border bg-[#0b0c0f] p-5 text-[#f5f3ef]", className)}>
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_70%_at_50%_0%,rgba(243,146,86,0.18),transparent)]" />
+    <div className={cn("glass relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-[1.75rem] p-5", className)}>
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_70%_at_50%_0%,rgba(150,170,255,0.14),transparent)]" />
       <div className="relative w-full">{children}</div>
     </div>
   );
@@ -44,7 +34,7 @@ function MenuBarStage() {
         <div className="flex items-center justify-end gap-2.5 rounded-t-lg bg-white/[0.07] px-3 py-1.5 text-[10px] text-white/60">
           <span>Wi‑Fi</span>
           <span className="flex items-center rounded bg-white/15 px-1 py-0.5">
-            <BrandMark size={11} />
+            <GlassMark size={11} />
           </span>
           <span>9:41</span>
         </div>
@@ -54,7 +44,7 @@ function MenuBarStage() {
             <span className="font-medium">Strata is running</span>
           </div>
           <div className="mx-2 my-0.5 h-px bg-white/10" />
-          <div className="rounded-md bg-[#f39256] px-2 py-1.5 font-medium text-[#1a0e06]">Open Dashboard</div>
+          <div className="rounded-md bg-white/15 px-2 py-1.5 font-medium text-white">Open Dashboard</div>
           <div className="px-2 py-1.5 text-white/70">Check for Updates…</div>
           <div className="px-2 py-1.5 text-white/70">Start at Login ✓</div>
         </div>
@@ -81,7 +71,7 @@ function FoldersStage() {
               <span className="ml-auto text-white/50">{f.count}</span>
             </div>
             <div className="h-1 overflow-hidden rounded-full bg-white/10">
-              <div className={cn("h-full rounded-full", f.done === 100 ? "bg-[#4cd08a]" : "bg-[#f39256]")} style={{ width: `${f.done}%` }} />
+              <div className={cn("h-full rounded-full", f.done === 100 ? "bg-[#4cd08a]" : "bg-white")} style={{ width: `${f.done}%` }} />
             </div>
           </div>
         ))}
@@ -98,7 +88,7 @@ function PlayerStage() {
   return (
     <Stage className="p-0">
       <div className="relative aspect-[4/3] w-full">
-        <div className="absolute inset-0" style={{ background: "linear-gradient(150deg, #22304f, #f08a48)" }} />
+        <div className="absolute inset-0" style={{ background: "linear-gradient(150deg, #1b2440, #6d7fb8)" }} />
         <div className="absolute top-[18%] left-1/2 size-[34%] -translate-x-1/2 rounded-full bg-white/25 blur-[2px]" />
         <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/80 to-transparent" />
         <div className="absolute inset-x-5 bottom-5 flex flex-col gap-2.5">
@@ -131,7 +121,8 @@ export function Steps() {
     { stage: <PlayerStage />, title: "Press play", body: "Open Strata on iPhone, iPad, Mac or Apple TV and pick up where you left off, on any of them." },
   ];
   return (
-    <section className="mx-auto max-w-6xl px-5 py-20 sm:px-8 sm:py-28">
+    <section className="relative mx-auto max-w-6xl px-5 py-20 sm:px-8 sm:py-28">
+      <Glow className="top-20 -right-40 size-[34rem]" color="rgba(150,120,255,0.13)" />
       <Heading eyebrow="How it works" title="From your files to the sofa in three steps" />
       <ol className="grid gap-10 md:grid-cols-3 md:gap-6">
         {steps.map((s, i) => (
@@ -139,10 +130,10 @@ export function Steps() {
             <li className="flex flex-col gap-5">
               {s.stage}
               <div className="flex gap-4">
-                <span className="text-brand-text border-primary/40 flex size-9 shrink-0 items-center justify-center rounded-full border text-sm font-semibold shadow-[0_0_24px_-6px_var(--primary)]">{i + 1}</span>
+                <span className="glass flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold">{i + 1}</span>
                 <div className="space-y-1.5">
                   <h3 className="text-lg font-semibold">{s.title}</h3>
-                  <p className="text-muted-foreground text-sm leading-relaxed">{s.body}</p>
+                  <p className="text-sm leading-relaxed text-white/60">{s.body}</p>
                 </div>
               </div>
             </li>
@@ -158,16 +149,16 @@ export function Steps() {
 /** A feature card: a picture on top (dark, like the apps), then what it is. */
 function Card({ icon: Icon, title, body, children, className, visual }: { icon: typeof Zap; title: string; body: string; children: ReactNode; className?: string; visual?: string }) {
   return (
-    <div className={cn("group bg-card relative flex flex-col overflow-hidden rounded-3xl border transition-all duration-300 hover:-translate-y-0.5 hover:border-[var(--primary)]/40 hover:shadow-[0_20px_60px_-30px_var(--primary)]", className)}>
-      <div className={cn("relative flex min-h-48 flex-1 items-center justify-center overflow-hidden bg-[#0b0c0f] p-6 text-[#f5f3ef]", visual)}>
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_70%_60%_at_50%_0%,rgba(243,146,86,0.16),transparent)] opacity-70 transition-opacity duration-300 group-hover:opacity-100" />
+    <div className={cn("group glass relative flex flex-col overflow-hidden rounded-[1.75rem] transition-all duration-300 hover:-translate-y-0.5 hover:border-white/25", className)}>
+      <div className={cn("relative flex min-h-48 flex-1 items-center justify-center overflow-hidden p-6", visual)}>
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_70%_60%_at_50%_0%,rgba(150,170,255,0.12),transparent)] opacity-70 transition-opacity duration-300 group-hover:opacity-100" />
         <div className="relative w-full">{children}</div>
       </div>
-      <div className="flex flex-col gap-1.5 border-t p-6">
+      <div className="flex flex-col gap-1.5 border-t border-white/10 p-6">
         <h3 className="flex items-center gap-2 font-semibold">
-          <Icon className="text-brand-text size-4" /> {title}
+          <Icon className="size-4 text-white/80" /> {title}
         </h3>
-        <p className="text-muted-foreground text-sm leading-relaxed">{body}</p>
+        <p className="text-sm leading-relaxed text-white/60">{body}</p>
       </div>
     </div>
   );
@@ -184,7 +175,7 @@ function ProfilesVisual() {
             <img
               src={`/api/avatars/${a.id}.png`}
               alt=""
-              className={cn("size-14 rounded-2xl transition-transform duration-300 group-hover:-translate-y-1 sm:size-[4.5rem]", i === 0 && "ring-2 ring-white ring-offset-2 ring-offset-[#0b0c0f]")}
+              className={cn("size-14 rounded-2xl transition-transform duration-300 group-hover:-translate-y-1 sm:size-[4.5rem]", i === 0 && "ring-2 ring-white ring-offset-2 ring-offset-[#14161b]")}
               style={{ transitionDelay: `${i * 50}ms` }}
             />
             <span className={cn("text-xs", i === 0 ? "text-white" : "text-white/50")}>{a.name}</span>
@@ -203,7 +194,7 @@ function KidsVisual() {
         <span className="flex items-center gap-1.5 text-white/70">
           <img src="/api/avatars/dino.png" alt="" className="size-5 rounded-md" /> Kai
         </span>
-        <span className="rounded-full bg-[#f39256]/20 px-2 py-0.5 font-medium text-[#f6a574]">Up to 7+</span>
+        <span className="glass-thin rounded-full px-2 py-0.5 font-medium text-white">Up to 7+</span>
       </div>
       <div className="grid grid-cols-3 gap-2">
         {[6, 12, 19].map((seed, i) => (
@@ -253,10 +244,10 @@ function DirectVisual() {
         Your files
       </span>
       <span className="relative h-px flex-1 overflow-hidden bg-white/15">
-        <span className="animate-flow absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-[#f39256] to-transparent" />
+        <span className="animate-flow absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white to-transparent" />
       </span>
       <span className="flex flex-col items-center gap-1.5">
-        <span className="flex size-11 items-center justify-center rounded-xl bg-[#f39256] text-[#1a0e06]">
+        <span className="glass-solid flex size-11 items-center justify-center rounded-xl">
           <Tv className="size-5" />
         </span>
         Your TV
@@ -282,7 +273,7 @@ function EverywhereVisual() {
               <span className="text-white/50">{i === 0 ? "Paused" : "Resume at 38:10"}</span>
             </div>
             <div className="h-1 overflow-hidden rounded-full bg-white/15">
-              <div className="h-full rounded-full bg-[#f39256]" style={{ width: `${r.at}%` }} />
+              <div className="h-full rounded-full bg-white" style={{ width: `${r.at}%` }} />
             </div>
           </div>
         </div>
@@ -316,8 +307,8 @@ function PrivateVisual() {
   return (
     <div className="flex flex-wrap justify-center gap-2">
       {["Runs on your machine", "No ads", "No tracking", "Invite-only", "Open source"].map((t) => (
-        <span key={t} className="flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-3 py-1.5 text-xs">
-          <Check className="size-3.5 text-[#f6a574]" /> {t}
+        <span key={t} className="flex items-center gap-1.5 glass-thin rounded-full px-3 py-1.5 text-xs">
+          <Check className="size-3.5 text-white" /> {t}
         </span>
       ))}
     </div>
@@ -326,8 +317,9 @@ function PrivateVisual() {
 
 export function Features() {
   return (
-    <div className="bg-muted/30 border-y">
-      <section className="mx-auto max-w-6xl px-5 py-20 sm:px-8 sm:py-28">
+    <div className="relative">
+      <Glow className="top-1/3 left-1/2 size-[60rem] -translate-x-1/2" color="rgba(120,140,255,0.12)" />
+      <section className="relative mx-auto max-w-6xl px-5 py-20 sm:px-8 sm:py-28">
         <Heading eyebrow="Features" title="The experience your media deserves" lede="Everything you love about the big streaming apps, for the movies and shows that are already yours." />
         <Reveal className="grid gap-4 md:grid-cols-6">
           <Card icon={UserPlus} title="A profile for everyone" body="Everyone you invite gets their own picture, progress, Continue Watching and My List." className="md:col-span-4">
