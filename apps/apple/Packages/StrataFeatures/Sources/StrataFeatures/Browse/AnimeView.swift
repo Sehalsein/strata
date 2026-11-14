@@ -15,6 +15,7 @@ struct AnimeView: View {
             PageStack {
                 if let hero {
                     HeroCarousel(cards: hero.items)
+                        .tvAboveFilterRow(!categories.isEmpty)
                 } else if loadingSpotlight {
                     SkeletonHero(featured: true)
                 }
@@ -29,7 +30,6 @@ struct AnimeView: View {
                     // lands here first, rather than on whichever poster sits under it.
                     HStack { menu; Spacer() }
                         .padding(.horizontal, Metrics.gutter)
-                        .tvFilterRow(underHero: hero != nil)
                         .focusSection()
                 }
                 #endif

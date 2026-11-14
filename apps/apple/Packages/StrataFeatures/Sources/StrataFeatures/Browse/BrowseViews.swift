@@ -26,6 +26,7 @@ struct BrowseView: View {
             PageStack {
                 if let hero, genre == nil {
                     HeroCarousel(cards: hero.items)
+                        .tvAboveFilterRow(!genres.isEmpty)
                 } else if loadingSpotlight {
                     SkeletonHero(featured: true)
                 }
@@ -41,7 +42,6 @@ struct BrowseView: View {
                     // Full width, so down from the hero reaches it (see AnimeView).
                     HStack { GenreMenu(genres: genres, selected: $genre); Spacer() }
                         .padding(.horizontal, Metrics.gutter)
-                        .tvFilterRow(underHero: true)
                         .focusSection()
                 }
                 #endif
@@ -231,12 +231,13 @@ extension GenreMenu where Item == Genre {
 }
 
 extension View {
-    /// On the TV, a filter row under a hero sits close to it, so the first row of posters
-    /// shows below; the page's usual gap would leave the posters off screen.
-    @ViewBuilder func tvFilterRow(underHero: Bool) -> some View {
+    /// On the TV, a hero with a filter row under it gives up some of the gap to it, so
+    /// the row sits close and the first row of posters still shows below. The hero gives
+    /// the space, not the row: negative padding on the row itself left it no height at
+    /// all, and a control in a row with no height can't take focus.
+    @ViewBuilder func tvAboveFilterRow(_ above: Bool) -> some View {
         #if os(tvOS)
-        padding(.top, underHero ? -Metrics.space12 : 0)
-            .padding(.bottom, -Metrics.space6)
+        padding(.bottom, above ? -Metrics.space12 : 0)
         #else
         self
         #endif
