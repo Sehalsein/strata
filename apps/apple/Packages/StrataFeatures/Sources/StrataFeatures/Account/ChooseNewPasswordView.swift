@@ -15,13 +15,13 @@ struct ChooseNewPasswordView: View {
 
     /// The server's minimum.
     private static let minimumLength = 8
-    private var name: String { services.store.active?.name ?? "You" }
+    private var name: String { services.store.active?.name ?? String(localized: "You", bundle: .module) }
 
     private var problem: String? {
         if new.isEmpty { return nil }
-        if new.count < Self.minimumLength { return "Use at least \(Self.minimumLength) characters." }
-        if new == current { return "Choose something other than the temporary password." }
-        if !confirm.isEmpty && confirm != new { return "The new passwords don't match." }
+        if new.count < Self.minimumLength { return String(localized: "Use at least \(Self.minimumLength) characters.", bundle: .module) }
+        if new == current { return String(localized: "Choose something other than the temporary password.", bundle: .module) }
+        if !confirm.isEmpty && confirm != new { return String(localized: "The new passwords don't match.", bundle: .module) }
         return nil
     }
 
@@ -30,30 +30,30 @@ struct ChooseNewPasswordView: View {
             VStack(alignment: .leading, spacing: Metrics.space6) {
                 Image(systemName: "key.fill").font(.system(size: 40)).foregroundStyle(Theme.accentText)
                 VStack(alignment: .leading, spacing: Metrics.space2) {
-                    Text("Choose your own password").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                    Text("\(name), you signed in with a temporary password. Pick one only you know to carry on.")
+                    Text("Choose your own password", bundle: .module).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                    Text("\(name), you signed in with a temporary password. Pick one only you know to carry on.", bundle: .module)
                         .font(.stCallout).foregroundStyle(Theme.ink2)
                 }
                 #if os(tvOS)
                 if let server = services.store.activeServer {
-                    Text("Do it on your phone in the Strata app, or at \(ServerAddress.display(server.url)), then sign in here again.")
+                    Text("Do it on your phone in the Strata app, or at \(ServerAddress.display(server.url)), then sign in here again.", bundle: .module)
                         .font(.stCallout).foregroundStyle(Theme.ink2)
                 }
                 #else
                 VStack(spacing: Metrics.space3) {
-                    SecureField("Temporary password", text: $current).textContentType(.password).modifier(FieldStyle())
-                    SecureField("New password", text: $new).textContentType(.newPassword).modifier(FieldStyle())
-                    SecureField("Confirm new password", text: $confirm).textContentType(.newPassword).modifier(FieldStyle())
+                    SecureField(String(localized: "Temporary password", bundle: .module), text: $current).textContentType(.password).modifier(FieldStyle())
+                    SecureField(String(localized: "New password", bundle: .module), text: $new).textContentType(.newPassword).modifier(FieldStyle())
+                    SecureField(String(localized: "Confirm new password", bundle: .module), text: $confirm).textContentType(.newPassword).modifier(FieldStyle())
                 }
                 if let message = error ?? problem {
                     Label(message, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
                 }
-                PrimaryButton("Save and Continue", isLoading: saving) {
+                PrimaryButton(String(localized: "Save and Continue", bundle: .module), isLoading: saving) {
                     Task { await save() }
                 }
                 .disabled(saving || current.isEmpty || new.count < Self.minimumLength || confirm != new || new == current)
                 #endif
-                Button("Sign Out") {
+                Button(String(localized: "Sign Out", bundle: .module)) {
                     Task {
                         await services.store.signOut()
                         services.refreshClient()
@@ -85,7 +85,7 @@ struct ChooseNewPasswordView: View {
             services.refreshClient()
         } catch {
             let e = StrataError.wrap(error)
-            self.error = e.code == "INVALID_PASSWORD" ? "The temporary password isn't right." : e.message
+            self.error = e.code == "INVALID_PASSWORD" ? String(localized: "The temporary password isn't right.", bundle: .module) : e.message
         }
     }
 }

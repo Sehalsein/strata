@@ -30,7 +30,7 @@ struct AirPlayPickerRepresentable: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let v = AVRoutePickerView()
         v.tintColor = UIColor.white.withAlphaComponent(0.85)
-        v.activeTintColor = UIColor(red: 232/255, green: 51/255, blue: 31/255, alpha: 1)
+        v.activeTintColor = .white // neutral, like the rest of the player
         v.prioritizesVideoDevices = true
         return v
     }
@@ -46,7 +46,7 @@ struct AirPlayPickerRepresentableMac: NSViewRepresentable {
         let v = AVRoutePickerView()
         v.isRoutePickerButtonBordered = false
         v.setRoutePickerButtonColor(NSColor.white.withAlphaComponent(0.85), for: .normal)
-        v.setRoutePickerButtonColor(NSColor(red: 232/255, green: 51/255, blue: 31/255, alpha: 1), for: .active)
+        v.setRoutePickerButtonColor(.white, for: .active)
         return v
     }
     func updateNSView(_ nsView: AVRoutePickerView, context: Context) {}

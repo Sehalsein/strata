@@ -73,9 +73,7 @@ struct StrataNowPlayingActivity: Widget {
 
     private func formatRemaining(state: StrataNowPlayingAttributes.ContentState) -> String {
         let remaining = max(0, state.duration - state.position)
-        let total = Int(remaining)
-        let m = total / 60, s = total % 60
-        return String(format: "%02d:%02d", m, s)
+        return Duration.seconds(Int(remaining)).formatted(.time(pattern: .minuteSecond(padMinuteToLength: 2)))
     }
 }
 
@@ -121,7 +119,7 @@ private struct ProgressBar: View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Rectangle().fill(Color.white.opacity(0.18)).frame(height: 2)
-                Rectangle().fill(Color(red: 0.91, green: 0.20, blue: 0.12))
+                Rectangle().fill(Color.white) // neutral, like the app
                     .frame(width: progress(width: geo.size.width), height: 2)
             }
         }

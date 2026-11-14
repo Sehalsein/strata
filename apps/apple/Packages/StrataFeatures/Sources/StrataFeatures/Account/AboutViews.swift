@@ -33,7 +33,7 @@ struct Acknowledgement: Decodable, Identifiable, Hashable {
 struct AcknowledgementsRow: View {
     var body: some View {
         NavigationLink { AcknowledgementsView() } label: {
-            Text("Acknowledgements")
+            Label { Text("Acknowledgements", bundle: .module) } icon: { Image(systemName: "doc.text") }
         }
     }
 }
@@ -41,21 +41,35 @@ struct AcknowledgementsRow: View {
 /// Third-party code in the app, with its licence.
 struct AcknowledgementsView: View {
     var body: some View {
+        #if os(tvOS)
+        TVSettingsPage {
+            TVSettingsSide(systemImage: "doc.text", title: String(localized: "Acknowledgements", bundle: .module),
+                           message: String(localized: "Strata includes the following third-party software.", bundle: .module))
+        } content: { form }
+        #else
+        form
+        #endif
+    }
+
+    private var form: some View {
         Form {
             Section {
                 ForEach(Acknowledgement.all) { item in
                     NavigationLink { AcknowledgementDetailView(item: item) } label: {
+                        // System colours, which flip with the white focused row on the TV.
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(item.name).foregroundStyle(Theme.ink)
-                            Text("\(item.version) · \(item.license)").font(.stFootnote).foregroundStyle(Theme.ink3)
+                            Text(item.name).foregroundStyle(.primary)
+                            Text(verbatim: "\(item.version) · \(item.license)").font(.stFootnote).foregroundStyle(.secondary)
                         }
                     }
                 }
             } footer: {
-                Text("Strata includes the following third-party software.")
+                #if !os(tvOS)
+                Text("Strata includes the following third-party software.", bundle: .module)
+                #endif
             }
         }
-        .navigationTitle("Acknowledgements")
+        .navigationTitle(Text("Acknowledgements", bundle: .module))
         #if !os(tvOS)
         .navigationBarTitleDisplayMode(.inline)
         .scrollContentBackground(.hidden)
@@ -69,17 +83,31 @@ struct AcknowledgementDetailView: View {
     let item: Acknowledgement
 
     var body: some View {
+        #if os(tvOS)
+        TVSettingsPage {
+            TVSettingsSide(systemImage: "shippingbox", title: item.name,
+                           message: String(localized: "Version \(item.version)", bundle: .module),
+                           footnote: item.license)
+        } content: { form }
+        #else
+        form
+        #endif
+    }
+
+    private var form: some View {
         Form {
+            #if !os(tvOS)
             Section {
-                LabeledContent("Version", value: item.version)
-                LabeledContent("Licence", value: item.license)
+                LabeledContent(String(localized: "Version", bundle: .module), value: item.version)
+                LabeledContent(String(localized: "Licence", bundle: .module), value: item.license)
             }
+            #endif
             Section {
                 ForEach(Self.paragraphs(item.notice), id: \.self) { paragraph in
                     Text(paragraph).font(.stCallout).readable()
                 }
             } header: {
-                Text("Notice")
+                Text("Notice", bundle: .module)
             }
             if let source = item.source {
                 Section {
@@ -93,9 +121,9 @@ struct AcknowledgementDetailView: View {
                     Link(source.absoluteString, destination: source)
                     #endif
                 } header: {
-                    Text("Source Code")
+                    Text("Source Code", bundle: .module)
                 } footer: {
-                    Text("The exact source this build of \(item.name) was made from.")
+                    Text("The exact source this build of \(item.name) was made from.", bundle: .module)
                 }
             }
             if let flags = item.configureFlags {
@@ -107,7 +135,7 @@ struct AcknowledgementDetailView: View {
                         #endif
                         .readable()
                 } header: {
-                    Text("Configure Flags")
+                    Text("Configure Flags", bundle: .module)
                 }
             }
             Section {
@@ -117,7 +145,7 @@ struct AcknowledgementDetailView: View {
                         .readable()
                 }
             } header: {
-                Text("Licence Text")
+                Text("Licence Text", bundle: .module)
             }
         }
         .navigationTitle(item.name)
@@ -136,6 +164,57 @@ struct AcknowledgementDetailView: View {
     }
 }
 
+#if os(tvOS)
+/// A Settings page on the TV, laid out like Settings itself: what the page is about on
+/// the left, its list on the right.
+struct TVSettingsPage<Side: View, Content: View>: View {
+    @ViewBuilder var side: Side
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Metrics.space20) {
+            side
+                .frame(width: 480)
+                .padding(.top, Metrics.space12)
+            // The focused row grows as it lifts: let it draw past the list's sides. Labels
+            // in the primary style, which turns dark on the white focused row; not as a
+            // tint, which would turn focused text in dialogs and fields white on white.
+            content.scrollClipDisabled().foregroundStyle(.primary)
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.top, 120)
+        .ignoresSafeArea(edges: .top)
+        .background(Theme.bg.ignoresSafeArea())
+        // The left column says what the page is; the bar's large title would repeat it.
+        .toolbar(.hidden, for: .navigationBar)
+    }
+}
+
+/// The left column of a TV Settings page: a large symbol, the title and a line or two.
+struct TVSettingsSide: View {
+    let systemImage: String
+    let title: String
+    var message: String?
+    var footnote: String?
+
+    var body: some View {
+        VStack(spacing: Metrics.space4) {
+            Image(systemName: systemImage)
+                .font(.system(size: 120, weight: .light))
+                .foregroundStyle(Theme.ink2)
+                .frame(height: 240)
+            Text(title).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink).lineLimit(1).minimumScaleFactor(0.6)
+            if let message { Text(message).font(.stCallout).foregroundStyle(Theme.ink3) }
+            if let footnote { Text(footnote).font(.stFootnote).foregroundStyle(Theme.ink3).padding(.top, Metrics.space4) }
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+#endif
+
 // MARK: - Privacy
 
 /// The Settings row for the connected server's privacy page (`<server>/privacy`): opened in
@@ -150,11 +229,14 @@ struct PrivacyPolicyRow: View {
 
     var body: some View {
         #if os(tvOS)
-        NavigationLink { PrivacyQRView(url: url) } label: { Text("Privacy") }
+        NavigationLink { PrivacyQRView(url: url) } label: {
+            Label { Text("Privacy", bundle: .module) } icon: { Image(systemName: "hand.raised") }
+        }
         #else
         Button { openURL(url) } label: {
             HStack {
-                Text("Privacy").foregroundStyle(Theme.ink)
+                Label { Text("Privacy", bundle: .module) } icon: { Image(systemName: "hand.raised") }
+                    .foregroundStyle(Theme.ink)
                 Spacer()
                 Image(systemName: "arrow.up.right").font(.stFootnote).foregroundStyle(Theme.ink3)
             }
@@ -167,19 +249,26 @@ struct PrivacyPolicyRow: View {
 /// The server's privacy page as a QR code, to read on a phone.
 struct PrivacyQRView: View {
     let url: URL
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: Metrics.space6) {
-            QRCodeView(url.absoluteString, size: 360)
-            Text("Scan with your phone to read this server's privacy policy.")
-                .font(.stHeadline)
-            Text(url.absoluteString)
-                .font(.stCallout)
-                .foregroundStyle(Theme.ink3)
+        TVSettingsPage {
+            TVSettingsSide(systemImage: "hand.raised", title: String(localized: "Privacy", bundle: .module),
+                           message: String(localized: "Scan with your phone to read this server's privacy policy.", bundle: .module))
+        } content: {
+            // Nothing here is a button, so the page itself takes focus: with no focus on the
+            // page, Menu had nowhere to go and the page couldn't be left.
+            VStack(spacing: Metrics.space6) {
+                QRCodeView(url.absoluteString, size: 420)
+                Text(url.absoluteString).font(.stCallout).foregroundStyle(Theme.ink3)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, Metrics.space12)
+            .focusable()
+            .focusEffectDisabled()
+            .onExitCommand { dismiss() }
         }
-        .multilineTextAlignment(.center)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle("Privacy")
+        .navigationTitle(Text("Privacy", bundle: .module))
     }
 }
 #endif

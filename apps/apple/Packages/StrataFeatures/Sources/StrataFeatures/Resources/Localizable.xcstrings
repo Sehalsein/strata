@@ -1,0 +1,1061 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    " You'll need the setup code from the server's log." : {
+
+    },
+    "%@ airs today." : {
+
+    },
+    "%@ can watch more than one. Each has its own titles and lists." : {
+
+    },
+    "%@ free on this device" : {
+
+    },
+    "%@ free on this device. Downloads use Wi-Fi unless Download on Cellular is on." : {
+
+    },
+    "%@ hasn't aired yet." : {
+
+    },
+    "%@ is out now." : {
+
+    },
+    "%@ is removed from this device. You can sign in again later." : {
+
+    },
+    "%@ isn't in your library." : {
+
+    },
+    "%@ isn't set up yet. Open %@ in a browser to create the first account, then try again.%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ isn't set up yet. Open %2$@ in a browser to create the first account, then try again.%3$@"
+          }
+        }
+      }
+    },
+    "%@ of %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ of %2$@"
+          }
+        }
+      }
+    },
+    "%@, %lld of %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$lld of %3$lld"
+          }
+        }
+      }
+    },
+    "%@, you signed in with a temporary password. Pick one only you know to carry on." : {
+
+    },
+    "%@: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@: %2$@"
+          }
+        }
+      }
+    },
+    "%lld Seasons" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Season"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Seasons"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld copies" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld copy"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld copies"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld of %lld in library" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld in library"
+          }
+        }
+      }
+    },
+    "A kids profile only sees titles within its age limit." : {
+
+    },
+    "Access" : {
+
+    },
+    "Acknowledgements" : {
+
+    },
+    "Actor" : {
+
+    },
+    "Add Profile" : {
+
+    },
+    "Add a profile" : {
+
+    },
+    "Add media folders in your server's dashboard." : {
+
+    },
+    "Add movies and shows with My List on their page." : {
+
+    },
+    "Add shows and anime to My List to see when new episodes air." : {
+
+    },
+    "Add to My List" : {
+
+    },
+    "Address" : {
+
+    },
+    "All" : {
+
+    },
+    "All Anime" : {
+
+    },
+    "All Genres" : {
+
+    },
+    "Allow Local Network access in Settings to find servers automatically." : {
+
+    },
+    "AniList score" : {
+
+    },
+    "Anime" : {
+
+    },
+    "App" : {
+
+    },
+    "Approve" : {
+
+    },
+    "Approve on your phone" : {
+
+    },
+    "Approve only a TV you're in front of." : {
+
+    },
+    "Back" : {
+
+    },
+    "Calendar" : {
+
+    },
+    "Can't play this" : {
+
+    },
+    "Cancel" : {
+
+    },
+    "Cancel Download" : {
+
+    },
+    "Cast" : {
+
+    },
+    "Category" : {
+
+    },
+    "Cellular Quality" : {
+
+    },
+    "Change Password" : {
+
+    },
+    "Check the code matches" : {
+
+    },
+    "Check your TV shows this code" : {
+
+    },
+    "Checking the code…" : {
+
+    },
+    "Choose" : {
+
+    },
+    "Choose Source" : {
+
+    },
+    "Choose a library" : {
+
+    },
+    "Choose how to sign in this Apple TV." : {
+
+    },
+    "Choose something other than the temporary password." : {
+
+    },
+    "Choose the server the profile is on." : {
+
+    },
+    "Choose your own password" : {
+
+    },
+    "Clear List" : {
+
+    },
+    "Close" : {
+
+    },
+    "Code %@" : {
+
+    },
+    "Coming soon" : {
+
+    },
+    "Configure Flags" : {
+
+    },
+    "Confirm new password" : {
+
+    },
+    "Connect to Strata" : {
+
+    },
+    "Continue" : {
+
+    },
+    "Continue Watching" : {
+
+    },
+    "Couldn't load %@" : {
+
+    },
+    "Couldn't load Anime" : {
+
+    },
+    "Couldn't load Home" : {
+
+    },
+    "Couldn't load My List" : {
+
+    },
+    "Couldn't load libraries" : {
+
+    },
+    "Couldn't load profiles" : {
+
+    },
+    "Couldn't load sources" : {
+
+    },
+    "Couldn't load the calendar" : {
+
+    },
+    "Couldn't load the pictures. %@" : {
+
+    },
+    "Couldn't load this movie" : {
+
+    },
+    "Couldn't load this person" : {
+
+    },
+    "Couldn't load this show" : {
+
+    },
+    "Couldn't sign in your TV" : {
+
+    },
+    "Couldn't sign in." : {
+
+    },
+    "Current password" : {
+
+    },
+    "Decline" : {
+
+    },
+    "Delete All" : {
+
+    },
+    "Delete All Downloads" : {
+
+    },
+    "Delete all downloads on this device?" : {
+
+    },
+    "Directed by" : {
+
+    },
+    "Director" : {
+
+    },
+    "Do it on your phone in the Strata app, or at %@, then sign in here again." : {
+
+    },
+    "Done" : {
+
+    },
+    "Download" : {
+
+    },
+    "Download Episode" : {
+
+    },
+    "Download failed" : {
+
+    },
+    "Download movies and episodes from their page to watch them without a connection." : {
+
+    },
+    "Download on Cellular" : {
+
+    },
+    "Downloaded" : {
+
+    },
+    "Downloading, %lld%%" : {
+
+    },
+    "Downloads" : {
+
+    },
+    "Edit" : {
+
+    },
+    "Edit Profile" : {
+
+    },
+    "Enter the server address" : {
+
+    },
+    "Enter your TV's code" : {
+
+    },
+    "Every profile's downloads on this device are deleted. They can be downloaded again." : {
+
+    },
+    "Featured" : {
+
+    },
+    "Filter by %@" : {
+
+    },
+    "Find any movie or show to watch or add to My List." : {
+
+    },
+    "Finding a source" : {
+
+    },
+    "Finding your TV…" : {
+
+    },
+    "First Aired" : {
+
+    },
+    "Forgot password?" : {
+
+    },
+    "Genre" : {
+
+    },
+    "Genres" : {
+
+    },
+    "Getting it ready" : {
+
+    },
+    "Go to Movie" : {
+
+    },
+    "Go to Show" : {
+
+    },
+    "Hide controls" : {
+
+    },
+    "Home" : {
+
+    },
+    "In My List" : {
+
+    },
+    "In Your Library" : {
+
+    },
+    "In your library" : {
+
+    },
+    "Information" : {
+
+    },
+    "Initial" : {
+
+    },
+    "It will be signed in to %@ as %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "It will be signed in to %1$@ as %2$@."
+          }
+        }
+      }
+    },
+    "It will start playing as soon as it's ready." : {
+
+    },
+    "It's on the server's dashboard, like 192.168.1.20 or strata.example.com." : {
+
+    },
+    "It's signed out here. You can add it again later." : {
+
+    },
+    "It's watching as %@ on %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "It's watching as %1$@ on %2$@."
+          }
+        }
+      }
+    },
+    "Keep this phone on the same Wi-Fi as your Apple TV." : {
+
+    },
+    "Kids" : {
+
+    },
+    "Less" : {
+
+    },
+    "Library" : {
+
+    },
+    "Licence" : {
+
+    },
+    "Licence Text" : {
+
+    },
+    "Link a TV" : {
+
+    },
+    "Looking for servers…" : {
+
+    },
+    "Looking for sources…" : {
+
+    },
+    "Mark as Unwatched" : {
+
+    },
+    "Mark as Watched" : {
+
+    },
+    "More" : {
+
+    },
+    "More Info" : {
+
+    },
+    "More Like This" : {
+
+    },
+    "Movie" : {
+
+    },
+    "Movies" : {
+
+    },
+    "Movies and shows" : {
+
+    },
+    "My List" : {
+
+    },
+    "Name" : {
+
+    },
+    "New password" : {
+
+    },
+    "Next" : {
+
+    },
+    "Next Episode" : {
+
+    },
+    "No downloads" : {
+
+    },
+    "No results for “%@”" : {
+
+    },
+    "No sources" : {
+
+    },
+    "None" : {
+
+    },
+    "Not connected to a server." : {
+
+    },
+    "Not signed in to that server" : {
+
+    },
+    "Nothing here yet" : {
+
+    },
+    "Nothing in %@ yet" : {
+
+    },
+    "Nothing on the calendar" : {
+
+    },
+    "Notice" : {
+
+    },
+    "Notifications On" : {
+
+    },
+    "Notifications are off for Strata" : {
+
+    },
+    "Notifies you when episodes of shows on My List air" : {
+
+    },
+    "Notify Me" : {
+
+    },
+    "OK" : {
+
+    },
+    "On your network" : {
+
+    },
+    "Only on this device." : {
+
+    },
+    "Opened on this device without a password: %@ can watch here, but changing settings needs the password." : {
+
+    },
+    "Or enter this code in Strata on your phone, in Settings › Link a TV" : {
+
+    },
+    "Or paste a link" : {
+
+    },
+    "Or paste a sign-in link or address" : {
+
+    },
+    "Or sign in another way" : {
+
+    },
+    "Original Title" : {
+
+    },
+    "Other Seasons" : {
+
+    },
+    "Other devices signed in as %@ will be signed out." : {
+
+    },
+    "Other ways to sign in" : {
+
+    },
+    "Password" : {
+
+    },
+    "Pause Download" : {
+
+    },
+    "Paused" : {
+
+    },
+    "Paused · %lld%%" : {
+
+    },
+    "Play Download" : {
+
+    },
+    "Play from Beginning" : {
+
+    },
+    "Playback" : {
+
+    },
+    "Playing now" : {
+
+    },
+    "Point the camera at the QR code in your server's dashboard: someone's sign-in code (Members › Sign-in code), or the server's address." : {
+
+    },
+    "Point your iPhone's camera at it." : {
+
+    },
+    "Privacy" : {
+
+    },
+    "Quality" : {
+
+    },
+    "Rating" : {
+
+    },
+    "Released" : {
+
+    },
+    "Remove" : {
+
+    },
+    "Remove %@ from this device?" : {
+
+    },
+    "Remove Download" : {
+
+    },
+    "Remove from Continue Watching" : {
+
+    },
+    "Remove from List" : {
+
+    },
+    "Remove from My List" : {
+
+    },
+    "Remove from This Device" : {
+
+    },
+    "Rename Server" : {
+
+    },
+    "Resume Download" : {
+
+    },
+    "S%lld · E%lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "S%1$lld · E%2$lld"
+          }
+        }
+      }
+    },
+    "S%lld · E%lld · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "S%1$lld · E%2$lld · %3$@"
+          }
+        }
+      }
+    },
+    "Same Wi-Fi as this TV" : {
+
+    },
+    "Save" : {
+
+    },
+    "Save and Continue" : {
+
+    },
+    "Scan QR Code" : {
+
+    },
+    "Scan a code from your admin, or pick a server on your network." : {
+
+    },
+    "Scan a code from your admin, or pick the server it's on." : {
+
+    },
+    "Scan a code. Nothing to type." : {
+
+    },
+    "Scan the code" : {
+
+    },
+    "Scan the code with your phone's camera and approve this TV from your profile." : {
+
+    },
+    "Scan with your phone to read this server's privacy policy." : {
+
+    },
+    "Search" : {
+
+    },
+    "Search failed" : {
+
+    },
+    "Search movies and shows" : {
+
+    },
+    "Season" : {
+
+    },
+    "Server" : {
+
+    },
+    "Server address" : {
+
+    },
+    "Server address, like 192.168.1.20" : {
+
+    },
+    "Settings" : {
+
+    },
+    "Show" : {
+
+    },
+    "Show %lld Hidden Servers" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Show %lld Hidden Server"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Show %lld Hidden Servers"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Show controls" : {
+
+    },
+    "Shows" : {
+
+    },
+    "Sign %@ out?" : {
+
+    },
+    "Sign In" : {
+
+    },
+    "Sign In with a Password" : {
+
+    },
+    "Sign Out" : {
+
+    },
+    "Sign Out %@" : {
+
+    },
+    "Sign in an Apple TV as %@ by approving the code it shows." : {
+
+    },
+    "Sign in on this phone first." : {
+
+    },
+    "Sign in on this phone to the server your TV is using, then scan the code again." : {
+
+    },
+    "Sign in to %@" : {
+
+    },
+    "Sign in to %@?" : {
+
+    },
+    "Sign in with your Strata username and password. New here? Ask whoever runs this server for an invite." : {
+
+    },
+    "Sign in with your phone" : {
+
+    },
+    "Sign in your TV?" : {
+
+    },
+    "Sign-in code or server address" : {
+
+    },
+    "Sign-in declined" : {
+
+    },
+    "Signing in to %@. Check your phone shows the same code." : {
+
+    },
+    "Source Code" : {
+
+    },
+    "Sources" : {
+
+    },
+    "Starring" : {
+
+    },
+    "Status" : {
+
+    },
+    "Strata can't use the camera. Allow it in Settings › Strata, or paste the link below." : {
+
+    },
+    "Strata includes the following third-party software." : {
+
+    },
+    "Studio" : {
+
+    },
+    "Switch" : {
+
+    },
+    "Switch Profile" : {
+
+    },
+    "TV Show" : {
+
+    },
+    "Tap Approve" : {
+
+    },
+    "Temporary password" : {
+
+    },
+    "That QR code isn't from Strata. Scan a sign-in code from Members, or the server's address." : {
+
+    },
+    "That code has expired. The TV shows a new one." : {
+
+    },
+    "That code was already used. Ask the TV for a new one." : {
+
+    },
+    "That sign-in was declined on the phone. Here's a new code." : {
+
+    },
+    "That's a TV's code. Sign in on this phone first, then scan it again to sign the TV in." : {
+
+    },
+    "That's a TV's code. To sign a TV in, open Settings › Link a TV." : {
+
+    },
+    "The TV wasn't signed in. It shows a new code if you want to try again." : {
+
+    },
+    "The current password isn't right." : {
+
+    },
+    "The exact source this build of %@ was made from." : {
+
+    },
+    "The new passwords don't match." : {
+
+    },
+    "The server couldn't use what this file holds. Pick another source." : {
+
+    },
+    "The server is getting this source ready. Try downloading it again in a few minutes." : {
+
+    },
+    "The temporary password isn't right." : {
+
+    },
+    "There's no such code. Check it against the one on your TV." : {
+
+    },
+    "There's nothing to play this from." : {
+
+    },
+    "This TV can't reach your phone's server. %@" : {
+
+    },
+    "This TV signs in as you, to watch." : {
+
+    },
+    "This code signs this device in to %@ as the person it was made for, able to watch." : {
+
+    },
+    "This device can't scan codes. Paste the link instead." : {
+
+    },
+    "This needs %@ and the device has %@ free. Pick a smaller source, or free up space." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This needs %1$@ and the device has %2$@ free. Pick a smaller source, or free up space."
+          }
+        }
+      }
+    },
+    "This server" : {
+
+    },
+    "Today" : {
+
+    },
+    "Tomorrow" : {
+
+    },
+    "Trailer" : {
+
+    },
+    "Trailers & Extras" : {
+
+    },
+    "Trending" : {
+
+    },
+    "Try Again" : {
+
+    },
+    "Try another quality." : {
+
+    },
+    "Turn them on in Settings › Notifications › Strata to hear when new episodes air." : {
+
+    },
+    "Type the server's address." : {
+
+    },
+    "Upcoming Episodes" : {
+
+    },
+    "Update needed" : {
+
+    },
+    "Use Password Instead" : {
+
+    },
+    "Use an iPhone that's already signed in to Strata. Nothing to type." : {
+
+    },
+    "Use at least %lld characters." : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Use at least %lld character."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Use at least %lld characters."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Username or email" : {
+
+    },
+    "Version" : {
+
+    },
+    "Waiting for approval…" : {
+
+    },
+    "Waiting for your phone…" : {
+
+    },
+    "Watch only, no settings" : {
+
+    },
+    "Watches as" : {
+
+    },
+    "When Strata chooses the source on cellular data, it picks one no sharper than this. 4K can use 20 GB or more an hour. A source you choose yourself always plays as it is." : {
+
+    },
+    "Who's watching?" : {
+
+    },
+    "Yesterday" : {
+
+    },
+    "You" : {
+
+    },
+    "You're offline. Your downloads still play." : {
+
+    },
+    "Your TV is signed in" : {
+
+    },
+    "Your last pick" : {
+
+    },
+    "Your list is empty" : {
+
+    },
+    "Your phone and this TV show the same one." : {
+
+    },
+    "less" : {
+
+    },
+    "more space" : {
+
+    },
+    "on %@" : {
+
+    },
+    "this server" : {
+
+    }
+  },
+  "version" : "1.0"
+}

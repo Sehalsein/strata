@@ -10,16 +10,19 @@ public struct PlayerChrome: View {
     let onClose: () -> Void
     let onDetails: () -> Void
     let onPiP: (() -> Void)?
+    /// Opens the list of copies to play from instead; `nil` for a download.
+    let onSources: (() -> Void)?
     let onInteraction: () -> Void
     let onScrubbing: (Bool) -> Void
 
     /// `onInteraction` fires on any touch inside the controls, so the caller can keep
     /// them visible while someone is using them (e.g. a track menu is open).
-    public init(engine: PlayerEngine, onClose: @escaping () -> Void, onDetails: @escaping () -> Void, onPiP: (() -> Void)? = nil, onInteraction: @escaping () -> Void = {}, onScrubbing: @escaping (Bool) -> Void = { _ in }) {
+    public init(engine: PlayerEngine, onClose: @escaping () -> Void, onDetails: @escaping () -> Void, onPiP: (() -> Void)? = nil, onSources: (() -> Void)? = nil, onInteraction: @escaping () -> Void = {}, onScrubbing: @escaping (Bool) -> Void = { _ in }) {
         self.engine = engine
         self.onClose = onClose
         self.onDetails = onDetails
         self.onPiP = onPiP
+        self.onSources = onSources
         self.onInteraction = onInteraction
         self.onScrubbing = onScrubbing
     }
@@ -30,6 +33,78 @@ public struct PlayerChrome: View {
     #endif
 
     public var body: some View {
+        #if os(tvOS)
+        tvBody
+        #else
+        touchBody
+        #endif
+    }
+
+    #if os(tvOS)
+    /// Like the TV app's player: what's playing at the bottom left over the scrubber, the
+    /// track buttons above its right end, and the elapsed time with a play / pause glyph
+    /// under it. Select on the scrubber plays or pauses; left and right scrub.
+    private var tvBody: some View {
+        ZStack(alignment: .bottom) {
+            LinearGradient(stops: [
+                .init(color: .clear, location: 0.4),
+                .init(color: .black.opacity(0.45), location: 0.7),
+                .init(color: .black.opacity(0.8), location: 1),
+            ], startPoint: .top, endPoint: .bottom)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: Metrics.space4) {
+                HStack(alignment: .bottom, spacing: Metrics.space8) {
+                    VStack(alignment: .leading, spacing: Metrics.space1) {
+                        if let subtitle = engine.meta?.subtitle {
+                            Text(subtitle).font(.system(size: 26, weight: .semibold)).opacity(0.85).lineLimit(1)
+                        }
+                        Text(engine.meta?.title ?? "")
+                            .font(.system(size: 50, weight: .bold))
+                            .titleTracking()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                        ChapterLabel(engine: engine)
+                    }
+                    Spacer(minLength: 0)
+                    GlassEffectContainer(spacing: Metrics.space2) {
+                        HStack(spacing: Metrics.space4) {
+                            SubtitleMenu(engine: engine)
+                            AudioMenu(engine: engine)
+                            SpeedMenu(engine: engine)
+                        }
+                    }
+                }
+                PlaybackProgress(engine: engine, isPlaying: isPlaying, onSelect: { engine.togglePlay() }, onScrubbing: onScrubbing)
+                    .prefersDefaultFocus(true, in: focusScope)
+                HStack(spacing: Metrics.space4) {
+                    Button(action: onDetails) {
+                        Text("Info", bundle: .module).font(.system(size: 26, weight: .semibold)).padding(.horizontal, Metrics.space1)
+                    }
+                    .buttonStyle(.strataGlass)
+                    .controlSize(.small)
+                    if let onSources {
+                        Button(action: onSources) {
+                            Text("Change Source", bundle: .module).font(.system(size: 26, weight: .semibold)).padding(.horizontal, Metrics.space1)
+                        }
+                        .buttonStyle(.strataGlass)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(.top, Metrics.space1)
+            }
+            // Like the TV app's player: nearly edge to edge, not inside the safe area too.
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.bottom, Metrics.space10)
+            .ignoresSafeArea(edges: [.horizontal, .bottom])
+        }
+        .foregroundStyle(Theme.onArtwork)
+        .focusScope(focusScope)
+    }
+    #endif
+
+    private var touchBody: some View {
         ZStack {
             LinearGradient(stops: [
                 .init(color: .black.opacity(0.55), location: 0),
@@ -54,15 +129,12 @@ public struct PlayerChrome: View {
             .simultaneousGesture(TapGesture().onEnded { onInteraction() })
         }
         .foregroundStyle(Theme.onArtwork)
-        #if os(tvOS)
-        .focusScope(focusScope)
-        #endif
     }
 
     private var topBar: some View {
         HStack(alignment: .center, spacing: Metrics.space3) {
             #if !os(tvOS)
-            PlayerIconButton("Close", systemImage: "xmark", action: onClose)
+            PlayerIconButton(String(localized: "Close", bundle: .module), systemImage: "xmark", action: onClose)
             #endif
             VStack(alignment: .leading, spacing: 2) {
                 Text(engine.meta?.title ?? "").font(.stHeadline).lineLimit(1)
@@ -75,17 +147,18 @@ public struct PlayerChrome: View {
                 HStack(spacing: Metrics.space2) {
                     #if !os(tvOS)
                     // Fit shows the whole picture; fill crops to the screen (also pinch or double-tap).
-                    PlayerIconButton(isFilled ? "Fit to Screen" : "Fill Screen",
+                    PlayerIconButton(isFilled ? String(localized: "Fit to Screen", bundle: .module) : String(localized: "Fill Screen", bundle: .module),
                                      systemImage: isFilled ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") {
                         engine.toggleVideoGravity()
                     }
-                    if let onPiP { PlayerIconButton("Picture in Picture", systemImage: "pip.enter", action: onPiP) }
+                    if let onPiP { PlayerIconButton(String(localized: "Picture in Picture", bundle: .module), systemImage: "pip.enter", action: onPiP) }
                     AirPlayRoutePicker()
                         .frame(width: 30, height: 30)
                         .padding(7)
                         .glassEffect(.regular.interactive(), in: .circle)
                     #endif
-                    PlayerIconButton("Stream Details", systemImage: "info", action: onDetails)
+                    if let onSources { PlayerIconButton(String(localized: "Change Source", bundle: .module), systemImage: "rectangle.stack", action: onSources) }
+                    PlayerIconButton(String(localized: "Stream Details", bundle: .module), systemImage: "info", action: onDetails)
                 }
             }
         }
@@ -95,7 +168,7 @@ public struct PlayerChrome: View {
     private var centerControls: some View {
         GlassEffectContainer(spacing: Metrics.space6) {
             HStack(spacing: Metrics.space6) {
-                PlayerIconButton("Back 10 seconds", systemImage: "gobackward.10") { Task { await engine.skip(-10) } }
+                PlayerIconButton(String(localized: "Back 10 seconds", bundle: .module), systemImage: "gobackward.10") { Task { await engine.skip(-10) } }
                 if isWaiting {
                     // One spinner, in the play button's place, while loading or buffering.
                     ProgressView()
@@ -103,11 +176,11 @@ public struct PlayerChrome: View {
                         .tint(.white)
                         .frame(width: 76, height: 76)
                         .glassEffect(.regular, in: .circle)
-                        .accessibilityLabel("Loading")
+                        .accessibilityLabel(Text("Loading", bundle: .module))
                 } else {
-                    PlayerIconButton(isPlaying ? "Pause" : "Play", systemImage: isPlaying ? "pause.fill" : "play.fill", size: .large) { engine.togglePlay() }
+                    PlayerIconButton(isPlaying ? String(localized: "Pause", bundle: .module) : String(localized: "Play", bundle: .module), systemImage: isPlaying ? "pause.fill" : "play.fill", size: .large) { engine.togglePlay() }
                 }
-                PlayerIconButton("Forward 10 seconds", systemImage: "goforward.10") { Task { await engine.skip(10) } }
+                PlayerIconButton(String(localized: "Forward 10 seconds", bundle: .module), systemImage: "goforward.10") { Task { await engine.skip(10) } }
             }
         }
     }
@@ -119,23 +192,9 @@ public struct PlayerChrome: View {
 
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: Metrics.space3) {
-            if let chapter = engine.currentChapter?.title {
-                Text(chapter).eyebrowStyle(Theme.onArtwork.opacity(0.75))
-            }
-            Scrubber(position: engine.position, duration: engine.duration, chapters: engine.chapters, onScrubbing: onScrubbing) { target in
-                Task { await engine.seek(to: target) }
-            }
+            ChapterLabel(engine: engine)
+            PlaybackProgress(engine: engine, onScrubbing: onScrubbing)
             HStack(spacing: Metrics.space2) {
-                #if os(tvOS)
-                GlassEffectContainer(spacing: Metrics.space2) {
-                    HStack(spacing: Metrics.space2) {
-                        PlayerIconButton("Back 10 seconds", systemImage: "gobackward.10") { Task { await engine.skip(-10) } }
-                        PlayerIconButton(isPlaying ? "Pause" : "Play", systemImage: isPlaying ? "pause.fill" : "play.fill") { engine.togglePlay() }
-                            .prefersDefaultFocus(true, in: focusScope)
-                        PlayerIconButton("Forward 10 seconds", systemImage: "goforward.10") { Task { await engine.skip(10) } }
-                    }
-                }
-                #endif
                 Spacer()
                 GlassEffectContainer(spacing: Metrics.space2) {
                     HStack(spacing: Metrics.space2) {
@@ -145,6 +204,33 @@ public struct PlayerChrome: View {
                     }
                 }
             }
+        }
+    }
+}
+
+/// The scrubber, in its own view: it reads the playhead, which moves several times a
+/// second, so only it redraws on each tick rather than the whole chrome.
+private struct PlaybackProgress: View {
+    let engine: PlayerEngine
+    var isPlaying: Bool? = nil
+    var onSelect: (() -> Void)? = nil
+    let onScrubbing: (Bool) -> Void
+
+    var body: some View {
+        Scrubber(position: engine.position, duration: engine.duration, chapters: engine.chapters,
+                 isPlaying: isPlaying, onSelect: onSelect, onScrubbing: onScrubbing) { target in
+            Task { await engine.seek(to: target) }
+        }
+    }
+}
+
+/// The chapter playing, if the file has chapters; on its own for the same reason.
+private struct ChapterLabel: View {
+    let engine: PlayerEngine
+
+    var body: some View {
+        if let chapter = engine.currentChapter?.title {
+            Text(chapter).eyebrowStyle(Theme.onArtwork.opacity(0.75))
         }
     }
 }

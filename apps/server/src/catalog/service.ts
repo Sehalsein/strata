@@ -4,7 +4,7 @@ import type { Library } from "../library";
 import { isResumable, type ProgressRow, type ProgressStore } from "../progress";
 import type { Settings } from "../settings";
 import { findCandidates, type Candidate } from "../sources/resolver";
-import { imageUrl, yearOf, type Tmdb, type TmdbCredits, type TmdbListItem, type TmdbMovie, type TmdbShow } from "./tmdb";
+import { imageUrl, logoUrl, yearOf, type Tmdb, type TmdbCredits, type TmdbListItem, type TmdbMovie, type TmdbShow } from "./tmdb";
 import { logger } from "../log";
 import { seasonOf, type Anilist, type AnilistDate, type AnilistHomeItem, type AnilistRankedList, type AnilistSeason, type AnilistTitle } from "./anime/anilist";
 import { animeRating } from "./contentRating";
@@ -47,6 +47,8 @@ export interface TitleCard {
   eyebrow?: string;
   /** A short label the apps show with the card as is ("Episode 12", "TV · 24 episodes"). */
   badge?: string;
+  /** The title's logo, on hero cards only: the apps show it in place of the name. */
+  logoUrl?: string;
 }
 
 export interface EpisodeRef {
@@ -307,8 +309,8 @@ export class CatalogService {
         const candidates = src.cards.filter((c) => c.backdropUrl).slice(0, src.take);
         // Each card is filled out by its own type: a source can mix series and films,
         // and a TMDB id means a different title in each.
-        const full = await Promise.all(
-          candidates.map(async (c) => (c.overview || !c.tmdbId ? c : ((await this.detailCards(c.type, [c.tmdbId]))[0] ?? null))),
+        const full = await this.withLogos(
+          await Promise.all(candidates.map(async (c) => (c.overview || !c.tmdbId ? c : ((await this.detailCards(c.type, [c.tmdbId]))[0] ?? null)))),
         );
         // The hero fills the screen: list cards carry a w780 backdrop, too soft at that size.
         return full
@@ -457,10 +459,10 @@ export class CatalogService {
       list(this.tmdb.topRated("tv")),
       discover({ "first_air_date.gte": day(-1), "first_air_date.lte": day(-90) }),
     ]);
-    const spotlight = trending
-      .filter((c) => c.backdropUrl && c.overview)
-      .slice(0, 8)
-      .map((c, i) => ({ ...c, eyebrow: `#${i + 1} in Shows` }));
+    const spotlight = (await this.withLogos(trending.filter((c) => c.backdropUrl && c.overview).slice(0, 8))).map((c, i) => ({
+      ...c!,
+      eyebrow: `#${i + 1} in Shows`,
+    }));
     const shelves: Shelf[] = [
       { id: "shows-spotlight", title: "Spotlight", kind: "titles", style: "hero", items: spotlight },
       { id: "shows-trending", title: "Trending", kind: "titles", items: trending.slice(0, 10) },
@@ -633,7 +635,27 @@ export class CatalogService {
       cards.map(async (card) => {
         if (!card.tmdbId) return card;
         const detail = await (card.type === "movie" ? this.tmdb.movie(card.tmdbId) : this.tmdb.show(card.tmdbId)).catch(() => null);
-        return detail?.backdrop_path ? { ...card, backdropUrl: imageUrl(detail.backdrop_path, "original") } : card;
+        const logo = logoUrl(detail?.images, this.tmdb.language);
+        return {
+          ...card,
+          ...(detail?.backdrop_path ? { backdropUrl: imageUrl(detail.backdrop_path, "original") } : {}),
+          ...(logo ? { logoUrl: logo } : {}),
+        };
+      }),
+    );
+  }
+
+  /**
+   * Hero cards with the title's logo from TMDB's details (cached), for the apps to show
+   * in place of the name. Cards TMDB doesn't know, or without a logo, are left as they are.
+   */
+  private async withLogos<T extends TitleCard | null>(cards: T[]): Promise<T[]> {
+    return Promise.all(
+      cards.map(async (card) => {
+        if (!card?.tmdbId) return card;
+        const detail = await (card.type === "movie" ? this.tmdb.movie(card.tmdbId) : this.tmdb.show(card.tmdbId)).catch(() => null);
+        const logo = logoUrl(detail?.images, this.tmdb.language);
+        return logo ? { ...card, logoUrl: logo } : card;
       }),
     );
   }
@@ -674,6 +696,8 @@ export class CatalogService {
       certification,
       posterUrl: media.coverImage?.extraLarge ?? media.coverImage?.large ?? null,
       backdropUrl,
+      /** The title as artwork from TMDB, where the title maps to it; null otherwise. */
+      logoUrl: await this.tmdbLogo(ref.type, tmdbId),
       cast: [] as ReturnType<typeof castOf>,
       trailer: trailerKey ? { site: "youtube", key: trailerKey, name: "Trailer" } : null,
       videos: trailerKey ? [youtubeVideo(trailerKey, "Trailer", "Trailer")] : [],
@@ -796,6 +820,12 @@ export class CatalogService {
   }
 
   /** TMDB's backdrop for a title, or null. */
+  private async tmdbLogo(type: TitleType, tmdbId: number | undefined): Promise<string | null> {
+    if (!tmdbId) return null;
+    const detail = await (type === "movie" ? this.tmdb.movie(tmdbId) : this.tmdb.show(tmdbId)).catch(() => null);
+    return logoUrl(detail?.images, this.tmdb.language);
+  }
+
   private async tmdbBackdrop(type: TitleType, tmdbId: number | undefined): Promise<string | null> {
     if (!tmdbId) return null;
     const detail = await (type === "movie" ? this.tmdb.movie(tmdbId) : this.tmdb.show(tmdbId)).catch(() => null);
@@ -928,6 +958,8 @@ export class CatalogService {
       certification,
       posterUrl: imageUrl(m.poster_path, "w500"),
       backdropUrl: imageUrl(m.backdrop_path, "w1280"),
+      /** The title as artwork, for the page's hero; null when TMDB has none. */
+      logoUrl: logoUrl(m.images, this.tmdb.language),
       cast: castOf(m.credits),
       directors: m.credits?.crew.filter((c) => c.job === "Director").map((c) => c.name) ?? [],
       trailer: trailerOf(m.videos),
@@ -969,6 +1001,8 @@ export class CatalogService {
       certification: s.content_ratings?.results.find((r) => r.iso_3166_1 === region)?.rating || null,
       posterUrl: imageUrl(s.poster_path, "w500"),
       backdropUrl: imageUrl(s.backdrop_path, "w1280"),
+      /** The title as artwork, for the page's hero; null when TMDB has none. */
+      logoUrl: logoUrl(s.images, this.tmdb.language),
       cast: castOf(s.credits),
       trailer: trailerOf(s.videos),
       videos: videosOf(s.videos),

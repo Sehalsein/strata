@@ -13,14 +13,14 @@ struct PlaybackSettingsSection: View {
     var body: some View {
         #if os(iOS)
         Section {
-            Picker("Cellular Quality", selection: $cellular) {
+            Picker(String(localized: "Cellular Quality", bundle: .module), selection: $cellular) {
                 ForEach(CellularQuality.allCases) { Text($0.label).tag($0) }
             }
             .onChange(of: cellular) { _, value in CellularQuality.current = value }
         } header: {
-            Text("Playback")
+            Text("Playback", bundle: .module)
         } footer: {
-            Text("When Strata chooses the source on cellular data, it picks one no sharper than this. 4K can use 20 GB or more an hour. A source you choose yourself always plays as it is.")
+            Text("When Strata chooses the source on cellular data, it picks one no sharper than this. 4K can use 20 GB or more an hour. A source you choose yourself always plays as it is.", bundle: .module)
         }
         downloads
         #endif
@@ -31,22 +31,22 @@ struct PlaybackSettingsSection: View {
         @Bindable var store = DownloadStore.shared
         Section {
             NavigationLink { DownloadsView() } label: {
-                LabeledContent("Downloads", value: Formatting.size(bytes: Int(store.bytesUsed)) ?? "None")
+                LabeledContent(String(localized: "Downloads", bundle: .module), value: Formatting.size(bytes: Int(store.bytesUsed)) ?? String(localized: "None", bundle: .module))
             }
-            Toggle("Download on Cellular", isOn: $store.allowsCellular)
+            Toggle(String(localized: "Download on Cellular", bundle: .module), isOn: $store.allowsCellular)
             if !store.items.isEmpty {
-                Button("Delete All Downloads", role: .destructive) { confirmDeleteAll = true }
-                    .confirmationDialog("Delete all downloads on this device?", isPresented: $confirmDeleteAll, titleVisibility: .visible) {
-                        Button("Delete All", role: .destructive) { store.removeAll() }
+                Button(String(localized: "Delete All Downloads", bundle: .module), role: .destructive) { confirmDeleteAll = true }
+                    .confirmationDialog(String(localized: "Delete all downloads on this device?", bundle: .module), isPresented: $confirmDeleteAll, titleVisibility: .visible) {
+                        Button(String(localized: "Delete All", bundle: .module), role: .destructive) { store.removeAll() }
                     } message: {
-                        Text("Every profile's downloads on this device are deleted. They can be downloaded again.")
+                        Text("Every profile's downloads on this device are deleted. They can be downloaded again.", bundle: .module)
                     }
             }
         } header: {
-            Text("Downloads")
+            Text("Downloads", bundle: .module)
         } footer: {
             if let free = DownloadStore.freeSpace, let text = Formatting.size(bytes: Int(free)) {
-                Text("\(text) free on this device. Downloads use Wi-Fi unless Download on Cellular is on.")
+                Text("\(text) free on this device. Downloads use Wi-Fi unless Download on Cellular is on.", bundle: .module)
             }
         }
     }

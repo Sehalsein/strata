@@ -106,6 +106,10 @@ public final class PlayerLayerHostView: UIView {
     public var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 
     #if os(tvOS)
+    /// The display manager of the window the video is in, so the engine can ask for a
+    /// mode switch the moment it knows the format (not a render later) and wait it out.
+    @MainActor static weak var displayManager: AVDisplayManager?
+
     /// Set on the window's display manager while the view is in a window, and cleared
     /// when it leaves (the TV goes back to its usual mode).
     var displayCriteria: AVDisplayCriteria? {
@@ -117,12 +121,17 @@ public final class PlayerLayerHostView: UIView {
 
     public override func willMove(toWindow newWindow: UIWindow?) {
         super.willMove(toWindow: newWindow)
-        if newWindow == nil { window?.avDisplayManager.preferredDisplayCriteria = nil }
+        if newWindow == nil, let manager = window?.avDisplayManager {
+            manager.preferredDisplayCriteria = nil
+            if Self.displayManager === manager { Self.displayManager = nil }
+        }
     }
 
     public override func didMoveToWindow() {
         super.didMoveToWindow()
-        if let window, displayCriteria != nil { window.avDisplayManager.preferredDisplayCriteria = displayCriteria }
+        guard let window else { return }
+        Self.displayManager = window.avDisplayManager
+        if displayCriteria != nil { window.avDisplayManager.preferredDisplayCriteria = displayCriteria }
     }
     #endif
 }

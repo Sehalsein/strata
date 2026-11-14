@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "StrataPlayerUI",
+    defaultLocalization: "en",
     platforms: [.iOS("26.0"), .macOS("26.0"), .tvOS("26.0")],
     products: [
         .library(name: "StrataPlayerUI", targets: ["StrataPlayerUI"]),
@@ -16,7 +17,7 @@ let package = Package(
         .target(
             name: "StrataPlayerUI",
             dependencies: ["StrataKit", "StrataDesign", "StrataRemux"],
-            resources: [.copy("Resources/PrivacyInfo.xcprivacy")]
+            resources: [.copy("Resources/PrivacyInfo.xcprivacy"), .process("Resources/Localizable.xcstrings")]
         ),
         .testTarget(name: "StrataPlayerUITests", dependencies: ["StrataPlayerUI"]),
     ]

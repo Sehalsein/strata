@@ -8,9 +8,10 @@ public enum StrataNetworking {
     /// Installs a large shared `URLCache`. Idempotent; call once at launch
     /// before the first image or request goes out.
     public static func configureSharedCaches() {
-        // 64 MB memory / 512 MB disk is plenty for poster/backdrop art and
-        // makes a cold tab revisit paint instantly from disk.
-        let cache = URLCache(memoryCapacity: 64 * 1024 * 1024,
+        // 512 MB disk is plenty for poster/backdrop art and makes a cold tab revisit
+        // paint instantly from disk. The memory tier stays small: the UI's image pipeline
+        // already keeps decoded images in memory, so a big one would hold them twice.
+        let cache = URLCache(memoryCapacity: 16 * 1024 * 1024,
                              diskCapacity: 512 * 1024 * 1024,
                              diskPath: "strata-url-cache")
         URLCache.shared = cache

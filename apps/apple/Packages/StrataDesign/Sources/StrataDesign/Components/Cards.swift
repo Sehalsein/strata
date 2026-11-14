@@ -4,13 +4,25 @@ import SwiftUI
 public enum ProviderKind: String, Hashable, Sendable {
     case library
 
-    public var label: String { "Library" }
+    public var label: String { String(localized: "Library", bundle: .module) }
     public var systemImage: String { "externaldrive.fill" }
     public var color: Color { Theme.local }
 }
 
 /// Press/focus treatment for artwork cards: a lift with shadow on tvOS focus,
 /// a slight shrink on touch.
+public extension View {
+    /// A card's button: on the TV the system's own focus (the artwork lifts with Liquid
+    /// Glass highlight and parallax, like the TV app's posters); elsewhere `StrataCardStyle`.
+    @ViewBuilder func cardButtonStyle() -> some View {
+        #if os(tvOS)
+        buttonStyle(.borderless)
+        #else
+        buttonStyle(StrataCardStyle())
+        #endif
+    }
+}
+
 public struct StrataCardStyle: ButtonStyle {
     public init() {}
     public func makeBody(configuration: Configuration) -> some View {
@@ -57,12 +69,14 @@ public struct PosterCard: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.space2) {
+        VStack(alignment: .leading, spacing: Metrics.cardCaptionGap) {
             Button(action: action) {
                 ArtworkImage(url: imageURL, aspectRatio: 2 / 3, seed: id, title: imageURL == nil ? title : nil)
             }
-            .buttonStyle(StrataCardStyle())
+            .cardButtonStyle()
+            // One element for VoiceOver: the button says it all, the caption is for the eye.
             .accessibilityLabel(title)
+            .accessibilityValue(CardSpeech.join([subtitle, providers.first.map { String(localized: "On \($0.label)", bundle: .module) }, CardSpeech.watched(progress)]))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -72,7 +86,6 @@ public struct PosterCard: View {
                 HStack(spacing: Metrics.space2) {
                     if let provider = providers.first {
                         Circle().fill(provider.color).frame(width: 6, height: 6)
-                            .accessibilityLabel("On \(provider.label)")
                     }
                     if let subtitle { Text(subtitle) }
                 }
@@ -80,8 +93,21 @@ public struct PosterCard: View {
                 .foregroundStyle(Theme.ink3)
                 if let progress, progress > 0 { ProgressBar(progress).padding(.top, 4) }
             }
+            .accessibilityHidden(true)
         }
         .frame(width: width)
+    }
+}
+
+/// What a card's button says beyond its title.
+enum CardSpeech {
+    static func watched(_ progress: Double?) -> String? {
+        guard let progress, progress > 0 else { return nil }
+        return String(localized: "\(Int((min(progress, 1) * 100).rounded())) percent watched", bundle: .module)
+    }
+
+    static func join(_ parts: [String?]) -> String {
+        parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 }
 
@@ -110,7 +136,7 @@ public struct ContinueCard: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.space2) {
+        VStack(alignment: .leading, spacing: Metrics.cardCaptionGap) {
             Button(action: action) {
                 ArtworkImage(url: imageURL, aspectRatio: 16 / 9, seed: id, title: imageURL == nil ? (artworkTitle ?? title) : nil)
                     .overlay(alignment: .bottom) {
@@ -123,18 +149,22 @@ public struct ContinueCard: View {
                             .font(.title2)
                             .foregroundStyle(Theme.onArtwork)
                             .padding(14)
-                            .glassEffect(.regular.interactive(), in: .circle)
+                            // Not interactive: the card is the control, the glyph only marks it.
+                            .glassEffect(.regular, in: .circle)
                             .opacity(0.9)
                     }
             }
-            .buttonStyle(StrataCardStyle())
-            .accessibilityLabel("Play \(title)")
+            .cardButtonStyle()
+            // The episode and how far through, not just "Play" and a name.
+            .accessibilityLabel(CardSpeech.join([String(localized: "Play \(title)", bundle: .module), overline, CardSpeech.watched(progress)]))
+            .accessibilityValue(subtitle ?? "")
 
             VStack(alignment: .leading, spacing: 2) {
                 if let overline { Text(overline).eyebrowStyle() }
                 Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                 if let subtitle { Text(subtitle).font(.stFootnote).foregroundStyle(Theme.ink3).lineLimit(1) }
             }
+            .accessibilityHidden(true)
         }
         .frame(width: width)
     }

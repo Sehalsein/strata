@@ -12,9 +12,9 @@ public enum CellularQuality: Int, CaseIterable, Identifiable, Sendable {
 
     public var label: String {
         switch self {
-        case .best: "Best Available"
-        case .hd1080: "Up to 1080p"
-        case .hd720: "Up to 720p"
+        case .best: String(localized: "Best Available", bundle: .module)
+        case .hd1080: String(localized: "Up to 1080p", bundle: .module)
+        case .hd720: String(localized: "Up to 720p", bundle: .module)
         }
     }
 

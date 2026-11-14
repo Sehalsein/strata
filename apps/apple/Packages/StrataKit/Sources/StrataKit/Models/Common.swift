@@ -4,7 +4,7 @@ import Foundation
 public enum TitleType: String, Codable, Sendable, Hashable, CaseIterable {
     case movie, show
 
-    public var label: String { self == .movie ? "Movie" : "Show" }
+    public var label: String { self == .movie ? String(localized: "Movie", bundle: .module) : String(localized: "Show", bundle: .module) }
 }
 
 /// What actually plays: a movie or a single episode.
@@ -27,7 +27,7 @@ public enum Provider: Codable, Sendable, Hashable {
         try container.encode(self == .local ? "local" : "linked")
     }
 
-    public var label: String { "Library" }
+    public var label: String { String(localized: "Library", bundle: .module) }
 }
 
 /// Saved watch progress for a movie or episode.
@@ -60,8 +60,8 @@ public enum Formatting {
     public static func runtime(minutes: Int?) -> String? {
         guard let minutes, minutes > 0 else { return nil }
         let h = minutes / 60, m = minutes % 60
-        if h == 0 { return "\(m)m" }
-        return m == 0 ? "\(h)h" : "\(h)h \(m)m"
+        if h == 0 { return String(localized: "\(m)m", bundle: .module, comment: "Runtime in minutes") }
+        return m == 0 ? String(localized: "\(h)h", bundle: .module, comment: "Runtime in hours") : String(localized: "\(h)h \(m)m", bundle: .module, comment: "Runtime in hours and minutes")
     }
 
     /// Runtime string for a millisecond duration.
@@ -72,18 +72,18 @@ public enum Formatting {
 
     /// "12m left" style remaining time.
     public static func remaining(ms: Int) -> String? {
-        runtime(ms: ms).map { "\($0) left" }
+        runtime(ms: ms).map { String(localized: "\($0) left", bundle: .module) }
     }
 
     /// "S1 · E4"
     public static func episodeCode(season: Int, episode: Int) -> String {
-        "S\(season) · E\(episode)"
+        String(localized: "S\(season) · E\(episode)", bundle: .module)
     }
 
     /// "7.4" for a TMDB rating, nil when absent or zero.
     public static func rating(_ value: Double?) -> String? {
         guard let value, value > 0 else { return nil }
-        return String(format: "%.1f", value)
+        return value.formatted(.number.precision(.fractionLength(1)))
     }
 
     /// Bytes as "4.2 GB" / "700 MB".
@@ -114,5 +114,5 @@ public enum Formatting {
 
 extension Array where Element == Provider {
     /// "Library" when the title is in the server's library.
-    public var label: String { isEmpty ? "" : "Library" }
+    public var label: String { isEmpty ? "" : String(localized: "Library", bundle: .module) }
 }

@@ -1,6 +1,11 @@
 import SwiftUI
+import MediaAccessibility
+import CoreText
 import StrataDesign
 import StrataKit
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// The active subtitle cue, centered above the controls.
 public struct SubtitleOverlay: View {
@@ -12,11 +17,8 @@ public struct SubtitleOverlay: View {
         self.raised = raised
     }
 
-    #if os(tvOS)
-    private let font = Font.system(size: 44, weight: .semibold)
-    #else
-    private let font = Font.title3.weight(.semibold)
-    #endif
+    /// The caption style from Settings (Accessibility > Subtitles & Captioning).
+    @State private var style = CaptionStyle.current
 
     public var body: some View {
         ZStack {
@@ -29,7 +31,8 @@ public struct SubtitleOverlay: View {
     private var pictures: some View {
         GeometryReader { geo in
             let frame = videoFrame(in: geo.size)
-            ForEach(engine.activeCueImages, id: \.self) { image in
+            // By position, not by value: hashing the PNGs on every redraw isn't free.
+            ForEach(Array(engine.activeCueImages.enumerated()), id: \.offset) { _, image in
                 if let cg = engine.picture(image) {
                     let width = image.width * frame.width, height = image.height * frame.height
                     // Lifted above the controls when they show.
@@ -49,7 +52,7 @@ public struct SubtitleOverlay: View {
     }
 
     #if os(tvOS)
-    private static let raisedInset: CGFloat = 260
+    private static let raisedInset: CGFloat = 400
     #else
     private static let raisedInset: CGFloat = 180
     #endif
@@ -69,20 +72,117 @@ public struct SubtitleOverlay: View {
             Spacer()
             if let text = engine.activeCueText {
                 Text(text)
-                    .font(font)
+                    .font(style.font)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.9), radius: 3, y: 1)
+                    .foregroundStyle(style.foreground)
+                    .modifier(CaptionEdge(edge: style.edge))
                     .padding(.horizontal, Metrics.space4)
                     .padding(.vertical, Metrics.space2)
-                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: Metrics.radiusSM, style: .continuous))
+                    .background(style.background, in: RoundedRectangle(cornerRadius: Metrics.radiusSM, style: .continuous))
                     .transition(.opacity)
             }
         }
-        .padding(.bottom, raised ? 180 : 48)
+        .padding(.bottom, raised ? Self.raisedInset : 48)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.easeOut(duration: 0.15), value: engine.activeCueText)
         .allowsHitTesting(false)
+        .onReceive(NotificationCenter.default.publisher(for: CaptionStyle.changed)) { _ in style = .current }
+    }
+}
+
+/// How subtitle text is drawn: the system caption style where the user set one, else
+/// Strata's own (white semibold on a soft dark box, with a shadow).
+struct CaptionStyle {
+    enum Edge { case strataShadow, none, dropShadow, raised, depressed, uniform }
+
+    var font: Font
+    var foreground: Color
+    var background: Color
+    var edge: Edge
+
+    static let changed = Notification.Name(kMACaptionAppearanceSettingsChangedNotification as String)
+
+    #if os(tvOS)
+    private static let baseSize: CGFloat = 44
+    #elseif canImport(UIKit)
+    private static var baseSize: CGFloat { UIFont.preferredFont(forTextStyle: .title3).pointSize }
+    #else
+    private static let baseSize: CGFloat = 20
+    #endif
+
+    /// Read from MediaAccessibility. A setting is used when the user made it override
+    /// video (or, for size, changed it); anything else keeps Strata's look.
+    static var current: CaptionStyle {
+        let domain = MACaptionAppearanceDomain.user
+        var behavior = MACaptionAppearanceBehavior.useContentIfAvailable
+
+        let scale = MACaptionAppearanceGetRelativeCharacterSize(domain, &behavior)
+        let size = baseSize * (scale > 0 ? scale : 1)
+        var font: Font
+        #if os(tvOS)
+        font = .system(size: size, weight: .semibold)
+        #else
+        font = scale > 0 && scale != 1 ? .system(size: size, weight: .semibold) : .title3.weight(.semibold)
+        #endif
+        behavior = .useContentIfAvailable
+        let descriptor = MACaptionAppearanceCopyFontDescriptorForStyle(domain, &behavior, .default).takeRetainedValue()
+        if behavior == .useValue, let name = CTFontDescriptorCopyAttribute(descriptor, kCTFontNameAttribute) as? String {
+            font = .custom(name, fixedSize: size)
+        }
+
+        var foreground = Color.white
+        behavior = .useContentIfAvailable
+        let fg = MACaptionAppearanceCopyForegroundColor(domain, &behavior).takeRetainedValue()
+        var fgOpacityBehavior = MACaptionAppearanceBehavior.useContentIfAvailable
+        let fgOpacity = MACaptionAppearanceGetForegroundOpacity(domain, &fgOpacityBehavior)
+        if behavior == .useValue || fgOpacityBehavior == .useValue {
+            foreground = Color(cgColor: fg).opacity(fgOpacity)
+        }
+
+        var background = Color.black.opacity(0.45)
+        behavior = .useContentIfAvailable
+        let bg = MACaptionAppearanceCopyBackgroundColor(domain, &behavior).takeRetainedValue()
+        var bgOpacityBehavior = MACaptionAppearanceBehavior.useContentIfAvailable
+        let bgOpacity = MACaptionAppearanceGetBackgroundOpacity(domain, &bgOpacityBehavior)
+        if behavior == .useValue || bgOpacityBehavior == .useValue {
+            background = Color(cgColor: bg).opacity(bgOpacity)
+        }
+
+        var edge = Edge.strataShadow
+        behavior = .useContentIfAvailable
+        let edgeStyle = MACaptionAppearanceGetTextEdgeStyle(domain, &behavior)
+        if behavior == .useValue {
+            switch edgeStyle {
+            case .none: edge = .none
+            case .dropShadow: edge = .dropShadow
+            case .raised: edge = .raised
+            case .depressed: edge = .depressed
+            case .uniform: edge = .uniform
+            default: break
+            }
+        }
+        return CaptionStyle(font: font, foreground: foreground, background: background, edge: edge)
+    }
+}
+
+/// The caption text's edge: a shadow, raised, depressed or outlined.
+private struct CaptionEdge: ViewModifier {
+    let edge: CaptionStyle.Edge
+
+    func body(content: Content) -> some View {
+        switch edge {
+        case .strataShadow: content.shadow(color: .black.opacity(0.9), radius: 3, y: 1)
+        case .none: content
+        case .dropShadow: content.shadow(color: .black.opacity(0.8), radius: 2, x: 1.5, y: 1.5)
+        case .raised: content.shadow(color: .black.opacity(0.9), radius: 0, x: 0, y: -1)
+        case .depressed: content.shadow(color: .black.opacity(0.9), radius: 0, x: 0, y: 1)
+        case .uniform:
+            content
+                .shadow(color: .black, radius: 0, x: 1, y: 0)
+                .shadow(color: .black, radius: 0, x: -1, y: 0)
+                .shadow(color: .black, radius: 0, x: 0, y: 1)
+                .shadow(color: .black, radius: 0, x: 0, y: -1)
+        }
     }
 }
 
@@ -105,20 +205,25 @@ public struct UpNextCard: View {
             ArtworkImage(url: next.stillUrl, aspectRatio: 16 / 9, seed: next.code, cornerRadius: Metrics.radiusSM)
                 .frame(width: 160)
             VStack(alignment: .leading, spacing: Metrics.space1) {
-                Text("Up Next in \(countdown)s").eyebrowStyle(Theme.accentText)
+                Text("Up Next in \(countdown)s", bundle: .module).eyebrowStyle(Theme.accentText)
                 Text(next.name).font(.stHeadline).foregroundStyle(Theme.onArtwork).lineLimit(2)
                 Text(next.code).font(.stFootnote).foregroundStyle(Theme.onArtwork.opacity(0.7))
                 GlassEffectContainer(spacing: Metrics.space2) {
                     HStack(spacing: Metrics.space2) {
-                        PlayButton("Play Now", systemImage: "forward.fill", action: onPlay)
-                        GlassButton("Cancel", action: onDismiss)
+                        PlayButton(String(localized: "Play Now", bundle: .module), systemImage: "forward.fill", action: onPlay)
+                        GlassButton(String(localized: "Cancel", bundle: .module), action: onDismiss)
                     }
                 }
                 .padding(.top, Metrics.space2)
             }
         }
         .padding(Metrics.space4)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Metrics.radiusLG, style: .continuous))
+        // A plain dark material, not glass: the buttons on it are glass already.
+        .background {
+            RoundedRectangle(cornerRadius: Metrics.radiusLG, style: .continuous)
+                .fill(.regularMaterial)
+                .environment(\.colorScheme, .dark)
+        }
         .frame(maxWidth: 520)
     }
 }
@@ -138,12 +243,12 @@ public struct StreamDetailsPanel: View {
     private func audio(_ session: PlayResponse) -> String {
         let title = session.selectedAudio?.displayTitle ?? "—"
         guard session.mode == .device, let plan = session.remux, plan.audio != "copy" else { return title }
-        return title + " → Lossless (ALAC)"
+        return String(localized: "\(title) → Lossless (ALAC)", bundle: .module)
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space4) {
-            Text("Stream Details").font(.stTitle2).foregroundStyle(Theme.ink)
+            Text("Stream Details", bundle: .module).font(.stTitle2).foregroundStyle(Theme.ink)
             if let session {
                 let c = session.candidate
                 Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Metrics.space4, verticalSpacing: Metrics.space3) {
@@ -163,7 +268,7 @@ public struct StreamDetailsPanel: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Text("Nothing is playing.").font(.stCallout).foregroundStyle(.secondary)
+                Text("Nothing is playing.", bundle: .module).font(.stCallout).foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, Metrics.space6)
@@ -175,9 +280,9 @@ public struct StreamDetailsPanel: View {
     }
 
     // Labels use the vibrant secondary color: the sheet is glass, where ink-3 doesn't read.
-    private func row(_ label: String, _ value: String) -> some View {
+    private func row(_ label: LocalizedStringKey, _ value: String) -> some View {
         GridRow {
-            Text(label).font(.stFootnote).foregroundStyle(.secondary)
+            Text(label, bundle: .module).font(.stFootnote).foregroundStyle(.secondary)
             Text(value.isEmpty ? "—" : value).font(.stCallout).foregroundStyle(Theme.ink)
                 #if !os(tvOS)
                 .textSelection(.enabled)
@@ -207,12 +312,12 @@ public struct ChaptersRail: View {
                         onSelect(chapter.start)
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(chapter.title ?? "Chapter \(index + 1)").font(.stCallout.weight(.semibold)).lineLimit(1)
+                            Text(chapter.title ?? String(localized: "Chapter \(index + 1)", bundle: .module)).font(.stCallout.weight(.semibold)).lineLimit(1)
                             Text(Scrubber.format(chapter.start)).font(.stTimecode).opacity(0.7)
                         }
                         .padding(.horizontal, Metrics.space2)
                     }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.strataGlass)
                     .tint(current ? Theme.apricot : nil)
                 }
             }

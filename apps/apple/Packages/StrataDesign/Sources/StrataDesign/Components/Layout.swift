@@ -30,9 +30,9 @@ public struct Rail<Content: View>: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RailTitleButtonStyle())
             .accessibilityAddTraits(.isHeader)
-            .accessibilityHint("Shows the full list"))
+            .accessibilityHint(Text("Shows the full list", bundle: .module)))
         }
         self.content = content
     }
@@ -88,7 +88,7 @@ extension Rail {
             }
             .buttonStyle(.plain)
             .accessibilityAddTraits(.isHeader)
-            .accessibilityHint("Shows all")
+            .accessibilityHint(Text("Shows all", bundle: .module))
         } else {
             Text(title).railHeaderStyle().accessibilityAddTraits(.isHeader)
         }
@@ -96,13 +96,42 @@ extension Rail {
     }
 }
 
+/// A rail's "Title ›" link. On the TV it lifts and brightens when focused, like the TV
+/// app's, rather than sitting on a white platter its light text can't be read on.
+struct RailTitleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { Label(configuration: configuration) }
+
+    private struct Label: View {
+        let configuration: Configuration
+        @Environment(\.isFocused) private var focused
+
+        var body: some View {
+            #if os(tvOS)
+            configuration.label
+                .opacity(focused ? 1 : 0.8)
+                .scaleEffect(focused ? 1.08 : 1, anchor: .leading)
+                .shadow(color: .black.opacity(focused ? 0.4 : 0), radius: 8, y: 4)
+                .animation(.easeOut(duration: 0.15), value: focused)
+            #else
+            configuration.label.opacity(configuration.isPressed ? 0.6 : 1)
+            #endif
+        }
+    }
+}
+
 /// A responsive grid of poster cards (Movies, Shows, search results, My List).
 public struct PosterGrid<Content: View>: View {
     @ViewBuilder let content: () -> Content
+    /// Side inset; 0 where the page already keeps to the safe area (TV Search).
+    let inset: CGFloat
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
-    public init(@ViewBuilder content: @escaping () -> Content) { self.content = content }
+    /// `inset` defaults to the gutter.
+    @MainActor public init(inset: CGFloat? = nil, @ViewBuilder content: @escaping () -> Content) {
+        self.inset = inset ?? Metrics.gutter
+        self.content = content
+    }
 
     /// Three columns on an iPhone and in a narrow iPad window, rather than two (or one)
     /// oversized ones; the rails' poster size elsewhere.
@@ -116,10 +145,10 @@ public struct PosterGrid<Content: View>: View {
 
     public var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: minimum), spacing: Metrics.cardGap, alignment: .top)],
-                  alignment: .leading, spacing: Metrics.space8) {
+                  alignment: .leading, spacing: Metrics.gridRowGap) {
             content()
         }
-        .padding(.horizontal, Metrics.gutter)
+        .padding(.horizontal, inset)
     }
 }
 
@@ -161,7 +190,7 @@ public struct SkeletonRail: View {
         }
         .skeletonPulse()
         .accessibilityElement()
-        .accessibilityLabel("Loading")
+        .accessibilityLabel(Text("Loading", bundle: .module))
     }
 }
 
@@ -248,7 +277,7 @@ public struct MessageView: View {
             if let message { Text(message) }
         } actions: {
             if let actionTitle, let action {
-                Button(actionTitle, action: action).buttonStyle(.glass)
+                Button(actionTitle, action: action).buttonStyle(.strataGlass)
             }
         }
         .foregroundStyle(Theme.ink)

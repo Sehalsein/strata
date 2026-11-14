@@ -11,6 +11,9 @@ public struct HeroBillboard<Actions: View>: View {
     let fallbackURL: URL?
     let eyebrow: String?
     let title: String
+    /// The title as artwork (the film's own logo), shown in place of `title` once it
+    /// loads; the name stays as the fallback and for VoiceOver.
+    let logoURL: URL?
     let meta: [String]
     let badges: [String]
     /// IMDb / Rotten Tomatoes, after the metadata line.
@@ -18,18 +21,38 @@ public struct HeroBillboard<Actions: View>: View {
     let overview: String?
     /// A page of a horizontal pager: the art slides at a slower pace than the page.
     let paged: Bool
+    /// Home's featured layout on Apple TV and iPad, like the TV app's: the text to the
+    /// left over a darker wash, the eyebrow as a pill, and on the TV the art running on
+    /// under the first rail, which peeks in at the bottom of the screen.
+    let featured: Bool
+    /// "Starring …", "Director …": at the bottom right of the featured layout.
+    let credits: [HeroCredit]
+    /// Partway through: a bar and what's left, under the featured layout's buttons.
+    let progress: HeroProgress?
     @ViewBuilder let actions: () -> Actions
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #elseif os(macOS)
+    private let sizeClass: MacSizeClass? = .regular
+    #endif
+    #if !os(tvOS)
+    /// The featured title follows Dynamic Type from its 52pt default.
+    @ScaledMetric(relativeTo: .largeTitle) private var featuredTitleSize: CGFloat = 52
+    #endif
 
-    public init(id: String, backdropURL: URL?, fallbackURL: URL? = nil, eyebrow: String? = nil, title: String, meta: [String] = [], badges: [String] = [], ratings: [ExternalRating] = [], overview: String? = nil, paged: Bool = false, @ViewBuilder actions: @escaping () -> Actions) {
+    public init(id: String, backdropURL: URL?, fallbackURL: URL? = nil, eyebrow: String? = nil, title: String, logoURL: URL? = nil, meta: [String] = [], badges: [String] = [], ratings: [ExternalRating] = [], overview: String? = nil, paged: Bool = false, featured: Bool = false, credits: [HeroCredit] = [], progress: HeroProgress? = nil, @ViewBuilder actions: @escaping () -> Actions) {
         self.id = id
-        // Full size: list-sized TMDB art (w780) is soft across a whole screen.
-        self.backdropURL = backdropURL.map(TMDBImage.original)
+        self.backdropURL = backdropURL.map(HeroArt.backdrop)
         self.paged = paged
+        self.featured = featured
+        self.credits = credits
+        self.progress = progress
         self.fallbackURL = fallbackURL
         self.eyebrow = eyebrow
         self.title = title
+        self.logoURL = logoURL
         self.meta = meta
         self.badges = badges
         self.ratings = ratings
@@ -37,12 +60,14 @@ public struct HeroBillboard<Actions: View>: View {
         self.actions = actions
     }
 
-    #if os(tvOS)
-    private static var backdropPixels: Int { 1920 }
-    #else
-    // The art fills the hero's height, so on a 3x phone it's ~2,800px wide.
-    private static var backdropPixels: Int { 2400 }
-    #endif
+    /// The box a logo fits in: wide and short, like the TV app's.
+    static func logoSize(featured: Bool) -> CGSize {
+        #if os(tvOS)
+        featured ? CGSize(width: 620, height: 210) : CGSize(width: 560, height: 190)
+        #else
+        Metrics.isPad ? CGSize(width: 440, height: 150) : CGSize(width: 260, height: 100)
+        #endif
+    }
 
     /// How far the art lags behind a page as it slides, as a fraction of the page width.
     private static var pageParallax: CGFloat { 0.3 }
@@ -53,13 +78,42 @@ public struct HeroBillboard<Actions: View>: View {
     private let titleFont = Font.stDisplayTV
     private let overviewLines = 4
     #else
-    private var height: CGFloat { Metrics.isPad ? 620 : 520 }
     private let titleFont = Font.stDisplay
-    private var overviewLines: Int { Metrics.isPad ? 4 : 3 }
+    private var overviewLines: Int { sizeClass == .regular ? 4 : 3 }
     #endif
 
     public var body: some View {
         ZStack(alignment: .bottomLeading) {
+            if !bleedsUnderRail { art }
+            if usesFeaturedLayout {
+                featuredInfo
+                    .frame(maxWidth: .infinity, alignment: .bottomLeading)
+                    .overlay(alignment: .bottomTrailing) { creditsBlock }
+            } else {
+                #if os(tvOS)
+                tvInfo
+                #else
+                info
+                #endif
+            }
+        }
+        // Full width even when the art is in the background and only the text is inside.
+        .frame(maxWidth: .infinity, alignment: .bottomLeading)
+        #if os(tvOS)
+        .frame(height: HeroLayout.tvHeight(featured: featured), alignment: .bottom)
+        // The featured TV hero is shorter than the screen so the first rail shows below
+        // it, and its art carries on under that rail to the bottom of the screen.
+        .background(alignment: .top) {
+            if bleedsUnderRail { art.frame(height: HeroLayout.tvScreenHeight) }
+        }
+        #else
+        // A pager's page fills the height the pager was given (Home sizes it the same way).
+        .modifier(HeroHeight(featured: usesFeaturedLayout, fills: paged))
+        #endif
+    }
+
+    private var art: some View {
+        ZStack {
             backdrop
             ZStack { scrims }
                 .visualEffect { [stretches] content, proxy in
@@ -70,18 +124,25 @@ public struct HeroBillboard<Actions: View>: View {
                     return content.scaleEffect(y > 0 ? (height + y) / height : 1, anchor: .bottom)
                 }
                 .allowsHitTesting(false)
-            #if os(tvOS)
-            tvInfo
-            #else
-            info
-            #endif
         }
-        #if os(tvOS)
-        // Like the TV app: the art fills the whole screen, safe areas included,
-        // and the page's other sections start below the fold.
-        .frame(height: UIScreen.main.bounds.height)
+    }
+
+    /// The left-weighted layout: Home's featured carousel on Apple TV, and in a regular
+    /// width (iPad, not in a narrow Split View).
+    private var usesFeaturedLayout: Bool {
+        #if os(iOS)
+        featured && sizeClass == .regular
         #else
-        .frame(height: height)
+        featured && Metrics.isPadOrTV
+        #endif
+    }
+
+    /// The TV's featured hero leaves the bottom of the screen to the first rail.
+    private var bleedsUnderRail: Bool {
+        #if os(tvOS)
+        featured
+        #else
+        false
         #endif
     }
 
@@ -111,7 +172,8 @@ public struct HeroBillboard<Actions: View>: View {
                     // In a pager the art is wider than the page, so it can slide within it.
                     let bleed = paged && moves ? (geo.size.width * Self.pageParallax).rounded() : 0
                     // A blurred poster needs few pixels; a backdrop, about the screen's width.
-                    RemoteImage(url: backdropURL ?? fallbackURL, maxPixel: blurred ? 320 : Self.backdropPixels, blur: blurred ? 40 : 0) {
+                    RemoteImage(url: backdropURL ?? fallbackURL, maxPixel: blurred ? HeroArt.blurredPixels : HeroArt.backdropPixels,
+                                blur: blurred ? 40 : 0, priority: .userInitiated) {
                         StrataPlaceholder.hero(seed: id)
                     }
                     .frame(width: geo.size.width + 2 * bleed, height: geo.size.height)
@@ -134,6 +196,12 @@ public struct HeroBillboard<Actions: View>: View {
     }
 
     @ViewBuilder private var scrims: some View {
+        if usesFeaturedLayout {
+            // Like the TV app: a deep wash from the left edge, under the text, so the
+            // right of the picture stays bright.
+            LinearGradient(stops: Self.eased(from: 0, to: 0.62) { (colorScheme == .light ? Theme.bg : .black).opacity(0.78 * (1 - $0)) },
+                           startPoint: .leading, endPoint: .trailing)
+        }
         #if os(tvOS)
         // A left-side wash keeps the title legible over bright art; it sits under
         // the bottom fade so the hero ends in plain `bg` with no seam.
@@ -170,13 +238,14 @@ public struct HeroBillboard<Actions: View>: View {
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: Metrics.space3) {
             if let eyebrow { Text(eyebrow).eyebrowStyle(heroText.opacity(0.75)) }
-            Text(title)
-                .font(titleFont)
-                .titleTracking()
-                .foregroundStyle(heroText)
-                .lineLimit(2)
-                .minimumScaleFactor(0.6)
-                .accessibilityAddTraits(.isHeader)
+            HeroTitle(title: title, logoURL: logoURL, maxLogo: Self.logoSize(featured: false)) {
+                Text(title)
+                    .font(titleFont)
+                    .titleTracking()
+                    .foregroundStyle(heroText)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.6)
+            }
             if !meta.isEmpty || !badges.isEmpty || !ratings.isEmpty {
                 // One line when it fits; on a phone the badges wrap under the metadata.
                 ViewThatFits(in: .horizontal) {
@@ -209,8 +278,9 @@ public struct HeroBillboard<Actions: View>: View {
     }
 
     private var actionRow: some View {
+        // The featured hero spaces its buttons out like the TV app's.
         GlassEffectContainer(spacing: Metrics.space2) {
-            HStack(spacing: Metrics.space3) { actions() }
+            HStack(spacing: usesFeaturedLayout ? Metrics.space6 : Metrics.space3) { actions() }
         }
     }
 
@@ -224,6 +294,89 @@ public struct HeroBillboard<Actions: View>: View {
     }
 
     #if os(tvOS)
+    private let featuredWidth: CGFloat = 1100
+    private let featuredOverviewWidth: CGFloat = 760
+    private let featuredTitleFont = Font.system(size: 68, weight: .heavy)
+    private let featuredBottom: CGFloat = Metrics.space12
+    #else
+    private let featuredWidth: CGFloat = 640
+    private let featuredOverviewWidth: CGFloat = 460
+    private var featuredTitleFont: Font { .system(size: featuredTitleSize, weight: .heavy) }
+    private let featuredBottom: CGFloat = Metrics.space10
+    #endif
+
+    /// The featured layout's text: eyebrow pill, title, metadata, a short overview, then
+    /// the actions, all to the left like the TV app's.
+    private var featuredInfo: some View {
+        VStack(alignment: .leading, spacing: Metrics.space4) {
+            if let eyebrow {
+                Text(eyebrow)
+                    .font(.stFootnote.weight(.semibold))
+                    .foregroundStyle(heroText)
+                    .padding(.horizontal, Metrics.space3)
+                    .padding(.vertical, Metrics.space1)
+                    .overlay(Capsule().strokeBorder(heroText.opacity(0.7), lineWidth: 2))
+            }
+            HeroTitle(title: title, logoURL: logoURL, maxLogo: Self.logoSize(featured: true)) {
+                Text(title)
+                    .font(featuredTitleFont)
+                    .titleTracking()
+                    .foregroundStyle(heroText)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.5)
+            }
+            .shadow(color: .black.opacity(colorScheme == .light ? 0 : 0.35), radius: 12, y: 4)
+            // Like the TV app: the facts, the synopsis, then the ratings and specs.
+            if !meta.isEmpty {
+                Text(meta.joined(separator: " · "))
+                    .font(.stCallout.weight(.semibold))
+                    .foregroundStyle(heroText.opacity(0.9))
+                    .lineLimit(1)
+            }
+            if let overview, !overview.isEmpty {
+                Text(overview)
+                    .font(.stCallout)
+                    .foregroundStyle(heroText.opacity(0.85))
+                    .lineLimit(3)
+                    .frame(maxWidth: featuredOverviewWidth, alignment: .leading)
+            }
+            badgeRow
+            // A clear break between what it is and what you can do with it.
+            actionRow.padding(.top, Metrics.isTV ? Metrics.space8 : Metrics.space5)
+            if let progress {
+                HStack(spacing: Metrics.space3) {
+                    ProgressBar(progress.fraction).frame(maxWidth: 240)
+                    if let label = progress.label {
+                        Text(label).font(.stFootnote).foregroundStyle(heroText.opacity(0.7))
+                    }
+                }
+                .padding(.top, Metrics.space2)
+            }
+        }
+        .frame(maxWidth: featuredWidth, alignment: .leading)
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.bottom, featuredBottom)
+    }
+
+    #if os(tvOS)
+    /// The credits, quiet, at the bottom right (the TV app's "Starring" and "Director").
+    @ViewBuilder private var creditsBlock: some View {
+        if Metrics.isTV, !credits.isEmpty {
+            VStack(alignment: .leading, spacing: Metrics.space1) {
+                ForEach(credits, id: \.label) { credit in
+                    (Text(credit.label + " ").foregroundStyle(heroText.opacity(0.6))
+                     + Text(credit.names).foregroundStyle(heroText.opacity(0.9)))
+                        .font(.stFootnote)
+                        .lineLimit(2)
+                }
+            }
+            .frame(maxWidth: 480, alignment: .leading)
+            .padding(.trailing, Metrics.gutter)
+            .padding(.bottom, featuredBottom)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
     /// Title block over the actions, with the overview beside them.
     private var tvInfo: some View {
         VStack(alignment: .leading, spacing: Metrics.space6) {
@@ -237,6 +390,9 @@ public struct HeroBillboard<Actions: View>: View {
         .padding(.bottom, Metrics.space20)
     }
     #else
+    /// The credits show on the TV only.
+    private var creditsBlock: some View { EmptyView() }
+
     private var info: some View {
         VStack(alignment: .leading, spacing: Metrics.space3) {
             titleBlock
@@ -248,6 +404,26 @@ public struct HeroBillboard<Actions: View>: View {
         .padding(.bottom, Metrics.space2)
     }
     #endif
+}
+
+/// How far through a title is, for the hero.
+public struct HeroProgress: Hashable, Sendable {
+    public let fraction: Double
+    public let label: String?
+    public init(fraction: Double, label: String?) {
+        self.fraction = fraction
+        self.label = label
+    }
+}
+
+/// A line of credits for the hero: "Starring" and the first few names.
+public struct HeroCredit: Hashable, Sendable {
+    public let label: String
+    public let names: String
+    public init(_ label: String, _ names: [String]) {
+        self.label = label
+        self.names = names.joined(separator: ", ")
+    }
 }
 
 /// A rectangle with no top edge: clips the sides and bottom, and lets content run up
@@ -263,39 +439,178 @@ public struct OpenTopRectangle: Shape {
 public enum TMDBImage {
     /// The full-size image, for art that fills the screen. Other URLs are left as they are.
     public static func original(_ url: URL) -> URL {
+        resized(url, to: "original")
+    }
+
+    /// The smallest TMDB size that covers `maxPixel` across: w1280 up to 1280px,
+    /// else the original (which can be 4K and several megabytes).
+    public static func covering(_ url: URL, maxPixel: Int) -> URL {
+        resized(url, to: maxPixel <= 1280 ? "w1280" : "original")
+    }
+
+    private static func resized(_ url: URL, to size: String) -> URL {
         guard url.host() == "image.tmdb.org" else { return url }
-        let path = url.absoluteString.replacingOccurrences(of: #"/t/p/w\d+/"#, with: "/t/p/original/", options: .regularExpression)
+        let path = url.absoluteString.replacingOccurrences(of: #"/t/p/(w\d+|original)/"#, with: "/t/p/\(size)/", options: .regularExpression)
         return URL(string: path) ?? url
     }
 }
+
+/// The hero's artwork: which URL and how many pixels, so Home can load the next
+/// title's art ahead at exactly the size the hero will ask for.
+public enum HeroArt {
+    #if os(tvOS)
+    // The TV's 1080p frame: keep TMDB's original, w1280 is soft across the room.
+    static let backdropPixels = 1920
+    #else
+    // The art fills the hero's height, so on a 3x phone it's ~2,800px wide.
+    static let backdropPixels = 2400
+    #endif
+    /// A blurred poster standing in for a missing backdrop needs few pixels.
+    static let blurredPixels = 320
+
+    /// List-sized TMDB art (w780) is soft across a whole screen; ask for what covers it.
+    static func backdrop(_ url: URL) -> URL {
+        #if os(tvOS)
+        return TMDBImage.original(url)
+        #else
+        return TMDBImage.covering(url, maxPixel: backdropPixels)
+        #endif
+    }
+
+    /// Starts loading a hero's art before it's on screen (the carousel's next title).
+    @MainActor public static func prefetch(backdropURL: URL?, fallbackURL: URL?) {
+        if let backdropURL {
+            RemoteImage<EmptyView>.prefetch(backdrop(backdropURL), maxPixel: backdropPixels)
+        } else if let fallbackURL {
+            RemoteImage<EmptyView>.prefetch(fallbackURL, maxPixel: blurredPixels)
+        }
+    }
+}
+
+/// How tall a hero is.
+#if os(macOS)
+/// The Mac (where the package tests build) has no size classes: it lays out as iPad does.
+enum MacSizeClass { case compact, regular }
+#endif
+
+public enum HeroLayout {
+    /// Apple TV's screen is 1920×1080 points whatever the panel, and the hero is sized
+    /// to the whole screen, safe areas included.
+    static let tvScreenHeight: CGFloat = 1080
+
+    /// Like the TV app: the art fills the whole screen; on Home the first rail's title
+    /// and the top of its cards show at the bottom of the featured hero.
+    static func tvHeight(featured: Bool) -> CGFloat {
+        featured ? (tvScreenHeight * 0.76).rounded() : tvScreenHeight
+    }
+
+    /// iPhone and iPad: a share of the page's height (`containerRelativeFrame`), capped at
+    /// the sizes it has on a full-screen iPad, so a short window (landscape, Split View,
+    /// Stage Manager) gets a shorter hero. A compact width keeps the phone's 520.
+    public static func height(featured: Bool, regular: Bool, container length: CGFloat) -> CGFloat {
+        guard regular else { return 520 }
+        return featured ? min(720, max(420, length * 0.9)) : min(620, max(420, length * 0.8))
+    }
+}
+
+#if !os(tvOS)
+/// A hero's height on iPhone and iPad (and the Mac the package tests build for): its
+/// share of the page, or all of a pager's page.
+struct HeroHeight: ViewModifier {
+    let featured: Bool
+    let fills: Bool
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #else
+    private let sizeClass: MacSizeClass? = .regular
+    #endif
+
+    func body(content: Content) -> some View {
+        if fills {
+            content.frame(maxHeight: .infinity, alignment: .bottom)
+        } else {
+            content.containerRelativeFrame(.vertical, alignment: .bottom) { length, _ in
+                HeroLayout.height(featured: featured, regular: sizeClass == .regular, container: length)
+            }
+        }
+    }
+}
+#endif
 
 /// The shape of a `HeroBillboard` while its page loads: same height, with bars where
 /// the eyebrow, title, metadata, overview and buttons will be, so nothing moves when
 /// the page arrives.
 public struct SkeletonHero: View {
-    public init() {}
+    /// The featured layout (Home on Apple TV and iPad, title pages on Apple TV), as
+    /// `HeroBillboard(featured:)` lays it out: the same height and the same left column.
+    let featured: Bool
+
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
+
+    public init(featured: Bool = false) { self.featured = featured }
+
+    private var usesFeaturedLayout: Bool {
+        #if os(iOS)
+        featured && sizeClass == .regular
+        #else
+        featured && Metrics.isPadOrTV
+        #endif
+    }
 
     #if os(tvOS)
     private let titleSize = CGSize(width: 720, height: 76)
     private let button = CGSize(width: 220, height: 66)
+    private let featuredTitle = CGSize(width: 760, height: 68)
+    private let featuredButton = CGSize(width: 260, height: 74)
+    private let lineHeight: CGFloat = 26
     #else
-    private var height: CGFloat { Metrics.isPad ? 620 : 520 }
     private let titleSize = CGSize(width: 240, height: 36)
     private let button = CGSize(width: 120, height: 50)
+    private let featuredTitle = CGSize(width: 440, height: 52)
+    private let featuredButton = CGSize(width: 280, height: 50)
+    private let lineHeight: CGFloat = 15
     #endif
 
     public var body: some View {
         ZStack(alignment: .bottomLeading) {
             LinearGradient(colors: [Theme.surface1, Theme.surface1, Theme.bg], startPoint: .top, endPoint: .bottom)
-            info
+            if usesFeaturedLayout { featuredInfo } else { info }
         }
+        .frame(maxWidth: .infinity)
         #if os(tvOS)
-        .frame(height: UIScreen.main.bounds.height)
+        .frame(height: HeroLayout.tvHeight(featured: featured))
         #else
-        .frame(height: height)
+        .modifier(HeroHeight(featured: usesFeaturedLayout, fills: false))
         #endif
         .accessibilityElement()
-        .accessibilityLabel("Loading")
+        .accessibilityLabel(Text("Loading", bundle: .module))
+    }
+
+    /// Eyebrow pill, title, facts, three lines of synopsis, badges, then Play and the
+    /// round buttons: where `HeroBillboard`'s featured text and actions will be.
+    private var featuredInfo: some View {
+        VStack(alignment: .leading, spacing: Metrics.space4) {
+            Capsule().fill(Theme.surface2).frame(width: 150, height: lineHeight + 14)
+            SkeletonBar(width: featuredTitle.width, height: featuredTitle.height)
+            SkeletonBar(width: 320, height: lineHeight)
+            VStack(alignment: .leading, spacing: 10) {
+                SkeletonBar(height: lineHeight)
+                SkeletonBar(height: lineHeight)
+                SkeletonBar(width: 420, height: lineHeight)
+            }
+            .frame(maxWidth: Metrics.isTV ? 760 : 460, alignment: .leading)
+            HStack(spacing: Metrics.space6) {
+                Capsule().fill(Theme.surface2).frame(width: featuredButton.width, height: featuredButton.height)
+                Circle().fill(Theme.surface2).frame(width: featuredButton.height, height: featuredButton.height)
+                Circle().fill(Theme.surface2).frame(width: featuredButton.height, height: featuredButton.height)
+            }
+            .padding(.top, Metrics.isTV ? Metrics.space8 : Metrics.space5)
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.bottom, Metrics.isTV ? Metrics.space12 : Metrics.space10)
+        .skeletonPulse()
     }
 
     private var info: some View {
@@ -322,6 +637,36 @@ public struct SkeletonHero: View {
         .padding(.bottom, Metrics.space2)
         #endif
         .skeletonPulse()
+    }
+}
+
+/// A poster grid while it loads: the grid's columns, in placeholder cards.
+public struct SkeletonGrid: View {
+    let count: Int
+    let inset: CGFloat?
+    public init(count: Int = 12, inset: CGFloat? = nil) {
+        self.count = count
+        self.inset = inset
+    }
+
+    public var body: some View {
+        PosterGrid(inset: inset) {
+            ForEach(0..<count, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: Metrics.cardCaptionGap) {
+                    RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
+                        .fill(Theme.surface1)
+                        .aspectRatio(2 / 3, contentMode: .fit)
+                    VStack(alignment: .leading, spacing: 6) {
+                        SkeletonBar(width: 140, height: Metrics.isTV ? 22 : 12)
+                        SkeletonBar(width: 60, height: Metrics.isTV ? 18 : 10)
+                    }
+                }
+            }
+        }
+        .skeletonPulse()
+        .allowsHitTesting(false)
+        .accessibilityElement()
+        .accessibilityLabel(Text("Loading", bundle: .module))
     }
 }
 
@@ -357,7 +702,7 @@ public struct SkeletonEpisodeRows: View {
         }
         .skeletonPulse()
         .accessibilityElement()
-        .accessibilityLabel("Loading")
+        .accessibilityLabel(Text("Loading", bundle: .module))
     }
 }
 
@@ -389,27 +734,41 @@ public struct EpisodeRow<Trailing: View>: View {
     }
 
     #if os(tvOS)
-    private let stillWidth: CGFloat = 320
+    private let stillWidth: CGFloat = 288
+    private let titleFont = Font.system(size: 34, weight: .semibold)
+    private let overviewFont = Font.system(size: 24)
+    private let footFont = Font.system(size: 22)
+    private let inset = Metrics.space5
+    private let gap = Metrics.space6
     #else
     private var stillWidth: CGFloat { Metrics.isPad ? 220 : 140 }
+    private let titleFont = Font.stHeadline
+    private let overviewFont = Font.stCallout
+    private let footFont = Font.stFootnote
+    private let inset = Metrics.space4
+    private let gap = Metrics.space4
     #endif
 
     public var body: some View {
-        HStack(alignment: .top, spacing: Metrics.space4) {
+        HStack(alignment: .top, spacing: gap) {
             ArtworkImage(url: stillURL, aspectRatio: 16 / 9, seed: id, cornerRadius: Metrics.radiusSM)
                 .frame(width: stillWidth)
+                #if os(tvOS)
+                // The row lifts as a whole; the still's own focus lift would pull it to the edge.
+                .hoverEffectDisabled()
+                #endif
                 .overlay(alignment: .bottom) {
                     if let progress, progress > 0 { ProgressBar(progress, track: .white.opacity(0.25)).padding(6) }
                 }
-            VStack(alignment: .leading, spacing: 2) {
-                if isCurrent { Text("Up Next").eyebrowStyle(Theme.accentText).padding(.bottom, 2) }
-                Text("\(number). \(title)").font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(2)
+            VStack(alignment: .leading, spacing: Metrics.isTV ? 6 : 2) {
+                if isCurrent { Text("Up Next", bundle: .module).eyebrowStyle(Theme.accentText).padding(.bottom, 2) }
+                Text("\(number). \(title)", bundle: .module).font(titleFont).foregroundStyle(Theme.ink).lineLimit(2)
                 if let overview, !overview.isEmpty {
-                    Text(overview).font(.stCallout).foregroundStyle(Theme.ink2).lineLimit(Metrics.isPadOrTV ? 2 : 1)
+                    Text(overview).font(overviewFont).foregroundStyle(Theme.ink2).lineLimit(Metrics.isPadOrTV ? 2 : 1)
                 }
                 if foot != nil || imdbRating != nil {
                     HStack(spacing: Metrics.space2) {
-                        if let foot { Text(foot).font(.stFootnote).foregroundStyle(Theme.ink3) }
+                        if let foot { Text(foot).font(footFont).foregroundStyle(Theme.ink3) }
                         if let imdbRating { RatingBadge(.imdb(imdbRating)) }
                     }
                     .padding(.top, imdbRating != nil ? 2 : 0)
@@ -418,18 +777,65 @@ public struct EpisodeRow<Trailing: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             trailing()
         }
-        .padding(.vertical, Metrics.space3)
-        .padding(.horizontal, Metrics.space4)
+        .padding(.vertical, Metrics.isTV ? inset : Metrics.space3)
+        .padding(.horizontal, inset)
         .contentShape(Rectangle())
     }
 }
 
 public extension Metrics {
+    static var isTV: Bool {
+        #if os(tvOS)
+        true
+        #else
+        false
+        #endif
+    }
+
+    /// The hero's buttons: a size down on the TV, so the title and text lead.
+    static var heroControlSize: ControlSize { isTV ? .regular : .large }
+
     @MainActor static var isPadOrTV: Bool {
         #if os(tvOS)
         true
         #else
         isPad
         #endif
+    }
+}
+
+
+/// A hero's title: the film's logo when there is one and it loads, else the name in the
+/// hero's type. While the logo loads, the name holds its place unseen, so the text under
+/// it doesn't jump. Light mode (iPhone and iPad) keeps the name: logos are made for dark.
+struct HeroTitle<Fallback: View>: View {
+    let title: String
+    let logoURL: URL?
+    let maxLogo: CGSize
+    @ViewBuilder let fallback: () -> Fallback
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Group {
+            if let logoURL, colorScheme == .dark {
+                AsyncImage(url: logoURL, transaction: Transaction(animation: .easeOut(duration: 0.25))) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFit()
+                            .frame(maxWidth: maxLogo.width, maxHeight: maxLogo.height, alignment: .bottomLeading)
+                            .transition(.opacity)
+                    case .failure:
+                        fallback()
+                    default:
+                        fallback().hidden()
+                    }
+                }
+            } else {
+                fallback()
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(.isHeader)
     }
 }

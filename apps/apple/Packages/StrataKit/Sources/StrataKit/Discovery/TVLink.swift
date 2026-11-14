@@ -129,10 +129,10 @@ public final class TVLinkHost {
 
     private func answer(_ data: Data?) async -> TVLink.Answer {
         guard let data, let offer = try? JSONDecoder().decode(TVLink.Offer.self, from: data) else {
-            return TVLink.Answer(error: "That wasn't a Strata request.")
+            return TVLink.Answer(error: String(localized: "That wasn't a Strata request.", bundle: .module))
         }
         guard offer.key == key else { return TVLink.Answer(wrongKey: true) }
-        guard !busy, let onOffer else { return TVLink.Answer(error: "This TV is already signing in.") }
+        guard !busy, let onOffer else { return TVLink.Answer(error: String(localized: "This TV is already signing in.", bundle: .module)) }
         busy = true
         defer { busy = false }
         do {
@@ -183,7 +183,7 @@ public enum TVLinkClient {
                 self.continuation = continuation
                 self.queue.asyncAfter(deadline: .now() + timeout) { [weak self] in
                     self?.finish(.failure(StrataError(kind: .network,
-                        message: "Couldn't find your TV. Make sure it's on the same Wi-Fi as this phone and still showing the code.")))
+                        message: String(localized: "Couldn't find your TV. Make sure it's on the same Wi-Fi as this phone and still showing the code.", bundle: .module))))
                 }
                 if let endpoints = self.endpoints { return endpoints.forEach(self.attempt) }
                 let params = NWParameters()
@@ -199,7 +199,7 @@ public enum TVLinkClient {
                 browser.stateUpdateHandler = { [weak self] state in
                     if case .failed(let error) = state { self?.finish(.failure(StrataError(kind: .network, message: error.localizedDescription))) }
                     if case .waiting(let error) = state, case .dns(let code) = error, code == DNSServiceErrorType(kDNSServiceErr_PolicyDenied) {
-                        self?.finish(.failure(StrataError(kind: .network, message: "Allow Local Network access for Strata in Settings so it can find your TV.")))
+                        self?.finish(.failure(StrataError(kind: .network, message: String(localized: "Allow Local Network access for Strata in Settings so it can find your TV.", bundle: .module))))
                     }
                 }
                 browser.start(queue: self.queue)

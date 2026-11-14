@@ -30,10 +30,11 @@ struct StrataApp: App {
         }
     }
 
+    /// Only the category here: the player activates the session when playback starts (and
+    /// gives it back when it stops), so opening the app doesn't stop music that's playing.
     private func configureAudioSession() {
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
-            try AVAudioSession.sharedInstance().setActive(true)
         } catch {
             // Playback still works; only background audio / silent-switch behaviour degrades.
         }

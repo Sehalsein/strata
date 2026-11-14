@@ -90,7 +90,7 @@ public final class TitleActions: Sendable {
     /// Play for a movie page, from the library alone (no request): shown until `play(_:)` answers.
     public static func libraryPlay(_ movie: MovieDetail) -> PlayOptions {
         guard movie.isAvailable else { return PlayOptions() }
-        return PlayOptions(choice: PlayChoice(label: movie.resumeMs != nil ? "Resume" : "Play", target: movie.target, subtitle: movie.yearText))
+        return PlayOptions(choice: PlayChoice(label: movie.resumeMs != nil ? String(localized: "Resume", bundle: .module) : String(localized: "Play", bundle: .module), target: movie.target, subtitle: movie.yearText))
     }
 
     /// Play for a show page, from the library alone: its Up Next episode when it's in the library.
@@ -103,7 +103,7 @@ public final class TitleActions: Sendable {
     /// show's Up Next takes its page, so it waits for `play(_:)`.
     public static func libraryPlay(_ card: TitleCard) -> PlayOptions {
         guard card.type == .movie, card.isAvailable else { return PlayOptions() }
-        return PlayOptions(choice: PlayChoice(label: "Play", target: .movie(card.ref), subtitle: card.yearText))
+        return PlayOptions(choice: PlayChoice(label: String(localized: "Play", bundle: .module), target: .movie(card.ref), subtitle: card.yearText))
     }
 
     /// Play for a movie page. In the library it plays from there (the sources are the
@@ -112,7 +112,7 @@ public final class TitleActions: Sendable {
         let found = await sources(movie.target, discover: !movie.isAvailable)
         var options = Self.libraryPlay(movie)
         if options.choice == nil, let first = found.first {
-            options.choice = PlayChoice(label: movie.resumeMs != nil ? "Resume" : "Play", target: movie.target, candidateId: first.id, subtitle: movie.yearText)
+            options.choice = PlayChoice(label: movie.resumeMs != nil ? String(localized: "Resume", bundle: .module) : String(localized: "Play", bundle: .module), target: movie.target, candidateId: first.id, subtitle: movie.yearText)
         }
         options.sources = found
         options.asked = true
@@ -143,7 +143,7 @@ public final class TitleActions: Sendable {
             let library = Self.libraryPlay(card)
             if library.choice != nil { return PlayOptions(choice: library.choice, asked: true) }
             let found = await sources(.movie(card.ref), discover: true)
-            return PlayOptions(choice: found.first.map { PlayChoice(label: "Play", target: .movie(card.ref), candidateId: $0.id, subtitle: card.yearText) },
+            return PlayOptions(choice: found.first.map { PlayChoice(label: String(localized: "Play", bundle: .module), target: .movie(card.ref), candidateId: $0.id, subtitle: card.yearText) },
                                asked: true, lookedFurther: true)
         case .show:
             guard let show = try? await perform({ try await $0.show(card.ref) }) else { return PlayOptions(asked: true) }
@@ -160,13 +160,13 @@ public final class TitleActions: Sendable {
     public func play(_ episode: EpisodeItem, of show: TitleRef) async -> PlayChoice? {
         let subtitle = "\(episode.code) · \(episode.name)"
         let target = episode.target(show: show)
-        if episode.isAvailable { return PlayChoice(label: "Play", target: target, subtitle: subtitle) }
+        if episode.isAvailable { return PlayChoice(label: String(localized: "Play", bundle: .module), target: target, subtitle: subtitle) }
         guard let first = await sources(target, discover: true).first else { return nil }
-        return PlayChoice(label: "Play", target: target, candidateId: first.id, subtitle: subtitle)
+        return PlayChoice(label: String(localized: "Play", bundle: .module), target: target, candidateId: first.id, subtitle: subtitle)
     }
 
     private static func upNextChoice(_ show: ShowDetail, _ next: UpNext, candidateId: String?) -> PlayChoice {
-        PlayChoice(label: "\(next.isResume ? "Resume" : "Play") \(next.code)",
+        PlayChoice(label: next.isResume ? String(localized: "Resume \(next.code)", bundle: .module) : String(localized: "Play \(next.code)", bundle: .module),
                    target: .episode(show: show.ref, season: next.season, episode: next.episode),
                    candidateId: candidateId, subtitle: next.code)
     }
@@ -207,7 +207,7 @@ public final class TitleActions: Sendable {
     }
 
     private func perform<T: Sendable>(_ work: @Sendable (StrataClient) async throws -> T) async throws -> T {
-        guard let current = await client() else { throw StrataError(kind: .network, message: "Not connected to a server.") }
+        guard let current = await client() else { throw StrataError(kind: .network, message: String(localized: "Not connected to a server.", bundle: .module)) }
         do {
             return try await work(current)
         } catch {

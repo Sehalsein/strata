@@ -1,36 +1,82 @@
 import SwiftUI
 
-/// The one primary action: Liquid Glass tinted apricot, dark label.
+/// The system's Liquid Glass button styles.
+public extension PrimitiveButtonStyle where Self == GlassButtonStyle {
+    /// The system's Liquid Glass button. On the TV, its clear variant: the default there
+    /// reads as a flat grey platter over artwork.
+    static var strataGlass: GlassButtonStyle {
+        #if os(tvOS)
+        .glass(.clear)
+        #else
+        .glass
+        #endif
+    }
+}
+
+public extension Font {
+    /// A button's label: the headline, or on the TV a small button's smaller label (the
+    /// headline there is 38pt, which a small button can't hold).
+    static func buttonLabel(_ size: ControlSize) -> Font {
+        #if os(tvOS)
+        size == .small || size == .mini ? .system(size: 26, weight: .semibold) : .stHeadline
+        #else
+        .stHeadline
+        #endif
+    }
+}
+
 public struct PlayButton: View {
     let title: String
     let systemImage: String
     /// Widens the button, like the TV app's hero (`.infinity` to fill the row).
     let maxWidth: CGFloat?
+    let size: ControlSize
     let action: () -> Void
 
-    public init(_ title: String = "Play", systemImage: String = "play.fill", maxWidth: CGFloat? = nil, action: @escaping () -> Void) {
-        self.title = title
+    /// No `title`: "Play".
+    public init(_ title: String? = nil, systemImage: String = "play.fill", maxWidth: CGFloat? = nil, size: ControlSize = Metrics.heroControlSize, action: @escaping () -> Void) {
+        self.title = title ?? String(localized: "Play", bundle: .module)
         self.systemImage = systemImage
         self.maxWidth = maxWidth
+        self.size = size
         self.action = action
     }
 
     public var body: some View {
+        #if os(tvOS)
+        // On the TV, translucent glass like the buttons beside it; focus turns it white.
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .font(.stHeadline)
-                .foregroundStyle(Theme.onAccent)
+                .font(Font.buttonLabel(size))
+                // One line: a longer label ("Resume S1 · E1") widens the button rather
+                // than wrapping inside the width it was given.
+                .lineLimit(1)
+                .fixedSize()
                 .padding(.horizontal, Metrics.space2)
-                .frame(maxWidth: maxWidth, minHeight: 30)
+                .frame(minWidth: maxWidth.flatMap { $0.isFinite ? $0 : nil }, maxWidth: maxWidth == .infinity ? .infinity : nil, minHeight: 30)
+        }
+        .buttonStyle(.strataGlass)
+        .tint(Theme.ink)
+        .controlSize(size)
+        #else
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(Font.buttonLabel(size))
+                .foregroundStyle(Theme.onAccent)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, Metrics.space2)
+                .frame(minWidth: maxWidth.flatMap { $0.isFinite ? $0 : nil }, maxWidth: maxWidth == .infinity ? .infinity : nil, minHeight: 30)
         }
         .buttonStyle(.glassProminent)
         .tint(Theme.apricot)
-        .controlSize(.large)
+        .controlSize(size)
+        #endif
     }
 }
 
-/// Full-width primary action for forms (Continue, Sign In). Apricot glass when
-/// enabled; the label switches to `ink-3` when disabled so it stays legible.
+/// Full-width primary action for forms (Continue, Sign In). Prominent Liquid Glass in
+/// the neutral accent when enabled; the label switches to `ink-3` when disabled so it stays legible.
 public struct PrimaryButton: View {
     let title: String
     let isLoading: Bool
@@ -63,12 +109,14 @@ public struct GlassButton: View {
     let title: String
     let systemImage: String?
     let iconOnly: Bool
+    let size: ControlSize
     let action: () -> Void
 
-    public init(_ title: String, systemImage: String? = nil, iconOnly: Bool = false, action: @escaping () -> Void) {
+    public init(_ title: String, systemImage: String? = nil, iconOnly: Bool = false, size: ControlSize = Metrics.heroControlSize, action: @escaping () -> Void) {
         self.title = title
         self.systemImage = systemImage
         self.iconOnly = iconOnly
+        self.size = size
         self.action = action
     }
 
@@ -83,12 +131,13 @@ public struct GlassButton: View {
                     Text(title)
                 }
             }
-            .font(.stHeadline)
+            .font(Font.buttonLabel(size))
             .frame(minHeight: 30)
         }
-        .buttonStyle(.glass)
-        .controlSize(.large)
-        // Glass labels take the tint: ink, not the app's accent (apricot is for Play only).
+        .buttonStyle(.strataGlass)
+        .controlSize(size)
+        .buttonBorderShape(iconOnly ? .circle : .automatic)
+        // Glass labels take the tint: ink, so the label reads on clear glass.
         // The system still inverts it for the tvOS focus state.
         .tint(Theme.ink)
     }
@@ -156,12 +205,12 @@ public enum Availability: Equatable, Sendable {
 
     public var title: String {
         switch self {
-        case .ready: "Ready"
-        case .instant: "Instant"
-        case .downloading(let p): "Downloading \(Int(p * 100))%"
-        case .download: "Download"
-        case .unavailable: "Not in your library"
-        case .watched: "Watched"
+        case .ready: String(localized: "Ready", bundle: .module)
+        case .instant: String(localized: "Instant", bundle: .module)
+        case .downloading(let p): String(localized: "Downloading \(Int(p * 100))%", bundle: .module)
+        case .download: String(localized: "Download", bundle: .module)
+        case .unavailable: String(localized: "Not in your library", bundle: .module)
+        case .watched: String(localized: "Watched", bundle: .module)
         }
     }
 
@@ -230,29 +279,43 @@ public struct ProfileAvatar: View {
     }
 }
 
-/// The app's mark: three bands that stack into a play triangle.
+/// The app's mark: three bands that stack into a play triangle, each one the system's
+/// Liquid Glass tinted with the logo's sand, orange and rust, like the app icon (the one
+/// place the orange stays: the interface itself is neutral).
 public struct StrataMark: View {
     public init() {}
 
+    private static let tints: [Color] = [Color(hex: 0xF7C873), Color(hex: 0xF39256), Color(hex: 0xD2603F)]
+
     public var body: some View {
-        Canvas { ctx, size in
-            // Same geometry as the app icon, normalised to the mark's bounding box.
-            let s = min(size.width / 460, size.height / 500)
-            func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: (x - 300) * s, y: (y - 262) * s) }
-            let bands: [([CGPoint], Color)] = [
-                ([p(300, 262), p(552, 399), p(300, 399)], Theme.sand),
-                ([p(300, 443), p(633, 443), p(760, 512), p(633, 581), p(300, 581)], Theme.apricot),
-                ([p(300, 625), p(552, 625), p(300, 762)], Theme.rust),
-            ]
-            for (points, color) in bands {
-                var path = Path()
-                path.addLines(points)
-                path.closeSubpath()
-                ctx.fill(path, with: .color(color))
-                ctx.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 16 * s, lineJoin: .round))
+        ZStack {
+            ForEach(0..<3, id: \.self) { band in
+                Color.clear
+                    .glassEffect(.regular.tint(Self.tints[band]), in: MarkBand(band: band))
             }
         }
         .aspectRatio(460 / 500, contentMode: .fit)
         .accessibilityHidden(true)
+    }
+}
+
+/// One band of the mark, in the app icon's geometry (460 × 500 design units from
+/// (300, 262)) fitted to the frame, with the icon's rounded corners.
+private struct MarkBand: Shape {
+    let band: Int
+
+    func path(in rect: CGRect) -> Path {
+        let s = min(rect.width / 460, rect.height / 500)
+        let origin = CGPoint(x: rect.midX - 230 * s, y: rect.midY - 250 * s)
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: origin.x + (x - 300) * s, y: origin.y + (y - 262) * s) }
+        let points = [
+            [p(300, 262), p(552, 399), p(300, 399)],
+            [p(300, 443), p(633, 443), p(760, 512), p(633, 581), p(300, 581)],
+            [p(300, 625), p(552, 625), p(300, 762)],
+        ][band]
+        var path = Path()
+        path.addLines(points)
+        path.closeSubpath()
+        return path.strokedPath(StrokeStyle(lineWidth: 16 * s, lineJoin: .round)).union(path)
     }
 }

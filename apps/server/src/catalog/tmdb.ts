@@ -51,6 +51,12 @@ export interface TmdbCredits {
   cast: { id: number; name: string; character?: string; profile_path?: string | null; order?: number }[];
   crew: { id: number; name: string; job: string; department?: string; profile_path?: string | null }[];
 }
+/** A title's logo (its name as artwork), from `images`. */
+export interface TmdbLogo {
+  file_path: string;
+  iso_639_1?: string | null;
+  vote_average?: number;
+}
 export interface TmdbMovie {
   id: number;
   imdb_id?: string | null;
@@ -70,6 +76,8 @@ export interface TmdbMovie {
   release_dates?: { results: { iso_3166_1: string; release_dates: { certification: string; type: number }[] }[] };
   external_ids?: { imdb_id?: string | null };
   videos?: { results: { key: string; site: string; type: string; official?: boolean; name: string }[] };
+  /** With `images` appended: logos in the server's language, English and no language. */
+  images?: { logos?: TmdbLogo[] };
 }
 export interface TmdbShow {
   id: number;
@@ -94,6 +102,8 @@ export interface TmdbShow {
   content_ratings?: { results: { iso_3166_1: string; rating: string }[] };
   external_ids?: { imdb_id?: string | null; tvdb_id?: number | null };
   videos?: TmdbMovie["videos"];
+  /** With `images` appended: logos in the server's language, English and no language. */
+  images?: { logos?: TmdbLogo[] };
 }
 export interface TmdbPersonCredit extends TmdbListItem {
   media_type: "movie" | "tv";
@@ -146,6 +156,11 @@ export class Tmdb {
     private readonly fetchImpl: typeof fetch = globalFetch,
   ) {}
 
+  /** The language titles are fetched in ("en-US"). */
+  get language(): string {
+    return this.getLanguage();
+  }
+
   get configured(): boolean {
     return !!this.getKey();
   }
@@ -158,11 +173,16 @@ export class Tmdb {
 
   movie(id: number) {
     assertTmdbId(id);
-    return this.get<TmdbMovie>(`/movie/${id}`, { append_to_response: "credits,recommendations,release_dates,external_ids,videos" }, 3 * DAY);
+    return this.get<TmdbMovie>(`/movie/${id}`, { append_to_response: "credits,recommendations,release_dates,external_ids,videos,images", include_image_language: this.imageLanguages() }, 3 * DAY);
   }
   show(id: number) {
     assertTmdbId(id);
-    return this.get<TmdbShow>(`/tv/${id}`, { append_to_response: "credits,recommendations,content_ratings,external_ids,videos" }, DAY);
+    return this.get<TmdbShow>(`/tv/${id}`, { append_to_response: "credits,recommendations,content_ratings,external_ids,videos,images", include_image_language: this.imageLanguages() }, DAY);
+  }
+  /** Which logos `images` brings: the server's language, then English, then textless. */
+  private imageLanguages() {
+    const lang = this.getLanguage().split("-")[0]?.toLowerCase() || "en";
+    return [...new Set([lang, "en", "null"])].join(",");
   }
   season(showId: number, season: number) {
     assertTmdbId(showId);
@@ -263,6 +283,21 @@ const normalizeQuery = (query: string) => query.trim().replace(/\s+/g, " ").toLo
 const isBearer = (key: string) => key.startsWith("eyJ");
 
 /** TMDB's image at `size`; a full URL (an AniList title's artwork in media_items) is kept as is. */
+/**
+ * The title's logo to show in place of its name: one in the server's language first,
+ * then English, then one with no language, the best rated of each. PNGs only (the apps
+ * can't draw TMDB's SVGs). Null when TMDB has none, and the apps show the name.
+ */
+export function logoUrl(images: { logos?: TmdbLogo[] } | undefined, language: string): string | null {
+  const logos = (images?.logos ?? []).filter((l) => l.file_path?.toLowerCase().endsWith(".png"));
+  if (!logos.length) return null;
+  const lang = language.split("-")[0]?.toLowerCase() || "en";
+  const rank = (l: TmdbLogo) => (l.iso_639_1 === lang ? 0 : l.iso_639_1 === "en" ? 1 : l.iso_639_1 == null ? 2 : 3);
+  const best = [...logos].sort((a, b) => rank(a) - rank(b) || (b.vote_average ?? 0) - (a.vote_average ?? 0))[0]!;
+  if (rank(best) === 3) return null;
+  return imageUrl(best.file_path, "w500");
+}
+
 export function imageUrl(path: string | null | undefined, size: "w185" | "w342" | "w500" | "w780" | "w1280" | "original" = "w500") {
   if (!path) return null;
   return /^https?:\/\//.test(path) ? path : `https://image.tmdb.org/t/p/${size}${path}`;

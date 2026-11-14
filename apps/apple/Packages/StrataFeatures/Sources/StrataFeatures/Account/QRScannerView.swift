@@ -79,19 +79,19 @@ struct QRScannerSheet: View {
                             .allowsHitTesting(false)
                     }
                     .frame(maxHeight: 420)
-                    Text("Point the camera at the QR code in your server's dashboard: someone's sign-in code (Members › Sign-in code), or the server's address.")
+                    Text("Point the camera at the QR code in your server's dashboard: someone's sign-in code (Members › Sign-in code), or the server's address.", bundle: .module)
                         .font(.stCallout).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
                 } else if asking {
                     ProgressView().frame(maxHeight: 420)
                 } else {
                     Image(systemName: "camera.metering.unknown").font(.system(size: 44)).foregroundStyle(Theme.ink3)
                     Text(DataScannerViewController.isSupported
-                         ? "Strata can't use the camera. Allow it in Settings › Strata, or paste the link below."
-                         : "This device can't scan codes. Paste the link instead.")
+                         ? String(localized: "Strata can't use the camera. Allow it in Settings › Strata, or paste the link below.", bundle: .module)
+                         : String(localized: "This device can't scan codes. Paste the link instead.", bundle: .module))
                         .font(.stCallout).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
                 }
                 VStack(alignment: .leading, spacing: Metrics.space2) {
-                    TextField("Or paste a link", text: $pasted, prompt: Text("Or paste a sign-in link or address"))
+                    TextField(String(localized: "Or paste a link", bundle: .module), text: $pasted, prompt: Text("Or paste a sign-in link or address", bundle: .module))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
@@ -99,7 +99,7 @@ struct QRScannerSheet: View {
                         .onSubmit(usePasted)
                         .modifier(FieldStyle())
                     if !pasted.trimmingCharacters(in: .whitespaces).isEmpty {
-                        PrimaryButton("Continue", action: usePasted)
+                        PrimaryButton(String(localized: "Continue", bundle: .module), action: usePasted)
                     }
                 }
                 Spacer(minLength: 0)
@@ -112,10 +112,10 @@ struct QRScannerSheet: View {
                 canScan = Self.scannerReady
                 asking = false
             }
-            .navigationTitle("Scan QR Code")
+            .navigationTitle(Text("Scan QR Code", bundle: .module))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
             }
         }
     }

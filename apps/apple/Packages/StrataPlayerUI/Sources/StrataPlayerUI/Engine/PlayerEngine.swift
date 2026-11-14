@@ -4,6 +4,9 @@ import Combine
 import Observation
 import StrataKit
 import StrataRemux
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// What the player shows for the current title (Now Playing, chrome, Live Activity).
 public struct PlaybackMeta: Sendable, Hashable {
@@ -42,8 +45,52 @@ public final class PlayerEngine {
     }
 
     public private(set) var status: Status = .idle
+    /// Set while a copy that wouldn't open is being passed over for another, to say so.
+    public private(set) var fallbackNote: String?
+    /// What a start is doing right now, for the loading screen. Only the steps this start
+    /// actually goes through are set.
+    public private(set) var loadingStep: LoadingStep?
+
+    public enum LoadingStep: Equatable, Sendable {
+        /// Asking the server what to play.
+        case finding
+        /// Reading the file's tracks for the server (the first time a file plays).
+        case reading
+        /// Opening the file over the network to play it on this device.
+        case connecting
+        /// The server is repackaging it; waiting for the stream's first part.
+        case preparingStream
+        /// Stream open; the player is buffering its first seconds.
+        case buffering
+
+        public var label: String {
+            switch self {
+            case .finding: String(localized: "Asking the server for the best copy…", bundle: .module)
+            case .reading: String(localized: "Checking the file's video and audio…", bundle: .module)
+            case .connecting: String(localized: "Connecting to the file…", bundle: .module)
+            case .preparingStream: String(localized: "The server is getting the stream ready…", bundle: .module)
+            case .buffering: String(localized: "Starting playback…", bundle: .module)
+            }
+        }
+
+        /// Said instead once the step has run long.
+        public var slowLabel: String {
+            switch self {
+            case .finding: String(localized: "The server is still looking for a copy. This can take a moment.", bundle: .module)
+            case .reading: String(localized: "Still checking the file. Large files take longer.", bundle: .module)
+            case .connecting: String(localized: "Still connecting to the file. The server holding it is slow to answer.", bundle: .module)
+            case .preparingStream: String(localized: "The server is still getting the stream ready. This can take a moment.", bundle: .module)
+            case .buffering: String(localized: "Still buffering. The connection is slow right now.", bundle: .module)
+            }
+        }
+    }
     /// Media time, seconds.
-    public private(set) var position: TimeInterval = 0
+    public private(set) var position: TimeInterval = 0 {
+        didSet {
+            updateActiveCues()
+            updateCurrentChapter()
+        }
+    }
     /// Full title duration from the server (HLS EVENT playlists grow, so the item's own duration isn't used).
     public private(set) var duration: TimeInterval = 0
     /// AVPlayer is waiting for data (initial load, stall, or a seek restart).
@@ -73,22 +120,23 @@ public final class PlayerEngine {
     public var activeSubtitle: SubtitleTrack? { subtitleTracks.first { $0.id == activeSubtitleId } }
     public private(set) var isLoadingSubtitles = false
     public private(set) var subtitleError: String?
-    /// Parsed cues of the active track, in media time.
-    public private(set) var subtitleCues: [VTTCue] = []
+    /// Parsed cues of the active track, in media time, sorted by start.
+    public private(set) var subtitleCues: [VTTCue] = [] {
+        didSet {
+            longestCue = subtitleCues.reduce(0) { max($0, $1.end - $1.start) }
+            activeCueIndices = nil
+            updateActiveCues()
+        }
+    }
     /// Text to draw right now (overlapping cues joined by a newline), nil when nothing shows.
-    public var activeCueText: String? {
-        guard !subtitleCues.isEmpty else { return nil }
-        let t = position
-        let texts = subtitleCues.lazy.filter { t >= $0.start && t <= $0.end && !$0.text.isEmpty }.map(\.text)
-        let joined = texts.joined(separator: "\n")
-        return joined.isEmpty ? nil : joined
-    }
+    /// Stored, and changed only when the cues showing change, so the overlay redraws then.
+    public private(set) var activeCueText: String?
     /// Picture subtitles to draw right now.
-    public var activeCueImages: [SubtitleImage] {
-        guard !subtitleCues.isEmpty else { return [] }
-        let t = position
-        return subtitleCues.compactMap { t >= $0.start && t <= $0.end ? $0.image : nil }
-    }
+    public private(set) var activeCueImages: [SubtitleImage] = []
+    /// Which cues are showing (indices into `subtitleCues`), to tell when that changes.
+    @ObservationIgnored private var activeCueIndices: [Int]?
+    /// The longest cue: how far back from a time a cue can start and still show then.
+    @ObservationIgnored private var longestCue: TimeInterval = 0
     /// The video's frame size (device mode), which picture subtitles are placed against.
     public var videoSize: CGSize? {
         guard let format = remux?.videoFormat, format.width > 0, format.height > 0 else { return nil }
@@ -107,8 +155,9 @@ public final class PlayerEngine {
         return decoded
     }
 
-    public private(set) var chapters: [Chapter] = []
-    public var currentChapter: Chapter? { chapters.last { $0.start <= position } }
+    public private(set) var chapters: [Chapter] = [] { didSet { updateCurrentChapter() } }
+    /// The chapter playing now; stored, so views reading it redraw only when it changes.
+    public private(set) var currentChapter: Chapter?
     /// What Up Next should offer (episodes only).
     public private(set) var nextEpisode: NextEpisode?
     public var nextTarget: PlaybackTarget? {
@@ -125,7 +174,7 @@ public final class PlayerEngine {
     public enum SleepOption: Int, CaseIterable, Identifiable, Sendable {
         case off = 0, m15 = 15, m30 = 30, m45 = 45, m60 = 60
         public var id: Int { rawValue }
-        public var label: String { self == .off ? "Off" : "\(rawValue) min" }
+        public var label: String { self == .off ? String(localized: "Off", bundle: .module) : String(localized: "\(rawValue) min", bundle: .module) }
     }
 
     /// `.resizeAspect` (default) letterboxes; `.resizeAspectFill` crops to fill. Persisted.
@@ -150,6 +199,8 @@ public final class PlayerEngine {
     private var remux: RemuxSession?
     /// Lines read so far from each embedded text track, by stream index, in media time.
     private var embeddedCues: [Int: [VTTCue]] = [:]
+    /// The lines in `embeddedCues`, to drop ones read again.
+    @ObservationIgnored private var embeddedCueKeys: [Int: Set<CueKey>] = [:]
     /// The stream's own subtitle tracks (embedded text tracks, as WebVTT), which the player
     /// draws itself: in Picture in Picture and on AirPlay too.
     private var nativeSubtitles: AVMediaSelectionGroup?
@@ -166,10 +217,23 @@ public final class PlayerEngine {
     private var subtitleTask: Task<Void, Never>?
     /// Bumped on every new load/unload; stale async work checks it before touching state.
     private var generation = 0
+    /// Bumped by every load and restart: only the newest may install its item.
+    @ObservationIgnored private var startToken = 0
+    /// Bumped as soon as `load` is called; see `unload(ifCurrent:)`.
+    public private(set) var loadToken = 0
+    /// Playing when an audio interruption (a call, an alarm) began.
+    @ObservationIgnored private var playingBeforeInterruption = false
+    /// Playback was asked to run (and not paused since), whatever the player is doing now.
+    @ObservationIgnored private var wantsToPlay = false
+    @ObservationIgnored private var systemObservers: [NSObjectProtocol] = []
     /// Media time being restarted to; the timeline isn't trusted until the new item plays.
     private var restartTarget: TimeInterval?
     /// Files whose media info this load already read for the server (see `probe`).
     private var probedFiles = Set<Int>()
+    /// The file last read for the server (`probe`), so a failed read can rule it out.
+    private var lastProbedFile: Int?
+    /// Other copies tried after the first one failed on this device, at most.
+    private static let maxFallbacks = 3
     /// Device mode: waits out a stall, then reopens the stream where it stopped.
     private var stallTask: Task<Void, Never>?
     /// Times the device stream was reopened after a stall or failure, and where the last
@@ -211,6 +275,7 @@ public final class PlayerEngine {
         } else {
             videoGravity = .resizeAspect
         }
+        observeSystem()
     }
 
     public func configure(client: StrataClient, nowPlaying: NowPlayingBridge? = nil) {
@@ -224,12 +289,16 @@ public final class PlayerEngine {
     /// `candidateId` picks a source the server listed (else the server's choice). Returns once
     /// playback has started, failed, or the load was superseded (`unload()` / another `load`).
     public func load(target: PlaybackTarget, meta: PlaybackMeta, candidateId: String? = nil, startMs: Int? = nil) async {
-        guard let client else { status = .failed("Not connected to a server."); return }
+        loadToken += 1
+        guard let client else { status = .failed(String(localized: "Not connected to a server.", bundle: .module)); return }
         await teardown(reportFinal: true)
         generation += 1
         let gen = generation
+        startToken += 1
+        let token = startToken
         skipNativeSubtitles = false
         probedFiles = []
+        lastProbedFile = nil
         recoveries = 0
         self.target = target
         self.meta = meta
@@ -237,29 +306,21 @@ public final class PlayerEngine {
         position = startMs.map { TimeInterval($0) / 1000 } ?? 0
         nowPlaying?.update(meta: meta, position: position, duration: duration, rate: 0)
 
+        fallbackNote = nil
+        loadingStep = nil
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                let memory = SourceMemory.shared
-                // A source you picked before for this (or, for a show, one like it).
-                let remembered = candidateId == nil ? await self.rememberedSource(for: target, client: client) : nil
-                var res: PlayResponse
-                do {
-                    res = try await self.requestPlay(client: client, target: target, candidateId: candidateId ?? remembered, startMs: startMs, audioIndex: nil, gen: gen)
-                } catch let error as StrataError where remembered != nil && error.kind == .http && [404, 410].contains(error.status ?? 0) {
-                    // That file is gone: let the server choose again.
-                    memory.forget(target, server: client.baseURL)
-                    res = try await self.requestPlay(client: client, target: target, candidateId: nil, startMs: startMs, audioIndex: nil, gen: gen)
-                }
-                try await self.start(res, gen: gen, newTitle: true, autoplay: true)
-                if candidateId != nil { memory.remember(res.candidate, for: target, server: client.baseURL) }
+                try await self.loadWithFallback(client: client, target: target, candidateId: candidateId, startMs: startMs, gen: gen, token: token)
             } catch let failure as DeviceFailure {
                 guard gen == self.generation else { return }
                 Log.player.warning("device play failed: \(failure.message, privacy: .public)")
+                self.fallbackNote = nil
                 self.status = .failed(failure.message)
             } catch {
                 guard gen == self.generation, !(error is CancellationError) else { return }
                 let e = StrataError.wrap(error)
+                self.fallbackNote = nil
                 if e.kind != .cancelled { self.status = .failed(e.message) }
             }
         }
@@ -270,9 +331,12 @@ public final class PlayerEngine {
     /// Plays a downloaded file (`res` from `DownloadItem.playResponse`) without the server:
     /// the same engine as a stream, reading the file from disk.
     public func load(offline res: PlayResponse, target: PlaybackTarget, meta: PlaybackMeta) async {
+        loadToken += 1
         await teardown(reportFinal: true)
         generation += 1
         let gen = generation
+        startToken += 1
+        let token = startToken
         skipNativeSubtitles = false
         probedFiles = []
         recoveries = 0
@@ -284,7 +348,7 @@ public final class PlayerEngine {
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.start(res, gen: gen, newTitle: true, autoplay: true)
+                try await self.start(res, gen: gen, token: token, newTitle: true, autoplay: true)
             } catch let failure as DeviceFailure {
                 guard gen == self.generation else { return }
                 self.status = .failed(failure.message)
@@ -295,6 +359,95 @@ public final class PlayerEngine {
         }
         loadTask = task
         await task.value
+    }
+
+    /// Plays the server's choice (or `candidateId`, or the copy you chose before). When the
+    /// server's choice won't open on this device (its link doesn't connect, the file can't be
+    /// read or decoded here), the next copy the server lists that's ready to play is tried,
+    /// up to `maxFallbacks` of them; the one that plays is remembered for next time. A copy
+    /// you picked yourself isn't swapped: its failure is shown, with Choose Source.
+    private func loadWithFallback(client: StrataClient, target: PlaybackTarget, candidateId: String?, startMs: Int?, gen: Int, token: Int) async throws {
+        let memory = SourceMemory.shared
+        // A source you picked before for this (or, for a show, one like it).
+        let remembered = candidateId == nil ? await rememberedSource(for: target, client: client) : nil
+        var pick = candidateId ?? remembered
+        var failedCandidates = Set<String>()
+        var failedFiles = Set<Int>()
+        var others: [Candidate]?
+        var attempt = 0
+        while true {
+            try Task.checkCancellation()
+            var res: PlayResponse?
+            do {
+                do {
+                    res = try await requestPlay(client: client, target: target, candidateId: pick, startMs: startMs, audioIndex: nil, gen: gen)
+                } catch let error as StrataError where attempt == 0 && pick == remembered && remembered != nil && error.kind == .http && [404, 410].contains(error.status ?? 0) {
+                    // That file is gone: let the server choose again.
+                    memory.forget(target, server: client.baseURL)
+                    pick = nil
+                    res = try await requestPlay(client: client, target: target, candidateId: nil, startMs: startMs, audioIndex: nil, gen: gen)
+                }
+                try await start(res!, gen: gen, token: token, newTitle: true, autoplay: true)
+                fallbackNote = nil
+                loadingStep = nil
+                // Your pick, or a copy that played after others didn't: start with it next time.
+                if candidateId != nil || attempt > 0 { memory.remember(res!.candidate, for: target, server: client.baseURL) }
+                return
+            } catch let failure as DeviceFailure {
+                guard gen == generation else { throw CancellationError() }
+                guard candidateId == nil else { throw failure }
+                guard attempt < Self.maxFallbacks else {
+                    throw DeviceFailure(message: String(localized: "Tried \(attempt + 1) copies and none would play here. Choose another source.", bundle: .module))
+                }
+                if let res {
+                    failedCandidates.insert(res.candidate.id)
+                    failedFiles.insert(res.candidate.fileId)
+                } else if let lastProbedFile {
+                    failedFiles.insert(lastProbedFile)
+                }
+                if let pick { failedCandidates.insert(pick) }
+                if pick == remembered, remembered != nil { memory.forget(target, server: client.baseURL) }
+                if others == nil { others = (try? await client.sources(target, discover: false)) ?? [] }
+                guard gen == generation else { throw CancellationError() }
+                // Ready now or shortly; not one the server would have to download first.
+                guard let next = others?.first(where: { !failedCandidates.contains($0.id) && !failedFiles.contains($0.fileId) && $0.readiness != .download }) else {
+                    // Say how far it got, so "Pick another source" isn't the first you hear of it.
+                    if attempt > 0 { throw DeviceFailure(message: String(localized: "Tried \(attempt + 1) copies and none would play here. Choose another source.", bundle: .module)) }
+                    throw failure
+                }
+                Log.player.warning("copy failed (\(failure.message, privacy: .public)); trying \(next.id, privacy: .public)")
+                attempt += 1
+                pick = next.id
+                fallbackNote = Self.fallbackNote(after: failure, next: next, attempt: attempt)
+                status = .loading
+            }
+        }
+    }
+
+    /// Why a copy's link wouldn't open. When its host doesn't answer, says so: that's the
+    /// copy's own server (TorBox's, say), not your Strata server.
+    nonisolated static func openFailure(_ error: Error) -> String {
+        let ns = error as NSError
+        let unreachable = ns.domain == NSURLErrorDomain && [NSURLErrorCannotConnectToHost, NSURLErrorTimedOut,
+            NSURLErrorCannotFindHost, NSURLErrorNetworkConnectionLost, NSURLErrorDNSLookupFailed].contains(ns.code)
+        if unreachable || error.localizedDescription.lowercased().contains("connect") {
+            return String(localized: "This copy's server didn't answer. Choose another source.", bundle: .module)
+        }
+        return String(localized: "This copy couldn't be opened (\(error.localizedDescription)). Choose another source.", bundle: .module)
+    }
+
+    /// What the player says while it switches: why the last copy was passed over, and
+    /// which one it's trying ("That copy couldn't be reached. Switching to 1080p · WEB (2 of 4)…").
+    private static func fallbackNote(after failure: DeviceFailure, next: Candidate, attempt: Int) -> String {
+        let text = failure.message.lowercased()
+        let why = text.contains("connect") || text.contains("timed out") || text.contains("network")
+            ? String(localized: "That copy couldn't be reached.", bundle: .module)
+            : text.contains("can't play on this device") || text.contains("dolby vision") || text.contains("hdr")
+            ? String(localized: "That copy won't play on this device.", bundle: .module)
+            : String(localized: "That copy wouldn't open.", bundle: .module)
+        let label = [next.resolutionLabel, next.source?.uppercased()].compactMap { $0 }.joined(separator: " · ")
+        let what = label.isEmpty ? String(localized: "another source", bundle: .module) : label
+        return String(localized: "\(why) Switching to \(what) (try \(attempt + 1) of \(maxFallbacks + 1))…", bundle: .module)
     }
 
     /// The source you chose for `target` before, or for a show the episode's copy most like
@@ -320,9 +473,14 @@ public final class PlayerEngine {
         var candidateId = candidateId
         while true {
             try Task.checkCancellation()
+            loadingStep = .finding
             switch try await client.play(target, candidateId: candidateId, startMs: startMs, audioStreamIndex: audioIndex) {
             case .started(let res):
-                guard gen == generation else { throw CancellationError() }
+                guard gen == generation, !Task.isCancelled else {
+                    // Started for nothing: don't leave it running on the server.
+                    if res.sessionId != session?.sessionId { stopSession(res.sessionId) }
+                    throw CancellationError()
+                }
                 return res
             case .preparing(let progress):
                 guard gen == generation else { throw CancellationError() }
@@ -341,28 +499,39 @@ public final class PlayerEngine {
     /// first time it plays it: read the header from the link and send it. Once per file per
     /// load, so a server that keeps asking can't loop forever.
     private func probe(fileId: Int, url: URL, client: StrataClient, gen: Int) async throws {
+        lastProbedFile = fileId
         guard probedFiles.insert(fileId).inserted else {
-            throw DeviceFailure(message: "The server couldn't use what this file holds. Pick another source.")
+            throw DeviceFailure(message: String(localized: "The server couldn't use what this file holds. Pick another source.", bundle: .module))
         }
         status = .loading
         let info: MediaInfo
         do {
             // MediaProbe reads on its own queue; the main actor only waits.
+            loadingStep = .reading
             info = try await MediaProbe.probe(url: url)
         } catch {
             guard gen == generation, !(error is CancellationError) else { throw CancellationError() }
             Log.player.warning("probe failed: \(error.localizedDescription, privacy: .public)")
-            throw DeviceFailure(message: "This file couldn't be read (\(error.localizedDescription)). Pick another source.")
+            throw DeviceFailure(message: String(localized: "This file couldn't be read (\(error.localizedDescription)). Pick another source.", bundle: .module))
         }
         guard gen == generation else { throw CancellationError() }
         try await client.reportProbe(fileId: fileId, info: info)
         guard gen == generation else { throw CancellationError() }
     }
 
+    /// Whether a start (`gen`, `token`) is still the one wanted: a newer load or restart
+    /// supersedes it, and it must never install its item.
+    private func isCurrent(_ gen: Int, _ token: Int) -> Bool {
+        gen == generation && token == startToken && !Task.isCancelled
+    }
+
     /// Installs a play response as the current item. `newTitle` resets tracks/subtitles;
     /// otherwise (seek restart / audio switch) the subtitle selection and cues carry over.
-    private func start(_ res: PlayResponse, gen: Int, newTitle: Bool, autoplay: Bool) async throws {
-        guard gen == generation else { throw CancellationError() }
+    private func start(_ res: PlayResponse, gen: Int, token: Int, newTitle: Bool, autoplay: Bool) async throws {
+        // A server session this start opened but never installed is stopped, however it ends.
+        var installed = false
+        defer { if !installed, res.sessionId != session?.sessionId { stopSession(res.sessionId) } }
+        guard isCurrent(gen, token) else { throw CancellationError() }
         let previous = session
         let previousRemux = remux
         // Device mode: open the file and repackage it here before anything changes on screen.
@@ -372,6 +541,7 @@ public final class PlayerEngine {
             let local = makeRemux(res)
             do {
                 // Built from the resume point, so the player begins there.
+                loadingStep = .connecting
                 url = try await local.start(at: TimeInterval(res.seekToMs) / 1000)
                 #if os(iOS)
                 // An Apple TV on AirPlay fetches the stream itself: it gets the Wi-Fi address.
@@ -379,10 +549,10 @@ public final class PlayerEngine {
                 #endif
             } catch {
                 local.stop()
-                guard gen == generation else { throw CancellationError() }
-                throw DeviceFailure(message: "This file couldn't be opened (\(error.localizedDescription)). Pick another source.")
+                guard isCurrent(gen, token) else { throw CancellationError() }
+                throw DeviceFailure(message: Self.openFailure(error))
             }
-            guard gen == generation else { local.stop(); throw CancellationError() }
+            guard isCurrent(gen, token) else { local.stop(); throw CancellationError() }
             newRemux = local
         }
         removeObservers()
@@ -390,6 +560,9 @@ public final class PlayerEngine {
         stallTask = nil
 
         session = res
+        installed = true
+        // The old server session ends now, so no later cancel or failure can leave it running.
+        if let previous, previous.sessionId != res.sessionId { stopSession(previous.sessionId) }
         timeline = MediaTimeline(res)
         duration = res.duration
         audioTracks = res.audioTracks
@@ -404,58 +577,88 @@ public final class PlayerEngine {
             subtitleError = nil
         }
 
-        if res.mode.isHLS { try await waitForPlaylist(res.url, gen: gen) }
-        let item = AVPlayerItem(url: url)
-        // Start buffering a little ahead; long forward buffers waste server work on a remux.
-        // On the device a minute ahead rides out a slow patch in the network.
-        switch res.mode {
-        case .remux, .transcode: item.preferredForwardBufferDuration = 30
-        case .device: item.preferredForwardBufferDuration = 60
-        case .direct: item.preferredForwardBufferDuration = 0
+        #if os(tvOS)
+        // The TV's mode switch takes seconds: ask for it as soon as the format is known.
+        var criteriaTask: Task<Void, Never>?
+        if newTitle || displayCriteria == nil, let format = newRemux?.videoFormat {
+            setDisplayCriteria(DisplayMatch.criteria(for: format))
         }
+        #endif
+
+        if res.mode.isHLS {
+            do {
+                loadingStep = .preparingStream
+                try await waitForPlaylist(res.url, gen: gen)
+            } catch {
+                newRemux?.stop()
+                throw error
+            }
+        }
+        guard isCurrent(gen, token) else { newRemux?.stop(); throw CancellationError() }
+        let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = Self.forwardBuffer(res)
+        #if os(tvOS)
+        if newTitle || displayCriteria == nil, newRemux == nil {
+            let asset = item.asset
+            let direct = res.mode == .direct
+            criteriaTask = Task { [weak self] in
+                let criteria = await DisplayMatch.criteria(loading: asset, direct: direct)
+                guard let self, gen == self.generation, token == self.startToken, let criteria else { return }
+                self.setDisplayCriteria(criteria)
+            }
+        }
+        #endif
         player.replaceCurrentItem(with: item)
         attachObservers(item)
         isBuffering = true
         remux = newRemux
-        if newTitle || res.mode != .device { embeddedCues = [:] }
+        if newTitle || res.mode != .device { embeddedCues = [:]; embeddedCueKeys = [:] }
         if previousRemux !== newRemux { previousRemux?.stop() }
-        if let previous, previous.sessionId != res.sessionId { stopSession(previous.sessionId) }
 
         do {
+            loadingStep = .buffering
             try await waitUntilReady(item)
         } catch let error as StrataError where res.mode == .device {
-            guard gen == generation else { throw CancellationError() }
+            guard isCurrent(gen, token) else { throw CancellationError() }
             if !skipNativeSubtitles, newRemux?.subtitleRenditions.isEmpty == false {
                 // Try once more without the subtitle tracks before giving up on the device.
                 Log.player.warning("stream with subtitle tracks refused (\(error.message, privacy: .public)); trying without")
                 skipNativeSubtitles = true
-                return try await start(res, gen: gen, newTitle: newTitle, autoplay: autoplay)
+                return try await start(res, gen: gen, token: token, newTitle: newTitle, autoplay: autoplay)
             }
             // AVPlayer refused what the device made (a codec it can't decode, say).
-            throw DeviceFailure(message: "This file can't play on this device (\(error.message)). Pick another source.")
+            throw DeviceFailure(message: String(localized: "This file can't play on this device (\(error.message)). Pick another source.", bundle: .module))
+        } catch let error as StrataError where newTitle {
+            // Played from its link or the server's stream: the copy wouldn't open (its host
+            // didn't answer, say). A failure like this is the copy's, so another may play.
+            guard isCurrent(gen, token) else { throw CancellationError() }
+            // Not the app's "can't reach your Strata server": it's the copy's own host.
+            throw DeviceFailure(message: error.kind == .network && error.message.lowercased().contains("connect")
+                ? String(localized: "This copy's server didn't answer. Choose another source.", bundle: .module)
+                : String(localized: "This copy couldn't be opened (\(error.message)). Choose another source.", bundle: .module))
         }
-        guard gen == generation else { throw CancellationError() }
-        #if os(tvOS)
-        if newTitle || displayCriteria == nil {
-            if let format = newRemux?.videoFormat {
-                displayCriteria = DisplayMatch.criteria(for: format)
-            } else if res.mode == .direct {
-                displayCriteria = await DisplayMatch.criteria(for: item.asset)
-            }
-        }
-        #endif
+        guard isCurrent(gen, token) else { throw CancellationError() }
         nativeSubtitles = res.mode == .device ? try? await item.asset.loadMediaSelectionGroup(for: .legible) : nil
-        guard gen == generation else { throw CancellationError() }
+        guard isCurrent(gen, token) else { throw CancellationError() }
         if let seek = MediaTimeline.initialSeek(res) {
             await player.seek(to: CMTime(seconds: seek, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
         }
-        guard gen == generation else { throw CancellationError() }
+        #if os(tvOS)
+        // Started only once the TV is in its new mode, so the first seconds aren't lost to it.
+        await criteriaTask?.value
+        await waitForDisplaySwitch()
+        #endif
+        guard isCurrent(gen, token) else { throw CancellationError() }
         restartTarget = nil
         didStartPlayback = true
         position = timeline.mediaTime(streamTime: player.currentTime().seconds)
         status = .ready
         if autoplay {
-            player.playImmediately(atRate: rate)
+            // play(), not playImmediately: the player fills a little buffer before it starts.
+            activateAudioSession()
+            wantsToPlay = true
+            player.defaultRate = rate
+            player.play()
             status = .playing
         } else {
             status = .paused
@@ -476,18 +679,65 @@ public final class PlayerEngine {
         reportProgress(force: true)
     }
 
-    /// Waits for the item to become playable. Polls rather than bridging KVO into an
-    /// async sequence: `publisher(for:).values` never yielded here, leaving loads stuck.
+    /// How far ahead the player buffers. Long forward buffers waste server work on a remux.
+    /// On the device the buffer sits in memory: a minute ahead rides out a slow patch in the
+    /// network, but at 4K remux bitrates that's hundreds of MB, so it shrinks with the bitrate.
+    private static func forwardBuffer(_ res: PlayResponse) -> TimeInterval {
+        switch res.mode {
+        case .remux, .transcode: return 30
+        case .direct: return 0
+        case .device:
+            let mbps = res.duration > 0 ? Double(res.candidate.size) * 8 / res.duration / 1_000_000 : 0
+            if mbps > 40 { return 15 }
+            if mbps > 15 { return 30 }
+            return 60
+        }
+    }
+
+    #if os(tvOS)
+    @ObservationIgnored private var displayCriteriaSetAt = Date.distantPast
+
+    /// Asks the TV for the title's display mode, straight on the window's display manager
+    /// (the player view sets it too, but only on its next render).
+    private func setDisplayCriteria(_ criteria: AVDisplayCriteria?) {
+        displayCriteria = criteria
+        displayCriteriaSetAt = Date()
+        PlayerLayerHostView.displayManager?.preferredDisplayCriteria = criteria
+    }
+
+    /// Waits while the TV switches its display mode (a few seconds of black screen).
+    private func waitForDisplaySwitch() async {
+        guard let manager = PlayerLayerHostView.displayManager, manager.isDisplayCriteriaMatchingEnabled else { return }
+        // The switch begins a moment after the criteria are set.
+        if !manager.isDisplayModeSwitchInProgress, Date().timeIntervalSince(displayCriteriaSetAt) < 0.3 {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        }
+        let deadline = Date().addingTimeInterval(10)
+        while manager.isDisplayModeSwitchInProgress, Date() < deadline, !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
+    #endif
+
+    /// Waits for the item to become playable, observing its status.
     private func waitUntilReady(_ item: AVPlayerItem, timeout: TimeInterval = 45) async throws {
-        let deadline = Date().addingTimeInterval(timeout)
-        while true {
-            switch item.status {
-            case .readyToPlay: return
-            case .failed: throw StrataError(kind: .network, message: Self.describe(item.error))
-            default: break
+        let waiter = ReadyWaiter()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                waiter.begin(continuation)
+                waiter.observe(item.observe(\.status, options: [.initial, .new]) { [waiter] item, _ in
+                    switch item.status {
+                    case .readyToPlay: waiter.finish(.success(()))
+                    case .failed: waiter.finish(.failure(StrataError(kind: .network, message: Self.describe(item.error))))
+                    default: break
+                    }
+                })
+                DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [waiter] in
+                    waiter.finish(.failure(StrataError(kind: .network, message: String(localized: "The stream didn't start in time. Try again.", bundle: .module))))
+                }
             }
-            guard Date() < deadline else { throw StrataError(kind: .network, message: "The stream didn't start in time. Try again.") }
-            try await Task.sleep(nanoseconds: 50_000_000)
+        } onCancel: {
+            waiter.finish(.failure(CancellationError()))
         }
     }
 
@@ -496,11 +746,17 @@ public final class PlayerEngine {
     public func play() {
         guard player.currentItem != nil else { return }
         if status == .ended { Task { await seek(to: 0) } }
-        player.playImmediately(atRate: rate)
+        activateAudioSession()
+        wantsToPlay = true
+        player.defaultRate = rate
+        // Resuming from a pause: the buffer is already there, so start at once. Otherwise
+        // let the player fill a little first.
+        if status == .paused { player.playImmediately(atRate: rate) } else { player.play() }
         status = .playing
     }
 
     public func pause() {
+        wantsToPlay = false
         player.pause()
         if player.currentItem != nil { status = .paused }
         reportProgress(force: true)
@@ -569,23 +825,24 @@ public final class PlayerEngine {
 
     private func scheduleRestart(at media: TimeInterval, audioIndex: Int?, debounce: Bool = true) {
         restartTask?.cancel()
+        startToken += 1
         let gen = generation
+        let token = startToken
         let wasPlaying = status == .playing || status == .ended || status == .ready
         restartTask = Task { [weak self] in
             guard let self else { return }
             if debounce {
                 try? await Task.sleep(nanoseconds: UInt64(self.restartDebounce * 1_000_000_000))
             }
-            guard !Task.isCancelled, gen == self.generation, let client = self.client, let target = self.target, let current = self.session else { return }
+            guard self.isCurrent(gen, token), let client = self.client, let target = self.target, let current = self.session else { return }
             self.player.pause()
             self.isBuffering = true
             do {
                 let res = try await self.requestPlay(client: client, target: target, candidateId: current.candidate.id,
                                                      startMs: Int((media * 1000).rounded()), audioIndex: audioIndex, gen: gen)
-                guard !Task.isCancelled else { return }
-                try await self.start(res, gen: gen, newTitle: false, autoplay: wasPlaying)
+                try await self.start(res, gen: gen, token: token, newTitle: false, autoplay: wasPlaying)
             } catch {
-                guard gen == self.generation, !(error is CancellationError), !Task.isCancelled else { return }
+                guard self.isCurrent(gen, token), !(error is CancellationError) else { return }
                 let e = StrataError.wrap(error)
                 if e.kind != .cancelled {
                     self.restartTarget = nil
@@ -673,7 +930,7 @@ public final class PlayerEngine {
             return
         }
         guard let url = track.url else {
-            subtitleError = "\(track.displayTitle) is an image-based subtitle and can't be shown yet."
+            subtitleError = String(localized: "\(track.displayTitle) is an image-based subtitle and can't be shown yet.", bundle: .module)
             return
         }
         guard let client else { return }
@@ -684,7 +941,10 @@ public final class PlayerEngine {
         let task = Task { [weak self] in
             do {
                 let text = try await client.subtitles(url)
-                let cues = WebVTT.parse(text).sorted { $0.start < $1.start }
+                // A film's worth of lines: parsed off the main actor.
+                let cues = await Task.detached(priority: .userInitiated) {
+                    WebVTT.parse(text).sorted { $0.start < $1.start }
+                }.value
                 guard let self, !Task.isCancelled, gen == self.generation, self.activeSubtitleId == track.id else { return }
                 self.subtitleCues = cues
                 self.isLoadingSubtitles = false
@@ -771,34 +1031,97 @@ public final class PlayerEngine {
                 self?.receive(cues, from: local)
             }
         }
+        local.onServerLost = { [weak self, weak local] in
+            Task { @MainActor [weak self] in
+                guard let local else { return }
+                self?.loopbackLost(local)
+            }
+        }
         return local
+    }
+
+    /// What makes an embedded line the same line when it's read again.
+    private struct CueKey: Hashable {
+        let start: TimeInterval
+        /// -1 for a picture: its end can differ between reads, so pictures match by start.
+        let end: TimeInterval
+        let text: String
     }
 
     /// Keeps lines read from the file, and shows them when their track is on.
     private func receive(_ cues: [SubtitleCue], from source: RemuxSession) {
         guard source === remux else { return }
-        var touched = Set<Int>()
+        var fresh: [Int: [VTTCue]] = [:]
         for cue in cues {
             let index = Int(cue.streamIndex)
-            let line = VTTCue(start: cue.start, end: cue.end, text: cue.text, image: cue.image)
-            // A new session after an audio switch reads some of the same lines again (a
-            // picture's end can differ between reads, so pictures match by start).
-            guard embeddedCues[index]?.contains(where: { $0 == line || (line.image != nil && $0.image != nil && $0.start == line.start) }) != true else { continue }
-            embeddedCues[index, default: []].append(line)
-            touched.insert(index)
+            // A new session after an audio switch reads some of the same lines again.
+            let key = CueKey(start: cue.start, end: cue.image == nil ? cue.end : -1, text: cue.text)
+            guard embeddedCueKeys[index, default: []].insert(key).inserted else { continue }
+            fresh[index, default: []].append(VTTCue(start: cue.start, end: cue.end, text: cue.text, image: cue.image))
         }
-        for index in touched { embeddedCues[index]?.sort { $0.start < $1.start } }
-        if let active = activeSubtitle, active.isEmbedded || active.isPicture, let index = active.streamIndex, touched.contains(index),
+        for (index, lines) in fresh {
+            embeddedCues[index] = Self.merge(embeddedCues[index] ?? [], lines.sorted { $0.start < $1.start })
+        }
+        if let active = activeSubtitle, active.isEmbedded || active.isPicture, let index = active.streamIndex, fresh[index] != nil,
            nativeOption(for: active) == nil {
             subtitleCues = embeddedCues[index] ?? []
         }
     }
 
+    /// Two runs of cues sorted by start, as one. Lines mostly arrive in order, so usually
+    /// this just appends.
+    private static func merge(_ a: [VTTCue], _ b: [VTTCue]) -> [VTTCue] {
+        guard let last = a.last, let first = b.first, first.start < last.start else { return a + b }
+        var out: [VTTCue] = []
+        out.reserveCapacity(a.count + b.count)
+        var i = 0, j = 0
+        while i < a.count, j < b.count {
+            if b[j].start < a[i].start { out.append(b[j]); j += 1 } else { out.append(a[i]); i += 1 }
+        }
+        out.append(contentsOf: a[i...])
+        out.append(contentsOf: b[j...])
+        return out
+    }
+
+    // MARK: - What shows now
+
+    /// Recomputes the cues showing at `position`, and publishes them only when they change.
+    private func updateActiveCues() {
+        let cues = subtitleCues
+        var showing: [Int] = []
+        if !cues.isEmpty {
+            let t = position
+            // The last cue starting at or before `t`, then back as far as a cue can last.
+            var lo = 0, hi = cues.count
+            while lo < hi {
+                let mid = (lo + hi) / 2
+                if cues[mid].start <= t { lo = mid + 1 } else { hi = mid }
+            }
+            var i = lo - 1
+            while i >= 0, cues[i].start >= t - longestCue {
+                if cues[i].end >= t { showing.append(i) }
+                i -= 1
+            }
+            showing.reverse()
+        }
+        guard showing != activeCueIndices else { return }
+        activeCueIndices = showing
+        let text = showing.map { cues[$0].text }.filter { !$0.isEmpty }.joined(separator: "\n")
+        let newText: String? = text.isEmpty ? nil : text
+        if newText != activeCueText { activeCueText = newText }
+        let images = showing.compactMap { cues[$0].image }
+        if !(images.isEmpty && activeCueImages.isEmpty) { activeCueImages = images }
+    }
+
+    private func updateCurrentChapter() {
+        let t = position
+        let chapter = chapters.last { $0.start <= t }
+        if chapter != currentChapter { currentChapter = chapter }
+    }
+
     /// Switches audio by repackaging the same file with the other track, at the same spot.
     /// Nothing goes to the server.
     private func switchDeviceAudio(to track: AudioTrack, in current: PlayResponse) async {
-        restartTask?.cancel()
-        let gen = generation
         let at = position
         let wasPlaying = status == .playing || status == .ended || status == .ready
         var res = current
@@ -807,12 +1130,18 @@ public final class PlayerEngine {
         res.audioTracks = current.audioTracks.map { var t = $0; t.selected = t.index == track.index; return t }
         res.seekToMs = timeline.ms(at)
         activeAudioIndex = track.index
-        await restartDevice(res, at: at, wasPlaying: wasPlaying, gen: gen)
+        await restartDevice(res, at: at, wasPlaying: wasPlaying).value
     }
 
-    /// Repackages the file again from `at` (another audio track, or a new address for
-    /// AirPlay). Nothing goes to the server.
-    private func restartDevice(_ res: PlayResponse, at: TimeInterval, wasPlaying: Bool, gen: Int) async {
+    /// Repackages the file again from `at` (another audio track, a new address for AirPlay,
+    /// a recovery). Nothing goes to the server. Supersedes any restart under way: it gets
+    /// its own token, so an older one can never install its item after this one.
+    @discardableResult
+    private func restartDevice(_ res: PlayResponse, at: TimeInterval, wasPlaying: Bool) -> Task<Void, Never> {
+        restartTask?.cancel()
+        startToken += 1
+        let gen = generation
+        let token = startToken
         var res = res
         res.seekToMs = timeline.ms(at)
         player.pause()
@@ -820,14 +1149,14 @@ public final class PlayerEngine {
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.start(res, gen: gen, newTitle: false, autoplay: wasPlaying)
+                try await self.start(res, gen: gen, token: token, newTitle: false, autoplay: wasPlaying)
             } catch {
-                guard gen == self.generation, !(error is CancellationError), !Task.isCancelled else { return }
+                guard self.isCurrent(gen, token), !(error is CancellationError) else { return }
                 self.status = .failed((error as? DeviceFailure)?.message ?? StrataError.wrap(error).message)
             }
         }
         restartTask = task
-        await task.value
+        return task
     }
 
     #if os(iOS)
@@ -840,11 +1169,7 @@ public final class PlayerEngine {
         let onLoopback = url.host == "127.0.0.1"
         guard active == onLoopback else { return }
         Log.player.info("AirPlay \(active ? "started" : "stopped", privacy: .public); moving the stream")
-        restartTask?.cancel()
-        let gen = generation
-        let at = position
-        let wasPlaying = status == .playing || status == .ready
-        restartTask = Task { [weak self] in await self?.restartDevice(current, at: at, wasPlaying: wasPlaying, gen: gen) }
+        restartDevice(current, at: position, wasPlaying: status == .playing || status == .ready)
     }
     #endif
 
@@ -861,7 +1186,7 @@ public final class PlayerEngine {
             self.stallTask = nil
             guard gen == self.generation, self.player.currentItem === item,
                   self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate else { return }
-            self.recoverDevice("stalled for \(Int(limit))s", giveUp: "Playback stalled and couldn't pick up again. Check the connection and try again, or pick another source.")
+            self.recoverDevice("stalled for \(Int(limit))s", giveUp: String(localized: "Playback stalled and couldn't pick up again. Check the connection and try again, or pick another source.", bundle: .module))
         }
     }
 
@@ -879,13 +1204,25 @@ public final class PlayerEngine {
         recoveries += 1
         recoveredAt = position
         Log.player.warning("device stream \(reason, privacy: .public); reopening at \(self.position, privacy: .public)s")
-        restartTask?.cancel()
-        let gen = generation
-        let at = position
-        restartTask = Task { [weak self] in await self?.restartDevice(current, at: at, wasPlaying: true, gen: gen) }
+        restartDevice(current, at: position, wasPlaying: true)
+    }
+
+    /// The loopback server stopped answering (it failed, or the system tore it down while
+    /// the app was suspended): reopen the stream on a new one, where it was.
+    private func loopbackLost(_ source: RemuxSession) {
+        guard source === remux, let current = session, current.mode == .device, restartTarget == nil else { return }
+        Log.player.warning("loopback server lost; reopening at \(self.position, privacy: .public)s")
+        restartDevice(current, at: position, wasPlaying: status == .playing || status == .ready)
     }
 
     // MARK: - Unload
+
+    /// Unloads only if nothing was loaded since `token` (`loadToken` when the caller's
+    /// playback began): a view closing late must not stop a newer playback.
+    public func unload(ifCurrent token: Int) async {
+        guard token == loadToken else { return }
+        await unload()
+    }
 
     /// Stops playback: reports the final position, ends the server session, clears state.
     public func unload() async {
@@ -901,9 +1238,11 @@ public final class PlayerEngine {
         #endif
         status = .idle
         nowPlaying?.update(meta: nil, position: 0, duration: 0, rate: 0)
+        deactivateAudioSession()
     }
 
     private func teardown(reportFinal: Bool) async {
+        startToken += 1
         loadTask?.cancel()
         loadTask = nil
         restartTask?.cancel()
@@ -913,6 +1252,7 @@ public final class PlayerEngine {
         stallTask?.cancel()
         stallTask = nil
         if reportFinal { reportProgress(force: true) }
+        wantsToPlay = false
         if let session { stopSession(session.sessionId) }
         removeObservers()
         player.pause()
@@ -920,6 +1260,7 @@ public final class PlayerEngine {
         remux?.stop()
         remux = nil
         embeddedCues = [:]
+        embeddedCueKeys = [:]
         nativeSubtitles = nil
         nativeSubtitleNames = [:]
         session = nil
@@ -949,7 +1290,18 @@ public final class PlayerEngine {
 
     // MARK: - Progress
 
-    @ObservationIgnored private var reportChain: Task<Void, Never>?
+    /// A position on its way to the server.
+    private struct Report {
+        let client: StrataClient
+        let target: PlaybackTarget
+        let ms: Int
+        let durationMs: Int
+        let sessionId: String?
+        let undelivered: (@Sendable (PlaybackTarget, Int, Int) -> Void)?
+    }
+    /// One report in flight at a time; behind it, only the latest for each title waits.
+    @ObservationIgnored private var reportInFlight = false
+    @ObservationIgnored private var pendingReports: [Report] = []
     @ObservationIgnored private var nowPlayingAt = Date.distantPast
     @ObservationIgnored private var nowPlayingRate: Float = -1
 
@@ -966,22 +1318,105 @@ public final class PlayerEngine {
         guard let client else { undelivered?(target, ms, durationMs); return }
         // A downloaded file has no session on the server.
         let sessionId = session.isOffline ? nil : session.sessionId
+        let report = Report(client: client, target: target, ms: ms, durationMs: durationMs, sessionId: sessionId, undelivered: undelivered)
         // In order: a slow earlier report must never land after (and overwrite) a later one.
-        let previous = reportChain
-        reportChain = Task.detached {
-            await previous?.value
+        // A newer position replaces one still waiting for the same title, so requests that
+        // hang can't pile up; the last one (the final report) always goes once they end.
+        if let last = pendingReports.last, last.target == report.target {
+            pendingReports[pendingReports.count - 1] = report
+        } else {
+            pendingReports.append(report)
+        }
+        sendNextReport()
+    }
+
+    private func sendNextReport() {
+        guard !reportInFlight, !pendingReports.isEmpty else { return }
+        let report = pendingReports.removeFirst()
+        reportInFlight = true
+        Task { [weak self] in
             do {
-                try await client.reportProgress(target, positionMs: ms, durationMs: durationMs, sessionId: sessionId)
+                _ = try await report.client.reportProgress(report.target, positionMs: report.ms, durationMs: report.durationMs, sessionId: report.sessionId)
             } catch {
                 Log.player.warning("progress report failed: \(StrataError.wrap(error).message, privacy: .public)")
-                if StrataError.wrap(error).kind == .network { undelivered?(target, ms, durationMs) }
+                if StrataError.wrap(error).kind == .network { report.undelivered?(report.target, report.ms, report.durationMs) }
             }
+            guard let self else { return }
+            self.reportInFlight = false
+            self.sendNextReport()
         }
     }
+
+    // MARK: - System
+
+    private func activateAudioSession() {
+        #if os(iOS) || os(tvOS)
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            Log.player.warning("audio session didn't activate: \(error.localizedDescription, privacy: .public)")
+        }
+        #endif
+    }
+
+    /// Gives the audio back: music another app was playing can pick up again.
+    private func deactivateAudioSession() {
+        #if os(iOS) || os(tvOS)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
+    }
+
+    /// Audio interruptions (a call, an alarm), headphones unplugged, and the app coming back
+    /// after a suspension (which can take the loopback server down).
+    private func observeSystem() {
+        let center = NotificationCenter.default
+        #if os(iOS) || os(tvOS)
+        let audio = AVAudioSession.sharedInstance()
+        systemObservers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: audio, queue: .main) { [weak self] note in
+            let info = note.userInfo ?? [:]
+            let type = (info[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init(rawValue:))
+            let options = AVAudioSession.InterruptionOptions(rawValue: info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
+            MainActor.assumeIsolated { self?.audioInterrupted(type, shouldResume: options.contains(.shouldResume)) }
+        })
+        systemObservers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: audio, queue: .main) { [weak self] note in
+            let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
+            guard reason == .oldDeviceUnavailable else { return }
+            // Headphones unplugged or out of range: don't carry on out loud.
+            MainActor.assumeIsolated {
+                guard let self, self.status == .playing else { return }
+                self.pause()
+            }
+        })
+        #endif
+        #if canImport(UIKit)
+        systemObservers.append(center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let remux = self.remux, !remux.isServing else { return }
+                self.loopbackLost(remux)
+            }
+        })
+        #endif
+    }
+
+    #if os(iOS) || os(tvOS)
+    private func audioInterrupted(_ type: AVAudioSession.InterruptionType?, shouldResume: Bool) {
+        switch type {
+        case .began:
+            playingBeforeInterruption = wantsToPlay && player.currentItem != nil
+            if playingBeforeInterruption { pause() }
+        case .ended:
+            if shouldResume, playingBeforeInterruption, status == .paused { play() }
+            playingBeforeInterruption = false
+        default:
+            break
+        }
+    }
+    #endif
 
     // MARK: - Observers
 
     private func applyRate() {
+        player.defaultRate = rate
         if status == .playing { player.rate = rate }
     }
 
@@ -1066,11 +1501,57 @@ public final class PlayerEngine {
     }
 
     nonisolated private static func describe(_ error: Error?) -> String {
-        guard let error else { return "Playback failed." }
+        guard let error else { return String(localized: "Playback failed.", bundle: .module) }
         let ns = error as NSError
         if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError, underlying.domain == NSURLErrorDomain {
             return StrataError.wrap(URLError(URLError.Code(rawValue: underlying.code))).message
         }
         return ns.localizedFailureReason ?? ns.localizedDescription
+    }
+}
+
+/// One wait for an item to become ready: finished once, by its status, a timeout or a cancel.
+private final class ReadyWaiter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Error>?
+    private var observation: NSKeyValueObservation?
+    /// How it ended, when that came before `begin` (a cancel, or `.initial` KVO).
+    private var early: Result<Void, Error>?
+    private var done = false
+
+    func begin(_ continuation: CheckedContinuation<Void, Error>) {
+        lock.lock()
+        if let early {
+            lock.unlock()
+            continuation.resume(with: early)
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func observe(_ observation: NSKeyValueObservation) {
+        lock.lock()
+        if done {
+            lock.unlock()
+            observation.invalidate()
+            return
+        }
+        self.observation = observation
+        lock.unlock()
+    }
+
+    func finish(_ result: Result<Void, Error>) {
+        lock.lock()
+        guard !done else { lock.unlock(); return }
+        done = true
+        let continuation = self.continuation
+        self.continuation = nil
+        let observation = self.observation
+        self.observation = nil
+        if continuation == nil { early = result }
+        lock.unlock()
+        observation?.invalidate()
+        continuation?.resume(with: result)
     }
 }

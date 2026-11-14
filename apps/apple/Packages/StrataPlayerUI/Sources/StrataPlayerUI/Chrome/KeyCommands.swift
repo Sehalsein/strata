@@ -24,25 +24,25 @@ public struct PlayerKeyCommands: View {
         EmptyView()
         #else
         VStack(spacing: 0) {
-            Button(" ") { engine.togglePlay() }
+            Button(" " as String) { engine.togglePlay() }
                 .keyboardShortcut(.space, modifiers: [])
-            Button("←") { Task { await engine.skip(-5) } }
+            Button("←" as String) { Task { await engine.skip(-5) } }
                 .keyboardShortcut(.leftArrow, modifiers: [])
-            Button("→") { Task { await engine.skip(5) } }
+            Button("→" as String) { Task { await engine.skip(5) } }
                 .keyboardShortcut(.rightArrow, modifiers: [])
-            Button("J") { Task { await engine.skip(-10) } }
+            Button("J" as String) { Task { await engine.skip(-10) } }
                 .keyboardShortcut("j", modifiers: [])
-            Button("L") { Task { await engine.skip(10) } }
+            Button("L" as String) { Task { await engine.skip(10) } }
                 .keyboardShortcut("l", modifiers: [])
-            Button("M") { engine.toggleMute() }
+            Button("M" as String) { engine.toggleMute() }
                 .keyboardShortcut("m", modifiers: [])
-            Button("F") { onToggleFullscreen() }
+            Button("F" as String) { onToggleFullscreen() }
                 .keyboardShortcut("f", modifiers: [])
-            Button("C") { onToggleCaptions() }
+            Button("C" as String) { onToggleCaptions() }
                 .keyboardShortcut("c", modifiers: [])
-            Button("S") { engine.cycleSpeed() }
+            Button("S" as String) { engine.cycleSpeed() }
                 .keyboardShortcut("s", modifiers: [])
-            Button("P") { onTogglePiP() }
+            Button("P" as String) { onTogglePiP() }
                 .keyboardShortcut("p", modifiers: [])
         }
         .frame(width: 0, height: 0)
@@ -63,22 +63,22 @@ public struct PlaybackCommands: Commands {
     }
 
     public var body: some Commands {
-        CommandMenu("Playback") {
-            Button("Play / Pause") { engine.togglePlay() }
+        CommandMenu(Text("Playback", bundle: .module)) {
+            Button(String(localized: "Play / Pause", bundle: .module)) { engine.togglePlay() }
                 .keyboardShortcut(.space, modifiers: [])
             Divider()
-            Button("Skip Back 10s") { Task { await engine.skip(-10) } }
+            Button(String(localized: "Skip Back 10s", bundle: .module)) { Task { await engine.skip(-10) } }
                 .keyboardShortcut("j", modifiers: [])
-            Button("Skip Forward 10s") { Task { await engine.skip(10) } }
+            Button(String(localized: "Skip Forward 10s", bundle: .module)) { Task { await engine.skip(10) } }
                 .keyboardShortcut("l", modifiers: [])
-            Button("Skip Back 5s") { Task { await engine.skip(-5) } }
+            Button(String(localized: "Skip Back 5s", bundle: .module)) { Task { await engine.skip(-5) } }
                 .keyboardShortcut(.leftArrow, modifiers: [])
-            Button("Skip Forward 5s") { Task { await engine.skip(5) } }
+            Button(String(localized: "Skip Forward 5s", bundle: .module)) { Task { await engine.skip(5) } }
                 .keyboardShortcut(.rightArrow, modifiers: [])
             Divider()
-            Button("Mute") { engine.toggleMute() }
+            Button(String(localized: "Mute", bundle: .module)) { engine.toggleMute() }
                 .keyboardShortcut("m", modifiers: [])
-            Button("Cycle Speed") { engine.cycleSpeed() }
+            Button(String(localized: "Cycle Speed", bundle: .module)) { engine.cycleSpeed() }
                 .keyboardShortcut("s", modifiers: [])
         }
     }

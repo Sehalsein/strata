@@ -42,8 +42,8 @@ struct TVCodeSignInView: View {
                     .font(.system(size: 64, weight: .medium))
                     .foregroundStyle(Theme.accentText)
                     .padding(.bottom, Metrics.space3)
-                Text("Approve on your phone").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                Text("Signing in to \(target.info.serverName). Check your phone shows the same code.")
+                Text("Approve on your phone", bundle: .module).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                Text("Signing in to \(target.info.serverName). Check your phone shows the same code.", bundle: .module)
                     .font(.stBody).foregroundStyle(Theme.ink2)
                     .multilineTextAlignment(.center)
             }
@@ -51,7 +51,7 @@ struct TVCodeSignInView: View {
                 CodeTiles(code.displayCode, size: .large)
             }
             messages
-            WaitingLabel("Waiting for approval…")
+            WaitingLabel(String(localized: "Waiting for approval…", bundle: .module))
         }
         .frame(maxWidth: 1100)
     }
@@ -60,21 +60,21 @@ struct TVCodeSignInView: View {
         HStack(alignment: .center, spacing: Metrics.space20) {
             VStack(alignment: .leading, spacing: Metrics.space10) {
                 VStack(alignment: .leading, spacing: Metrics.space3) {
-                    Text("Sign in to \(target.info.serverName)").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                    Text("Scan the code with your phone's camera and approve this TV from your profile.")
+                    Text("Sign in to \(target.info.serverName)", bundle: .module).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                    Text("Scan the code with your phone's camera and approve this TV from your profile.", bundle: .module)
                         .font(.stBody).foregroundStyle(Theme.ink2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let code {
                     VStack(alignment: .leading, spacing: Metrics.space4) {
-                        Text("Or enter this code in Strata on your phone, in Settings › Link a TV")
+                        Text("Or enter this code in Strata on your phone, in Settings › Link a TV", bundle: .module)
                             .font(.stCallout).foregroundStyle(Theme.ink3)
                             .fixedSize(horizontal: false, vertical: true)
                         CodeTiles(code.displayCode, size: .large)
                     }
                 }
                 messages
-                Button("Use Password Instead") { usePassword = true }
+                Button(String(localized: "Use Password Instead", bundle: .module)) { usePassword = true }
             }
             .frame(maxWidth: 820, alignment: .leading)
 
@@ -137,7 +137,7 @@ struct TVCodeSignInView: View {
                     attempt += 1
                     return
                 case .denied:
-                    notice = "That sign-in was declined on the phone. Here's a new code."
+                    notice = String(localized: "That sign-in was declined on the phone. Here's a new code.", bundle: .module)
                     attempt += 1
                     return
                 }
@@ -172,29 +172,29 @@ struct TVPhoneSignInView: View {
         HStack(alignment: .center, spacing: Metrics.space20) {
             VStack(alignment: .leading, spacing: Metrics.space10) {
                 VStack(alignment: .leading, spacing: Metrics.space3) {
-                    Text("Sign in with your phone").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                    Text("Use an iPhone that's already signed in to Strata. Nothing to type.")
+                    Text("Sign in with your phone", bundle: .module).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                    Text("Use an iPhone that's already signed in to Strata. Nothing to type.", bundle: .module)
                         .font(.stBody).foregroundStyle(Theme.ink2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 VStack(alignment: .leading, spacing: Metrics.space6) {
-                    Step(number: 1, title: "Scan the code", detail: "Point your iPhone's camera at it.")
-                    Step(number: 2, title: "Check the code matches", detail: "Your phone and this TV show the same one.")
-                    Step(number: 3, title: "Tap Approve", detail: "This TV signs in as you, to watch.")
+                    Step(number: 1, title: String(localized: "Scan the code", bundle: .module), detail: String(localized: "Point your iPhone's camera at it.", bundle: .module))
+                    Step(number: 2, title: String(localized: "Check the code matches", bundle: .module), detail: String(localized: "Your phone and this TV show the same one.", bundle: .module))
+                    Step(number: 3, title: String(localized: "Tap Approve", bundle: .module), detail: String(localized: "This TV signs in as you, to watch.", bundle: .module))
                 }
                 if let message = error ?? host.failure {
                     Label(message, systemImage: "exclamationmark.triangle.fill")
                         .font(.stCallout).foregroundStyle(Theme.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    WaitingLabel("Waiting for your phone…")
+                    WaitingLabel(String(localized: "Waiting for your phone…", bundle: .module))
                 }
             }
             .frame(maxWidth: 820, alignment: .leading)
 
             VStack(spacing: Metrics.space5) {
                 QRCodeView(TVLink.url(key: host.key).absoluteString, size: 440)
-                Label("Same Wi-Fi as this TV", systemImage: "wifi")
+                Label(String(localized: "Same Wi-Fi as this TV", bundle: .module), systemImage: "wifi")
                     .font(.stFootnote).foregroundStyle(Theme.ink3)
             }
         }
@@ -226,7 +226,7 @@ struct TVPhoneSignInView: View {
                 lastError = error
             }
         }
-        let message = "This TV can't reach your phone's server. \(lastError.map { StrataError.wrap($0).message } ?? "")"
+        let message = String(localized: "This TV can't reach your phone's server. \(lastError.map { StrataError.wrap($0).message } ?? "")", bundle: .module)
             .trimmingCharacters(in: .whitespaces)
         error = message
         throw StrataError(kind: .network, message: message)
@@ -240,7 +240,7 @@ private struct Step: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Metrics.space5) {
-            Text("\(number)")
+            Text(number, format: .number)
                 .font(.stHeadline.monospacedDigit())
                 .foregroundStyle(Theme.onAccent)
                 .frame(width: 52, height: 52)
@@ -332,7 +332,7 @@ struct CodeTiles: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Code \(code.filter { $0 != "-" }.map(String.init).joined(separator: " "))")
+        .accessibilityLabel(Text("Code \(code.filter { $0 != "-" }.map(String.init).joined(separator: " "))", bundle: .module))
     }
 }
 
@@ -379,13 +379,13 @@ struct ApproveDeviceView: View {
             }
             .scrollBounceBehavior(.basedOnSize)
             .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle("Link a TV")
+            .navigationTitle(Text("Link a TV", bundle: .module))
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 if phase != .done && phase != .denied {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
                 }
             }
         }
@@ -398,43 +398,43 @@ struct ApproveDeviceView: View {
 
     @ViewBuilder private var content: some View {
         if client == nil {
-            MessageView(systemImage: "server.rack", title: "Not signed in to that server",
-                        message: "Sign in on this phone to the server your TV is using, then scan the code again.")
+            MessageView(systemImage: "server.rack", title: String(localized: "Not signed in to that server", bundle: .module),
+                        message: String(localized: "Sign in on this phone to the server your TV is using, then scan the code again.", bundle: .module))
         } else if phase == .done {
-            LinkHero(systemImage: "checkmark", tint: Theme.success, title: "Your TV is signed in",
-                     message: "It's watching as \(signIn?.name ?? "you") on \(server?.name ?? "this server").")
-            PrimaryButton("Done") { dismiss() }
+            LinkHero(systemImage: "checkmark", tint: Theme.success, title: String(localized: "Your TV is signed in", bundle: .module),
+                     message: String(localized: "It's watching as \(signIn?.name ?? "you") on \(server?.name ?? String(localized: "this server", bundle: .module)).", bundle: .module))
+            PrimaryButton(String(localized: "Done", bundle: .module)) { dismiss() }
                 .padding(.top, Metrics.space4)
         } else if phase == .denied {
-            LinkHero(systemImage: "xmark", tint: Theme.ink3, title: "Sign-in declined",
-                     message: "The TV wasn't signed in. It shows a new code if you want to try again.")
-            PrimaryButton("Done") { dismiss() }
+            LinkHero(systemImage: "xmark", tint: Theme.ink3, title: String(localized: "Sign-in declined", bundle: .module),
+                     message: String(localized: "The TV wasn't signed in. It shows a new code if you want to try again.", bundle: .module))
+            PrimaryButton(String(localized: "Done", bundle: .module)) { dismiss() }
                 .padding(.top, Metrics.space4)
         } else if looked != nil {
-            LinkHero(systemImage: "tv", tint: Theme.apricot, title: "Sign in your TV?",
-                     message: "Approve only a TV you're in front of.")
+            LinkHero(systemImage: "tv", tint: Theme.apricot, title: String(localized: "Sign in your TV?", bundle: .module),
+                     message: String(localized: "Approve only a TV you're in front of.", bundle: .module))
             // Someone could show you a code for their own device; matching the code on
             // your screen is what proves it's yours.
             VStack(spacing: Metrics.space3) {
-                Text("Check your TV shows this code").font(.stFootnote).foregroundStyle(Theme.ink3)
+                Text("Check your TV shows this code", bundle: .module).font(.stFootnote).foregroundStyle(Theme.ink3)
                 CodeTiles(DeviceCode.display(code))
             }
             .padding(.vertical, Metrics.space5)
             .frame(maxWidth: .infinity)
             .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.radiusLG, style: .continuous))
             VStack(spacing: 0) {
-                detailRow("person.crop.circle", "Watches as", signIn?.name ?? "You")
+                detailRow("person.crop.circle", String(localized: "Watches as", bundle: .module), signIn?.name ?? String(localized: "You", bundle: .module))
                 Divider().overlay(Theme.hairline).padding(.leading, 52)
-                detailRow("server.rack", "Server", server?.name ?? "This server")
+                detailRow("server.rack", String(localized: "Server", bundle: .module), server?.name ?? String(localized: "This server", bundle: .module))
                 Divider().overlay(Theme.hairline).padding(.leading, 52)
-                detailRow("lock", "Access", "Watch only, no settings")
+                detailRow("lock", String(localized: "Access", bundle: .module), String(localized: "Watch only, no settings", bundle: .module))
             }
             .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.radiusLG, style: .continuous))
             errorLabel
             VStack(spacing: Metrics.space3) {
-                PrimaryButton("Approve", isLoading: phase == .approving) { Task { await approve() } }
+                PrimaryButton(String(localized: "Approve", bundle: .module), isLoading: phase == .approving) { Task { await approve() } }
                     .disabled(phase == .approving)
-                Button("Decline", role: .destructive) { Task { await deny() } }
+                Button(String(localized: "Decline", bundle: .module), role: .destructive) { Task { await deny() } }
                     .font(.stHeadline)
                     #if os(iOS)
                     .buttonStyle(.plain)
@@ -445,13 +445,13 @@ struct ApproveDeviceView: View {
             }
             .padding(.top, Metrics.space2)
         } else if request != nil {
-            LinkHero(systemImage: "tv", tint: Theme.apricot, title: "Checking the code…", message: nil)
+            LinkHero(systemImage: "tv", tint: Theme.apricot, title: String(localized: "Checking the code…", bundle: .module), message: nil)
             if error == nil { ProgressView() }
             errorLabel
         } else {
-            LinkHero(systemImage: "tv", tint: Theme.apricot, title: "Enter your TV's code",
-                     message: "It will be signed in to \(server?.name ?? "this server") as \(signIn?.name ?? "you").")
-            TextField("K7QF-2MXD", text: $typedCode)
+            LinkHero(systemImage: "tv", tint: Theme.apricot, title: String(localized: "Enter your TV's code", bundle: .module),
+                     message: String(localized: "It will be signed in to \(server?.name ?? String(localized: "this server", bundle: .module)) as \(signIn?.name ?? "you").", bundle: .module))
+            TextField("K7QF-2MXD" as String, text: $typedCode)
                 .font(.system(.title2, design: .monospaced).weight(.semibold))
                 .multilineTextAlignment(.center)
                 #if os(iOS)
@@ -462,7 +462,7 @@ struct ApproveDeviceView: View {
                 .onSubmit { Task { await lookUp() } }
                 .modifier(FieldStyle())
             errorLabel
-            PrimaryButton("Continue", isLoading: phase == .looking) { Task { await lookUp() } }
+            PrimaryButton(String(localized: "Continue", bundle: .module), isLoading: phase == .looking) { Task { await lookUp() } }
                 .disabled(code.count < 8 || phase == .looking)
         }
     }
@@ -498,7 +498,7 @@ struct ApproveDeviceView: View {
             if status.isPending {
                 looked = status
             } else {
-                error = "That code was already used. Ask the TV for a new one."
+                error = String(localized: "That code was already used. Ask the TV for a new one.", bundle: .module)
             }
         } catch {
             self.error = Self.message(error)
@@ -528,9 +528,9 @@ struct ApproveDeviceView: View {
         let e = StrataError.wrap(error)
         switch e.code {
         case "invalid_request" where e.message.localizedCaseInsensitiveContains("invalid user code"):
-            return "There's no such code. Check it against the one on your TV."
+            return String(localized: "There's no such code. Check it against the one on your TV.", bundle: .module)
         case "expired_token":
-            return "That code has expired. The TV shows a new one."
+            return String(localized: "That code has expired. The TV shows a new one.", bundle: .module)
         default:
             return e.message
         }
@@ -556,12 +556,12 @@ struct PhoneLinkTVView: View {
             NavigationStack {
                 VStack(spacing: Metrics.space6) {
                     if let error {
-                        MessageView(systemImage: "appletv", title: "Couldn't sign in your TV", message: error, actionTitle: "Try Again") {
+                        MessageView(systemImage: "appletv", title: String(localized: "Couldn't sign in your TV", bundle: .module), message: error, actionTitle: String(localized: "Try Again", bundle: .module)) {
                             attempt += 1
                         }
                     } else {
-                        LinkHero(systemImage: "tv", tint: Theme.apricot, title: "Finding your TV…",
-                                 message: "Keep this phone on the same Wi-Fi as your Apple TV.")
+                        LinkHero(systemImage: "tv", tint: Theme.apricot, title: String(localized: "Finding your TV…", bundle: .module),
+                                 message: String(localized: "Keep this phone on the same Wi-Fi as your Apple TV.", bundle: .module))
                         ProgressView()
                     }
                     Spacer(minLength: 0)
@@ -571,10 +571,10 @@ struct PhoneLinkTVView: View {
                 .frame(maxWidth: 480)
                 .frame(maxWidth: .infinity)
                 .background(Theme.bg.ignoresSafeArea())
-                .navigationTitle("Link a TV")
+                .navigationTitle(Text("Link a TV", bundle: .module))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
                 }
             }
             .presentationDetents([.large])
@@ -585,7 +585,7 @@ struct PhoneLinkTVView: View {
     private func link() async {
         error = nil
         guard let server = services.store.activeServer else {
-            error = "Sign in on this phone first."
+            error = String(localized: "Sign in on this phone first.", bundle: .module)
             return
         }
         do {

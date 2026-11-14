@@ -15,10 +15,17 @@ struct AnimeView: View {
             PageStack {
                 if let hero {
                     HeroCarousel(cards: hero.items)
+                        .tvAboveFilterRow(!categories.isEmpty)
+                } else if loadingSpotlight {
+                    SkeletonHero(featured: true)
                 }
                 #if os(tvOS)
-                if hero == nil { Color.clear.frame(height: 120) } // clear the top tab bar
-                if !categories.isEmpty {
+                if loadingSpotlight {
+                    EmptyView()
+                } else if hero == nil {
+                    // No spotlight (a category): the page's title, with the menu beside it.
+                    TVTabHeader(title: String(localized: "Anime", bundle: .module)) { if !categories.isEmpty { menu } }
+                } else if !categories.isEmpty {
                     // A full-width section: pressing down from the tab bar (or the hero)
                     // lands here first, rather than on whichever poster sits under it.
                     HStack { menu; Spacer() }
@@ -29,21 +36,21 @@ struct AnimeView: View {
                 content
             }
             #if !os(tvOS)
-            .padding(.top, hero == nil ? Metrics.space4 : 0)
+            .padding(.top, hero == nil && !loadingSpotlight ? Metrics.space4 : 0)
             .padding(.bottom, Metrics.space4)
             #endif
             .padding(.bottom, Metrics.space12)
         }
         #if !os(tvOS)
         // The spotlight runs to the top edge, under the bar, like Home's hero.
-        .heroUnderBar(hero != nil)
+        .heroUnderBar(hero != nil || loadingSpotlight)
         #endif
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
         #if os(tvOS)
         .ignoresSafeArea(edges: .top)
         #else
-        .navigationTitle("Anime")
+        .navigationTitle(Text("Anime", bundle: .module))
         .navigationSubtitle(category?.name ?? "")
         #if os(iOS)
         .navigationBarTitleDisplayMode(hero == nil ? .automatic : .inline)
@@ -66,7 +73,7 @@ struct AnimeView: View {
     }
 
     private var menu: some View {
-        GenreMenu(genres: categories, selected: $category, name: \.name, noun: "Category", allTitle: "All Anime")
+        GenreMenu(genres: categories, selected: $category, name: \.name, noun: String(localized: "Category", bundle: .module), allTitle: String(localized: "All Anime", bundle: .module))
     }
 
     @ViewBuilder private var content: some View {
@@ -75,16 +82,22 @@ struct AnimeView: View {
             SkeletonRail(width: Metrics.posterWidth)
             SkeletonRail(width: Metrics.posterWidth)
         case .failed(let message):
-            MessageView(systemImage: "wifi.exclamationmark", title: "Couldn't load Anime", message: message, actionTitle: "Try Again") {
+            MessageView(systemImage: "wifi.exclamationmark", title: String(localized: "Couldn't load Anime", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                 Task { await load() }
             }
             .frame(minHeight: 400)
         case .loaded(let list) where list.isEmpty:
-            MessageView(systemImage: "film.stack", title: "Nothing in \(category?.name ?? "Anime") yet").frame(minHeight: 400)
+            MessageView(systemImage: "film.stack", title: String(localized: "Nothing in \(category?.name ?? "Anime") yet", bundle: .module)).frame(minHeight: 400)
         case .loaded(let list):
             // The hero sits above the category menu.
             ForEach(list.filter { $0.style != .hero }) { shelf in ShelfRail(shelf: shelf) }
         }
+    }
+
+    /// All Anime has a spotlight: its shape while the page loads.
+    private var loadingSpotlight: Bool {
+        if category == nil, case .loading = shelves { return true }
+        return false
     }
 
     /// The spotlight, when the server sends one (not for a category).
@@ -106,16 +119,17 @@ struct AnimeListView: View {
 
     var body: some View {
         ScrollView {
+            TVPageHeader(title: title)
             switch items {
-            case .loading: ProgressView().padding(Metrics.space12)
+            case .loading: SkeletonGrid().padding(.vertical, Metrics.space4)
             case .failed(let message):
-                MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load \(title)", message: message, actionTitle: "Try Again") {
+                MessageView(systemImage: "exclamationmark.triangle", title: String(localized: "Couldn't load \(title)", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                     Task { await load(force: true) }
                 }
             case .loaded(let cards):
                 PosterGrid {
                     ForEach(cards) { card in
-                        NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.buttonStyle(StrataCardStyle())
+                        NavigationLink(value: card.route) { PosterCardLabel(card: card, width: nil) }.cardButtonStyle()
                     }
                 }
                 .padding(.vertical, Metrics.space4)
@@ -123,7 +137,7 @@ struct AnimeListView: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
-        .navigationTitle(title)
+        .pageTitle(title)
         #if !os(tvOS)
         .refreshable { await load(force: true) }
         #endif

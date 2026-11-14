@@ -90,7 +90,7 @@ public final class StrataClient: Sendable {
         // The bearer plugin puts the signed token in this header; the body has it too.
         if let token = response.value(forHTTPHeaderField: "set-auth-token"), !token.isEmpty { return token }
         if let token = try decode(SignInResponse.self, from: data).token, !token.isEmpty { return token }
-        throw StrataError(kind: .decoding, message: "The server signed you in but sent no session. Is the app up to date?")
+        throw StrataError(kind: .decoding, message: String(localized: "The server signed you in but sent no session. Is the app up to date?", bundle: .module))
     }
 
     /// Ends this session on the server.
@@ -162,7 +162,7 @@ public final class StrataClient: Sendable {
         // A used or expired code answers with a redirect to the dashboard, not JSON.
         if (200..<300).contains(response.statusCode), let res = try? JSONDecoder().decode(TokenResponse.self, from: data) { return res.token }
         if response.statusCode >= 400 { throw httpError(response.statusCode, data) }
-        throw StrataError(kind: .http, status: 410, message: "That code has expired or was already used. Show a new one and scan it again.")
+        throw StrataError(kind: .http, status: 410, message: String(localized: "That code has expired or was already used. Show a new one and scan it again.", bundle: .module))
     }
 
     // MARK: Sign-in by code (RFC 8628: a TV shows a code; a signed-in phone approves it)
@@ -494,7 +494,7 @@ public final class StrataClient: Sendable {
                 let retryAfter = response.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
                 let wait = min(retryAfter ?? delay, 10)
                 guard Date().addingTimeInterval(wait) < deadline else {
-                    throw StrataError(kind: .http, status: 202, message: "Subtitles are still being prepared. Try again in a moment.")
+                    throw StrataError(kind: .http, status: 202, message: String(localized: "Subtitles are still being prepared. Try again in a moment.", bundle: .module))
                 }
                 try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
                 delay = min(delay * 2, 8)
@@ -514,7 +514,7 @@ public final class StrataClient: Sendable {
         if policy != .reload, let hit = await cache.entry(key), policy == .cachedOnly || hit.isFresh {
             return try decode(T.self, from: hit.body)
         }
-        if policy == .cachedOnly { throw StrataError(kind: .notCached, message: "Not saved on this device yet.") }
+        if policy == .cachedOnly { throw StrataError(kind: .notCached, message: String(localized: "Not saved on this device yet.", bundle: .module)) }
         // Screens appearing together often ask for the same thing: share one request.
         let task = await cache.shared(key) {
             let (data, response) = try await self.performWithResponse(req)
@@ -550,14 +550,14 @@ public final class StrataClient: Sendable {
 
     private func request<B: Encodable>(_ method: String, _ path: String, query: [URLQueryItem] = [], body: B?) throws -> URLRequest {
         guard var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
-            throw StrataError(kind: .invalidInput, message: "That doesn't look like a valid server address.")
+            throw StrataError(kind: .invalidInput, message: String(localized: "That doesn't look like a valid server address.", bundle: .module))
         }
         comps.path = path
         comps.queryItems = query.isEmpty ? nil : query
         // URLComponents leaves "+" alone in queries; servers read it as a space.
         comps.percentEncodedQuery = comps.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         guard let url = comps.url else {
-            throw StrataError(kind: .invalidInput, message: "That doesn't look like a valid server address.")
+            throw StrataError(kind: .invalidInput, message: String(localized: "That doesn't look like a valid server address.", bundle: .module))
         }
         var req = URLRequest(url: url)
         // The client keeps catalog answers itself (`ResponseCache`); URLCache mustn't answer
@@ -598,7 +598,7 @@ public final class StrataClient: Sendable {
         do {
             let (data, response) = try await session.data(for: req, delegate: RedirectGuard(origin: baseURL))
             guard let http = response as? HTTPURLResponse else {
-                throw StrataError(kind: .decoding, message: "The server sent an invalid response.")
+                throw StrataError(kind: .decoding, message: String(localized: "The server sent an invalid response.", bundle: .module))
             }
             return (data, http)
         } catch {

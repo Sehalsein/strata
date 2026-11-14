@@ -43,7 +43,7 @@ public enum EpisodeAlerts {
             let content = UNMutableNotificationContent()
             content.title = item.title
             let what = [item.code, item.name].compactMap { $0 }.joined(separator: " · ")
-            content.body = item.hasTime ? "\(what) is out now." : "\(what) airs today."
+            content.body = item.hasTime ? String(localized: "\(what) is out now.", bundle: .module) : String(localized: "\(what) airs today.", bundle: .module)
             content.sound = .default
             content.threadIdentifier = item.ref.description
             content.userInfo = ["url": "strata://title/\(item.ref)"]

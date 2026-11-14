@@ -43,16 +43,21 @@ struct ConnectView: View {
 
     var body: some View {
         NavigationStack {
+            Group {
+            #if os(tvOS)
+            // Laid out like Settings: what this is on the left, the ways in on the right.
+            TVSettingsPage {
+                header.padding(.top, Metrics.space12)
+            } content: {
+                tvOptions
+            }
+            #else
             ScrollView {
                 VStack(alignment: Self.alignment, spacing: Metrics.space8) {
                     header
-                    #if os(tvOS)
-                    tvOptions
-                    #else
                     scanButton
                     serverList
                     addressEntry
-                    #endif
                 }
                 .frame(maxWidth: Self.columnWidth, alignment: Self.frameAlignment)
                 .padding(.horizontal, Metrics.gutter)
@@ -61,9 +66,11 @@ struct ConnectView: View {
             }
             .scrollBounceBehavior(.basedOnSize)
             .background(Theme.bg.ignoresSafeArea())
+            #endif
+            }
             .toolbar {
                 if isAdding {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
                 }
             }
             .navigationDestination(item: $signInTarget) { target in
@@ -132,20 +139,20 @@ struct ConnectView: View {
 
     private static func subtitle(isAdding: Bool) -> String {
         #if os(iOS)
-        isAdding ? "Scan a code from your admin, or pick the server it's on." : "Scan a code from your admin, or pick a server on your network."
+        isAdding ? String(localized: "Scan a code from your admin, or pick the server it's on.", bundle: .module) : String(localized: "Scan a code from your admin, or pick a server on your network.", bundle: .module)
         #else
-        isAdding ? "Choose the server the profile is on." : "Choose how to sign in this Apple TV."
+        isAdding ? String(localized: "Choose the server the profile is on.", bundle: .module) : String(localized: "Choose how to sign in this Apple TV.", bundle: .module)
         #endif
     }
 
     private var header: some View {
         VStack(alignment: Self.alignment, spacing: Metrics.space3) {
             #if os(tvOS)
-            StrataMark().frame(height: 64).padding(.bottom, Metrics.space3)
+            StrataMark().frame(height: 140).padding(.bottom, Metrics.space10)
             #else
             StrataMark().frame(height: 44).padding(.bottom, Metrics.space2)
             #endif
-            Text(isAdding ? "Add a profile" : "Connect to Strata")
+            Text(isAdding ? String(localized: "Add a profile", bundle: .module) : String(localized: "Connect to Strata", bundle: .module))
                 .font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
             Text(Self.subtitle(isAdding: isAdding))
                 .font(.stCallout).foregroundStyle(Theme.ink2)
@@ -156,52 +163,99 @@ struct ConnectView: View {
     #if os(tvOS)
     /// Servers on the network first (usually one, and the quickest way in), then the two
     /// ways in that don't need one found: a phone that's signed in, or a typed address.
+    /// System rows, as in Settings, which turn white with dark text when focused.
     private var tvOptions: some View {
-        VStack(alignment: .leading, spacing: Metrics.space12) {
-            VStack(alignment: .leading, spacing: Metrics.space4) {
-                sectionTitle("On your network")
-                serverList
-            }
-            VStack(alignment: .leading, spacing: Metrics.space4) {
-                sectionTitle(rows.isEmpty ? "Or sign in another way" : "Other ways to sign in")
-                HStack(spacing: Metrics.space8) {
-                    optionCard("Sign In with Your Phone", detail: "Scan a code. Nothing to type.", systemImage: "iphone") {
-                        showPhoneSignIn = true
+        Form {
+            Section {
+                if rows.isEmpty {
+                    HStack(spacing: Metrics.space4) {
+                        if services.browser.state == .denied {
+                            Image(systemName: "wifi.exclamationmark").foregroundStyle(Theme.warning)
+                            Text("Allow Local Network access in Settings to find servers automatically.", bundle: .module)
+                        } else {
+                            ProgressView()
+                            Text("Looking for servers…", bundle: .module)
+                        }
                     }
-                    optionCard("Enter Address", detail: "Type the server's address.", systemImage: "keyboard") {
-                        showAddressEntry = true
+                    .foregroundStyle(.secondary)
+                    .focusable()
+                }
+                ForEach(rows) { server in
+                    Button {
+                        Task { await probe(server.url.absoluteString) }
+                    } label: {
+                        optionLabel(server.name, detail: Self.address(server.url), systemImage: "server.rack") {
+                            if probing == server.url.absoluteString {
+                                ProgressView()
+                            } else if !server.isCompatible {
+                                Text("Update needed", bundle: .module).foregroundStyle(Theme.warning)
+                            }
+                        }
+                    }
+                    .focused($focusedServer, equals: server.id)
+                    .disabled(probing != nil)
+                    .contextMenu {
+                        // Off this list on this device; signing in to it again brings it back.
+                        Button(role: .destructive) { services.store.hideServer(server.id) } label: {
+                            Label(String(localized: "Remove from List", bundle: .module), systemImage: "minus.circle")
+                        }
                     }
                 }
-            }
-        }
-        .focusSection()
-    }
-
-    private func sectionTitle(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.stEyebrow).tracking(1.5)
-            .foregroundStyle(Theme.ink3)
-            .padding(.leading, Metrics.space2)
-    }
-
-    private func optionCard(_ title: String, detail: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: Metrics.space5) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 30, weight: .medium))
-                    .foregroundStyle(Theme.accentText)
-                    .frame(width: Self.iconSize, height: Self.iconSize)
-                    .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
-                VStack(alignment: .leading, spacing: Metrics.space1) {
-                    Text(title).font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(1)
-                    Text(detail).font(.stFootnote).foregroundStyle(Theme.ink3).lineLimit(1)
+                if !rows.isEmpty {
+                    // Right under the servers it takes off the list; hidden ones can come back.
+                    Button {
+                        services.store.hideServers(rows.map(\.id))
+                    } label: {
+                        Label(String(localized: "Remove All Servers from This List", bundle: .module), systemImage: "minus.circle")
+                    }
+                    .disabled(probing != nil)
+                }
+                let hidden = services.store.hiddenServerIDs.count
+                if hidden > 0 {
+                    Button {
+                        services.store.showHiddenServers()
+                    } label: {
+                        Label(String(localized: "Show \(hidden) Hidden Servers", bundle: .module), systemImage: "eye")
+                    }
+                }
+            } header: {
+                Text("On your network", bundle: .module)
+            } footer: {
+                if let error {
+                    Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.danger)
+                } else if !rows.isEmpty {
+                    Text("Hides every server above, on this Apple TV only. To remove just one, press and hold it. Signing in to a server again brings it back.", bundle: .module)
                 }
             }
-            .padding(Metrics.space6)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Section {
+                Button { showPhoneSignIn = true } label: {
+                    optionLabel(String(localized: "Sign In with Your Phone", bundle: .module),
+                                detail: String(localized: "Scan a code. Nothing to type.", bundle: .module), systemImage: "iphone") { EmptyView() }
+                }
+                .disabled(probing != nil)
+                Button { showAddressEntry = true } label: {
+                    optionLabel(String(localized: "Enter Address", bundle: .module),
+                                detail: String(localized: "Type the server's address.", bundle: .module), systemImage: "keyboard") { EmptyView() }
+                }
+                .disabled(probing != nil)
+            } header: {
+                Text(rows.isEmpty ? String(localized: "Or sign in another way", bundle: .module) : String(localized: "Other ways to sign in", bundle: .module))
+            }
         }
-        .buttonStyle(.card)
-        .disabled(probing != nil)
+    }
+
+    /// A Settings-style row: symbol, title and a line under it, with an accessory at the end.
+    private func optionLabel(_ title: String, detail: String, systemImage: String, @ViewBuilder accessory: () -> some View) -> some View {
+        HStack(spacing: Metrics.space5) {
+            Image(systemName: systemImage).frame(width: 48)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail).font(.stFootnote).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: Metrics.space4)
+            accessory()
+        }
+        .padding(.vertical, Metrics.space2)
     }
 
     /// The address, on its own screen: the remote's keyboard takes over the bottom half.
@@ -212,8 +266,8 @@ struct ConnectView: View {
                     .font(.system(size: 44, weight: .medium))
                     .foregroundStyle(Theme.accentText)
                     .padding(.bottom, Metrics.space2)
-                Text("Enter the server address").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                Text("It's on the server's dashboard, like 192.168.1.20 or strata.example.com.")
+                Text("Enter the server address", bundle: .module).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                Text("It's on the server's dashboard, like 192.168.1.20 or strata.example.com.", bundle: .module)
                     .font(.stCallout).foregroundStyle(Theme.ink2)
                     .multilineTextAlignment(.center)
             }
@@ -247,10 +301,10 @@ struct ConnectView: View {
                 HStack(spacing: Metrics.space3) {
                     if services.browser.state == .denied {
                         Image(systemName: "wifi.exclamationmark").foregroundStyle(Theme.warning)
-                        Text("Allow Local Network access in Settings to find servers automatically.")
+                        Text("Allow Local Network access in Settings to find servers automatically.", bundle: .module)
                     } else {
                         ProgressView()
-                        Text("Looking for servers…")
+                        Text("Looking for servers…", bundle: .module)
                     }
                 }
                 .font(.stCallout)
@@ -281,7 +335,7 @@ struct ConnectView: View {
                 .contextMenu {
                     // Off this list on this device; signing in to it again brings it back.
                     Button(role: .destructive) { services.store.hideServer(server.id) } label: {
-                        Label("Remove from List", systemImage: "minus.circle")
+                        Label(String(localized: "Remove from List", bundle: .module), systemImage: "minus.circle")
                     }
                 }
             }
@@ -295,10 +349,10 @@ struct ConnectView: View {
         if !rows.isEmpty || hidden > 0 {
             HStack(spacing: Metrics.space6) {
                 if !rows.isEmpty {
-                    Button("Clear List") { services.store.hideServers(rows.map(\.id)) }
+                    Button(String(localized: "Clear List", bundle: .module)) { services.store.hideServers(rows.map(\.id)) }
                 }
                 if hidden > 0 {
-                    Button(hidden == 1 ? "Show 1 Hidden Server" : "Show \(hidden) Hidden Servers") { services.store.showHiddenServers() }
+                    Button(String(localized: "Show \(hidden) Hidden Servers", bundle: .module)) { services.store.showHiddenServers() }
                 }
             }
             #if os(tvOS)
@@ -352,7 +406,7 @@ struct ConnectView: View {
             if probing == server.url.absoluteString {
                 ProgressView()
             } else if !server.isCompatible {
-                Text("Update needed").font(.stFootnote).foregroundStyle(Theme.warning)
+                Text("Update needed", bundle: .module).font(.stFootnote).foregroundStyle(Theme.warning)
             } else {
                 Image(systemName: "chevron.right").font(.stFootnote.weight(.semibold)).foregroundStyle(Theme.ink3)
             }
@@ -376,8 +430,8 @@ struct ConnectView: View {
                     .frame(width: 44, height: 44)
                     .background(Theme.apricot, in: RoundedRectangle(cornerRadius: Metrics.radiusSM, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Scan QR Code").font(.stHeadline).foregroundStyle(Theme.ink)
-                    Text("Sign-in code or server address")
+                    Text("Scan QR Code", bundle: .module).font(.stHeadline).foregroundStyle(Theme.ink)
+                    Text("Sign-in code or server address", bundle: .module)
                         .font(.stFootnote).foregroundStyle(Theme.ink3)
                 }
                 Spacer(minLength: Metrics.space2)
@@ -402,18 +456,18 @@ struct ConnectView: View {
             self.address = address
             Task { await probe(address) }
         case .tvLink:
-            error = "That's a TV's code. To sign a TV in, open Settings › Link a TV."
+            error = String(localized: "That's a TV's code. To sign a TV in, open Settings › Link a TV.", bundle: .module)
         case .tvPhoneLink:
-            error = "That's a TV's code. Sign in on this phone first, then scan it again to sign the TV in."
+            error = String(localized: "That's a TV's code. Sign in on this phone first, then scan it again to sign the TV in.", bundle: .module)
         case .unknown:
-            error = "That QR code isn't from Strata. Scan a sign-in code from Members, or the server's address."
+            error = String(localized: "That QR code isn't from Strata. Scan a sign-in code from Members, or the server's address.", bundle: .module)
         }
     }
     #endif
 
     private var addressEntry: some View {
         VStack(alignment: .leading, spacing: Metrics.space3) {
-            TextField("Server address", text: $address, prompt: Text("Server address, like 192.168.1.20"))
+            TextField(String(localized: "Server address", bundle: .module), text: $address, prompt: Text("Server address, like 192.168.1.20", bundle: .module))
                 .textContentType(.URL)
                 #if os(iOS)
                 .keyboardType(.URL)
@@ -428,7 +482,7 @@ struct ConnectView: View {
                     .font(.stFootnote).foregroundStyle(Theme.danger)
             }
             if !address.trimmingCharacters(in: .whitespaces).isEmpty {
-                PrimaryButton("Continue", isLoading: probing == address) {
+                PrimaryButton(String(localized: "Continue", bundle: .module), isLoading: probing == address) {
                     Task { await probe(address) }
                 }
                 .disabled(probing != nil)
@@ -446,8 +500,8 @@ struct ConnectView: View {
         do {
             let (url, info) = try await services.store.probeServer(value)
             if info.setupRequired {
-                let code = info.setupCodeRequired == false ? "" : " You'll need the setup code from the server's log."
-                error = "\(info.serverName) isn't set up yet. Open \(url.absoluteString) in a browser to create the first account, then try again.\(code)"
+                let code = info.setupCodeRequired == false ? "" : String(localized: " You'll need the setup code from the server's log.", bundle: .module)
+                error = String(localized: "\(info.serverName) isn't set up yet. Open \(url.absoluteString) in a browser to create the first account, then try again.\(code)", bundle: .module)
                 return
             }
             let target = ServerTarget(url: url, info: info)
@@ -476,43 +530,56 @@ struct SignInView: View {
     enum Field { case login, password }
 
     var body: some View {
-        ScrollView {
+        #if os(tvOS)
+        // Laid out like Settings: where you're signing in on the left, the form on the right.
+        TVSettingsPage {
+            TVSettingsSide(systemImage: "person.badge.key", title: String(localized: "Sign in to \(target.info.serverName)", bundle: .module),
+                           message: String(localized: "Sign in with your Strata username and password. New here? Ask whoever runs this server for an invite.", bundle: .module))
+        } content: {
             VStack(alignment: .leading, spacing: Metrics.space6) {
-                VStack(alignment: .leading, spacing: Metrics.space2) {
-                    Text("Sign in to \(target.info.serverName)").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                    Text("Sign in with your Strata username and password. New here? Ask whoever runs this server for an invite.")
-                        .font(.stCallout).foregroundStyle(Theme.ink2)
-                }
-                VStack(spacing: Metrics.space3) {
-                    TextField("Username or email", text: $login)
-                        .textContentType(.username)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.emailAddress)
-                        #endif
-                        .autocorrectionDisabled()
-                        .focused($field, equals: .login)
-                        .submitLabel(.next)
-                        .onSubmit { field = .password }
-                        .modifier(FieldStyle())
-                    SecureField("Password", text: $password)
-                        .textContentType(.password)
-                        .focused($field, equals: .password)
-                        .submitLabel(.go)
-                        .onSubmit { Task { await signIn() } }
-                        .modifier(FieldStyle())
-                }
+                fields
                 if let error = services.store.lastError {
                     Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
                 }
-                PrimaryButton("Sign In", isLoading: services.store.isAuthenticating) {
+                // The system's button: white with dark text when focused, dimmed until both are filled in.
+                Button {
+                    Task { await signIn() }
+                } label: {
+                    Group {
+                        if services.store.isAuthenticating { ProgressView() } else { Text("Sign In", bundle: .module) }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .disabled(login.isEmpty || password.isEmpty || services.store.isAuthenticating)
+            }
+            .padding(.top, Metrics.space12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .focusSection()
+        }
+        .onAppear {
+            services.store.lastError = nil
+            field = .login
+        }
+        #else
+        ScrollView {
+            VStack(alignment: .leading, spacing: Metrics.space6) {
+                VStack(alignment: .leading, spacing: Metrics.space2) {
+                    Text("Sign in to \(target.info.serverName)", bundle: .module).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                    Text("Sign in with your Strata username and password. New here? Ask whoever runs this server for an invite.", bundle: .module)
+                        .font(.stCallout).foregroundStyle(Theme.ink2)
+                }
+                fields
+                if let error = services.store.lastError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
+                }
+                PrimaryButton(String(localized: "Sign In", bundle: .module), isLoading: services.store.isAuthenticating) {
                     Task { await signIn() }
                 }
                 .disabled(login.isEmpty || password.isEmpty || services.store.isAuthenticating)
                 #if os(iOS)
                 // The server emails a reset link; its page asks for the address.
                 if target.info.signIn?.passwordReset == true {
-                    Button("Forgot password?") { openURL(target.url.appending(path: "forgot-password")) }
+                    Button(String(localized: "Forgot password?", bundle: .module)) { openURL(target.url.appending(path: "forgot-password")) }
                         .font(.stFootnote)
                         .buttonStyle(.plain)
                         .foregroundStyle(Theme.accentText)
@@ -529,6 +596,29 @@ struct SignInView: View {
         .onAppear {
             services.store.lastError = nil
             field = .login
+        }
+        #endif
+    }
+
+    private var fields: some View {
+        VStack(spacing: Metrics.space3) {
+            TextField(String(localized: "Username or email", bundle: .module), text: $login)
+                .textContentType(.username)
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.emailAddress)
+                #endif
+                .autocorrectionDisabled()
+                .focused($field, equals: .login)
+                .submitLabel(.next)
+                .onSubmit { field = .password }
+                .modifier(FieldStyle())
+            SecureField(String(localized: "Password", bundle: .module), text: $password)
+                .textContentType(.password)
+                .focused($field, equals: .password)
+                .submitLabel(.go)
+                .onSubmit { Task { await signIn() } }
+                .modifier(FieldStyle())
         }
     }
 

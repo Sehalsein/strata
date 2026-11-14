@@ -20,6 +20,8 @@ struct SettingsView: View {
     @State private var newName = ""
     /// How many libraries the profile can watch: "Library" only shows with several.
     @State private var libraryCount = 0
+    /// iPad, full width: the list keeps to a readable width.
+    @State private var wide = false
     /// Shown as a tab (tvOS) rather than a sheet: no Done button.
     var embedded = false
 
@@ -29,192 +31,285 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                // One card: who's watching, the other profiles to switch to, and what this one can do.
-                Section {
-                    if let active = store.active {
-                        Button {
-                            showEditProfile = true
-                        } label: {
-                            HStack(spacing: Metrics.space4) {
-                                ProfileAvatar(name: active.name, seed: active.id, size: 56, imageURL: store.imageURL(for: active))
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(active.name).font(.stTitle2).foregroundStyle(Theme.ink)
-                                    Text(profileLine(active)).font(.stFootnote).foregroundStyle(Theme.ink3)
-                                }
-                                Spacer(minLength: 0)
-                                if active.isKids { Text("Kids").eyebrowStyle(Theme.accentText) }
-                                Text("Edit").font(.stFootnote).foregroundStyle(Theme.accentText)
-                            }
-                            .padding(.vertical, Metrics.space1)
-                        }
-                        .profileActions(active, rename: startRename, remove: { removing = $0 }, store: store)
+            layout
+                .confirmationDialog(String(localized: "Remove \(removing?.name ?? "this profile") from this device?", bundle: .module),
+                                    isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+                                    titleVisibility: .visible, presenting: removing) { signIn in
+                    Button(String(localized: "Remove", bundle: .module), role: .destructive) {
+                        store.remove(signIn.id)
+                        services.refreshClient()
                     }
-                    ForEach(store.signIns.filter { $0.id != store.activeID }) { signIn in
-                        Button {
-                            store.switchTo(signIn.id)
-                            services.refreshClient()
-                        } label: {
-                            HStack(spacing: Metrics.space3) {
-                                ProfileAvatar(name: signIn.name, seed: signIn.id, size: 32, imageURL: store.imageURL(for: signIn))
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(signIn.name).foregroundStyle(Theme.ink)
-                                    if showsServers, let server = store.server(for: signIn)?.name {
-                                        Text(server).font(.stFootnote).foregroundStyle(Theme.ink3)
-                                    }
-                                }
-                                Spacer()
-                                if signIn.isKids { Text("Kids").eyebrowStyle(Theme.ink3) }
-                                Text("Switch").font(.stFootnote).foregroundStyle(Theme.accentText)
-                            }
-                        }
-                        .profileActions(signIn, rename: startRename, remove: { removing = $0 }, store: store)
-                    }
-                    Button {
-                        showAddProfile = true
-                    } label: {
-                        Label("Add Profile", systemImage: "plus")
-                    }
-                    if let active = store.active {
-                        #if os(tvOS)
-                        // The TV's tab bar has no room for My List; it lives with the profile.
-                        NavigationLink(value: Route.myList) { Label("My List", systemImage: "bookmark") }
-                        #endif
-                        if libraryCount > 1 {
-                            Button {
-                                showLibraries = true
-                            } label: {
-                                LabeledContent("Library", value: active.household?.name ?? "Choose")
-                            }
-                        }
-                        #if os(iOS)
-                        if !active.viewerOnly {
-                            Button("Change Password") { showChangePassword = true }
-                        }
-                        #endif
-                        Button("Sign Out \(active.name)", role: .destructive) { confirmSignOut = true }
-                            .confirmationDialog("Sign \(active.name) out?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-                                Button("Sign Out", role: .destructive) {
-                                    Task {
-                                        await store.signOut()
-                                        services.refreshClient()
-                                        if !embedded { dismiss() }
-                                    }
-                                }
-                            } message: {
-                                Text("\(active.name) is removed from this device. You can sign in again later.")
-                            }
-                    }
-                } footer: {
-                    if let active = store.active {
-                        if active.isKids {
-                            Text("A kids profile only sees titles within its age limit.")
-                        } else if active.viewerOnly {
-                            Text("Opened on this device without a password: \(active.name) can watch here, but changing settings needs the password.")
-                        }
-                    }
+                    Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+                } message: { _ in
+                    Text("It's signed out here. You can add it again later.", bundle: .module)
                 }
-
-                #if os(iOS)
-                if store.active != nil {
-                    Section {
-                        Button {
-                            showLinkTV = true
-                        } label: {
-                            Label("Link a TV", systemImage: "appletv")
-                        }
-                    } footer: {
-                        Text("Sign in an Apple TV as \(store.active?.name ?? "you") by approving the code it shows.")
+                #if os(tvOS)
+                // Its own page on the TV: an alert's field shows its text white on white there.
+                .pickerSheet(item: $renaming) { server in
+                    RenameServerPage(name: server.name) { store.renameServer(server.id, to: $0) }
+                }
+                #else
+                .alert(String(localized: "Rename Server", bundle: .module), isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+                    TextField(String(localized: "Name", bundle: .module), text: $newName)
+                    Button(String(localized: "Cancel", bundle: .module), role: .cancel) {}
+                    Button(String(localized: "Save", bundle: .module)) {
+                        if let renaming { store.renameServer(renaming.id, to: newName) }
                     }
+                } message: {
+                    Text("Only on this device.", bundle: .module)
                 }
                 #endif
+                .routeDestinations()
+                .toolbar {
+                    if !embedded {
+                        ToolbarItem(placement: .confirmationAction) { Button(String(localized: "Done", bundle: .module)) { dismiss() } }
+                    }
+                }
+                .task(id: store.activeID) {
+                    libraryCount = (try? await store.households().count) ?? 0
+                }
+                .pickerSheet(isPresented: $showLibraries) { NavigationStack { HouseholdPickerView(isSheet: true) } }
+                .pickerSheet(isPresented: $showAddProfile) { ConnectView(isAdding: true) }
+                .pickerSheet(isPresented: $showEditProfile) { EditProfileView() }
+                #if os(iOS)
+                .sheet(isPresented: $showLinkTV) { ApproveDeviceView() }
+                .sheet(isPresented: $showChangePassword) { ChangePasswordView() }
+                #endif
+        }
+    }
 
-                // Cellular quality and downloads (iPhone and iPad).
-                PlaybackSettingsSection()
+    /// Like the TV's own Settings: who's signed in on the left, the settings on the right,
+    /// below the sidebar's button. Elsewhere, Settings' usual grouped list.
+    @ViewBuilder private var layout: some View {
+        #if os(tvOS)
+        HStack(alignment: .top, spacing: Metrics.space20) {
+            profileColumn
+                .frame(width: 480)
+                .padding(.top, Metrics.space12)
+            // The focused row grows as it lifts: let it draw past the list's sides. Labels
+            // in the primary style, which turns dark on the white focused row (the app's
+            // accent doesn't read there). Not as a tint: a white tint reaches the
+            // dialogs and fields shown from here and turns their focused text white on white.
+            form.scrollClipDisabled().foregroundStyle(.primary)
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.top, 120)
+        .ignoresSafeArea(edges: .top)
+        .background(Theme.bg.ignoresSafeArea())
+        #else
+        // One list, as in the system's Settings; on a wide iPad it keeps to a readable
+        // width in the middle rather than running edge to edge.
+        form
+            .frame(maxWidth: wide ? 720 : .infinity)
+            .frame(maxWidth: .infinity)
+        .navigationTitle(Text("Settings", bundle: .module))
+        // The large title would sit at the window's edge, away from the centred list.
+        .navigationBarTitleDisplayMode(wide ? .inline : .automatic)
+        .scrollContentBackground(.hidden)
+        .background(Theme.bg)
+        .onGeometryChange(for: Bool.self) { $0.size.width >= 900 } action: { wide = $0 }
+        #endif
+    }
 
+    #if os(tvOS)
+    /// The profile in use, large: picture, name, where it's signed in, and what it can do.
+    @ViewBuilder private var profileColumn: some View {
+        if let active = store.active {
+            VStack(spacing: Metrics.space4) {
+                ProfileAvatar(name: active.name, seed: active.id, size: 240, imageURL: store.imageURL(for: active))
+                    .padding(.bottom, Metrics.space2)
+                Text(active.name).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink).multilineTextAlignment(.center)
+                Text(profileLine(active)).font(.stCallout).foregroundStyle(Theme.ink3).multilineTextAlignment(.center)
+                if active.isKids { kidsTag }
+                if let note = profileNote(active) {
+                    Text(note).font(.stFootnote).foregroundStyle(Theme.ink3).multilineTextAlignment(.center).padding(.top, Metrics.space4)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .combine)
+        }
+    }
+    #endif
+
+    private var form: some View {
+        Form {
+            #if !os(tvOS)
+            // The profile card, like the account at the top of the system's Settings.
+            if let active = store.active {
                 Section {
-                    if let server = store.activeServer {
-                        // The name is this device's own; the server keeps its name for everyone else.
-                        Button { startRename(server) } label: {
-                            LabeledContent("Name") {
-                                HStack(spacing: Metrics.space2) {
-                                    Text(server.name)
-                                    Image(systemName: "pencil").font(.stFootnote)
+                    Button { showEditProfile = true } label: {
+                        HStack(spacing: Metrics.space4) {
+                            ProfileAvatar(name: active.name, seed: active.id, size: 64, imageURL: store.imageURL(for: active))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(active.name).font(.stTitle2).foregroundStyle(.primary)
+                                Text(profileLine(active)).font(.stFootnote).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            if active.isKids { kidsTag }
+                            Image(systemName: "chevron.right").font(.stFootnote.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, Metrics.space1)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint(Text("Edit profile", bundle: .module))
+                    .profileActions(active, rename: startRename, remove: { removing = $0 }, store: store)
+                } footer: {
+                    if let note = profileNote(active) { Text(note) }
+                }
+            }
+            #endif
+
+            // Everyone else signed in on this device, a press away.
+            Section {
+                ForEach(store.signIns.filter { $0.id != store.activeID }) { signIn in
+                    Button {
+                        store.switchTo(signIn.id)
+                        services.refreshClient()
+                    } label: {
+                        HStack(spacing: Metrics.space3) {
+                            ProfileAvatar(name: signIn.name, seed: signIn.id, size: Metrics.isTV ? 48 : 32, imageURL: store.imageURL(for: signIn))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(signIn.name).foregroundStyle(.primary)
+                                if showsServers, let server = store.server(for: signIn)?.name {
+                                    Text(server).font(.stFootnote).foregroundStyle(.secondary)
                                 }
                             }
+                            Spacer()
+                            if signIn.isKids { kidsTag }
                         }
-                        .foregroundStyle(Theme.ink)
-                        LabeledContent("Address") {
-                            Text(Self.address(server.url))
-                                #if !os(tvOS)
-                                .textSelection(.enabled)
-                                #endif
-                        }
-                    } else {
-                        LabeledContent("Name", value: "—")
                     }
-                    LabeledContent("Version", value: store.activeServer?.version ?? "—")
-                } header: {
-                    Text("Server")
+                    .accessibilityHint(Text("Switches to this profile", bundle: .module))
+                    .profileActions(signIn, rename: startRename, remove: { removing = $0 }, store: store)
                 }
+                Button { showAddProfile = true } label: {
+                    Label(String(localized: "Add Profile", bundle: .module), systemImage: "person.badge.plus")
+                }
+            } header: {
+                Text("Profiles", bundle: .module)
+            }
 
+            if let active = store.active {
                 Section {
-                    LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
-                    if let server = store.activeServer {
-                        PrivacyPolicyRow(server: server.url)
+                    #if os(tvOS)
+                    Button { showEditProfile = true } label: {
+                        Label(String(localized: "Edit Profile", bundle: .module), systemImage: "person.crop.circle")
                     }
-                    AcknowledgementsRow()
+                    #endif
+                    if libraryCount > 1 {
+                        Button { showLibraries = true } label: {
+                            LabeledContent {
+                                Text(active.household?.name ?? String(localized: "Choose", bundle: .module))
+                            } label: {
+                                Label(String(localized: "Library", bundle: .module), systemImage: "books.vertical")
+                            }
+                        }
+                    }
+                    #if os(iOS)
+                    if !active.viewerOnly {
+                        Button { showChangePassword = true } label: {
+                            Label(String(localized: "Change Password", bundle: .module), systemImage: "key")
+                        }
+                    }
+                    Button { showLinkTV = true } label: {
+                        Label(String(localized: "Link a TV", bundle: .module), systemImage: "appletv")
+                    }
+                    #endif
                 } header: {
-                    Text("App")
+                    Text("Account", bundle: .module)
+                } footer: {
+                    #if os(iOS)
+                    Text("Sign in an Apple TV as \(active.name) by approving the code it shows.", bundle: .module)
+                    #endif
                 }
             }
-            .confirmationDialog("Remove \(removing?.name ?? "this profile") from this device?",
-                                isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
-                                titleVisibility: .visible, presenting: removing) { signIn in
-                Button("Remove", role: .destructive) {
-                    store.remove(signIn.id)
-                    services.refreshClient()
+
+            // Cellular quality and downloads (iPhone and iPad).
+            PlaybackSettingsSection()
+
+            Section {
+                if let server = store.activeServer {
+                    // The name is this device's own; the server keeps its name for everyone else.
+                    Button { startRename(server) } label: {
+                        LabeledContent {
+                            Text(server.name)
+                        } label: {
+                            Label(String(localized: "Name", bundle: .module), systemImage: "server.rack")
+                        }
+                    }
+                    .accessibilityHint(Text("Renames the server on this device", bundle: .module))
+                    LabeledContent {
+                        Text(Self.address(server.url))
+                            #if !os(tvOS)
+                            .textSelection(.enabled)
+                            #endif
+                    } label: {
+                        Label(String(localized: "Address", bundle: .module), systemImage: "network")
+                    }
                 }
-                Button("Cancel", role: .cancel) {}
-            } message: { _ in
-                Text("It's signed out here. You can add it again later.")
-            }
-            .alert("Rename Server", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-                TextField("Name", text: $newName)
-                Button("Cancel", role: .cancel) {}
-                Button("Save") {
-                    if let renaming { store.renameServer(renaming.id, to: newName) }
+                LabeledContent {
+                    Text(store.activeServer?.version ?? "—")
+                } label: {
+                    Label(String(localized: "Version", bundle: .module), systemImage: "info.circle")
                 }
-            } message: {
-                Text("Only on this device.")
+            } header: {
+                Text("Server", bundle: .module)
             }
-            .navigationTitle("Settings")
-            .routeDestinations()
-            #if !os(tvOS)
-            .scrollContentBackground(.hidden)
-            .background(Theme.bg)
-            #endif
-            .toolbar {
-                if !embedded {
-                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+
+            Section {
+                LabeledContent {
+                    Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+                } label: {
+                    Label(String(localized: "Version", bundle: .module), systemImage: "app.badge")
+                }
+                if let server = store.activeServer {
+                    PrivacyPolicyRow(server: server.url)
+                }
+                AcknowledgementsRow()
+            } header: {
+                Text("About Strata", bundle: .module)
+            }
+
+            if let active = store.active {
+                // On its own at the end, as in the system's Settings.
+                Section {
+                    Button(role: .destructive) { confirmSignOut = true } label: {
+                        Label(String(localized: "Sign Out \(active.name)", bundle: .module), systemImage: "rectangle.portrait.and.arrow.right")
+                            // Red, over the list's primary label style.
+                            .foregroundStyle(Theme.danger)
+                    }
+                    .confirmationDialog(String(localized: "Sign \(active.name) out?", bundle: .module), isPresented: $confirmSignOut, titleVisibility: .visible) {
+                        Button(String(localized: "Sign Out", bundle: .module), role: .destructive) {
+                            Task {
+                                await store.signOut()
+                                services.refreshClient()
+                                if !embedded { dismiss() }
+                            }
+                        }
+                    } message: {
+                        Text("\(active.name) is removed from this device. You can sign in again later.", bundle: .module)
+                    }
                 }
             }
-            .task(id: store.activeID) {
-                libraryCount = (try? await store.households().count) ?? 0
-            }
-            .sheet(isPresented: $showLibraries) { NavigationStack { HouseholdPickerView(isSheet: true) } }
-            .sheet(isPresented: $showAddProfile) { ConnectView(isAdding: true) }
-            .sheet(isPresented: $showEditProfile) { EditProfileView() }
-            #if os(iOS)
-            .sheet(isPresented: $showLinkTV) { ApproveDeviceView() }
-            .sheet(isPresented: $showChangePassword) { ChangePasswordView() }
-            #endif
         }
+    }
+
+    private var kidsTag: some View {
+        Text("Kids", bundle: .module).font(.stEyebrow).textCase(.uppercase).tracking(1).foregroundStyle(.secondary)
+    }
+
+    /// What this profile can do here, when it's limited.
+    private func profileNote(_ active: SavedSignIn) -> String? {
+        if active.isKids { return String(localized: "A kids profile only sees titles within its age limit.", bundle: .module) }
+        if active.viewerOnly {
+            return String(localized: "Opened on this device without a password: \(active.name) can watch here, but changing settings needs the password.", bundle: .module)
+        }
+        return nil
     }
 
     /// "@sam on Home Server", or just the server.
     private func profileLine(_ signIn: SavedSignIn) -> String {
-        let server = store.server(for: signIn)?.name ?? "this server"
+        let server = store.server(for: signIn)?.name ?? String(localized: "this server", bundle: .module)
         return signIn.username.map { "@\($0) · \(server)" } ?? server
     }
 
@@ -248,8 +343,8 @@ struct ChangePasswordView: View {
 
     private var problem: String? {
         if new.isEmpty { return nil }
-        if new.count < Self.minimumLength { return "Use at least \(Self.minimumLength) characters." }
-        if !confirm.isEmpty && confirm != new { return "The new passwords don't match." }
+        if new.count < Self.minimumLength { return String(localized: "Use at least \(Self.minimumLength) characters.", bundle: .module) }
+        if !confirm.isEmpty && confirm != new { return String(localized: "The new passwords don't match.", bundle: .module) }
         return nil
     }
 
@@ -257,13 +352,13 @@ struct ChangePasswordView: View {
         NavigationStack {
             Form {
                 Section {
-                    SecureField("Current password", text: $current).textContentType(.password)
+                    SecureField(String(localized: "Current password", bundle: .module), text: $current).textContentType(.password)
                 } footer: {
-                    Text("Other devices signed in as \(services.store.active?.name ?? "you") will be signed out.")
+                    Text("Other devices signed in as \(services.store.active?.name ?? "you") will be signed out.", bundle: .module)
                 }
                 Section {
-                    SecureField("New password", text: $new).textContentType(.newPassword)
-                    SecureField("Confirm new password", text: $confirm).textContentType(.newPassword)
+                    SecureField(String(localized: "New password", bundle: .module), text: $new).textContentType(.newPassword)
+                    SecureField(String(localized: "Confirm new password", bundle: .module), text: $confirm).textContentType(.newPassword)
                 } footer: {
                     if let message = error ?? problem {
                         Text(message).foregroundStyle(Theme.danger)
@@ -272,15 +367,15 @@ struct ChangePasswordView: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.bg)
-            .navigationTitle("Change Password")
+            .navigationTitle(Text("Change Password", bundle: .module))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     if saving {
                         ProgressView()
                     } else {
-                        Button("Save") { Task { await save() } }
+                        Button(String(localized: "Save", bundle: .module)) { Task { await save() } }
                             .disabled(current.isEmpty || new.count < Self.minimumLength || confirm != new)
                     }
                 }
@@ -298,7 +393,7 @@ struct ChangePasswordView: View {
             dismiss()
         } catch {
             let e = StrataError.wrap(error)
-            self.error = e.code == "INVALID_PASSWORD" ? "The current password isn't right." : e.message
+            self.error = e.code == "INVALID_PASSWORD" ? String(localized: "The current password isn't right.", bundle: .module) : e.message
         }
     }
 
@@ -312,17 +407,51 @@ private extension View {
         self
             .contextMenu {
                 if let server = store.server(for: signIn) {
-                    Button { rename(server) } label: { Label("Rename Server", systemImage: "pencil") }
+                    Button { rename(server) } label: { Label(String(localized: "Rename Server", bundle: .module), systemImage: "pencil") }
                 }
-                Button(role: .destructive) { remove(signIn) } label: { Label("Remove from This Device", systemImage: "minus.circle") }
+                Button(role: .destructive) { remove(signIn) } label: { Label(String(localized: "Remove from This Device", bundle: .module), systemImage: "minus.circle") }
             }
             #if !os(tvOS)
             // No full swipe, and no destructive role: that animates the row away before
             // anyone has confirmed, and it springs back if they cancel.
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button { remove(signIn) } label: { Label("Remove", systemImage: "minus.circle") }
+                Button { remove(signIn) } label: { Label(String(localized: "Remove", bundle: .module), systemImage: "minus.circle") }
                     .tint(.red)
             }
             #endif
     }
 }
+
+#if os(tvOS)
+/// The server's name on this device, on its own page: Settings' layout, a field and the
+/// two buttons. Menu cancels.
+private struct RenameServerPage: View {
+    @Environment(\.dismiss) private var dismiss
+    @State var name: String
+    let save: (String) -> Void
+
+    private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        TVSettingsPage {
+            TVSettingsSide(systemImage: "server.rack", title: String(localized: "Rename Server", bundle: .module),
+                           message: String(localized: "Only on this device. Everyone else still sees the server's own name.", bundle: .module))
+        } content: {
+            VStack(alignment: .leading, spacing: Metrics.space6) {
+                TextField(String(localized: "Name", bundle: .module), text: $name)
+                HStack(spacing: Metrics.space4) {
+                    Button(String(localized: "Cancel", bundle: .module)) { dismiss() }
+                    Button(String(localized: "Save", bundle: .module)) {
+                        save(trimmed)
+                        dismiss()
+                    }
+                    .disabled(trimmed.isEmpty)
+                }
+            }
+            .padding(.top, Metrics.space12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .focusSection()
+        }
+    }
+}
+#endif

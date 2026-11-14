@@ -13,10 +13,8 @@ struct CalendarView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: Metrics.space6) {
-                    #if os(tvOS)
-                    Color.clear.frame(height: 120) // clear the top tab bar
-                    #endif
+                TVPageHeader(title: String(localized: "Calendar", bundle: .module))
+                VStack(alignment: .leading, spacing: Self.dayGap) {
                     content
                 }
                 .padding(.horizontal, Metrics.gutter)
@@ -32,26 +30,24 @@ struct CalendarView: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         .fullBleedOnTV()
-        #if os(tvOS)
-        .ignoresSafeArea(edges: .top)
-        #else
-        .navigationTitle("Calendar")
+        #if !os(tvOS)
+        .navigationTitle(Text("Calendar", bundle: .module))
         .toolbar {
             if EpisodeAlerts.isAvailable {
                 ToolbarItem(placement: .primaryAction) {
                     Button { Task { await toggleAlerts() } } label: {
-                        Label(alertsOn ? "Notifications On" : "Notify Me", systemImage: alertsOn ? "bell.fill" : "bell")
+                        Label(alertsOn ? String(localized: "Notifications On", bundle: .module) : String(localized: "Notify Me", bundle: .module), systemImage: alertsOn ? "bell.fill" : "bell")
                     }
-                    .accessibilityHint("Notifies you when episodes of shows on My List air")
+                    .accessibilityHint(Text("Notifies you when episodes of shows on My List air", bundle: .module))
                 }
             }
             ProfileToolbarItems()
         }
         .refreshable { await load(force: true) }
-        .alert("Notifications are off for Strata", isPresented: $alertsDenied) {
-            Button("OK", role: .cancel) {}
+        .alert(String(localized: "Notifications are off for Strata", bundle: .module), isPresented: $alertsDenied) {
+            Button(String(localized: "OK", bundle: .module), role: .cancel) {}
         } message: {
-            Text("Turn them on in Settings › Notifications › Strata to hear when new episodes air.")
+            Text("Turn them on in Settings › Notifications › Strata to hear when new episodes air.", bundle: .module)
         }
         #endif
         .task { await load() }
@@ -60,23 +56,36 @@ struct CalendarView: View {
     @ViewBuilder private var content: some View {
         switch episodes {
         case .loading:
-            ProgressView().frame(maxWidth: .infinity, minHeight: 300)
+            VStack(alignment: .leading, spacing: Metrics.space3) {
+                SkeletonBar(width: 160, height: Metrics.isTV ? 30 : 16).skeletonPulse()
+                SkeletonEpisodeRows(count: 5)
+            }
         case .failed(let message):
-            MessageView(systemImage: "wifi.exclamationmark", title: "Couldn't load the calendar", message: message, actionTitle: "Try Again") {
+            MessageView(systemImage: "wifi.exclamationmark", title: String(localized: "Couldn't load the calendar", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                 Task { await load() }
             }
             .frame(minHeight: 400)
         case .loaded(let list) where list.isEmpty:
-            MessageView(systemImage: "calendar", title: "Nothing on the calendar",
-                        message: "Add shows and anime to My List to see when new episodes air.")
+            MessageView(systemImage: "calendar", title: String(localized: "Nothing on the calendar", bundle: .module),
+                        message: String(localized: "Add shows and anime to My List to see when new episodes air.", bundle: .module))
                 .frame(minHeight: 400)
         case .loaded:
             ForEach(days, id: \.day) { day in
                 VStack(alignment: .leading, spacing: Metrics.space3) {
                     Text(Self.heading(day.day))
-                        .font(.stHeadline)
-                        .foregroundStyle(Calendar.current.isDateInToday(day.day) ? Theme.accentText : Theme.ink2)
+                        .modifier(DayHeadingStyle(isToday: Calendar.current.isDateInToday(day.day)))
                         .accessibilityAddTraits(.isHeader)
+                    #if os(tvOS)
+                    // Each episode a native TV card that lifts on focus, like the source list.
+                    VStack(spacing: Metrics.space5) {
+                        ForEach(day.episodes) { episode in
+                            NavigationLink(value: Route.title(episode.ref)) {
+                                CalendarRow(episode: episode).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.card)
+                        }
+                    }
+                    #else
                     VStack(spacing: 0) {
                         ForEach(day.episodes) { episode in
                             // A full-width row lifts like an episode row, not like a poster.
@@ -86,6 +95,7 @@ struct CalendarView: View {
                         }
                     }
                     .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
+                    #endif
                 }
                 .id(day.day)
                 #if os(tvOS)
@@ -94,6 +104,12 @@ struct CalendarView: View {
             }
         }
     }
+
+    #if os(tvOS)
+    private static let dayGap: CGFloat = Metrics.space12
+    #else
+    private static let dayGap: CGFloat = Metrics.space6
+    #endif
 
     private struct Day {
         let day: Date
@@ -110,9 +126,9 @@ struct CalendarView: View {
     /// "Today", "Tomorrow", "Yesterday", or "Friday, October 31".
     private static func heading(_ day: Date) -> String {
         let calendar = Calendar.current
-        if calendar.isDateInToday(day) { return "Today" }
-        if calendar.isDateInTomorrow(day) { return "Tomorrow" }
-        if calendar.isDateInYesterday(day) { return "Yesterday" }
+        if calendar.isDateInToday(day) { return String(localized: "Today", bundle: .module) }
+        if calendar.isDateInTomorrow(day) { return String(localized: "Tomorrow", bundle: .module) }
+        if calendar.isDateInYesterday(day) { return String(localized: "Yesterday", bundle: .module) }
         return day.formatted(.dateTime.weekday(.wide).month(.wide).day())
     }
 
@@ -129,26 +145,51 @@ struct CalendarView: View {
     }
 }
 
+/// A day's heading: the rail-title size on the TV, a headline elsewhere; today in the accent.
+private struct DayHeadingStyle: ViewModifier {
+    let isToday: Bool
+
+    func body(content: Content) -> some View {
+        #if os(tvOS)
+        content
+            .font(.system(size: 34, weight: .semibold))
+            .foregroundStyle(isToday ? Theme.accentText : Theme.ink.opacity(0.85))
+        #else
+        content
+            .font(.stHeadline)
+            .foregroundStyle(isToday ? Theme.accentText : Theme.ink2)
+        #endif
+    }
+}
+
 /// An episode on the calendar: the show's poster, its name, the episode and when it airs.
 private struct CalendarRow: View {
     let episode: CalendarEpisode
 
     #if os(tvOS)
-    private let thumbWidth: CGFloat = 80
+    private let thumbWidth: CGFloat = 96
+    private let inset = Metrics.space5
+    private let gap = Metrics.space5
     #else
     private let thumbWidth: CGFloat = 48
+    private let inset = Metrics.space3
+    private let gap = Metrics.space3
     #endif
 
     var body: some View {
-        HStack(spacing: Metrics.space3) {
+        HStack(spacing: gap) {
             ArtworkImage(url: episode.posterUrl, aspectRatio: 2 / 3, seed: episode.ref.description)
                 .frame(width: thumbWidth)
+                #if os(tvOS)
+                // The row lifts as a whole; the poster's own focus lift would pull it to the edge.
+                .hoverEffectDisabled()
+                #endif
             VStack(alignment: .leading, spacing: 3) {
                 Text(episode.title).font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(1)
                 Text([episode.code, episode.name].compactMap { $0 }.joined(separator: " · "))
                     .font(.stCallout).foregroundStyle(Theme.ink2).lineLimit(1)
                 if episode.available {
-                    Label("In your library", systemImage: "checkmark.circle.fill")
+                    Label(String(localized: "In your library", bundle: .module), systemImage: "checkmark.circle.fill")
                         .font(.stFootnote).foregroundStyle(Theme.accentText)
                 }
             }
@@ -158,7 +199,7 @@ private struct CalendarRow: View {
                     .font(.stCallout.monospacedDigit()).foregroundStyle(Theme.ink3)
             }
         }
-        .padding(Metrics.space3)
+        .padding(inset)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }

@@ -23,24 +23,25 @@ struct HomeView: View {
             PageStack {
                 switch shelves {
                 case .loading:
+                    SkeletonHero(featured: true)
                     SkeletonRail(aspectRatio: 16 / 9, width: Metrics.landscapeWidth)
                     SkeletonRail(width: Metrics.posterWidth)
                 case .failed(let message):
-                    MessageView(systemImage: "wifi.exclamationmark", title: "Couldn't load Home", message: message, actionTitle: "Try Again") {
+                    MessageView(systemImage: "wifi.exclamationmark", title: String(localized: "Couldn't load Home", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                         Task { await load(force: true) }
                     }
                     .frame(minHeight: 400)
                 case .loaded(let list):
                     if let featured = list.first(where: { $0.id == "featured" }), !featured.items.isEmpty {
-                        HeroCarousel(cards: featured.items, watchlist: watchlistKeys(list))
+                        HeroCarousel(cards: featured.items, watchlist: watchlistKeys(list), takesLaunchFocus: true)
                     } else {
                         #if os(tvOS)
-                        Color.clear.frame(height: 120) // clear the top tab bar when there's no hero
+                        Color.clear.frame(height: 120) // clear the sidebar button when there's no hero
                         #endif
                     }
                     if list.isEmpty {
-                        MessageView(systemImage: "film.stack", title: "Nothing here yet",
-                                    message: "Add media folders in your server's dashboard.")
+                        MessageView(systemImage: "film.stack", title: String(localized: "Nothing here yet", bundle: .module),
+                                    message: String(localized: "Add media folders in your server's dashboard.", bundle: .module))
                             .frame(minHeight: 400)
                     }
                     ForEach(Self.rails(list)) { shelf in
@@ -56,7 +57,7 @@ struct HomeView: View {
         // The hero runs to the top edge, under the bar, like a title page.
         .heroUnderBar(hasHero)
         #if !os(tvOS)
-        .navigationTitle("Home")
+        .navigationTitle(Text("Home", bundle: .module))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -64,7 +65,7 @@ struct HomeView: View {
             // With the iPad sidebar, My List and the profile are there.
             if !showsSidebar {
                 ToolbarItem(placement: .primaryAction) {
-                    NavigationLink(value: Route.myList) { Label("My List", systemImage: "bookmark") }
+                    NavigationLink(value: Route.myList) { Label(String(localized: "My List", bundle: .module), systemImage: "bookmark") }
                 }
             }
             ProfileToolbarItems()
@@ -85,7 +86,7 @@ struct HomeView: View {
         var rails = list.filter { $0.id != "featured" }
         guard let first = rails.firstIndex(where: { resume.map(\.id).contains($0.id) }) else { return rails }
         rails.removeAll { resume.map(\.id).contains($0.id) }
-        rails.insert(Shelf(id: "continue", title: "Continue Watching", kind: .continue, items: resume.flatMap(\.items)), at: first)
+        rails.insert(Shelf(id: "continue", title: String(localized: "Continue Watching", bundle: .module), kind: .continue, items: resume.flatMap(\.items)), at: first)
         return rails
     }
 
@@ -108,7 +109,7 @@ struct HomeView: View {
 
     private var hasHero: Bool {
         #if os(tvOS)
-        true // the top tab bar floats over the page either way
+        true // the sidebar button floats over the page either way
         #else
         shelves.value?.contains { $0.id == "featured" && !$0.items.isEmpty } ?? false
         #endif
@@ -164,20 +165,20 @@ struct ShelfRail: View {
                     .contextMenu {
                         // A Button, not a NavigationLink: menu items sit outside the stack.
                         Button { pushRoute(card.route) } label: { Label(card.type == .show ? "Go to Show" : "Go to Movie", systemImage: "info.circle") }
-                        Button { if let r = card.watchRequest(restart: true) { services.play(r) } } label: { Label("Play from Beginning", systemImage: "arrow.counterclockwise") }
+                        Button { if let r = card.watchRequest(restart: true) { services.play(r) } } label: { Label(String(localized: "Play from Beginning", bundle: .module), systemImage: "arrow.counterclockwise") }
                         if let target = card.watchRequest()?.target {
-                            Button { setWatched(target, true) } label: { Label("Mark as Watched", systemImage: "checkmark.circle") }
+                            Button { setWatched(target, true) } label: { Label(String(localized: "Mark as Watched", bundle: .module), systemImage: "checkmark.circle") }
                         }
                         // Off the rail until it's watched again; progress is kept.
                         Button(role: .destructive) { hide(card) } label: {
-                            Label("Remove from Continue Watching", systemImage: "minus.circle")
+                            Label(String(localized: "Remove from Continue Watching", bundle: .module), systemImage: "minus.circle")
                         }
                     }
                 } else {
                     NavigationLink(value: card.route) {
                         PosterCardLabel(card: card)
                     }
-                    .buttonStyle(StrataCardStyle())
+                    .cardButtonStyle()
                 }
             }
         }
@@ -209,7 +210,7 @@ struct PosterCardLabel: View {
     var width: CGFloat? = Metrics.posterWidth
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.space2) {
+        VStack(alignment: .leading, spacing: Metrics.cardCaptionGap) {
             // No title on the placeholder: the caption below already names it.
             ArtworkImage(url: card.posterUrl, aspectRatio: 2 / 3, seed: card.id)
                 .overlay(alignment: .bottomLeading) {
@@ -238,8 +239,11 @@ struct PosterCardLabel: View {
         .frame(width: width)
         .frame(maxWidth: width == nil ? .infinity : nil)
         .contentShape(Rectangle())
+        // One element: the title, then what the caption and the badge say.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([card.title, card.yearText, card.providerKinds.first.map { "on \($0.label)" }].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel(card.title)
+        .accessibilityValue([card.role, card.yearText, card.badge, card.providerKinds.first.map { String(localized: "on \($0.label)", bundle: .module) }]
+            .compactMap { $0 }.joined(separator: ", "))
     }
 }
 
@@ -250,10 +254,10 @@ struct ComingUpRail: View {
 
     var body: some View {
         if !episodes.isEmpty {
-            Rail("Upcoming Episodes", seeAll: { pushRoute(.calendar) }) {
+            Rail(String(localized: "Upcoming Episodes", bundle: .module), seeAll: { pushRoute(.calendar) }) {
                 ForEach(episodes) { episode in
                     NavigationLink(value: Route.title(episode.ref)) { ComingUpCard(episode: episode) }
-                        .buttonStyle(StrataCardStyle())
+                        .cardButtonStyle()
                 }
             }
         }
@@ -264,7 +268,7 @@ private struct ComingUpCard: View {
     let episode: CalendarEpisode
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.space2) {
+        VStack(alignment: .leading, spacing: Metrics.cardCaptionGap) {
             ArtworkImage(url: episode.backdropUrl, aspectRatio: 16 / 9, seed: episode.ref.description,
                          title: episode.backdropUrl == nil ? episode.title : nil)
             VStack(alignment: .leading, spacing: 2) {
@@ -283,8 +287,8 @@ private struct ComingUpCard: View {
     private var when: String {
         let calendar = Calendar.current
         let time = episode.hasTime ? " " + episode.date.formatted(date: .omitted, time: .shortened) : ""
-        if calendar.isDateInToday(episode.date) { return "Today" + time }
-        if calendar.isDateInTomorrow(episode.date) { return "Tomorrow" + time }
+        if calendar.isDateInToday(episode.date) { return String(localized: "Today", bundle: .module) + time }
+        if calendar.isDateInTomorrow(episode.date) { return String(localized: "Tomorrow", bundle: .module) + time }
         let inWeek = episode.date < calendar.date(byAdding: .day, value: 6, to: calendar.startOfDay(for: .now))!
         return episode.date.formatted(inWeek ? .dateTime.weekday(.wide) : .dateTime.month(.abbreviated).day())
     }
@@ -292,43 +296,64 @@ private struct ComingUpCard: View {
 
 /// The Home hero: a carousel of featured titles (recently added, trending movies,
 /// shows and anime) that moves on by itself. iPhone and iPad swipe between them, and
-/// tapping the art opens the title; on tvOS, moving left or right past the hero's
-/// buttons does.
+/// tapping the art opens the title; on tvOS, the "›" button after the hero's buttons
+/// moves to the next one.
 struct HeroCarousel: View {
     @Environment(AppServices.self) private var services
     @Environment(\.pushRoute) private var pushRoute
     let cards: [TitleCard]
     /// The ref of each title on My List, from Home's own shelf.
     var watchlist: Set<String> = []
+    /// Home's carousel takes focus when it first shows, so the app opens on Play rather
+    /// than in the sidebar (which tvOS opens when nothing else can take focus while Home
+    /// loads). Once per launch: later it would pull focus out of the sidebar mid-browse.
+    var takesLaunchFocus = false
+    @MainActor private static var tookLaunchFocus = false
     /// Taps on + not yet reflected in `watchlist`.
     @State private var listed: [String: Bool] = [:]
     /// What Play does for each title the carousel has shown, once the server has said.
     @State private var plays: [String: PlayOptions] = [:]
     @State private var index = 0
-    /// When the current title started its turn, for the progress in its dot.
-    @State private var turnStarted = Date.now
-    /// Only moves on while it's on screen and the app is active (Home stays alive under
-    /// other tabs and pushed pages).
-    @State private var visible = false
+    /// Only moves on while it's on screen and the app is active: Home stays alive under
+    /// other tabs and pushed pages (`onScreen`), and on the TV the page stack isn't lazy,
+    /// so scrolling down to the rails doesn't take the hero away (`inView`).
+    @State private var onScreen = false
+    @State private var inView = true
+    private var visible: Bool { onScreen && inView }
     @Environment(\.scenePhase) private var scenePhase
+    /// Titles changing by themselves are hard to follow with VoiceOver and are motion.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
     #if os(tvOS)
     @FocusState private var focus: HeroButton?
-    enum HeroButton: Hashable { case play, add, info }
+    enum HeroButton: Hashable { case play, add, info, next }
+    /// The button you chose, which focus goes back to as titles change (Play, when the
+    /// next title has one, even if the last one didn't).
+    @State private var chosen: HeroButton?
+    /// Where the carousel itself last put focus, so that move isn't taken as your choice.
+    @State private var placed: HeroButton?
     #endif
 
     private static let interval: Double = 8
 
-    private struct AdvanceKey: Equatable {
+    private struct AdvanceKey: Hashable {
         let index: Int
         let running: Bool
     }
 
-    private var running: Bool {
-        #if os(tvOS)
-        // Not while someone's on a button: the title would change under them.
-        visible && scenePhase == .active && focus == nil
+    /// Moves on while on screen, buttons focused or not (as the TV app's does); focus stays
+    /// on the same button for the next title. Never with Reduce Motion or VoiceOver on.
+    private var running: Bool { visible && scenePhase == .active && !reduceMotion && !voiceOver }
+
+    /// iPad's roomier layout, with the facts and the synopsis; always on the TV.
+    private var roomy: Bool {
+        #if os(iOS)
+        sizeClass == .regular
         #else
-        visible && scenePhase == .active
+        Metrics.isPadOrTV
         #endif
     }
 
@@ -343,8 +368,25 @@ struct HeroCarousel: View {
         stack
             .onChange(of: cards.count) { if index >= cards.count { index = 0 } }
             .onChange(of: watchlist) { listed = [:] }
-            .onAppear { visible = true }
-            .onDisappear { visible = false }
+            .onAppear { onScreen = true }
+            .onScrollVisibilityChange(threshold: 0.3) { inView = $0 }
+            #if os(tvOS)
+            .task {
+                // Not when the app opened on a link: that page goes over Home and keeps focus.
+                guard takesLaunchFocus, !Self.tookLaunchFocus, !cards.isEmpty,
+                      services.coordinator.pendingRoute == nil else { return }
+                Self.tookLaunchFocus = true
+                // After the buttons are in place, so the focus engine can find them.
+                try? await Task.sleep(for: .milliseconds(150))
+                guard visible, services.coordinator.pendingRoute == nil else { return }
+                // Play is the button to start on; until it's known, "+" holds focus for it.
+                if focus == nil {
+                    chosen = .play
+                    place(hasPlay(cards[min(index, cards.count - 1)]) ? .play : .add)
+                }
+            }
+            #endif
+            .onDisappear { onScreen = false }
             // Only the title on screen: asking about all of them would send the server
             // looking for sources for ten titles at once.
             // After watching, Up Next moves on: ask again.
@@ -353,14 +395,30 @@ struct HeroCarousel: View {
                 guard !cards.isEmpty else { return }
                 await resolvePlay(cards[min(index, cards.count - 1)])
             }
+            // The next title's art, so it's there when the carousel moves on.
+            .onChange(of: index, initial: true) {
+                guard cards.count > 1 else { return }
+                let next = cards[(min(index, cards.count - 1) + 1) % cards.count]
+                HeroArt.prefetch(backdropURL: next.backdropUrl, fallbackURL: next.posterUrl)
+            }
             // Restarts on every change, manual or not, so a swipe gets a full interval.
             .task(id: AdvanceKey(index: index, running: running)) {
-                turnStarted = .now
                 guard running else { return }
                 try? await Task.sleep(for: .seconds(Self.interval))
                 guard !Task.isCancelled, cards.count > 1 else { return }
-                withAnimation(.easeInOut(duration: 0.6)) { index = (index + 1) % cards.count }
+                go(1)
             }
+    }
+
+    /// The next or previous title: the timer, the TV's "›" button, and VoiceOver's swipe
+    /// up and down on the dots.
+    private func go(_ by: Int) {
+        guard cards.count > 1 else { return }
+        #if os(tvOS)
+        step(by)
+        #else
+        withAnimation(.easeInOut(duration: 0.6)) { index = (index + by + cards.count) % cards.count }
+        #endif
     }
 
     #if os(tvOS)
@@ -369,20 +427,33 @@ struct HeroCarousel: View {
             .id(index)
             .transition(.opacity)
             .focusSection()
-            .onMoveCommand { direction in
-                // Past the last button goes to the next title, before the first to the previous one.
-                let last: HeroButton = .info
-                let first: HeroButton = hasPlay(cards[index]) ? .play : .add
-                if direction == .right, focus == last { step(1) }
-                if direction == .left, focus == first { step(-1) }
-            }
+            .background(trackChoice())
     }
 
     private func step(_ by: Int) {
-        let keep = focus
+        // Only while focus is in the hero; from the rows below, it stays where it is.
+        let want = focus == nil ? nil : (chosen ?? focus)
         withAnimation(.easeInOut(duration: 0.4)) { index = (index + by + cards.count) % cards.count }
-        // The new title's buttons replace the old ones: keep focus on the same kind.
-        DispatchQueue.main.async { focus = keep == .play && !hasPlay(cards[index]) ? .add : keep }
+        // The new title's buttons replace the old ones: focus the same kind.
+        DispatchQueue.main.async { if let want { place(want == .play && !hasPlay(cards[index]) ? .add : want) } }
+    }
+
+    private func place(_ button: HeroButton) {
+        placed = button
+        focus = button
+    }
+
+    /// Remembers the button you moved to, and puts you back on Play once the title on
+    /// screen turns out to have one.
+    private func trackChoice() -> some View {
+        Color.clear
+            .onChange(of: focus) { _, new in
+                guard let new else { return }
+                if new == placed { placed = nil } else { chosen = new }
+            }
+            .onChange(of: plays) {
+                if chosen == .play, focus == .add, hasPlay(cards[min(index, cards.count - 1)]) { place(.play) }
+            }
     }
     #elseif os(iOS)
     private var content: some View {
@@ -396,7 +467,7 @@ struct HeroCarousel: View {
                         .containerRelativeFrame(.horizontal)
                         .contentShape(Rectangle())
                         .onTapGesture { pushRoute(card.route) }
-                        .accessibilityAction(named: card.type == .movie ? "Go to Movie" : "Go to Show") { pushRoute(card.route) }
+                        .accessibilityAction(named: card.type == .movie ? Text("Go to Movie", bundle: .module) : Text("Go to Show", bundle: .module)) { pushRoute(card.route) }
                         .id(i)
                 }
             }
@@ -410,7 +481,10 @@ struct HeroCarousel: View {
         // Clipped at the sides only, so the art can stretch up into a pulled-down page.
         .scrollClipDisabled()
         .clipShape(OpenTopRectangle())
-        .frame(height: Metrics.isPad ? 620 : 520)
+        // A share of the page's height, as HeroBillboard sizes itself; its pages fill this.
+        .containerRelativeFrame(.vertical) { length, _ in
+            HeroLayout.height(featured: roomy, regular: roomy, container: length)
+        }
     }
     #else
     private var content: some View { hero(cards[min(index, cards.count - 1)]) }
@@ -437,23 +511,40 @@ struct HeroCarousel: View {
     }
 
     private func key(_ card: TitleCard) -> String { card.ref.description }
+
+    /// "Movie · 2026 · ★ 7.8", for the featured layout.
+    private func meta(_ card: TitleCard) -> [String] {
+        [card.type == .movie ? String(localized: "Movie", bundle: .module) : String(localized: "TV Show", bundle: .module), card.yearText, card.ratingText.map { "★ \($0)" }].compactMap { $0 }
+    }
     private func isListed(_ card: TitleCard) -> Bool { listed[key(card)] ?? watchlist.contains(key(card)) }
 
     /// Wide like the TV app's: the row's width on iPhone, a generous fixed width on iPad.
     private var primaryWidth: CGFloat {
         #if os(iOS)
-        Metrics.isPad ? 320 : .infinity
+        roomy ? 280 : .infinity
         #else
-        420
+        300
+        #endif
+    }
+
+    /// A size down from the detail pages' buttons on the TV, so the hero's text leads.
+    private var heroControlSize: ControlSize {
+        #if os(tvOS)
+        .regular
+        #else
+        .large
         #endif
     }
 
     private func hero(_ card: TitleCard) -> some View {
-        // Just the name: the carousel is for picking, the title page has the details.
-        HeroBillboard(id: card.id, backdropURL: card.backdropUrl, fallbackURL: card.posterUrl, eyebrow: card.eyebrow, title: card.title, paged: true) {
+        // Just the name on iPhone: the carousel is for picking, the title page has the
+        // details. Apple TV and iPad have room for a line of facts and the synopsis.
+        HeroBillboard(id: card.id, backdropURL: card.backdropUrl, fallbackURL: card.posterUrl, eyebrow: card.eyebrow, title: card.title, logoURL: card.logoUrl,
+                      meta: roomy ? meta(card) : [], badges: roomy ? card.badge.map { [$0] } ?? [] : [],
+                      overview: roomy ? card.overview : nil, paged: true, featured: true) {
             // Play when the server can play it now; otherwise the wide button opens it.
             if let choice = playChoice(card) {
-                PlayButton(choice.label, maxWidth: primaryWidth) { services.play(choice, title: card.title, artworkURL: card.backdropUrl) }
+                PlayButton(choice.label, maxWidth: primaryWidth, size: heroControlSize) { services.play(choice, title: card.title, artworkURL: card.backdropUrl) }
                 #if os(tvOS)
                 .focused($focus, equals: .play)
                 #endif
@@ -467,36 +558,54 @@ struct HeroCarousel: View {
                         .padding(.horizontal, Metrics.space2)
                         .frame(maxWidth: primaryWidth, minHeight: 30)
                 }
-                .buttonStyle(.glass)
-                .controlSize(.large)
+                .buttonStyle(.strataGlass)
+                .controlSize(heroControlSize)
                 .tint(Theme.ink)
                 #endif
             }
             let on = isListed(card)
-            // Ink, not the accent: glass labels take the tint, and apricot means Play.
+            // Ink: glass labels take the tint.
             Button { toggleList(card) } label: {
                 Image(systemName: on ? "checkmark" : "plus")
                     .font(.stHeadline)
                     .frame(width: 30, height: 30)
                     .contentTransition(.symbolEffect(.replace))
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.strataGlass)
             .buttonBorderShape(.circle)
-            .controlSize(.large)
+            .controlSize(heroControlSize)
             .tint(Theme.ink)
-            .accessibilityLabel(on ? "Remove from My List" : "Add to My List")
+            .accessibilityLabel(on ? Text("Remove from My List", bundle: .module) : Text("Add to My List", bundle: .module))
             #if os(tvOS)
             .focused($focus, equals: .add)
             #endif
             #if os(tvOS)
             // No art to click on the TV: its page is a button away.
             NavigationLink(value: card.route) {
-                Label("More Info", systemImage: "info.circle").font(.stHeadline).frame(minHeight: 30)
+                Image(systemName: "info")
+                    .font(.stHeadline)
+                    .frame(width: 30, height: 30)
             }
-            .buttonStyle(.glass)
-            .controlSize(.large)
+            .buttonStyle(.strataGlass)
+            .buttonBorderShape(.circle)
+            .controlSize(heroControlSize)
             .tint(Theme.ink)
+            .accessibilityLabel(Text("More Info", bundle: .module))
             .focused($focus, equals: .info)
+            // The next featured title; focus stays here, so it can be pressed again.
+            if cards.count > 1 {
+                Button { step(1) } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.stHeadline)
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.strataGlass)
+                .buttonBorderShape(.circle)
+                .controlSize(heroControlSize)
+                .tint(Theme.ink)
+                .accessibilityLabel(Text("Next", bundle: .module))
+                .focused($focus, equals: .next)
+            }
             #endif
         }
     }
@@ -520,28 +629,61 @@ struct HeroCarousel: View {
     /// Like the TV app's: the current title's dot is a bar that fills until the next one.
     @ViewBuilder private var dots: some View {
         if cards.count > 1 {
-            TimelineView(.animation(minimumInterval: 1 / 30, paused: !running)) { context in
-                let elapsed = running ? min(1, context.date.timeIntervalSince(turnStarted) / Self.interval) : 1
-                HStack(spacing: 6) {
-                    ForEach(cards.indices, id: \.self) { i in
-                        Capsule()
-                            .fill(dotColor.opacity(0.35))
-                            .frame(width: i == index ? 28 : 6, height: 6)
-                            .overlay(alignment: .leading) {
-                                if i == index {
-                                    Capsule().fill(dotColor.opacity(0.9)).frame(width: max(6, 28 * elapsed))
-                                }
+            HStack(spacing: 6) {
+                ForEach(cards.indices, id: \.self) { i in
+                    Capsule()
+                        .fill(dotColor.opacity(0.35))
+                        .frame(width: i == index ? 28 : 6, height: 6)
+                        .overlay(alignment: .leading) {
+                            if i == index {
+                                // A new fill for each turn, so it starts empty again.
+                                TurnFill(color: dotColor.opacity(0.9), running: running, duration: Self.interval)
+                                    .id(AdvanceKey(index: index, running: running))
                             }
-                    }
+                        }
                 }
             }
             .animation(.easeInOut(duration: 0.3), value: index)
             #if os(tvOS)
             .padding(.bottom, Metrics.space8)
             #endif
+            // Swipe up or down with VoiceOver for the next or previous title.
             .accessibilityElement()
-            .accessibilityLabel("Featured \(index + 1) of \(cards.count)")
+            .accessibilityLabel(Text("Featured", bundle: .module))
+            .accessibilityValue(Text("\(cards[min(index, cards.count - 1)].title), \(index + 1) of \(cards.count)", bundle: .module))
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: go(1)
+                case .decrement: go(-1)
+                @unknown default: break
+                }
+            }
         }
+    }
+}
+
+/// The current dot's bar, filling over a title's turn: one animation per turn rather
+/// than redrawing every frame. Paused, it shows full.
+private struct TurnFill: View {
+    let color: Color
+    let running: Bool
+    let duration: Double
+    @State private var progress: CGFloat
+
+    init(color: Color, running: Bool, duration: Double) {
+        self.color = color
+        self.running = running
+        self.duration = duration
+        _progress = State(initialValue: running ? 0 : 1)
+    }
+
+    var body: some View {
+        Capsule().fill(color)
+            .frame(width: 6 + 22 * progress)
+            .onAppear {
+                guard running else { return }
+                withAnimation(.linear(duration: duration)) { progress = 1 }
+            }
     }
 }
 

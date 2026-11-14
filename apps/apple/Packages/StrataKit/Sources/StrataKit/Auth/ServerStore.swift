@@ -234,7 +234,7 @@ public final class ServerStore {
     public func probeServer(_ address: String) async throws -> (url: URL, info: ServerInfo) {
         let candidates = ServerAddress.candidates(address)
         guard !candidates.isEmpty else {
-            throw StrataError(kind: .invalidInput, message: "That doesn't look like a valid server address.")
+            throw StrataError(kind: .invalidInput, message: String(localized: "That doesn't look like a valid server address.", bundle: .module))
         }
         for (i, url) in candidates.enumerated() {
             do {
@@ -244,7 +244,7 @@ public final class ServerStore {
                 guard i < candidates.count - 1, failure.nothingListening else { throw failure }
             }
         }
-        throw StrataError(kind: .invalidInput, message: "That doesn't look like a valid server address.")
+        throw StrataError(kind: .invalidInput, message: String(localized: "That doesn't look like a valid server address.", bundle: .module))
     }
 
     private func probeServer(at url: URL) async throws -> (url: URL, info: ServerInfo) {
@@ -252,16 +252,16 @@ public final class ServerStore {
         do {
             info = try await StrataClient(baseURL: url, session: session, cacheTTL: 0).info()
         } catch let e as StrataError where e.kind == .decoding || e.status == 404 {
-            throw StrataError(kind: .notStrata, message: "\(ServerAddress.display(url)) isn't a Strata server.")
+            throw StrataError(kind: .notStrata, message: String(localized: "\(ServerAddress.display(url)) isn't a Strata server.", bundle: .module))
         }
         guard info.isStrata else {
-            throw StrataError(kind: .notStrata, message: "\(ServerAddress.display(url)) isn't a Strata server.")
+            throw StrataError(kind: .notStrata, message: String(localized: "\(ServerAddress.display(url)) isn't a Strata server.", bundle: .module))
         }
         guard info.isCompatible else {
             let newer = info.apiVersion > ServerInfo.supportedAPIVersion
             throw StrataError(kind: .incompatible, message: newer
-                ? "\(info.serverName) runs a newer Strata (\(info.version)). Update this app to connect."
-                : "\(info.serverName) runs an older Strata (\(info.version)). Update the server to connect.")
+                ? String(localized: "\(info.serverName) runs a newer Strata (\(info.version)). Update this app to connect.", bundle: .module)
+                : String(localized: "\(info.serverName) runs an older Strata (\(info.version)). Update the server to connect.", bundle: .module))
         }
         return (url, info)
     }
@@ -279,7 +279,7 @@ public final class ServerStore {
         do {
             let (url, info) = try await probeServer(address)
             if info.setupRequired {
-                throw StrataError(kind: .invalidInput, message: "\(info.serverName) hasn't been set up yet. Open its dashboard in a browser to create the admin account.")
+                throw StrataError(kind: .invalidInput, message: String(localized: "\(info.serverName) hasn't been set up yet. Open its dashboard in a browser to create the admin account.", bundle: .module))
             }
             let anon = StrataClient(baseURL: url, session: session, cacheTTL: 0)
             let token = try await anon.signIn(login: login, password: password)
@@ -288,7 +288,7 @@ public final class ServerStore {
             return true
         } catch {
             let e = StrataError.wrap(error)
-            lastError = e.status == 401 ? "Wrong username or password." : e.message
+            lastError = e.status == 401 ? String(localized: "Wrong username or password.", bundle: .module) : e.message
             Log.auth.error("signIn failed: \(e.message, privacy: .public)")
             return false
         }
@@ -516,7 +516,7 @@ public final class ServerStore {
         } catch {
             let e = StrataError.wrap(error)
             if e.isUnauthorized {
-                lastError = "\(signIn.name)'s session on \(server.name) has expired. Sign in again."
+                lastError = String(localized: "\(signIn.name)'s session on \(server.name) has expired. Sign in again.", bundle: .module)
                 forget(signIn.id)
             } else {
                 lastError = e.message
@@ -539,7 +539,7 @@ public final class ServerStore {
         let e = StrataError.wrap(error)
         guard let signIn = active, var server = server(for: signIn) else { return false }
         if e.isUnauthorized {
-            lastError = "\(signIn.name)'s session on \(server.name) has expired. Sign in again."
+            lastError = String(localized: "\(signIn.name)'s session on \(server.name) has expired. Sign in again.", bundle: .module)
             forget(signIn.id)
             return false
         }
@@ -561,12 +561,12 @@ public final class ServerStore {
         guard var server = server(id: id) else { throw Self.signedOut }
         let (url, info) = try await probeServer(address)
         guard info.id == server.id else {
-            throw StrataError(kind: .invalidInput, message: "That address belongs to a different server (\(info.serverName)).")
+            throw StrataError(kind: .invalidInput, message: String(localized: "That address belongs to a different server (\(info.serverName)).", bundle: .module))
         }
         // The app tries a server's other addresses with its sign-in: a server it reaches over
         // HTTPS mustn't gain a plain-HTTP address on the internet that could be listened in on.
         if url.scheme == "http", !ServerAddress.isLocal(url), server.addresses.contains(where: { $0.scheme == "https" }) {
-            throw StrataError(kind: .invalidInput, message: "\(server.name) is reached over HTTPS, so its other addresses must be too (or on your local network).")
+            throw StrataError(kind: .invalidInput, message: String(localized: "\(server.name) is reached over HTTPS, so its other addresses must be too (or on your local network).", bundle: .module))
         }
         if !server.addresses.contains(url) { server.addresses.append(url) }
         upsert(server)
@@ -597,7 +597,7 @@ public final class ServerStore {
 
     // MARK: - Internals
 
-    private static let signedOut = StrataError(kind: .http, status: 401, message: "Not signed in.")
+    private static let signedOut = StrataError(kind: .http, status: 401, message: String(localized: "Not signed in.", bundle: .module))
 
     private func reachableAddress(for server: SavedServer, skipping: URL? = nil) async throws -> URL {
         var firstError: Error?
@@ -609,7 +609,7 @@ public final class ServerStore {
                 if firstError == nil { firstError = error }
             }
         }
-        throw firstError ?? StrataError(kind: .network, message: "Can't reach \(server.name) at any of its addresses.")
+        throw firstError ?? StrataError(kind: .network, message: String(localized: "Can't reach \(server.name) at any of its addresses.", bundle: .module))
     }
 
     private func upsert(_ server: SavedServer) {

@@ -9,6 +9,8 @@ struct WhoIsWatchingView: View {
     @Environment(\.dismiss) private var dismiss
     /// Shown over the app rather than in its place.
     var isSheet = false
+    /// After a profile is picked.
+    var onPicked: () -> Void = {}
 
     @State private var addAccount = false
     /// tvOS focus starts on the active profile (or the first), not on "Add Profile".
@@ -19,8 +21,8 @@ struct WhoIsWatchingView: View {
     private var showsServers: Bool { Set(store.signIns.map(\.serverID)).count > 1 }
 
     var body: some View {
-        VStack(spacing: Metrics.space8) {
-            Text("Who's watching?").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+        VStack(spacing: Metrics.isTV ? Metrics.space12 : Metrics.space8) {
+            Text("Who's watching?", bundle: .module).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
             if let error = store.lastError {
                 Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
                     .padding(.horizontal, Metrics.gutter)
@@ -34,11 +36,11 @@ struct WhoIsWatchingView: View {
                                    detail: showsServers ? store.server(for: signIn)?.name : nil,
                                    isKids: signIn.isKids, isCurrent: isSheet && signIn.id == store.activeID)
                     }
-                    .buttonStyle(StrataCardStyle())
+                    .profileTileStyle()
                     .focused($focused, equals: signIn.id)
                     #if !os(tvOS)
                     .contextMenu {
-                        Button("Remove from This Device", systemImage: "minus.circle", role: .destructive) {
+                        Button(String(localized: "Remove from This Device", bundle: .module), systemImage: "minus.circle", role: .destructive) {
                             store.remove(signIn.id)
                             services.refreshClient()
                         }
@@ -50,19 +52,22 @@ struct WhoIsWatchingView: View {
                 } label: {
                     AvatarTile(name: "Add Profile", seed: "", systemImage: "plus")
                 }
-                .buttonStyle(StrataCardStyle())
+                .profileTileStyle()
                 .focused($focused, equals: "add")
             }
         }
+        #if os(tvOS)
+        .padding(.bottom, Metrics.space12)
+        #endif
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.bg.ignoresSafeArea())
         .toolbar {
             if isSheet {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
             }
         }
         .onAppear { focused = store.activeID ?? store.signIns.first?.id ?? "add" }
-        .sheet(isPresented: $addAccount) {
+        .pickerSheet(isPresented: $addAccount) {
             ConnectView(isAdding: true) { if isSheet { dismiss() } }
         }
     }
@@ -70,6 +75,7 @@ struct WhoIsWatchingView: View {
     private func pick(_ signIn: SavedSignIn) {
         store.switchTo(signIn.id)
         services.refreshClient()
+        onPicked()
         if isSheet { dismiss() }
     }
 }
@@ -90,8 +96,8 @@ struct HouseholdPickerView: View {
     var body: some View {
         VStack(spacing: Metrics.space8) {
             VStack(spacing: Metrics.space2) {
-                Text("Choose a library").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
-                Text("\(services.store.active?.name ?? "This profile") can watch more than one. Each has its own titles and lists.")
+                Text("Choose a library", bundle: .module).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                Text("\(services.store.active?.name ?? "This profile") can watch more than one. Each has its own titles and lists.", bundle: .module)
                     .font(.stCallout).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
             }
             .padding(.horizontal, Metrics.gutter)
@@ -99,7 +105,7 @@ struct HouseholdPickerView: View {
             case .loading:
                 ProgressView()
             case .failed(let message):
-                MessageView(systemImage: "exclamationmark.triangle", title: "Couldn't load libraries", message: message, actionTitle: "Try Again") {
+                MessageView(systemImage: "exclamationmark.triangle", title: String(localized: "Couldn't load libraries", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                     Task { await load() }
                 }
             case .loaded(let list):
@@ -138,7 +144,7 @@ struct HouseholdPickerView: View {
                 Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
             }
             if !isSheet {
-                Button("Switch Profile") { services.store.deactivate() }
+                Button(String(localized: "Switch Profile", bundle: .module)) { services.store.deactivate() }
                     .font(.stCallout)
                     #if !os(tvOS)
                     .buttonStyle(.plain)
@@ -150,7 +156,7 @@ struct HouseholdPickerView: View {
         .background(Theme.bg.ignoresSafeArea())
         .toolbar {
             if isSheet {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
             }
         }
         .task { await load() }
@@ -197,7 +203,7 @@ struct JoinMemberPickerView: View {
     var body: some View {
         VStack(spacing: Metrics.space8) {
             VStack(spacing: Metrics.space2) {
-                Text("Who's watching?").font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
+                Text("Who's watching?", bundle: .module).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
                 Text(target.info.serverName)
                     .font(.stCallout).foregroundStyle(Theme.ink2)
             }
@@ -205,7 +211,7 @@ struct JoinMemberPickerView: View {
             case .loading:
                 ProgressView()
             case .failed(let message):
-                MessageView(systemImage: "person.crop.circle.badge.exclamationmark", title: "Couldn't load profiles", message: message, actionTitle: "Try Again") {
+                MessageView(systemImage: "person.crop.circle.badge.exclamationmark", title: String(localized: "Couldn't load profiles", bundle: .module), message: message, actionTitle: String(localized: "Try Again", bundle: .module)) {
                     Task { await load() }
                 }
             case .loaded(let home):
@@ -218,7 +224,7 @@ struct JoinMemberPickerView: View {
                                        imageURL: member.image.flatMap { URL(string: $0, relativeTo: target.url)?.absoluteURL },
                                        isKids: member.isKids, isBusy: joining == member.id)
                         }
-                        .buttonStyle(StrataCardStyle())
+                        .profileTileStyle()
                         .focused($focused, equals: member.id)
                         .disabled(joining != nil)
                     }
@@ -227,7 +233,7 @@ struct JoinMemberPickerView: View {
             if let error = services.store.lastError, joining == nil, choices.value != nil {
                 Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
             }
-            Button("Sign In with a Password") { usePassword = true }
+            Button(String(localized: "Sign In with a Password", bundle: .module)) { usePassword = true }
                 .font(.stCallout)
                 #if !os(tvOS)
                 .buttonStyle(.plain)
@@ -277,7 +283,7 @@ private struct AvatarRow<Content: View>: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: Metrics.isPadOrTV ? Metrics.space8 : Metrics.space6) { // top: a Kids label mustn't lift its avatar
+            HStack(alignment: .top, spacing: Metrics.isTV ? 72 : Metrics.isPadOrTV ? Metrics.space8 : Metrics.space6) { // top: a Kids label mustn't lift its avatar
                 content()
             }
             // Three accounts fit across an iPhone; more scroll.
@@ -303,13 +309,16 @@ private struct AvatarTile: View {
     var systemImage: String?
 
     #if os(tvOS)
-    private let size: CGFloat = 160
+    private let size: CGFloat = 240
+    /// In a button: the picture lifts and the name brightens while it has focus.
+    @Environment(\.isFocused) private var focused
     #else
     private let size: CGFloat = 96
+    private let focused = false
     #endif
 
     var body: some View {
-        VStack(spacing: Metrics.space3) {
+        VStack(spacing: Metrics.isTV ? Metrics.space6 : Metrics.space3) {
             ZStack {
                 if let systemImage {
                     Circle().fill(Theme.surface2).frame(width: size, height: size)
@@ -322,17 +331,43 @@ private struct AvatarTile: View {
             .overlay {
                 if isCurrent { Circle().stroke(Theme.accentText, lineWidth: 3).frame(width: size + 8, height: size + 8) }
             }
+            .scaleEffect(focused ? 1.12 : 1)
+            .shadow(color: .black.opacity(focused ? 0.5 : 0), radius: 24, y: 16)
             Text(name)
-                .font(.stCallout.weight(.medium))
-                .foregroundStyle(Theme.ink2)
+                .font(.stCallout.weight(focused ? .semibold : .medium))
+                .foregroundStyle(focused ? Theme.ink : Theme.ink3)
+                .offset(y: focused ? Metrics.space3 : 0)
             if let detail {
                 Text(detail).font(.stFootnote).foregroundStyle(Theme.ink3)
             }
             if isKids {
-                Text("Kids").eyebrowStyle(Theme.accentText)
+                Text("Kids", bundle: .module).eyebrowStyle(Theme.accentText)
             }
         }
         .lineLimit(1)
         .fixedSize()
+        .animation(.snappy(duration: 0.2), value: focused)
     }
 }
+
+private extension View {
+    /// The profile picker's buttons: on the TV the tile shows focus itself (see
+    /// `AvatarTile`), as the system's own profile picker does, with no card behind it.
+    @ViewBuilder func profileTileStyle() -> some View {
+        #if os(tvOS)
+        buttonStyle(ProfileTileStyle())
+        #else
+        cardButtonStyle()
+        #endif
+    }
+}
+
+#if os(tvOS)
+private struct ProfileTileStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .animation(.snappy(duration: 0.15), value: configuration.isPressed)
+    }
+}
+#endif
