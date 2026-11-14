@@ -15,11 +15,13 @@ struct EditProfileView: View {
     @State private var error: String?
 
     #if os(tvOS)
-    private let tile: CGFloat = 150
-    private let preview: CGFloat = 180
+    private let tile: CGFloat = 140
+    private let preview: CGFloat = 240
+    private let tileGap: CGFloat = 48
     #else
     private let tile: CGFloat = 72
     private let preview: CGFloat = 104
+    private let tileGap: CGFloat = Metrics.space3
     #endif
 
     private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -27,6 +29,58 @@ struct EditProfileView: View {
     private var changed: Bool { trimmed != active?.name || image != active?.image }
 
     var body: some View {
+        content
+            .onAppear {
+                name = active?.name ?? ""
+                image = active?.image
+            }
+            .task { await load() }
+    }
+
+    #if os(tvOS)
+    /// Full screen on the TV, like Settings: the profile on the left with its name and
+    /// actions, the pictures to choose from on the right. Menu cancels.
+    private var content: some View {
+        HStack(alignment: .top, spacing: 96) {
+            VStack(spacing: Metrics.space6) {
+                Text("Edit Profile", bundle: .module)
+                    .font(.system(size: 38, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                ProfileAvatar(name: trimmed.isEmpty ? "?" : trimmed, seed: active?.id ?? "", size: preview, imageURL: url(image))
+                    .animation(.snappy, value: image)
+                TextField(String(localized: "Name", bundle: .module), text: $name)
+                    .textContentType(.name)
+                    .multilineTextAlignment(.center)
+                if let message = error {
+                    Text(message).font(.stFootnote).foregroundStyle(Theme.danger).multilineTextAlignment(.center)
+                }
+                HStack(spacing: Metrics.space4) {
+                    Button(String(localized: "Cancel", bundle: .module)) { dismiss() }
+                    Button {
+                        Task { await save() }
+                    } label: {
+                        if saving { ProgressView() } else { Text("Save", bundle: .module) }
+                    }
+                    .disabled(trimmed.isEmpty || !changed || saving)
+                }
+                .padding(.top, Metrics.space4)
+            }
+            .frame(width: 520)
+            .padding(.top, 120)
+            .focusSection()
+
+            ScrollView {
+                pictures.padding(.vertical, 120)
+            }
+            .scrollClipDisabled()
+            .focusSection()
+        }
+        .padding(.horizontal, 80)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.bg.ignoresSafeArea())
+    }
+    #else
+    private var content: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: Metrics.space5) {
@@ -36,13 +90,9 @@ struct EditProfileView: View {
                         .textContentType(.name)
                         .multilineTextAlignment(.center)
                         .font(.stTitle2)
-                        #if os(iOS)
                         .padding(.vertical, Metrics.space3)
                         .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 12))
                         .frame(maxWidth: 320)
-                        #else
-                        .frame(maxWidth: 600)
-                        #endif
                     if let message = error {
                         Text(message).font(.stFootnote).foregroundStyle(Theme.danger)
                     }
@@ -52,9 +102,7 @@ struct EditProfileView: View {
             }
             .background(Theme.bg)
             .navigationTitle(Text("Edit Profile", bundle: .module))
-            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
-            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -66,12 +114,8 @@ struct EditProfileView: View {
                 }
             }
         }
-        .onAppear {
-            name = active?.name ?? ""
-            image = active?.image
-        }
-        .task { await load() }
     }
+    #endif
 
     @ViewBuilder private var pictures: some View {
         if let loadError {
@@ -79,14 +123,14 @@ struct EditProfileView: View {
         } else if groups.isEmpty {
             ProgressView().padding(.top, Metrics.space5)
         } else {
-            VStack(alignment: .leading, spacing: Metrics.space5) {
+            VStack(alignment: .leading, spacing: Metrics.isTV ? Metrics.space8 : Metrics.space5) {
                 choice(nil, label: String(localized: "Initial", bundle: .module)) {
                     ProfileAvatar(name: trimmed.isEmpty ? "?" : trimmed, seed: active?.id ?? "", size: tile)
                 }
                 ForEach(groups) { group in
                     VStack(alignment: .leading, spacing: Metrics.space3) {
                         Text(group.title).eyebrowStyle(Theme.ink3)
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: tile, maximum: tile + 24), spacing: Metrics.space3)], spacing: Metrics.space3) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: tile, maximum: tile + 24), spacing: tileGap)], spacing: tileGap) {
                             ForEach(group.avatars) { avatar in
                                 choice(avatar.url, label: avatar.name) {
                                     ProfileAvatar(name: avatar.name, seed: avatar.id, size: tile, imageURL: url(avatar.url))
@@ -110,7 +154,12 @@ struct EditProfileView: View {
                 }
                 .padding(5)
         }
+        #if os(tvOS)
+        // Focus lifts the picture itself, as on the system's profile pickers.
+        .buttonStyle(AvatarChoiceStyle())
+        #else
         .buttonStyle(.plain)
+        #endif
         .accessibilityLabel(label)
         .accessibilityAddTraits(image == path ? .isSelected : [])
     }
@@ -141,3 +190,18 @@ struct EditProfileView: View {
         }
     }
 }
+
+#if os(tvOS)
+/// A picture that grows and casts a shadow when focused, with its name underneath.
+private struct AvatarChoiceStyle: ButtonStyle {
+    @Environment(\.isFocused) private var focused
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 1.05 : focused ? 1.15 : 1)
+            .shadow(color: .black.opacity(focused ? 0.5 : 0), radius: 20, y: 12)
+            .animation(.snappy(duration: 0.2), value: focused)
+            .animation(.snappy(duration: 0.15), value: configuration.isPressed)
+    }
+}
+#endif

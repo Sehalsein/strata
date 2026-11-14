@@ -43,16 +43,21 @@ struct ConnectView: View {
 
     var body: some View {
         NavigationStack {
+            Group {
+            #if os(tvOS)
+            // Laid out like Settings: what this is on the left, the ways in on the right.
+            TVSettingsPage {
+                header.padding(.top, Metrics.space12)
+            } content: {
+                tvOptions
+            }
+            #else
             ScrollView {
                 VStack(alignment: Self.alignment, spacing: Metrics.space8) {
                     header
-                    #if os(tvOS)
-                    tvOptions
-                    #else
                     scanButton
                     serverList
                     addressEntry
-                    #endif
                 }
                 .frame(maxWidth: Self.columnWidth, alignment: Self.frameAlignment)
                 .padding(.horizontal, Metrics.gutter)
@@ -61,6 +66,8 @@ struct ConnectView: View {
             }
             .scrollBounceBehavior(.basedOnSize)
             .background(Theme.bg.ignoresSafeArea())
+            #endif
+            }
             .toolbar {
                 if isAdding {
                     ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
@@ -141,7 +148,7 @@ struct ConnectView: View {
     private var header: some View {
         VStack(alignment: Self.alignment, spacing: Metrics.space3) {
             #if os(tvOS)
-            StrataMark().frame(height: 64).padding(.bottom, Metrics.space3)
+            StrataMark().frame(height: 140).padding(.bottom, Metrics.space10)
             #else
             StrataMark().frame(height: 44).padding(.bottom, Metrics.space2)
             #endif
@@ -156,52 +163,94 @@ struct ConnectView: View {
     #if os(tvOS)
     /// Servers on the network first (usually one, and the quickest way in), then the two
     /// ways in that don't need one found: a phone that's signed in, or a typed address.
+    /// System rows, as in Settings, which turn white with dark text when focused.
     private var tvOptions: some View {
-        VStack(alignment: .leading, spacing: Metrics.space12) {
-            VStack(alignment: .leading, spacing: Metrics.space4) {
-                sectionTitle(String(localized: "On your network", bundle: .module))
-                serverList
+        Form {
+            Section {
+                if rows.isEmpty {
+                    HStack(spacing: Metrics.space4) {
+                        if services.browser.state == .denied {
+                            Image(systemName: "wifi.exclamationmark").foregroundStyle(Theme.warning)
+                            Text("Allow Local Network access in Settings to find servers automatically.", bundle: .module)
+                        } else {
+                            ProgressView()
+                            Text("Looking for servers…", bundle: .module)
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                    .focusable()
+                }
+                ForEach(rows) { server in
+                    Button {
+                        Task { await probe(server.url.absoluteString) }
+                    } label: {
+                        optionLabel(server.name, detail: Self.address(server.url), systemImage: "server.rack") {
+                            if probing == server.url.absoluteString {
+                                ProgressView()
+                            } else if !server.isCompatible {
+                                Text("Update needed", bundle: .module).foregroundStyle(Theme.warning)
+                            }
+                        }
+                    }
+                    .focused($focusedServer, equals: server.id)
+                    .disabled(probing != nil)
+                    .contextMenu {
+                        // Off this list on this device; signing in to it again brings it back.
+                        Button(role: .destructive) { services.store.hideServer(server.id) } label: {
+                            Label(String(localized: "Remove from List", bundle: .module), systemImage: "minus.circle")
+                        }
+                    }
+                }
+                let hidden = services.store.hiddenServerIDs.count
+                if hidden > 0 {
+                    Button {
+                        services.store.showHiddenServers()
+                    } label: {
+                        Label(String(localized: "Show \(hidden) Hidden Servers", bundle: .module), systemImage: "eye")
+                    }
+                }
+            } header: {
+                Text("On your network", bundle: .module)
+            } footer: {
+                if let error {
+                    Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.danger)
+                }
             }
-            VStack(alignment: .leading, spacing: Metrics.space4) {
-                sectionTitle(rows.isEmpty ? String(localized: "Or sign in another way", bundle: .module) : String(localized: "Other ways to sign in", bundle: .module))
-                HStack(spacing: Metrics.space8) {
-                    optionCard("Sign In with Your Phone", detail: String(localized: "Scan a code. Nothing to type.", bundle: .module), systemImage: "iphone") {
-                        showPhoneSignIn = true
-                    }
-                    optionCard("Enter Address", detail: String(localized: "Type the server's address.", bundle: .module), systemImage: "keyboard") {
-                        showAddressEntry = true
-                    }
+            Section {
+                Button { showPhoneSignIn = true } label: {
+                    optionLabel(String(localized: "Sign In with Your Phone", bundle: .module),
+                                detail: String(localized: "Scan a code. Nothing to type.", bundle: .module), systemImage: "iphone") { EmptyView() }
+                }
+                .disabled(probing != nil)
+                Button { showAddressEntry = true } label: {
+                    optionLabel(String(localized: "Enter Address", bundle: .module),
+                                detail: String(localized: "Type the server's address.", bundle: .module), systemImage: "keyboard") { EmptyView() }
+                }
+                .disabled(probing != nil)
+            } header: {
+                Text(rows.isEmpty ? String(localized: "Or sign in another way", bundle: .module) : String(localized: "Other ways to sign in", bundle: .module))
+            }
+            if !rows.isEmpty {
+                Section {
+                    // Takes every server shown off the list; hidden ones can come back.
+                    Button(String(localized: "Clear List", bundle: .module)) { services.store.hideServers(rows.map(\.id)) }
                 }
             }
         }
-        .focusSection()
     }
 
-    private func sectionTitle(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.stEyebrow).tracking(1.5)
-            .foregroundStyle(Theme.ink3)
-            .padding(.leading, Metrics.space2)
-    }
-
-    private func optionCard(_ title: String, detail: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: Metrics.space5) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 30, weight: .medium))
-                    .foregroundStyle(Theme.accentText)
-                    .frame(width: Self.iconSize, height: Self.iconSize)
-                    .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
-                VStack(alignment: .leading, spacing: Metrics.space1) {
-                    Text(title).font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(1)
-                    Text(detail).font(.stFootnote).foregroundStyle(Theme.ink3).lineLimit(1)
-                }
+    /// A Settings-style row: symbol, title and a line under it, with an accessory at the end.
+    private func optionLabel(_ title: String, detail: String, systemImage: String, @ViewBuilder accessory: () -> some View) -> some View {
+        HStack(spacing: Metrics.space5) {
+            Image(systemName: systemImage).frame(width: 48)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail).font(.stFootnote).foregroundStyle(.secondary)
             }
-            .padding(Metrics.space6)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: Metrics.space4)
+            accessory()
         }
-        .buttonStyle(.card)
-        .disabled(probing != nil)
+        .padding(.vertical, Metrics.space2)
     }
 
     /// The address, on its own screen: the remote's keyboard takes over the bottom half.

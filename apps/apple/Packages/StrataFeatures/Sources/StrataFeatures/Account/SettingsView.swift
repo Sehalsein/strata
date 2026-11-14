@@ -59,9 +59,9 @@ struct SettingsView: View {
                 .task(id: store.activeID) {
                     libraryCount = (try? await store.households().count) ?? 0
                 }
-                .sheet(isPresented: $showLibraries) { NavigationStack { HouseholdPickerView(isSheet: true) } }
-                .sheet(isPresented: $showAddProfile) { ConnectView(isAdding: true) }
-                .sheet(isPresented: $showEditProfile) { EditProfileView() }
+                .pickerSheet(isPresented: $showLibraries) { NavigationStack { HouseholdPickerView(isSheet: true) } }
+                .pickerSheet(isPresented: $showAddProfile) { ConnectView(isAdding: true) }
+                .pickerSheet(isPresented: $showEditProfile) { EditProfileView() }
                 #if os(iOS)
                 .sheet(isPresented: $showLinkTV) { ApproveDeviceView() }
                 .sheet(isPresented: $showChangePassword) { ChangePasswordView() }

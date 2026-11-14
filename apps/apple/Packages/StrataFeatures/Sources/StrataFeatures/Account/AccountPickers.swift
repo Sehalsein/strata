@@ -62,7 +62,7 @@ struct WhoIsWatchingView: View {
             }
         }
         .onAppear { focused = store.activeID ?? store.signIns.first?.id ?? "add" }
-        .sheet(isPresented: $addAccount) {
+        .pickerSheet(isPresented: $addAccount) {
             ConnectView(isAdding: true) { if isSheet { dismiss() } }
         }
     }
