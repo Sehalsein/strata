@@ -48,8 +48,12 @@ public struct PlayButton: View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(Font.buttonLabel(size))
+                // One line: a longer label ("Resume S1 · E1") widens the button rather
+                // than wrapping inside the width it was given.
+                .lineLimit(1)
+                .fixedSize()
                 .padding(.horizontal, Metrics.space2)
-                .frame(maxWidth: maxWidth, minHeight: 30)
+                .frame(minWidth: maxWidth.flatMap { $0.isFinite ? $0 : nil }, maxWidth: maxWidth == .infinity ? .infinity : nil, minHeight: 30)
         }
         .buttonStyle(.strataGlass)
         .tint(Theme.ink)
@@ -59,8 +63,10 @@ public struct PlayButton: View {
             Label(title, systemImage: systemImage)
                 .font(Font.buttonLabel(size))
                 .foregroundStyle(Theme.onAccent)
+                .lineLimit(1)
+                .fixedSize()
                 .padding(.horizontal, Metrics.space2)
-                .frame(maxWidth: maxWidth, minHeight: 30)
+                .frame(minWidth: maxWidth.flatMap { $0.isFinite ? $0 : nil }, maxWidth: maxWidth == .infinity ? .infinity : nil, minHeight: 30)
         }
         .buttonStyle(.glassProminent)
         .tint(Theme.apricot)
