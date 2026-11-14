@@ -53,6 +53,11 @@ export const householdSettingsSchema = z.object({
   // Discovery: finding TorBox-playable releases for titles not in the library.
   discoveryEnabled: z.boolean().default(true),
   useTorboxSearch: z.boolean().default(true),
+  /**
+   * After cached, language and limits: Strata's own order, or the order the add-ons gave
+   * (for add-ons set up to sort the way someone likes, like AIOStreams).
+   */
+  releaseOrder: z.enum(["strata", "addons"]).default("strata"),
   /** Offer releases TorBox hasn't cached (they must download before playing). */
   showUncached: z.boolean().default(true),
   /** Largest release discovery will pick automatically, in GB (0 = no limit). */

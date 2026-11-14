@@ -190,6 +190,7 @@ export interface Settings {
   discoveryEnabled: boolean;
   torrentioUrl: string;
   useTorboxSearch: boolean;
+  releaseOrder: "strata" | "addons";
   showUncached: boolean;
   maxReleaseSizeGb: number;
   bonjourEnabled: boolean;

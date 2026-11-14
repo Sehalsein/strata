@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isVideoFile } from "../media/parse";
+import { isVideoFile, type ParsedName } from "../media/parse";
 import { globalFetch } from "../net";
 import { runtime } from "#runtime";
 
@@ -122,19 +122,31 @@ export async function assertPublicHost(url: string): Promise<void> {
     return;
   }
   // Workers can't reach private networks at all; on Bun, look at what the name points to.
+  // (The fetch looks it up again: a name rebound in between isn't caught. Redirects are
+  // off and only torrent-shaped answers are used, which limits what that could reach.)
   if (runtime.name !== "bun") return;
   let addresses: string[];
   try {
-    const { lookup } = await import("node:dns/promises");
-    addresses = (await lookup(host, { all: true })).map((a) => a.address);
+    addresses = await resolveHost(host);
   } catch {
-    return; // doesn't resolve: the fetch fails on its own
+    throw new AddonError("Couldn't find that add-on's address.");
   }
-  if (addresses.some((a) => !isPublicAddress(a))) refuse();
+  if (!addresses.length || addresses.some((a) => !isPublicAddress(a))) refuse();
 }
 
+let resolveHost = async (host: string): Promise<string[]> => {
+  const { lookup } = await import("node:dns/promises");
+  return (await lookup(host, { all: true, verbatim: true })).map((a) => a.address);
+};
+
+/** For tests: how names are looked up. */
+export function setResolverForTests(fn: (host: string) => Promise<string[]>) {
+  resolveHost = fn;
+}
+
+/** An IP address rather than a name (URL parsing has already put IPv4 in dotted form). */
 function isIpLiteral(host: string): boolean {
-  return /^\d+\.\d+\.\d+\.\d+$/.test(host) || host.includes(":");
+  return /^[\d.]+$/.test(host) || host.includes(":");
 }
 
 /** Whether an IP address is on the public internet. */
@@ -142,9 +154,11 @@ export function isPublicAddress(raw: string): boolean {
   let address = raw.toLowerCase();
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(address);
   if (mapped) address = mapped[1]!;
-  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(address);
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
+  if (/^[\d.]+$/.test(address)) {
+    // Strictly dotted-decimal, four octets of 0–255 without leading zeros; anything else isn't trusted.
+    const octets = address.split(".");
+    if (octets.length !== 4 || octets.some((o) => !/^(0|[1-9]\d{0,2})$/.test(o) || Number(o) > 255)) return false;
+    const [a, b] = [Number(octets[0]), Number(octets[1])];
     if (a === 0 || a === 10 || a === 127 || a >= 224) return false; // this network, private, loopback, multicast/reserved
     if (a === 100 && b >= 64 && b <= 127) return false; // carrier-grade NAT
     if (a === 169 && b === 254) return false; // link-local, cloud metadata
@@ -153,7 +167,10 @@ export function isPublicAddress(raw: string): boolean {
     if (a === 198 && (b === 18 || b === 19)) return false; // benchmarking
     return true;
   }
-  if (address === "::" || address === "::1") return false;
+  if (!/^[0-9a-f:]+$/.test(address) || !address.includes(":")) return false;
+  // Unspecified, loopback and IPv4-compatible (::a.b.c.d / ::7f00:1): the high bits are all zero.
+  if (address.startsWith("::")) return false;
+  if (/^2002:/.test(address)) return false; // 6to4: wraps an IPv4 address
   if (/^f[cd]/.test(address) || /^fe[89ab]/.test(address) || /^ff/.test(address)) return false; // unique-local, link-local, multicast
   if (/^::ffff:/.test(address) || /^64:ff9b:/.test(address)) return false; // other mapped / NAT64 forms
   return true;
@@ -199,6 +216,12 @@ export interface AddonStream {
   size?: number;
   seeders?: number;
   resolution?: number;
+  /** The add-on says TorBox has it cached (AIOStreams' TorBox check, Torrentio's [TB+]). */
+  cached?: boolean;
+  /** Audio languages, as ISO 639-1 codes ("multi" for several), when the add-on says. */
+  languages?: string[];
+  hdr?: ParsedName["hdr"];
+  videoCodec?: ParsedName["videoCodec"];
 }
 
 /**
@@ -221,6 +244,9 @@ export async function addonStreams(addon: StreamAddon, type: "movie" | "series",
     const title = s.streamData?.folderName || lines[0]?.trim() || hintName || "";
     const fileName = hintName ?? (lines[1] && isVideoFile(lines[1].trim()) ? lines[1].trim() : undefined);
     const meta = lines.join(" ");
+    const parsedFile = s.streamData?.parsedFile;
+    const service = s.streamData?.service;
+    const languages = parsedFile?.languages?.length ? languageCodes(parsedFile.languages) : languagesFromText(meta);
     return [
       {
         hash,
@@ -228,7 +254,11 @@ export async function addonStreams(addon: StreamAddon, type: "movie" | "series",
         fileName,
         size: s.behaviorHints?.videoSize ?? s.streamData?.size ?? parseSize(meta),
         seeders: s.streamData?.torrent?.seeders ?? (Number(/👤\s*(\d+)/.exec(meta)?.[1] ?? 0) || undefined),
-        resolution: resolutionFromName(s.name),
+        resolution: resolutionFrom(parsedFile?.resolution) ?? resolutionFromName(s.name),
+        cached: service ? service.id === "torbox" && service.cached === true : /\[TB\+\]/.test(s.name ?? ""),
+        languages: languages.length ? languages : undefined,
+        hdr: hdrFrom(parsedFile?.visualTags),
+        videoCodec: codecFrom(parsedFile?.encode),
       },
     ];
   });
@@ -248,7 +278,17 @@ interface StremioStream {
     folderName?: string;
     size?: number;
     torrent?: { infoHash?: string; seeders?: number };
+    service?: { id?: string; cached?: boolean };
+    parsedFile?: AioParsedFile;
   };
+}
+
+/** What AIOStreams parsed from a release's name. */
+interface AioParsedFile {
+  resolution?: string;
+  encode?: string;
+  visualTags?: string[];
+  languages?: string[];
 }
 
 /** The stream's info-hash: given, or in a debrid link (Torrentio's /resolve/torbox/<key>/<hash>/…). */
@@ -281,7 +321,9 @@ interface AioResult {
   size: number | null;
   folderSize: number | null;
   seeders: number | null;
-  parsedFile?: { resolution?: string };
+  service?: string | null;
+  cached?: boolean | null;
+  parsedFile?: AioParsedFile;
 }
 
 /**
@@ -303,7 +345,7 @@ async function aioSearch(addon: StreamAddon, type: "movie" | "series", id: strin
   return (body.data?.results ?? []).flatMap((r) => {
     const hash = r.infoHash?.toLowerCase();
     if (!hash || !isInfoHash(hash)) return [];
-    const res = Number(/\d+/.exec(r.parsedFile?.resolution ?? "")?.[0]) || resolutionFromName(r.parsedFile?.resolution);
+    const languages = languageCodes(r.parsedFile?.languages ?? []);
     return [
       {
         hash,
@@ -311,7 +353,11 @@ async function aioSearch(addon: StreamAddon, type: "movie" | "series", id: strin
         fileName: r.filename ?? undefined,
         size: r.size ?? r.folderSize ?? undefined,
         seeders: r.seeders ?? undefined,
-        resolution: res === 4 ? 2160 : res || undefined,
+        resolution: resolutionFrom(r.parsedFile?.resolution),
+        cached: r.service === "torbox" && r.cached === true,
+        languages: languages.length ? languages : undefined,
+        hdr: hdrFrom(r.parsedFile?.visualTags),
+        videoCodec: codecFrom(r.parsedFile?.encode),
       },
     ];
   });
@@ -334,4 +380,56 @@ function resolutionFromName(name?: string): number | undefined {
   if (/4k|2160/i.test(name)) return 2160;
   const m = /(1080|720|480)p?/i.exec(name);
   return m ? Number(m[1]) : undefined;
+}
+
+/** "2160p", "1080p"… as a number; "4k" as 2160. */
+function resolutionFrom(text?: string): number | undefined {
+  if (!text) return undefined;
+  if (/4k/i.test(text)) return 2160;
+  return Number(/(\d{3,4})p/i.exec(text)?.[1]) || undefined;
+}
+
+/** AIOStreams' visual tags ("DV", "HDR+DV", "HDR10+"…) as the best HDR format they name. */
+function hdrFrom(tags?: string[]): ParsedName["hdr"] {
+  if (!tags?.length) return undefined;
+  const has = (t: string) => tags.some((x) => x.toUpperCase().includes(t));
+  if (has("DV")) return "dv";
+  if (has("HDR10+")) return "hdr10+";
+  if (has("HDR")) return "hdr10";
+  if (has("HLG")) return "hlg";
+  return undefined;
+}
+
+function codecFrom(encode?: string): ParsedName["videoCodec"] {
+  const e = encode?.toUpperCase();
+  return e === "HEVC" ? "hevc" : e === "AVC" ? "h264" : e === "AV1" ? "av1" : undefined;
+}
+
+/** Language names (AIOStreams') as ISO 639-1 codes; several-language releases as "multi". */
+const LANGUAGE_NAMES: Record<string, string> = {
+  english: "en", japanese: "ja", chinese: "zh", mandarin: "zh", cantonese: "zh", korean: "ko", french: "fr", german: "de", spanish: "es", latino: "es",
+  "spanish (latino)": "es", italian: "it", portuguese: "pt", "portuguese (brazil)": "pt", russian: "ru", hindi: "hi", tamil: "ta", telugu: "te", malayalam: "ml",
+  kannada: "kn", bengali: "bn", arabic: "ar", turkish: "tr", dutch: "nl", polish: "pl", swedish: "sv", danish: "da", norwegian: "no", finnish: "fi", czech: "cs",
+  hungarian: "hu", greek: "el", hebrew: "he", thai: "th", vietnamese: "vi", indonesian: "id", malay: "ms", ukrainian: "uk", romanian: "ro", persian: "fa",
+  multi: "multi", "dual audio": "multi", "multi audio": "multi",
+};
+
+export function languageCodes(names: string[]): string[] {
+  return [...new Set(names.map((n) => LANGUAGE_NAMES[n.trim().toLowerCase()]).filter((c): c is string => !!c))];
+}
+
+/** Flags of the languages Torrentio-style titles show (it shows them for non-English audio). */
+const FLAG_LANGUAGES: Record<string, string> = {
+  "🇬🇧": "en", "🇺🇸": "en", "🇯🇵": "ja", "🇨🇳": "zh", "🇹🇼": "zh", "🇰🇷": "ko", "🇫🇷": "fr", "🇩🇪": "de", "🇪🇸": "es", "🇲🇽": "es", "🇮🇹": "it", "🇵🇹": "pt", "🇧🇷": "pt",
+  "🇷🇺": "ru", "🇮🇳": "hi", "🇸🇦": "ar", "🇹🇷": "tr", "🇳🇱": "nl", "🇵🇱": "pl", "🇸🇪": "sv", "🇩🇰": "da", "🇳🇴": "no", "🇫🇮": "fi", "🇨🇿": "cs", "🇭🇺": "hu",
+  "🇬🇷": "el", "🇮🇱": "he", "🇹🇭": "th", "🇻🇳": "vi", "🇮🇩": "id", "🇺🇦": "uk", "🇷🇴": "ro", "🇮🇷": "fa",
+};
+
+/** Languages a stream's text shows: flags, and "Multi Audio" / "Dual Audio". */
+export function languagesFromText(text: string): string[] {
+  const codes = new Set<string>();
+  // "MULTi" in scene names is several audio tracks; "Multi-Subs" isn't.
+  if (/\b(multi|dual)[\s-]?audio\b|\bmulti\b(?![\s.-]?subs?\b)/i.test(text)) codes.add("multi");
+  for (const [flag, code] of Object.entries(FLAG_LANGUAGES)) if (text.includes(flag)) codes.add(code);
+  return [...codes];
 }

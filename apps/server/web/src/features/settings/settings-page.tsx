@@ -194,9 +194,29 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
           )}
 
           {section === "discovery" && (
-            <SettingsSection title="Finding releases" description="Playable releases for titles that aren't in the library yet.">
+            <SettingsSection
+              title="Finding releases"
+              description="Playable releases for titles that aren't in the library yet. Cached releases come first, then ones in the household's language (from General), then ones within your limits."
+            >
               <ToggleRow label="Find releases" description="Look for TorBox releases of titles that aren't in the library." checked={draft.discoveryEnabled} onChange={(v) => set("discoveryEnabled", v)} />
               <ToggleRow label="Use TorBox search" description={<>Also ask TorBox's own search, alongside your <a href="#addons">add-ons</a>.</>} checked={draft.useTorboxSearch} onChange={(v) => set("useTorboxSearch", v)} />
+              <SettingRow
+                label="Order releases by"
+                description={
+                  draft.releaseOrder === "addons"
+                    ? "The order your add-ons give, top add-on first: for ones set up to sort the way you like, like AIOStreams."
+                    : "Strata's own: resolution, single episodes before season packs, then source and seeders."
+                }
+              >
+                <ToggleGroup type="single" variant="outline" value={draft.releaseOrder} onValueChange={(v) => v && set("releaseOrder", v as Settings["releaseOrder"])} aria-label="Order releases by">
+                  <ToggleGroupItem value="strata" className="px-3">
+                    Strata
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="addons" className="px-3">
+                    Add-ons
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              </SettingRow>
               <ToggleRow label="Show uncached releases" description="Offer releases TorBox hasn't cached yet. They download before they can play." checked={draft.showUncached} onChange={(v) => set("showUncached", v)} />
               <SettingRow label="Largest automatic pick" htmlFor="max-size" description="Discovery won't pick a bigger release by itself. 0 means no limit.">
                 <NumberInput id="max-size" min={0} step={0.5} suffix="GB" value={draft.maxReleaseSizeGb} onChange={(v) => set("maxReleaseSizeGb", v)} />
