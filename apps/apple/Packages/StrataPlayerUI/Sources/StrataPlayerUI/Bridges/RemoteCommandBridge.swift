@@ -30,14 +30,14 @@ public final class RemoteCommandBridge {
             self?.engine?.togglePlay()
             return .success
         }
-        center.skipForwardCommand.preferredIntervals = [15]
+        center.skipForwardCommand.preferredIntervals = [10]
         center.skipForwardCommand.addTarget { [weak self] _ in
-            Task { await self?.engine?.skip(15) }
+            Task { await self?.engine?.skip(10) }
             return .success
         }
-        center.skipBackwardCommand.preferredIntervals = [15]
+        center.skipBackwardCommand.preferredIntervals = [10]
         center.skipBackwardCommand.addTarget { [weak self] _ in
-            Task { await self?.engine?.skip(-15) }
+            Task { await self?.engine?.skip(-10) }
             return .success
         }
         center.changePlaybackPositionCommand.addTarget { [weak self] event in

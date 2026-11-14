@@ -21,10 +21,19 @@ public final class DownloadStore {
 
     /// The client for a sign-in, to refresh an expired link (set by the app).
     @ObservationIgnored public var clientFor: (@MainActor (String) -> StrataClient?)?
-    /// Called by the system when background downloads finish while the app was away.
-    @ObservationIgnored public var backgroundCompletion: (() -> Void)?
+    /// Called by the system when background downloads finish while the app was away. Each
+    /// one handed in is kept (there are two sessions) and called once events are handled.
+    @ObservationIgnored public var backgroundCompletion: (() -> Void)? {
+        get { completions.last }
+        set { if let newValue { completions.append(newValue) } }
+    }
+    @ObservationIgnored private var completions: [() -> Void] = []
 
     static let sessionIdentifier = "app.strata.downloads"
+    /// The same downloads, Wi-Fi only. Cellular is allowed or not by the session a task runs
+    /// in: a request's own setting is baked into resume data, so a resumed download would
+    /// keep whatever was chosen when it began.
+    static let wifiSessionIdentifier = "app.strata.downloads.wifi"
     private static let cellularKey = "strata.downloadsOnCellular"
     nonisolated static let folder: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Downloads", isDirectory: true)
@@ -38,6 +47,9 @@ public final class DownloadStore {
     private var manifestURL: URL { Self.folder.appendingPathComponent("manifest.json") }
 
     @ObservationIgnored private var session: URLSession!
+    @ObservationIgnored private var wifiSession: URLSession!
+    /// The session new and resumed downloads go to, as the cellular setting says.
+    private var currentSession: URLSession { allowsCellular ? session : wifiSession }
     @ObservationIgnored private let delegate = SessionDelegate()
     @ObservationIgnored private var tasks: [String: URLSessionDownloadTask] = [:]
     @ObservationIgnored private var lastSave = Date.distantPast
@@ -49,24 +61,31 @@ public final class DownloadStore {
     private init() {
         allowsCellular = UserDefaults.standard.bool(forKey: Self.cellularKey)
         items = (try? JSONDecoder().decode([DownloadItem].self, from: Data(contentsOf: manifestURL))) ?? []
-        let config = URLSessionConfiguration.background(withIdentifier: Self.sessionIdentifier)
-        config.sessionSendsLaunchEvents = true
-        config.isDiscretionary = false
         delegate.store = self
-        session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
-        // Re-attach to downloads that carried on while the app was closed.
-        session.getAllTasks { tasks in
-            let found: [(String, URLSessionDownloadTask)] = tasks.compactMap { task in
-                guard let download = task as? URLSessionDownloadTask, let description = download.taskDescription else { return nil }
-                return (Self.itemID(description), download)
-            }
-            Task { @MainActor in
-                for (id, task) in found { self.tasks[id] = task }
-                for i in self.items.indices where self.items[i].state == .downloading && self.tasks[self.items[i].id] == nil {
-                    self.items[i].state = .paused
+        func make(_ identifier: String, cellular: Bool) -> URLSession {
+            let config = URLSessionConfiguration.background(withIdentifier: identifier)
+            config.sessionSendsLaunchEvents = true
+            config.isDiscretionary = false
+            config.allowsCellularAccess = cellular
+            return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+        }
+        session = make(Self.sessionIdentifier, cellular: true)
+        wifiSession = make(Self.wifiSessionIdentifier, cellular: false)
+        // Re-attach to downloads that carried on while the app was closed (in either session).
+        let sessions: [URLSession] = [session, wifiSession]
+        Task {
+            var found: [(String, URLSessionDownloadTask)] = []
+            for session in sessions {
+                for task in await session.allTasks {
+                    guard let download = task as? URLSessionDownloadTask, let description = download.taskDescription else { continue }
+                    found.append((Self.itemID(description), download))
                 }
-                self.save()
             }
+            for (id, task) in found { self.tasks[id] = task }
+            for i in self.items.indices where self.items[i].state == .downloading && self.tasks[self.items[i].id] == nil {
+                self.items[i].state = .paused
+            }
+            self.save()
         }
     }
 
@@ -136,7 +155,7 @@ public final class DownloadStore {
         update(item.id) { $0.state = .downloading }
         if let data = try? Data(contentsOf: Self.resumeURL(item.id)) {
             try? FileManager.default.removeItem(at: Self.resumeURL(item.id))
-            let task = session.downloadTask(withResumeData: data)
+            let task = currentSession.downloadTask(withResumeData: data)
             task.taskDescription = Self.taskDescription(item)
             tasks[item.id] = task
             task.resume()
@@ -170,9 +189,10 @@ public final class DownloadStore {
     // MARK: - Session events
 
     private func begin(_ item: DownloadItem, request: URLRequest) {
+        // Allowed here; the session decides (see `wifiSessionIdentifier`).
         var request = request
-        request.allowsCellularAccess = allowsCellular
-        let task = session.downloadTask(with: request)
+        request.allowsCellularAccess = true
+        let task = currentSession.downloadTask(with: request)
         task.taskDescription = Self.taskDescription(item)
         tasks[item.id] = task
         task.resume()
@@ -202,9 +222,9 @@ public final class DownloadStore {
     }
 
     fileprivate func progressed(_ id: String, written: Int64, expected: Int64) {
-        // A few times a second at most: every change redraws the pages that show the item.
+        // Once a second at most: every change redraws the pages that show the item.
         let now = Date()
-        if let last = lastProgress[id], now.timeIntervalSince(last) < 0.25 { return }
+        if let last = lastProgress[id], now.timeIntervalSince(last) < 1 { return }
         lastProgress[id] = now
         update(id) {
             $0.bytesWritten = written
@@ -244,8 +264,9 @@ public final class DownloadStore {
     }
 
     fileprivate func finishedBackgroundEvents() {
-        backgroundCompletion?()
-        backgroundCompletion = nil
+        let pending = completions
+        completions = []
+        pending.forEach { $0() }
     }
 
     private func update(_ id: String, _ change: (inout DownloadItem) -> Void) {
@@ -253,10 +274,17 @@ public final class DownloadStore {
         change(&items[i])
     }
 
+    /// Encodes and writes the manifest off the main actor, in order.
     private func save() {
         lastSave = Date()
-        try? JSONEncoder().encode(items).write(to: manifestURL, options: .atomic)
+        let snapshot = items
+        let url = manifestURL
+        Self.saveQueue.async {
+            try? JSONEncoder().encode(snapshot).write(to: url, options: .atomic)
+        }
     }
+
+    nonisolated private static let saveQueue = DispatchQueue(label: "strata.downloads.manifest", qos: .utility)
 
     // MARK: - Names
 

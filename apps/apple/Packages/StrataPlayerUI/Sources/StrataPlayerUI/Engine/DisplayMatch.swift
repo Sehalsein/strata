@@ -34,6 +34,13 @@ enum DisplayMatch {
         return AVDisplayCriteria(refreshRate: Float(format.frameRate ?? 0), formatDescription: description)
     }
 
+    /// What the asset asks for (an HLS stream from its playlist), loaded as soon as the item
+    /// exists; for a direct file, its own video track when the asset doesn't say.
+    static func criteria(loading asset: AVAsset, direct: Bool) async -> AVDisplayCriteria? {
+        if let criteria = try? await asset.load(.preferredDisplayCriteria) { return criteria }
+        return direct ? await criteria(for: asset) : nil
+    }
+
     /// From the file's own video track (direct play of an MP4).
     static func criteria(for asset: AVAsset) async -> AVDisplayCriteria? {
         guard let track = try? await asset.loadTracks(withMediaType: .video).first,

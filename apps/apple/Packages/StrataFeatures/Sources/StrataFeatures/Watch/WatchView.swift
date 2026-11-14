@@ -164,8 +164,11 @@ struct WatchView: View {
             #endif
             hideTask?.cancel()
             let played = engine.target
+            // Only what this view was playing: a quick close-and-replay may have started a
+            // newer playback by the time this runs.
+            let token = engine.loadToken
             Task {
-                await engine.unload()
+                await engine.unload(ifCurrent: token)
                 await services.titles.progressSaved(played)
             }
         }

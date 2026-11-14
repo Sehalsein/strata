@@ -28,7 +28,8 @@ public final class NowPlayingBridge {
             MPMediaItemPropertyTitle: meta.title,
             MPMediaItemPropertyAlbumTitle: meta.subtitle ?? "Strata",
             MPNowPlayingInfoPropertyPlaybackRate: NSNumber(value: rate),
-            MPNowPlayingInfoPropertyElapsedPlaybackTime: NSNumber(value: position)
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: NSNumber(value: position),
+            MPNowPlayingInfoPropertyMediaType: NSNumber(value: MPNowPlayingInfoMediaType.video.rawValue),
         ]
         if duration > 0 {
             info[MPMediaItemPropertyPlaybackDuration] = NSNumber(value: duration)
@@ -44,6 +45,19 @@ public final class NowPlayingBridge {
         }
     }
 
+    #if canImport(UIKit)
+    private typealias PlatformImage = UIImage
+    #elseif canImport(AppKit)
+    private typealias PlatformImage = NSImage
+    #endif
+
+    /// Built outside the main actor: the system calls the closure on a background queue,
+    /// and a main-actor closure there traps.
+    nonisolated private static func artwork(_ image: PlatformImage) -> MPMediaItemArtwork {
+        let box = ImageBox(image)
+        return MPMediaItemArtwork(boundsSize: image.size) { @Sendable _ in box.image }
+    }
+
     private func loadArtwork(from url: URL) async {
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
@@ -52,7 +66,7 @@ public final class NowPlayingBridge {
             #elseif canImport(AppKit)
             guard let image = NSImage(data: data) else { return }
             #endif
-            let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            let artwork = Self.artwork(image)
             await MainActor.run {
                 guard url == self.artworkURL else { return }
                 self.artwork = artwork
@@ -64,4 +78,15 @@ public final class NowPlayingBridge {
             // best-effort
         }
     }
+}
+
+/// Hands the artwork image to the closure the system calls off the main thread (it's only read).
+private final class ImageBox: @unchecked Sendable {
+    #if canImport(UIKit)
+    let image: UIImage
+    init(_ image: UIImage) { self.image = image }
+    #elseif canImport(AppKit)
+    let image: NSImage
+    init(_ image: NSImage) { self.image = image }
+    #endif
 }

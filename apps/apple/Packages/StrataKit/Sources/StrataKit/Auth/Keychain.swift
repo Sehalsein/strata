@@ -15,14 +15,23 @@ public enum Keychain {
             kSecAttrService as String: service,
             kSecAttrAccount as String: key
         ]
-        SecItemDelete(baseQuery as CFDictionary)
-        guard let value, let data = value.data(using: .utf8) else { return errSecParam }
-        var insert = baseQuery
-        insert[kSecValueData as String] = data
+        guard let value, let data = value.data(using: .utf8) else {
+            // nil clears the item.
+            let status = SecItemDelete(baseQuery as CFDictionary)
+            return status == errSecItemNotFound ? errSecSuccess : status
+        }
         // Tokens are device sessions on the server: never back them up or migrate
         // them to another device. AfterFirstUnlock keeps background playback working.
-        insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(insert as CFDictionary, nil)
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        // Updated in place: deleting first and then failing to add would lose the token.
+        var status = SecItemUpdate(baseQuery as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            let insert = baseQuery.merging(attributes) { _, new in new }
+            status = SecItemAdd(insert as CFDictionary, nil)
+        }
         if status != errSecSuccess {
             Log.auth.error("Keychain set \(key, privacy: .public) failed: \(Self.message(status), privacy: .public) (\(status))")
         }

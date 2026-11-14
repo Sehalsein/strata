@@ -97,6 +97,11 @@ public final class RemuxSession: @unchecked Sendable {
     public private(set) var videoFormat: VideoFormat?
     /// Called on an arbitrary thread with new subtitle lines as segments are read.
     public var onCues: (@Sendable ([SubtitleCue]) -> Void)?
+    /// Called on an arbitrary thread when the loopback server fails after it started (the
+    /// system can take it down while the app is suspended): the stream needs reopening.
+    public var onServerLost: (@Sendable () -> Void)?
+    /// Set by `stop()` (under `lock`): nothing more is built or answered.
+    private var stopped = false
 
     public init(source: Source, plan: RemuxPlan) {
         self.source = source
@@ -125,6 +130,8 @@ public final class RemuxSession: @unchecked Sendable {
             self.markBuilt(first)
             return segmenter
         }
+        // Stopped while the file was opening: `stop()` may have run before there was a source.
+        guard !isStopped else { closeSource(); throw CancellationError() }
         self.segmenter = segmenter
         let first = segmenter.segment(at: seconds)
         startSeconds = first > 0 ? max(0, seconds) : 0
@@ -132,7 +139,9 @@ public final class RemuxSession: @unchecked Sendable {
         if first + 1 < segmenter.segmentCount { Task { _ = await self.segment(first + 1, for: .prefetch) } }
         videoFormat = Self.videoFormat(segmenter, plan: plan)
         let server = try LoopbackServer { [weak self] path in await self?.respond(to: path) ?? .notFound }
+        server.onFailure = { [weak self] in self?.onServerLost?() }
         let port = try await server.start()
+        guard !isStopped else { server.stop(); throw CancellationError() }
         self.server = server
         let url = URL(string: "http://127.0.0.1:\(port)/index.m3u8")!
         playlistURL = url
@@ -154,14 +163,21 @@ public final class RemuxSession: @unchecked Sendable {
             return await self?.respond(to: "/" + path.dropFirst(prefix.count)) ?? .notFound
         }
         let port = try await server.start()
+        guard !isStopped else { server.stop(); throw CancellationError() }
         networkServer = server
         let url = URL(string: "http://\(address):\(port)\(prefix)index.m3u8")!
         networkURL = url
         return url
     }
 
+    /// The loopback server is up and answering.
+    public var isServing: Bool { server?.isListening ?? false }
+
+    private var isStopped: Bool { lock.withLock { stopped } }
+
     public func stop() {
         lock.lock()
+        stopped = true
         let waiting = jobs
         jobs = []
         playhead = Int.min / 2 // anything being built is now stale and stops
@@ -172,7 +188,18 @@ public final class RemuxSession: @unchecked Sendable {
         networkServer?.stop()
         networkServer = nil
         networkURL = nil
-        byteSource?.close()
+        closeSource()
+    }
+
+    private func closeSource() {
+        if let file = byteSource as? FileByteSource {
+            // Closed after any read under way on the work queue: closing it here could let
+            // the descriptor be reused by another file while a pread is still using it.
+            work.async { file.close() }
+        } else {
+            // Wakes a read waiting on the network (it fails) rather than queueing behind it.
+            byteSource?.close()
+        }
     }
 
     public var stats: Stats {
@@ -320,6 +347,7 @@ public final class RemuxSession: @unchecked Sendable {
     }
 
     private func respond(to path: String) async -> LoopbackServer.Reply {
+        guard !isStopped else { return .unavailable }
         let name = path.split(separator: "?").first.map { String($0.dropFirst()) } ?? ""
         let m3u8 = "application/vnd.apple.mpegurl"
         if name == "index.m3u8" { return .ok(Data(masterPlaylist().utf8), m3u8) }
@@ -377,12 +405,19 @@ public final class RemuxSession: @unchecked Sendable {
     /// A segment's media, built once however many ask for it. Nil when it was dropped as
     /// stale or couldn't be read.
     func segment(_ n: Int, for purpose: Purpose) async -> Data? {
+        guard !isStopped else { return nil }
         if let hit = cached(n) {
             if purpose == .player { lock.withLock { playhead = n } }
             return hit
         }
         return await withCheckedContinuation { (continuation: CheckedContinuation<Data?, Never>) in
             lock.lock()
+            // Stopped since the check above: `stop()` already answered everyone waiting.
+            if stopped {
+                lock.unlock()
+                continuation.resume(returning: nil)
+                return
+            }
             if purpose == .player { playhead = n }
             if let job = (building?.index == n ? building : nil) ?? jobs.first(where: { $0.index == n }) {
                 job.waiters.append(continuation)
@@ -400,6 +435,8 @@ public final class RemuxSession: @unchecked Sendable {
 
     /// Whether a segment is too far from the playhead to be worth building (lock held).
     private func isStale(_ job: Job) -> Bool {
+        // After `stop()` everything is, subtitle reads too.
+        if stopped { return true }
         guard job.purpose != .subtitles else { return false }
         return job.index < playhead - 1 || job.index > playhead + 3
     }
@@ -452,13 +489,14 @@ public final class RemuxSession: @unchecked Sendable {
         return cache[n]
     }
 
-    /// Keeps the last few segments (the player re-asks after a stall or a short seek back).
+    /// Keeps the last couple of segments (the player re-asks after a stall or a short seek
+    /// back). Only two: a 4K segment is tens of MB, and the player buffers the rest itself.
     private func store(_ n: Int, _ data: Data) {
         lock.lock(); defer { lock.unlock() }
         cache[n] = data
         cacheOrder.removeAll { $0 == n }
         cacheOrder.append(n)
-        while cacheOrder.count > 4 { cache.removeValue(forKey: cacheOrder.removeFirst()) }
+        while cacheOrder.count > 2 { cache.removeValue(forKey: cacheOrder.removeFirst()) }
     }
 
     private func cues(_ stream: Int32, from: Double, to: Double) -> [SubtitleCue] {
