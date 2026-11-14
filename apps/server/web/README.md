@@ -1,17 +1,39 @@
 # Strata dashboard
 
-The admin dashboard served by `strata-server`. React 19 + Vite + TypeScript, styled with
-[shadcn/ui](https://ui.shadcn.com) components on Tailwind CSS v4. `apps/server/scripts/build.ts`
-runs `bun run build` here and embeds `dist/` into the server binary.
+The admin dashboard that `strata-server` serves. It's React 19, Vite and TypeScript, with [shadcn/ui](https://ui.shadcn.com) components on Tailwind CSS v4. This file is for working on it.
+
+## Quick start
 
 ```sh
 bun install
-bun run dev        # http://localhost:5173, proxies /api to http://localhost:8420 (STRATA_API overrides)
-bun run build      # tsc --noEmit && vite build → dist/
+bun run dev        # http://localhost:5173, proxies /api to http://localhost:8420
 ```
 
-To try a build against a real server without touching your data:
-`bun ../src/main.ts --data-dir /tmp/strata-test --port 8431 --web-dir web/dist` (from `apps/server`).
+Run the server alongside it (`bun run dev` in `apps/server`). Set `STRATA_API` to proxy to a different server.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `bun run dev` | Vite dev server on :5173 |
+| `bun run build` | `tsc --noEmit && vite build` → `dist/` |
+| `bun run typecheck` | `tsc --noEmit` |
+
+You don't need to build it for a release: `apps/server/scripts/build.ts` runs `bun run build` here and embeds `dist/` in the server binary.
+
+To try a build against a real server without touching your data, run this from `apps/server`:
+
+```sh
+bun src/main.ts --data-dir /tmp/strata-test --port 8431 --web-dir web/dist
+```
+
+## Adding a page
+
+1. Create `src/features/<area>/<area>-page.tsx` with a default-exported component.
+2. Add an entry to `routes` in `src/app/routes.tsx`, with a lucide icon and a nav group.
+3. Add API calls to `lib/api.ts`, types to `lib/types.ts`, and a key to `queryKeys` in `lib/query.ts`.
+
+The sidebar, top-bar title and code splitting all come from the route table.
 
 ## Layout
 
@@ -34,48 +56,32 @@ src/
     theme-provider.tsx     light / dark / system, class strategy, saved in localStorage
   lib/
     api.ts types.ts        the API client and response types (mirror apps/server/src/api/routes)
-    auth-client.ts         every auth/session call, on Better Auth: setup, sign in/up/out, accounts,
-                           households, members, invitations, sessions, TV approval
+    auth-client.ts         every auth/session call, on Better Auth
     query.ts               QueryClient, query keys, useApiMutation (toasts + invalidation)
     router.tsx             tiny history router + <Link>
     format.ts utils.ts
 ```
 
-### Adding a page
+## Who can see what
 
-1. Create `src/features/<area>/<area>-page.tsx` with a default-exported component.
-2. Add an entry to `routes` in `src/app/routes.tsx` (pick a lucide icon and a nav group).
-3. Add API calls to `lib/api.ts`, types to `lib/types.ts`, and a key to `queryKeys` in `lib/query.ts`.
+`/api/me` returns the account, its active household and its role. Each route's `access` is one of:
 
-The sidebar, top-bar title and code splitting come from the route table.
+| Access | Who |
+|---|---|
+| `any` | Anyone signed in |
+| `householdAdmin` | Owner or admin of the active household |
+| `serverAdmin` | The setup account, also needing a household it runs (`/api/admin/*` is per household) |
 
-## Decisions
+Pages hide server-only fields (server name, TMDB key, transcoding, updates and so on) from household admins.
 
-- **Data fetching: TanStack Query.** The dashboard polls (status every 3 s, logs, update
-  progress), mutates and then needs other views refreshed (a new TMDB key changes the Overview,
-  renaming the server changes the sidebar), and keeps paged library results while the next page
-  loads. A hand-rolled hook had grown its own polling, sequencing and refresh plumbing for this;
-  Query covers all of it (visibility-aware `refetchInterval`, `invalidateQueries`,
-  `keepPreviousData`) for ~13 kB gzipped, and new features get caching for free.
-- **Auth behind one module.** Pages and the shell only call `authClient` (`lib/auth-client.ts`),
-  a thin promise API over Better Auth's client (`better-auth/react` with the username,
-  organization, admin, multi-session and device-authorization client plugins) that throws
-  `AuthError` (an `ApiError` with Better Auth's `code`). Sessions are same-origin cookies, so
-  `lib/api.ts` sends no auth header; `configureApiAuth` only reports 401s. Results are cached
-  with TanStack Query like any other data.
-- **Who can see what.** `/api/me` gives the account, its active household and role. A route's
-  `access` is `any`, `householdAdmin` (owner/admin of the active household) or `serverAdmin`
-  (the setup account, also needing a household it runs, since `/api/admin/*` is per household).
-  Pages hide server-only fields (server name, TMDB key, transcoding, updates…) from household
-  admins. Switching account or household goes through `session.authChanged()`, which re-reads
-  `/api/me`, drops every cached response and remounts the shell.
-- **Routing: no router library.** A handful of flat pages and the server's index.html fallback don't need
-  one. `lib/router.tsx` is ~50 lines; the route table is the one place pages are registered.
-  If nested routes or loaders are ever needed, swapping in a router only touches `app/`.
-- **Tables:** sorting, filtering and pagination are done directly (server-side for the library,
-  client-side for devices) rather than through TanStack Table, which would add weight for two
-  tables.
-- **Forms:** shadcn's `Field` layout with plain state and inline validation messages; no form
-  library, the forms are small.
-- **Bundle:** every page and the setup wizard are `React.lazy` chunks; the entry chunk is React,
-  Query and the shell.
+Switching account or household goes through `session.authChanged()`. It re-reads `/api/me`, drops every cached response and remounts the shell.
+
+## Design decisions
+
+- **Data fetching: TanStack Query.** The dashboard polls (status every 3 s, logs, update progress), refreshes other views after changes, and keeps paged library results while the next page loads. Query covers all of that (`refetchInterval`, `invalidateQueries`, `keepPreviousData`) for about 13 kB gzipped.
+- **Auth behind one module.** Pages only call `authClient` (`lib/auth-client.ts`), a thin promise API over Better Auth's client (`better-auth/react` with the username, organization, admin, multi-session and device-authorization plugins). It throws `AuthError`, an `ApiError` with Better Auth's `code`.
+- **Cookies, not headers.** Sessions are same-origin cookies, so `lib/api.ts` sends no auth header. `configureApiAuth` only reports 401s.
+- **No router library.** A handful of flat pages and the server's index.html fallback don't need one. `lib/router.tsx` is about 50 lines; swapping in a router later only touches `app/`.
+- **No table library.** Sorting, filtering and paging are done directly: server-side for the library, client-side for devices.
+- **No form library.** Forms use shadcn's `Field` layout with plain state and inline validation messages.
+- **Small entry bundle.** Every page and the setup wizard are `React.lazy` chunks. The entry chunk is React, Query and the shell.
