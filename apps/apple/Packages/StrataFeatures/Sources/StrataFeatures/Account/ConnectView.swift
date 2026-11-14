@@ -206,9 +206,7 @@ struct ConnectView: View {
                     Button {
                         services.store.hideServers(rows.map(\.id))
                     } label: {
-                        Label(rows.count == 1 ? String(localized: "Remove This Server from List", bundle: .module)
-                                              : String(localized: "Remove These Servers from List", bundle: .module),
-                              systemImage: "minus.circle")
+                        Label(String(localized: "Remove All Servers from This List", bundle: .module), systemImage: "minus.circle")
                     }
                     .disabled(probing != nil)
                 }
@@ -226,7 +224,7 @@ struct ConnectView: View {
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.danger)
                 } else if !rows.isEmpty {
-                    Text("Removing a server only hides it on this Apple TV. Signing in to it again brings it back.", bundle: .module)
+                    Text("Hides every server above, on this Apple TV only. To remove just one, press and hold it. Signing in to a server again brings it back.", bundle: .module)
                 }
             }
             Section {
