@@ -1,6 +1,5 @@
-// The knowledge base at docs.strata.sehalsein.com (apps/docs): static files only, no Worker.
-//   bun --cwd ../../apps/docs run build
-//   npx wrangler deploy
+// The knowledge base at docs.strata.sehalsein.com (apps/docs): static files only, no
+// Worker code. Deploy with deploy.sh (Workers Builds runs it on merge to main; README.md).
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "strata-docs",
