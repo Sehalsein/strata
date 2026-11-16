@@ -124,6 +124,8 @@ struct ResetPasswordView: View {
 
     /// The server's minimum.
     private static let minimumLength = 8
+    /// The address, never the name the server gives itself: any page can open this link,
+    /// so where the new password goes must be plain.
     private var address: String { ServerAddress.display(request.server) }
 
     private var problem: String? {
@@ -148,7 +150,7 @@ struct ResetPasswordView: View {
                             .font(.stTitle2).multilineTextAlignment(.center)
                         Text(done
                              ? String(localized: "Sign in with it. Your other devices were signed out and need it too.", bundle: .module)
-                             : String(localized: "For your account on \(target?.info.serverName ?? address). It signs you out on every other device.", bundle: .module))
+                             : String(localized: "For your account on \(address). It signs you out on every other device.", bundle: .module))
                             .font(.stCallout).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
                     }
                     if done {

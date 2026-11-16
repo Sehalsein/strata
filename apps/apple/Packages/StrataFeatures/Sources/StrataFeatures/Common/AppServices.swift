@@ -228,11 +228,14 @@ public struct ResetPasswordRequest: Identifiable, Hashable {
         func value(_ name: String) -> String? { query.first { $0.name == name }?.value.flatMap { $0.isEmpty ? nil : $0 } }
         switch url.scheme?.lowercased() {
         case "strata" where url.host == "reset-password":
+            // No user@ part: the address shown must be the one the password goes to.
             guard let token = value("token"), let server = value("server").flatMap(URL.init(string:)),
-                  server.scheme == "http" || server.scheme == "https", server.host != nil else { return nil }
+                  server.scheme == "http" || server.scheme == "https", server.host != nil,
+                  server.user == nil, server.password == nil else { return nil }
             self.server = server
             self.token = token
         case "http", "https":
+            guard url.user == nil, url.password == nil else { return nil }
             let parts = url.pathComponents.filter { $0 != "/" }
             let token: String
             if parts == ["reset-password"], let found = value("token") {
