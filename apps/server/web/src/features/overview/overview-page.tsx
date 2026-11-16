@@ -12,7 +12,7 @@ import { JobsCard } from "./jobs-card";
 import { PlayReportsCard } from "./play-reports-card";
 import { SessionsCard } from "./sessions-card";
 import { SetupChecklist } from "./setup-checklist";
-import { LibraryCard, ProvidersCard } from "./status-cards";
+import { LibraryCard, ProvidersCard, SectionCards } from "./status-cards";
 
 export default function OverviewPage() {
   const { isHouseholdAdmin } = useSession();
@@ -104,6 +104,8 @@ function AdminOverview() {
       </div>
 
       <SetupChecklist status={data} isServerAdmin={isServerAdmin} />
+
+      <SectionCards stats={data.library} />
 
       <div className="grid gap-4 md:grid-cols-2">
         <LibraryCard stats={data.library} />

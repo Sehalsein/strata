@@ -1,11 +1,12 @@
 import { Suspense, useEffect, useState } from "react";
 import { roleLabel } from "@/features/members/household-people";
-import { ArrowLeft, ChevronsUpDown, Fingerprint, KeyRound, ShieldCheck, Lock, LogOut, SearchX, ShieldEllipsis, UserPlus, UserRound } from "lucide-react";
+import { ArrowLeft, BookOpen, ChevronsUpDown, Fingerprint, KeyRound, ShieldCheck, Lock, LogOut, SearchX, ShieldEllipsis, UserPlus, UserRound } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { errorMessage } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
 import { queryKeys } from "@/lib/query";
+import { docsUrl } from "@/lib/docs";
 import { Link, usePath } from "@/lib/router";
 import { BrandMark } from "@/components/brand-mark";
 import { ModeToggle } from "@/components/mode-toggle";
@@ -78,7 +79,7 @@ function AppSidebar({ path }: { path: string }) {
   const backoffice = !!active?.backoffice;
   const close = () => isMobile && setOpenMobile(false);
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader>
         {backoffice ? (
           <SidebarMenu>
@@ -130,10 +131,10 @@ function AppSidebar({ path }: { path: string }) {
             </SidebarGroup>
           );
         })}
-        {!backoffice && can("systemAdmin") && (
-          <SidebarGroup className="mt-auto">
-            <SidebarGroupContent>
-              <SidebarMenu>
+        <SidebarGroup className="mt-auto">
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {!backoffice && can("systemAdmin") && (
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild tooltip="Backoffice">
                     <Link href="/backoffice" onClick={close}>
@@ -142,10 +143,18 @@ function AppSidebar({ path }: { path: string }) {
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
+              )}
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild tooltip="Docs">
+                  <a href={docsUrl()} target="_blank" rel="noreferrer" onClick={close}>
+                    <BookOpen />
+                    <span>Docs</span>
+                  </a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
         <Link href="/" className="text-muted-foreground flex items-center gap-2 px-2 text-xs" onClick={close} title={`Strata v${info.version}`}>
@@ -163,7 +172,7 @@ function AppSidebar({ path }: { path: string }) {
 function TopBar({ title }: { title: string }) {
   const { info } = useSession();
   return (
-    <header className="bg-background/80 sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b px-4 backdrop-blur md:px-6">
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 md:px-6">
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-4" />
       <div className="flex min-w-0 flex-1 items-baseline gap-2">
@@ -172,6 +181,11 @@ function TopBar({ title }: { title: string }) {
           {info.serverName} · v{info.version}
         </span>
       </div>
+      <Button variant="ghost" size="sm" asChild className="hidden sm:inline-flex">
+        <a href={docsUrl()} target="_blank" rel="noreferrer">
+          Docs
+        </a>
+      </Button>
       <ModeToggle />
       <AccountMenu />
     </header>
@@ -246,6 +260,12 @@ function AccountMenu() {
               </DropdownMenuItem>
             </>
           )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            <a href={docsUrl()} target="_blank" rel="noreferrer">
+              <BookOpen /> Docs
+            </a>
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={addAccount}>
             <UserPlus /> Add account
