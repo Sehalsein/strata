@@ -150,7 +150,8 @@ struct ShelfRail: View {
 
     var body: some View {
         Rail(shelf.title, link: seeAll) {
-            ForEach(shelf.kind == .continue ? shelf.items : Array(shelf.items.prefix(Metrics.railLimit))) { card in
+            // A server that sends `seeAll` has cut the rail to the household's length already.
+            ForEach(shelf.kind == .continue || shelf.seeAll != nil ? shelf.items : Array(shelf.items.prefix(Metrics.railLimit))) { card in
                 if shelf.kind == .continue {
                     ContinueCard(id: card.id,
                                  overline: card.episode?.code ?? card.yearText,
@@ -190,6 +191,7 @@ struct ShelfRail: View {
         guard shelf.kind == .titles else { return nil }
         if shelf.id == "watchlist" { return .myList }
         if let more = shelf.more { return .animeList(more, shelf.title) }
+        if let path = shelf.seeAll { return .rowList(path, shelf.title) }
         return shelf.items.count > Metrics.railLimit ? .shelf(shelf) : nil
     }
 

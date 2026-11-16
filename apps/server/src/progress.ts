@@ -1,6 +1,6 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "./db";
-import { continueHidden, progress, watchlist } from "./db/schema";
+import { continueHidden, progress, reminders, watchlist } from "./db/schema";
 import { formatRef, targetRef, type TitleRef, type TitleTarget } from "./catalog/ref";
 
 export type ProgressRow = typeof progress.$inferSelect;
@@ -155,6 +155,24 @@ export class ProgressStore {
   async setWatchlist(userId: string, ref: TitleRef, on: boolean) {
     if (on) await this.db.insert(watchlist).values({ userId, source: ref.source, type: ref.type, titleId: ref.id }).onConflictDoNothing();
     else await this.db.delete(watchlist).where(this.listed(userId, ref));
+  }
+
+  /** Titles the person asked to be reminded of when they come out. */
+  reminders(userId: string) {
+    return this.db.select().from(reminders).where(eq(reminders.userId, userId)).orderBy(desc(reminders.createdAt));
+  }
+
+  async isReminded(userId: string, ref: TitleRef): Promise<boolean> {
+    return (await this.db.select().from(reminders).where(this.reminder(userId, ref))).length > 0;
+  }
+
+  async setReminder(userId: string, ref: TitleRef, on: boolean) {
+    if (on) await this.db.insert(reminders).values({ userId, source: ref.source, type: ref.type, titleId: ref.id }).onConflictDoNothing();
+    else await this.db.delete(reminders).where(this.reminder(userId, ref));
+  }
+
+  private reminder(userId: string, ref: TitleRef) {
+    return and(eq(reminders.userId, userId), eq(reminders.source, ref.source), eq(reminders.type, ref.type), eq(reminders.titleId, ref.id));
   }
 
   private listed(userId: string, ref: TitleRef) {

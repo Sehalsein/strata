@@ -212,11 +212,11 @@ export class Tmdb {
   trending(type: "movie" | "tv", page = 1) {
     return this.get<TmdbPage>(`/trending/${type}/week`, page > 1 ? { page: String(page) } : {}, 6 * HOUR);
   }
-  popular(type: "movie" | "tv") {
-    return this.get<TmdbPage>(`/${type}/popular`, {}, 12 * HOUR);
+  popular(type: "movie" | "tv", page = 1) {
+    return this.get<TmdbPage>(`/${type}/popular`, page > 1 ? { page: String(page) } : {}, 12 * HOUR);
   }
-  topRated(type: "movie" | "tv") {
-    return this.get<TmdbPage>(`/${type}/top_rated`, {}, DAY);
+  topRated(type: "movie" | "tv", page = 1) {
+    return this.get<TmdbPage>(`/${type}/top_rated`, page > 1 ? { page: String(page) } : {}, DAY);
   }
   /** The movie or show TMDB knows by another site's id: IMDb ("tt…") or TVDB. */
   find(externalId: string, source: "imdb_id" | "tvdb_id") {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Blocks, Cable, Compass, Globe, Library, LoaderCircle, Network, RefreshCw, Server } from "lucide-react";
+import { Blocks, LayoutList, Cable, Compass, Globe, Library, LoaderCircle, Network, RefreshCw, Server } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
@@ -15,6 +15,7 @@ import { ChoiceSelect, minutesLabel, type SetFn } from "./fields";
 import { MediaFolders } from "./media-folders";
 import { Connections } from "./connections";
 import { AddonsSection } from "./addons";
+import { PagesSection } from "./pages";
 import { SettingRow, SettingsSection, ToggleRow } from "./layout";
 import { CATALOG_LANGUAGES, languageName, REGIONS, regionName, SUBTITLE_LANGUAGES } from "./languages";
 import { ChevronDown } from "lucide-react";
@@ -23,7 +24,7 @@ import { UpdatesCard } from "./updates-card";
 import { useSession } from "@/app/session";
 import { Link, navigate, usePath } from "@/lib/router";
 
-type SectionId = "general" | "library" | "discovery" | "addons" | "connections" | "server" | "network" | "updates";
+type SectionId = "general" | "library" | "discovery" | "addons" | "pages" | "connections" | "server" | "network" | "updates";
 interface Section {
   id: SectionId;
   label: string;
@@ -55,6 +56,7 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
       { id: "library", label: "Library", icon: Library, group: "household" },
       { id: "discovery", label: "Discovery", icon: Compass, group: "household" },
       { id: "addons", label: "Add-ons", icon: Blocks, group: "household" },
+      { id: "pages", label: "Pages", icon: LayoutList, group: "household" },
       { id: "connections", label: "Connections", icon: Cable, group: "household" },
       ...(isServerAdmin
         ? ([
@@ -147,8 +149,8 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
         {sections.length > 1 && <SettingsNav sections={sections} current={section} hrefOf={pathOf} />}
 
         <div className="flex min-w-0 flex-1 flex-col gap-6">
-          {/* Add-ons draws its own heading, with its count and actions. */}
-          {sections.length > 1 && section !== "addons" && <h2 className="text-xl font-semibold">{current.label}</h2>}
+          {/* Add-ons and Pages draw their own headings, with their counts and actions. */}
+          {sections.length > 1 && section !== "addons" && section !== "pages" && <h2 className="text-xl font-semibold">{current.label}</h2>}
 
           {section === "general" && (
             <SettingsSection title="Catalog" description="The language titles and artwork are shown in, and the country release dates and age ratings follow.">
@@ -189,6 +191,8 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
           )}
 
           {section === "addons" && <AddonsSection />}
+
+          {section === "pages" && <PagesSection />}
 
           {section === "connections" && <Connections secrets={data.secrets} draft={draft} set={set} />}
 

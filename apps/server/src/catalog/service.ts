@@ -1,6 +1,8 @@
 import type { FileProvider } from "../db/schema";
 import type { ShelfSource } from "./addonRows";
+import { addonRowsOn, applyLayout, type PageId, type PageLayout } from "./pageLayouts";
 import { bestFirst, tasteSeeds, topPicks, type Rec } from "./forYou";
+import { anilistUpcoming, movieUpcoming, remindOf, showUpcoming } from "./upcoming";
 import { SharedWork } from "../inFlight";
 import { runtime } from "#runtime";
 import type { Library } from "../library";
@@ -81,6 +83,8 @@ export interface Shelf {
   items: (TitleCard | ContinueCard)[];
   /** The full list behind the rail ("See all"): an Anime tab list, `GET /api/anime/list/:more`. */
   more?: string;
+  /** The full list behind the rail ("See all"): a path on this server answering `{ title, items }`. */
+  seeAll?: string;
 }
 
 export interface ProgressDto {
@@ -92,9 +96,18 @@ export interface ProgressDto {
 const progressDto = (row?: ProgressRow): ProgressDto | null => (row ? { positionMs: row.positionMs, durationMs: row.durationMs, completed: row.completed } : null);
 
 /** A Home rail that fails is left out rather than failing the page. */
+/** Building a page in full, for a row's "See all" (more of TMDB's pages, every add-on title). */
+export interface PageOpts {
+  full?: boolean;
+}
+const FULL_PAGES = 3;
+const FULL_ADDON_ROW = 100;
+
 /** "For you" only recommends titles rated at least this well, by this many people. */
 const FOR_YOU_MIN_RATING = 6.3;
 const FOR_YOU_MIN_VOTES = 150;
+/** "Because you watched" rows at most: one each for the strongest taste signals. */
+const BECAUSE_ROWS = 5;
 
 async function homeSafe<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
   try {
@@ -244,7 +257,7 @@ export class CatalogService {
   }
 
   /** Continue Watching, Up Next and My List: this person's own rails, asked for on every visit. */
-  async homeProfile(userId: string): Promise<Shelf[]> {
+  async homeProfile(userId: string, opts: PageOpts = {}): Promise<Shelf[]> {
     const [cont, nextUp, watchlist] = await Promise.all([
       homeSafe("continue", () => this.continueWatching(userId)),
       homeSafe("nextUp", () => this.nextUp(userId)),
@@ -255,11 +268,11 @@ export class CatalogService {
     if (nextUp?.length) shelves.push({ id: "nextUp", title: "Up Next", kind: "continue", items: nextUp });
     if (watchlist?.length) shelves.push({ id: "watchlist", title: "My List", kind: "titles", items: watchlist });
     shelves.push(...((await homeSafe("forYou", () => this.forYou(userId))) ?? []));
-    return shelves;
+    return applyLayout(shelves, this.layout("home"), { cut: !opts.full });
   }
 
   /** Home's rails that are the same for everyone: the hero, recently added and trending. */
-  async homeCatalog(): Promise<Shelf[]> {
+  async homeCatalog(opts: PageOpts = {}): Promise<Shelf[]> {
     const shelves: Shelf[] = [];
     const safe = homeSafe;
 
@@ -310,8 +323,8 @@ export class CatalogService {
     if (trendingMovies?.length) shelves.push({ id: "trendingMovies", title: "Trending Movies", kind: "titles", items: trendingMovies });
     if (trendingShows?.length) shelves.push({ id: "trendingShows", title: "Trending Shows", kind: "titles", items: trendingShows });
     if (trendingAnime.length) shelves.push({ id: "trendingAnime", title: "Trending Anime", kind: "titles", items: trendingAnime });
-    for (const source of this.rowSources) shelves.push(...((await safe("rowSource", () => source.shelves())) ?? []));
-    return shelves;
+    shelves.push(...(await this.pageAddonRows("home", opts)));
+    return applyLayout(shelves, this.layout("home"), { cut: !opts.full });
   }
 
   /**
@@ -347,15 +360,15 @@ export class CatalogService {
     return out.slice(0, 10);
   }
 
-  async browse(type: TitleType, list: BrowseList): Promise<TitleCard[]> {
+  async browse(type: TitleType, list: BrowseList, pages = 1): Promise<TitleCard[]> {
     if (list === "library") return await this.libraryCards(type, 500);
     if (list === "latestReleases" || list === "inTheaters") {
       if (type !== "movie") return [];
       return await this.cards(list === "latestReleases" ? await this.latestReleases() : await this.inTheaters(), "movie");
     }
     const tmdbType = type === "movie" ? "movie" : "tv";
-    const page = list === "trending" ? await this.tmdb.trending(tmdbType) : list === "popular" ? await this.tmdb.popular(tmdbType) : await this.tmdb.topRated(tmdbType);
-    return await this.cards(page.results, type);
+    const fetchPage = (n: number) => (list === "trending" ? this.tmdb.trending(tmdbType, n) : list === "popular" ? this.tmdb.popular(tmdbType, n) : this.tmdb.topRated(tmdbType, n));
+    return await this.cards(await this.pagesOf(fetchPage, pages), type);
   }
 
   /**
@@ -456,7 +469,7 @@ export class CatalogService {
    * trending top 10, episodes that just aired, then new, popular, top rated and coming
    * soon. Anime has its own tab, so it's left out.
    */
-  async showsPage(): Promise<Shelf[]> {
+  async showsPage(userId?: string, opts: PageOpts = {}): Promise<Shelf[]> {
     await this.anime?.ids.ready().catch(() => {});
     const keep = (i: TmdbListItem) => !this.isAnimeItem("show", i);
     const day = (offset: number) => new Date(Date.now() - offset * 86_400_000).toISOString().slice(0, 10);
@@ -466,13 +479,14 @@ export class CatalogService {
         .discover("tv", { without_genres: "10763,10766,10767", sort_by: "popularity.desc", ...params })
         .then((p) => this.cards(p.results.filter(keep), "show"))
         .catch(() => [] as TitleCard[]);
-    const list = (work: Promise<{ results: TmdbListItem[] }>) => work.then((p) => this.cards(p.results.filter(keep), "show")).catch(() => [] as TitleCard[]);
+    const list = (work: (page: number) => Promise<{ results: TmdbListItem[] }>) =>
+      this.pagesOf(work, opts.full ? FULL_PAGES : 1).then((items) => this.cards(items.filter(keep), "show")).catch(() => [] as TitleCard[]);
     const [trending, latest, fresh, popular, topRated, soon] = await Promise.all([
       this.trendingThisWeek("show", keep, {}).catch(() => [] as TitleCard[]),
       this.latestEpisodes(keep).catch(() => [] as TitleCard[]),
       discover({ "first_air_date.gte": day(90), "first_air_date.lte": day(0), "vote_count.gte": "10" }),
-      list(this.tmdb.popular("tv")),
-      list(this.tmdb.topRated("tv")),
+      list((page) => this.tmdb.popular("tv", page)),
+      list((page) => this.tmdb.topRated("tv", page)),
       discover({ "first_air_date.gte": day(-1), "first_air_date.lte": day(-90) }),
     ]);
     const spotlight = (await this.withLogos(trending.filter((c) => c.backdropUrl && c.overview).slice(0, 8))).map((c, i) => ({
@@ -481,14 +495,21 @@ export class CatalogService {
     }));
     const shelves: Shelf[] = [
       { id: "shows-spotlight", title: "Spotlight", kind: "titles", style: "hero", items: spotlight },
-      { id: "shows-trending", title: "Trending", kind: "titles", items: trending.slice(0, 10) },
+      { id: "shows-trending", title: "Trending", kind: "titles", items: trending },
       { id: "shows-latest-episodes", title: "Latest Episodes", kind: "titles", items: latest },
       { id: "shows-new", title: "New Shows", kind: "titles", items: fresh },
       { id: "shows-popular", title: "Popular", kind: "titles", items: popular },
       { id: "shows-top-rated", title: "Top Rated", kind: "titles", items: topRated },
       { id: "shows-coming-soon", title: "Coming Soon", kind: "titles", items: soon },
     ];
-    return shelves.filter((s) => s.items.length >= 3);
+    // This person's picks among shows, after Trending; the household's show catalogs from add-ons at the end.
+    const [picks, addons] = await Promise.all([
+      userId ? homeSafe("forYou-show", () => this.forYouPicks(userId, "show")).then((s) => s ?? []) : Promise.resolve([] as Shelf[]),
+      this.pageAddonRows("shows", opts),
+    ]);
+    shelves.splice(2, 0, ...picks);
+    shelves.push(...addons);
+    return applyLayout(shelves.filter((s) => s.items.length >= 3), this.layout("shows"), { cut: !opts.full });
   }
 
   /**
@@ -526,13 +547,13 @@ export class CatalogService {
    * The Anime tab: what's trending and airing, then series and films ranked by Kitsu.
    * With a category, its own popular and top rated series and films.
    */
-  async animePage(category?: string): Promise<Shelf[]> {
+  async animePage(category?: string, opts: PageOpts = {}): Promise<Shelf[]> {
     const { ids, kitsu } = this.anime ?? {};
     if (!ids) return [];
     await ids.ready();
     if (!category) {
       const sections = await this.animeSections().catch((err) => (log.warn("Anime sections failed", err), null));
-      if (sections?.length) return sections;
+      if (sections?.length) return applyLayout([...sections, ...(await this.pageAddonRows("anime", opts))], this.layout("anime"), { cut: !opts.full });
     }
     if (!kitsu) return [];
     type Plan = { id: string; title: string; kind: "series" | "films"; rail: KitsuRail };
@@ -743,6 +764,7 @@ export class CatalogService {
         sources,
         progress: progressDto(await this.progress.get(userId, target)),
         inWatchlist: await this.progress.inWatchlist(userId, ref),
+        remind: remindOf(anilistUpcoming(media, "movie", Date.now()), await this.progress.isReminded(userId, ref)),
       };
     }
     const [files, watched] = await Promise.all([this.library.filesFor(ref), this.progress.forShow(userId, ref)]);
@@ -771,6 +793,7 @@ export class CatalogService {
       /** Where the Play button should go: an in-progress episode, else the next unwatched one. */
       upNext: anilistUpNext(files, watched, aired, episodeCount),
       inWatchlist: await this.progress.inWatchlist(userId, ref),
+      remind: remindOf(anilistUpcoming(media, "show", Date.now()), await this.progress.isReminded(userId, ref)),
     };
   }
 
@@ -925,16 +948,24 @@ export class CatalogService {
    * My List (see forYou.ts), with TMDB's recommendations for their strongest titles.
    * Kept a while per person: it changes as they watch, not by the minute.
    */
-  private forYou(userId: string): Promise<Shelf[]> {
-    return this.forYouMemo.get(userId, () => this.buildForYou(userId));
+  private async forYou(userId: string): Promise<Shelf[]> {
+    return (await this.forYouMemo.get(userId, () => this.buildForYou(userId))).home;
   }
 
-  private forYouMemo = new SharedWork<string, Shelf[]>({ remember: true, ttlMs: 30 * 60_000, max: 500 });
+  /** "Top picks for you" of one kind, for the Movies or Shows page (empty with too little history). */
+  async forYouPicks(userId: string, type: TitleType): Promise<Shelf[]> {
+    const { byType } = await this.forYouMemo.get(userId, () => this.buildForYou(userId));
+    const items = byType[type];
+    return items.length >= 6 ? [{ id: `forYou-${type}`, title: "Top picks for you", kind: "titles", items }] : [];
+  }
 
-  private async buildForYou(userId: string): Promise<Shelf[]> {
+  private forYouMemo = new SharedWork<string, { home: Shelf[]; byType: Record<TitleType, TitleCard[]> }>({ remember: true, ttlMs: 30 * 60_000, max: 500 });
+
+  private async buildForYou(userId: string): Promise<{ home: Shelf[]; byType: Record<TitleType, TitleCard[]> }> {
+    const none = { home: [], byType: { movie: [], show: [] } };
     const [history, listed] = await Promise.all([this.progress.history(userId), this.progress.watchlist(userId)]);
     const seeds = tasteSeeds(history, listed.map((l) => ({ source: l.source, type: l.type, titleId: l.titleId, addedAt: l.addedAt })));
-    if (!seeds.length) return [];
+    if (!seeds.length) return none;
     // Everything they've started, finished or listed is left out, as are the seeds themselves.
     const seen = new Set<string>([
       ...history.map((h) => `${h.mediaType === "movie" ? "movie" : "show"}:${h.titleId}`),
@@ -950,7 +981,7 @@ export class CatalogService {
       }),
     );
     const usable = details.filter((d) => d.name && d.items.length);
-    if (!usable.length) return [];
+    if (!usable.length) return none;
     const byKey = new Map<string, TmdbListItem>();
     for (const d of usable) for (const r of d.items) byKey.set(`${d.seed.type}:${r.id}`, r);
     const toCards = async (recs: Rec[]) => {
@@ -963,16 +994,89 @@ export class CatalogService {
       const at = new Map(recs.map((r, i) => [formatRef(tmdbRef(r.type, r.id)), i]));
       return out.sort((a, b) => (at.get(a.ref) ?? 0) - (at.get(b.ref) ?? 0));
     };
-    const recsOf = (d: (typeof usable)[number]): Rec[] => d.items.map((r) => ({ type: d.seed.type, id: r.id, rating: r.vote_average }));
+    const recsOf = (d: (typeof details)[number]): Rec[] => d.items.map((r) => ({ type: d.seed.type, id: r.id, rating: r.vote_average }));
     const shelves: Shelf[] = [];
-    const picks = topPicks(usable.map((d) => ({ seed: d.seed, recs: recsOf(d) })), new Set([...seen, ...seeds.map((s) => `${s.type}:${s.id}`)]));
+    const allPicks = topPicks(usable.map((d) => ({ seed: d.seed, recs: recsOf(d) })), new Set([...seen, ...seeds.map((s) => `${s.type}:${s.id}`)]), 60);
+    const pickCards = await toCards(allPicks);
+    const picks = pickCards.slice(0, 20);
     // Pooling needs more than one title to say something the "Because" rows don't.
-    if (usable.length >= 2 && picks.length >= 6) shelves.push({ id: "forYou", title: "Top picks for you", kind: "titles", items: await toCards(picks) });
-    for (const d of usable.slice(0, 2)) {
+    if (usable.length >= 2 && picks.length >= 6) shelves.push({ id: "forYou", title: "Top picks for you", kind: "titles", items: picks });
+    for (const d of usable.slice(0, BECAUSE_ROWS)) {
       const recs = bestFirst(recsOf(d).filter((r) => !seen.has(`${r.type}:${r.id}`))).slice(0, 20);
       if (recs.length >= 4) shelves.push({ id: `because:${d.seed.type}:${d.seed.id}`, title: `Because you watched ${d.name}`, kind: "titles", items: await toCards(recs) });
     }
-    return shelves;
+    const byType = { movie: pickCards.filter((c) => c.type === "movie").slice(0, 20), show: pickCards.filter((c) => c.type === "show").slice(0, 20) };
+    return { home: shelves, byType };
+  }
+
+  /**
+   * The Movies page: a spotlight of what's trending, then the film lists (new to rent or
+   * buy, in cinemas, popular, top rated), this person's picks among films, and the
+   * household's film catalogs from add-ons.
+   */
+  async moviesPage(userId: string, opts: PageOpts = {}): Promise<Shelf[]> {
+    await this.anime?.ids.ready().catch(() => {});
+    const keep = (c: TitleCard) => c.tmdbId === undefined || !this.isAnimeItem("movie", { id: c.tmdbId } as TmdbListItem);
+    const list = (name: BrowseList) => this.browse("movie", name, opts.full ? FULL_PAGES : 1).then((l) => l.filter(keep)).catch(() => [] as TitleCard[]);
+    const [trending, latest, theaters, popular, topRated, picks, addons] = await Promise.all([
+      list("trending"),
+      list("latestReleases"),
+      list("inTheaters"),
+      list("popular"),
+      list("topRated"),
+      homeSafe("forYou-movie", () => this.forYouPicks(userId, "movie")).then((s) => s ?? []),
+      this.pageAddonRows("movies", opts),
+    ]);
+    const spotlight = (await this.withLogos(trending.filter((c) => c.backdropUrl && c.overview).slice(0, 8))).map((c, i) => ({
+      ...c!,
+      backdropUrl: c!.backdropUrl!.replace(/\/t\/p\/w\d+\//, "/t/p/original/"),
+      eyebrow: `#${i + 1} in Movies`,
+    }));
+    const shelves: Shelf[] = [
+      { id: "movies-spotlight", title: "Spotlight", kind: "titles", style: "hero", items: spotlight },
+      { id: "movies-trending", title: "Trending", kind: "titles", items: trending },
+      ...picks,
+      { id: "movies-latest", title: "Latest Releases", kind: "titles", items: latest },
+      { id: "movies-in-theaters", title: "New in Theaters", kind: "titles", items: theaters },
+      { id: "movies-popular", title: "Popular", kind: "titles", items: popular },
+      { id: "movies-top-rated", title: "Top Rated", kind: "titles", items: topRated },
+      ...addons,
+    ];
+    return applyLayout(shelves.filter((s) => s.items.length >= 3), this.layout("movies"), { cut: !opts.full });
+  }
+
+  /** TMDB list pages fetched in turn and joined, without repeats. */
+  private async pagesOf(fetchPage: (page: number) => Promise<{ results: TmdbListItem[] }>, pages: number): Promise<TmdbListItem[]> {
+    const all = await Promise.all(Array.from({ length: pages }, (_, i) => fetchPage(i + 1).then((p) => p.results).catch(() => [] as TmdbListItem[])));
+    return dedupe(all.flat());
+  }
+
+  /**
+   * One row of a page in full, for its "See all": the page built in full (more pages of
+   * TMDB's lists, every title an add-on gives) and not cut to the rail's length.
+   */
+  async rowList(page: PageId, rowId: string, userId: string): Promise<Shelf | null> {
+    const full = { full: true };
+    const shelves =
+      page === "home"
+        ? [...(await this.homeProfile(userId, full)), ...(await this.homeCatalog(full))]
+        : page === "movies"
+          ? await this.moviesPage(userId, full)
+          : page === "shows"
+            ? await this.showsPage(userId, full)
+            : await this.animePage(undefined, full);
+    return shelves.find((s) => s.id === rowId) ?? null;
+  }
+
+  /** How the household laid out a page (none yet: as built). */
+  private layout(page: PageId): PageLayout | undefined {
+    return this.settings().pageLayouts?.[page];
+  }
+
+  /** The add-on rows a page shows: those its layout turns on (none until it's laid out). */
+  private async pageAddonRows(page: PageId, opts: PageOpts = {}): Promise<Shelf[]> {
+    const rows = await Promise.all(this.rowSources.map((s) => homeSafe("rowSource", () => s.rows(addonRowsOn(this.layout(page), []), opts.full ? FULL_ADDON_ROW : undefined))));
+    return rows.flat().filter((s): s is Shelf => !!s);
   }
 
   /** A cast or crew member and the movies and shows they're known for, most popular first. */
@@ -1055,6 +1159,8 @@ export class CatalogService {
       sources,
       progress: progressDto(await this.progress.get(userId, { source: "tmdb", mediaType: "movie", titleId: id })),
       inWatchlist: await this.progress.inWatchlist(userId, ref),
+      /** "Remind me" when it comes out: only for a film with a release still to come. */
+      remind: remindOf(movieUpcoming(m, region, today()), await this.progress.isReminded(userId, ref)),
       anime,
     };
   }
@@ -1104,6 +1210,8 @@ export class CatalogService {
       /** Where the Play button should go: an in-progress episode, else the next unwatched one. */
       upNext,
       inWatchlist: await this.progress.inWatchlist(userId, ref),
+      /** "Remind me" of its next episode or premiere, when one is dated. */
+      remind: remindOf(showUpcoming(s, today()), await this.progress.isReminded(userId, ref)),
       anime,
     };
   }
@@ -1409,6 +1517,8 @@ function showStatus(status: string | null | undefined): string | null {
 }
 
 /** An AniList date as "YYYY-MM-DD", or null unless it's a whole date. */
+const today = () => new Date().toISOString().slice(0, 10);
+
 function isoDate(d: AnilistDate | null | undefined): string | null {
   if (!d?.year || !d.month || !d.day) return null;
   return `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;

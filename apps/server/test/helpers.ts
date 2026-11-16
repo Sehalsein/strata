@@ -53,6 +53,10 @@ export const fakeTmdb: typeof fetch = (async (input: string | URL | Request) => 
     const results = q.includes("test show") ? [{ id: 9001, name: "Test Show", first_air_date: "2020-01-01", poster_path: "/ts.jpg" }] : [];
     return json({ page: 1, results, total_pages: 1, total_results: results.length });
   }
+  if (path === "/movie/990001") {
+    // A film still to come out: in cinemas, then to stream, years from now.
+    return json({ id: 990001, title: "Future Film", release_date: "2099-03-01", genres: [], poster_path: "/ff.jpg", credits: { cast: [], crew: [] }, recommendations: { page: 1, results: [], total_pages: 1, total_results: 0 }, videos: { results: [] }, release_dates: { results: [{ iso_3166_1: "US", release_dates: [{ type: 3, certification: "", release_date: "2099-03-01T00:00:00.000Z" }, { type: 4, certification: "", release_date: "2099-05-01T00:00:00.000Z" }] }] } });
+  }
   if (path === "/movie/10378") {
     return json({ id: 10378, imdb_id: "tt1254207", title: "Big Buck Bunny", release_date: "2008-05-30", runtime: 10, genres: [{ id: 16, name: "Animation" }], poster_path: "/bbb.jpg", credits: { cast: [], crew: [] }, recommendations: { page: 1, results: [], total_pages: 1, total_results: 0 }, videos: { results: [
       { key: "clip1", site: "YouTube", type: "Clip", name: "Opening", official: true },

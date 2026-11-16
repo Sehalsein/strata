@@ -1,5 +1,7 @@
 import type {
   StreamAddon,
+  PageId,
+  PageLayout,
   AnilistResult,
   AdminStatus,
   FsListing,
@@ -111,6 +113,9 @@ export const api = {
   updateSettings: (patch: Partial<Settings>) => request<{ settings: Settings }>("PATCH", "/admin/settings", patch),
   setSecret: (key: SecretKey, value: string | null) => request<{ ok: true }>("PUT", `/admin/secrets/${key}`, { value }),
   torboxAccount: () => request<TorboxAccount>("GET", "/admin/torbox/account"),
+  pages: () => request<{ pages: PageLayout[]; maxAddonRows: number }>("GET", "/admin/pages"),
+  /** The whole list, in order; an empty list puts the page back to its defaults. */
+  setPage: (page: PageId, rows: { id: string; on: boolean; name?: string; count?: number }[]) => request<{ pages: PageLayout[] }>("PUT", `/admin/pages/${page}`, { rows }),
   addons: () => request<{ items: StreamAddon[] }>("GET", "/admin/addons"),
   addAddon: (url: string) => request<StreamAddon>("POST", "/admin/addons", { url }),
   updateAddon: (id: string, patch: { enabled?: boolean; index?: number; url?: string; homeCatalogs?: string[] }) => request<{ items: StreamAddon[] }>("PATCH", `/admin/addons/${encodeURIComponent(id)}`, patch),

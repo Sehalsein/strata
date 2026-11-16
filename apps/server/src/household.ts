@@ -30,6 +30,7 @@ import { Buffer } from "node:buffer";
 import { TitleIds } from "./catalog/titleIds";
 import { AddonHealth } from "./sources/addonHealth";
 import { AddonRows } from "./catalog/addonRows";
+import { BUILT_IN_ROWS, MAX_ADDON_ROWS_PER_PAGE, PAGE_IDS, PAGE_TITLES, type PageId, type PageLayout, type RowOption } from "./catalog/pageLayouts";
 import { SharedWork } from "./inFlight";
 import type { TitleTarget } from "./catalog/ref";
 import { TorboxHousekeeping } from "./sources/torbox/cleanup";
@@ -95,6 +96,8 @@ export class Household {
   readonly omdb: Omdb;
   /** Other sites' ids for a title (IMDb, TVDB, Kitsu…) as Strata's own. */
   readonly titleIds: TitleIds;
+  /** Its add-ons' catalogs as rows for its pages. */
+  readonly addonRows!: AddonRows;
   /** How each of its add-ons is doing, for the dashboard (and which are paused). */
   readonly addonHealth = new AddonHealth();
   /** Subtitles from its subtitle add-ons. */
@@ -117,13 +120,22 @@ export class Household {
     const tmdb = this.tmdb;
     this.library = new Library(db, organizationId, tmdb, new Matcher(tmdb, new AnimeMatcher(shared.anime.anilist, shared.anime.ids, tmdb, shared.anime.kitsu)), shared.anime.anilist);
     this.titleIds = new TitleIds(tmdb, shared.anime.ids);
-    const addonRows = new AddonRows(() => this.addons(), this.titleIds, (refs) => this.catalog.titleCards(refs), (refs) => this.library.availability(refs), shared.fetch, this.addonHealth);
+    const addonRows = (this.addonRows = new AddonRows(() => this.addons(), this.titleIds, (refs) => this.catalog.titleCards(refs), (refs) => this.library.availability(refs), shared.fetch, this.addonHealth));
     this.catalog = new CatalogService(tmdb, this.library, shared.progress, settings, shared.anime, this.omdb, [addonRows]);
     this.content = new ContentFilter(db, organizationId, tmdb, settings, shared.anime);
     this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, show) => this.content.allowed(userId, show), () => this.settings().region,
       // Out, not in the library, but ready on TorBox (or an add-on's ready link): it plays now too.
-      async ({ ref, season, episode }) =>
-        this.discovery.available && !!(await this.discovery.bestCached({ source: ref.source, mediaType: ref.type === "movie" ? "movie" : "episode", titleId: ref.id, season, episode })));
+      // Each check is a release search, so it spends the household's search allowance like
+      // the Sources screen does; once that's used up, the calendar just doesn't say.
+      async ({ ref, season, episode }) => {
+        if (!this.discovery.available) return false;
+        try {
+          await this.spendSearch();
+        } catch {
+          return false;
+        }
+        return !!(await this.discovery.bestCached({ source: ref.source, mediaType: ref.type === "movie" ? "movie" : "episode", titleId: ref.id, season, episode }));
+      });
     this.housekeeping = new TorboxHousekeeping(db, organizationId, this.library);
     this.plays = new HouseholdPlays(shared.sessions, organizationId, this.library);
     this.playReports = new PlayReports(db, organizationId);
@@ -157,6 +169,37 @@ export class Household {
       log.warn(`${addon.name}'s link didn't lead to a file`, err);
       throw new PlaybackError(`${addon.name} couldn't play this copy just now. Try again, or pick another source.`, 502);
     }
+  }
+
+  /**
+   * Each page's rows as the dashboard lays them out: the page's order (its own rows, the
+   * per-person ones, every add-on catalog), each on or off. A page not laid out yet shows as
+   * it is: its own rows on, and the add-on rows that were ticked for Home (of its kind).
+   */
+  pages(): { id: PageId; title: string; rows: (RowOption & { on: boolean; name?: string; count?: number })[] }[] {
+    const addonOptions = this.addonRows.options();
+    return PAGE_IDS.map((page) => {
+      const options: RowOption[] = [
+        ...BUILT_IN_ROWS[page].map((r) => ({ ...r, defaultOn: true })),
+        // Add-on rows start off: a page shows Strata's own and the per-person rows until laid out.
+        ...addonOptions.map((o) => ({ id: o.id, title: o.title, source: "addon" as const, addon: o.addon, defaultOn: false })),
+      ];
+      const layout = this.settings().pageLayouts?.[page];
+      if (!layout?.length) return { id: page, title: PAGE_TITLES[page], rows: options.map((o) => ({ ...o, on: o.defaultOn })) };
+      const byId = new Map(options.map((o) => [o.id, o]));
+      const listed = layout.filter((r) => byId.has(r.id)).map((r) => ({ ...byId.get(r.id)!, on: r.on, ...(r.name ? { name: r.name } : {}), ...(r.count ? { count: r.count } : {}) }));
+      const rest = options.filter((o) => !layout.some((r) => r.id === o.id)).map((o) => ({ ...o, on: o.source !== "addon" }));
+      return { id: page, title: PAGE_TITLES[page], rows: [...listed, ...rest] };
+    });
+  }
+
+  /** Saves a page's layout (rows by id, in order, on or off); throws AddonError for rows it doesn't have or too many add-on rows. */
+  async setPageLayout(page: PageId, rows: PageLayout) {
+    const known = new Set(this.pages().find((p) => p.id === page)!.rows.map((r) => r.id));
+    const unknown = rows.find((r) => !known.has(r.id));
+    if (unknown) throw new AddonError(`${PAGE_TITLES[page]} has no row "${unknown.id}".`);
+    if (rows.filter((r) => r.on && r.id.startsWith("addon:")).length > MAX_ADDON_ROWS_PER_PAGE) throw new AddonError(`A page can show up to ${MAX_ADDON_ROWS_PER_PAGE} add-on rows. Turn one off first.`);
+    await this.settingsStore.update({ pageLayouts: { ...(this.settings().pageLayouts ?? {}), [page]: rows } });
   }
 
   /** The languages its subtitle add-ons are asked for: as set, else the household's language. */

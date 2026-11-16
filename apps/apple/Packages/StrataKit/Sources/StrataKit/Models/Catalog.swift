@@ -140,9 +140,13 @@ public struct Shelf: Codable, Sendable, Hashable, Identifiable {
     public var style: Style? { styleName.flatMap(Style.init(rawValue:)) }
     /// The full list behind the rail ("See all"): an Anime tab list, for `StrataClient.animeList`.
     public var more: String?
+    /// The full list behind the rail ("See all"): a path on the server, for `StrataClient.rowList`.
+    /// Newer servers send it, and cut the rail to the length the household chose: the app
+    /// shows the rail as sent.
+    public var seeAll: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, kind, items, more
+        case id, title, kind, items, more, seeAll
         case styleName = "style"
     }
 
@@ -356,11 +360,13 @@ public struct MovieDetail: Codable, Sendable, Hashable, Identifiable {
     public var sources: [Candidate]
     public var progress: WatchProgress?
     public var inWatchlist: Bool
+    /// "Remind me" when it comes out: only for a film with a release still to come (and absent from older servers).
+    public var remind: Reminder?
 
     enum CodingKeys: String, CodingKey {
         case type, tmdbId, imdbId, title, tagline, overview, year, releaseDate, runtimeMinutes, genres, rating, ratings, certification
         case posterUrl, backdropUrl, logoUrl, cast, directors, trailer, videos, anime, collection, related, recommendations, available, sources
-        case progress, inWatchlist
+        case progress, inWatchlist, remind
         case sentRef = "ref"
     }
 
@@ -375,6 +381,29 @@ public struct MovieDetail: Codable, Sendable, Hashable, Identifiable {
     public var releaseDateValue: Date? { Formatting.date(releaseDate) }
     /// Resume position when there's meaningful progress.
     public var resumeMs: Int? { progress.flatMap { $0.isResumable ? $0.positionMs : nil } }
+}
+
+/// What's still to come for a title, as the server words it, and whether this person asked
+/// to be reminded. The calendar then lists it and the app notifies on the day.
+public struct Reminder: Codable, Sendable, Hashable {
+    public var on: Bool
+    /// YYYY-MM-DD.
+    public var date: String
+    /// The exact time, when known.
+    public var airsAt: String?
+    /// "In cinemas", "Season 2 premieres".
+    public var label: String
+
+    public init(on: Bool, date: String, airsAt: String? = nil, label: String) {
+        self.on = on; self.date = date; self.airsAt = airsAt; self.label = label
+    }
+
+    /// "In cinemas · Mar 1, 2027".
+    public var text: String {
+        let when = airsAt.flatMap { try? Date($0, strategy: .iso8601) } ?? Formatting.date(date)
+        guard let when else { return label }
+        return "\(label) · \(when.formatted(.dateTime.month(.abbreviated).day().year()))"
+    }
 }
 
 // MARK: - Show
@@ -441,11 +470,13 @@ public struct ShowDetail: Codable, Sendable, Hashable, Identifiable {
     public var available: [Provider]
     public var upNext: UpNext?
     public var inWatchlist: Bool
+    /// "Remind me" of its next episode or premiere, when one is dated (absent from older servers).
+    public var remind: Reminder?
 
     enum CodingKeys: String, CodingKey {
         case type, tmdbId, imdbId, title, tagline, overview, year, firstAirDate, lastAirDate, status, genres, rating, ratings
         case certification, posterUrl, backdropUrl, logoUrl, cast, trailer, videos, anime, seasons, related, recommendations, available
-        case upNext, inWatchlist
+        case upNext, inWatchlist, remind
         case sentRef = "ref"
     }
 

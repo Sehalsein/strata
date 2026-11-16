@@ -101,7 +101,7 @@ const KITSU: Record<number, string | null> = { 46474: "PG", 49240: "PG", 11614: 
 const kitsu = { ageRating: async (id: number) => KITSU[id] ?? null } as unknown as Kitsu;
 
 const library = { availability: async () => new Map(), filesFor: async () => [] } as never;
-const progress = { get: async () => undefined, forShow: async () => [], inWatchlist: async () => false } as never;
+const progress = { get: async () => undefined, forShow: async () => [], inWatchlist: async () => false, isReminded: async () => false } as never;
 const settings = () => ({ region: "US" }) as never;
 const catalog = () => new CatalogService(tmdb, library, progress, settings, { ids: ids(), anilist: { title: async (id: number) => MEDIA[id] ?? null } as unknown as Anilist, kitsu });
 const ref = (text: string) => parseRef(text)!;

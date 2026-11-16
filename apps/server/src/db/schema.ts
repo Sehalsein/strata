@@ -364,6 +364,21 @@ export const watchlist = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.source, t.type, t.titleId] })],
 );
 
+/** Titles someone asked to be reminded of when they come out (the calendar notifies them). */
+export const reminders = pgTable(
+  "reminders",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    source: text("source").$type<TitleSource>().notNull().default("tmdb"),
+    type: text("type").$type<"movie" | "show">().notNull(),
+    titleId: integer("title_id").notNull(),
+    createdAt: ms("created_at").notNull().$defaultFn(now),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.source, t.type, t.titleId] })],
+);
+
 /**
  * Plays of TorBox files: the server only handed the app a link, so any server sharing
  * the database can refresh it, record progress against it or end it. (Local files,

@@ -17,6 +17,8 @@ const SHOWS: Record<number, TmdbShow> = {
   1: show(1, "The Drama", [[1, 8], [2, 8]]),
   209867: show(209867, "Frieren", [[1, 38]]),
   3: show(3, "Old Show", [[1, 10]]),
+  // Season 2 is announced for next spring.
+  7: { ...show(7, "Returning Show", [[1, 8]]), next_episode_to_air: { season_number: 2, episode_number: 1, air_date: "2027-03-04" } } as TmdbShow,
 };
 const SEASONS: Record<string, TmdbSeason> = {
   "1:2": season(2, [[1, "2026-10-20"], [2, "2026-10-27"], [3, "2026-11-03"], [4, "2026-12-30"]]),
@@ -39,7 +41,7 @@ function service(watchlist: number[], airing: AiringEpisode[], inLibrary: string
   const asked: { ids: number[]; from: number; to: number }[] = [];
   const anilist = { airing: async (mediaIds: number[], from: number, to: number) => (asked.push({ ids: mediaIds, from, to }), airing) } as unknown as Anilist;
   const library = { filesFor: (show: TitleRef, s: number, e: number) => (inLibrary.includes(`${show.id}:${s}:${e}`) ? [{}] : []) } as never;
-  const progress = { history: async () => [], watchlist: () => watchlist.map((titleId) => ({ source: "tmdb", type: "show", titleId })) } as never;
+  const progress = { history: async () => [], reminders: async () => [], watchlist: () => watchlist.map((titleId) => ({ source: "tmdb", type: "show", titleId })) } as never;
   return { calendar: new CalendarService(tmdb, library, progress, { ids, anilist }, async (_, show) => allowed(show.id)), asked };
 }
 
@@ -89,7 +91,7 @@ test("AniList shows on the list come from AniList's schedule, numbered as AniLis
     title: async (id: number) => ({ id, title: { romaji: id === 888 ? "Adult Thing" : "Sousou no Frieren 2nd Season" }, isAdult: id === 888, coverImage: { large: `https://img.anili.st/${id}.jpg` }, bannerImage: null }),
   } as unknown as Anilist;
   const library = { filesFor: (show: TitleRef, s: number, e: number) => (show.source === "anilist" && show.id === 182255 && s === 1 && e === 3 ? [{}] : []) } as never;
-  const progress = { history: async () => [], watchlist: () => [{ source: "anilist", type: "show", titleId: 182255 }, { source: "anilist", type: "show", titleId: 888 }, { source: "anilist", type: "show", titleId: 4 }] } as never;
+  const progress = { history: async () => [], reminders: async () => [], watchlist: () => [{ source: "anilist", type: "show", titleId: 182255 }, { source: "anilist", type: "show", titleId: 888 }, { source: "anilist", type: "show", titleId: 4 }] } as never;
   const allowed: TitleRef[] = [];
   const calendar = new CalendarService(tmdb, library, progress, { ids, anilist }, async (_, show) => (allowed.push(show), show.id !== 4));
   const items = await calendar.episodes("u1", NOW);
@@ -110,12 +112,12 @@ describe("calendar entries (ItsOut-style)", () => {
     genres: [],
     release_dates: {
       results: [
-        { iso_3166_1: "GB", release_dates: [{ type: 3, certification: "", release_date: "2026-10-23T00:00:00.000Z" }, { type: 4, certification: "", release_date: "2026-11-20T00:00:00.000Z" }] },
+        { iso_3166_1: "GB", release_dates: [{ type: 3, certification: "", release_date: "2026-10-23T00:00:00.000Z" }, { type: 4, certification: "", release_date: "2026-11-20T00:00:00.000Z" }, { type: 5, certification: "", release_date: "2027-02-10T00:00:00.000Z" }] },
         { iso_3166_1: "US", release_dates: [{ type: 3, certification: "", release_date: "2026-10-01T00:00:00.000Z" }] },
       ],
     },
   };
-  const make = (opts: { inLibrary?: string[]; readyElsewhere?: string[] } = {}) => {
+  const make = (opts: { inLibrary?: string[]; readyElsewhere?: string[]; reminders?: { source: string; type: string; titleId: number }[] } = {}) => {
     const ids = new AnimeIds(fileAnimeIdStore("/nonexistent"));
     ids.ready = async () => {};
     const anilist = { airing: async () => [] } as unknown as Anilist;
@@ -125,6 +127,7 @@ describe("calendar entries (ItsOut-style)", () => {
     } as never;
     // The Drama isn't on the list: it's followed because it's being watched.
     const progress = {
+      reminders: async () => opts.reminders ?? [],
       history: async () => [{ mediaType: "episode", source: "tmdb", titleId: 1, season: 2, episode: 1, updatedAt: NOW - 3 * DAY * 1000 }],
       watchlist: () => [{ source: "tmdb", type: "movie", titleId: 50 }],
     } as never;
@@ -152,5 +155,17 @@ describe("calendar entries (ItsOut-style)", () => {
     expect(ep.alert).toEqual({ title: "The Drama", body: "S2 E2 · Episode 2 of The Drama is ready to play in Strata.", now: true });
     // Not out yet: never ready.
     expect(entries.find((e) => e.label.startsWith("S2 E3"))!.ready).toBe(false);
+  });
+
+  test("reminded titles come in up to a year ahead, one entry for a show's next premiere, with its notification", async () => {
+    const { entries } = await make({ reminders: [{ source: "tmdb", type: "movie", titleId: 50 }, { source: "tmdb", type: "show", titleId: 7 }] }).entries("u1", NOW);
+    const later = entries.filter((e) => e.date > "2026-12-01").map((e) => [e.kind, e.title, e.label, e.date]);
+    expect(later).toEqual([
+      ["movie", "The Film", "Out on disc", "2027-02-10"],
+      ["episode", "Returning Show", "Season 2 premieres", "2027-03-04"],
+    ]);
+    expect(entries.find((e) => e.title === "Returning Show")!.alert).toEqual({ title: "Returning Show", body: "Returning Show season 2 premieres today." });
+    // Not reminded: the calendar keeps to its month.
+    expect((await make().entries("u1", NOW)).entries.some((e) => e.date > "2026-12-01")).toBe(false);
   });
 });

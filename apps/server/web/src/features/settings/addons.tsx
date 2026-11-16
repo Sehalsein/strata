@@ -1,19 +1,14 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, GripVertical, LoaderCircle, MoreHorizontal, Pencil, Plus, RefreshCw, Rows3, Trash2 } from "lucide-react";
+import { ExternalLink, GripVertical, LoaderCircle, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
@@ -22,6 +17,7 @@ import { queryClient, queryKeys } from "@/lib/query";
 import type { StreamAddon } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/format";
+import { Link } from "@/lib/router";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorAlert } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -33,12 +29,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 
 const setItems = (items: StreamAddon[]) => queryClient.setQueryData(queryKeys.addons, { items });
-const reload = () => queryClient.invalidateQueries({ queryKey: queryKeys.addons });
+const reload = () => {
+  // Pages lists every add-on catalog, so it changes with them.
+  void queryClient.invalidateQueries({ queryKey: queryKeys.pages });
+  return queryClient.invalidateQueries({ queryKey: queryKeys.addons });
+};
 
 /**
  * The household's add-ons: Torrentio, AIOStreams, Comet or any other that finds streams,
  * OpenSubtitles or any other that finds subtitles, and AIO Metadata or any other with
- * catalogs (rows on Home), each added by its manifest URL, as in Stremio.
+ * catalogs (rows on the apps' pages, laid out under Pages), each added by its manifest URL, as in Stremio.
  * Changes save straight away; their URLs stay on the server (they often hold a key), so
  * rows show the host and Configure goes through a server redirect.
  */
@@ -144,7 +144,7 @@ export function AddonsSection() {
 
       <p className="text-muted-foreground px-1 text-xs">
         Add one with its manifest URL, the same one you'd install in Stremio. Drag to change the order: higher add-ons come first when sources tie. Subtitle add-ons are asked in
-        the languages set under General; catalog add-ons add rows to Home (pick them in each one's menu).
+        the languages set under General; catalog add-ons offer rows for the apps' pages, which start off: turn on the ones you want under Pages.
       </p>
 
       <UrlDialog
@@ -177,7 +177,7 @@ function AddonRow({ addon: a }: { addon: StreamAddon }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: a.id });
 
   /** Saves a change; the switch and menus show it at once, and it's undone if the server says no. */
-  const update = async (patch: { enabled?: boolean; homeCatalogs?: string[] }, optimistic: Partial<StreamAddon>) => {
+  const update = async (patch: { enabled?: boolean }, optimistic: Partial<StreamAddon>) => {
     const before = queryClient.getQueryData<{ items: StreamAddon[] }>(queryKeys.addons)?.items;
     if (before) setItems(before.map((x) => (x.id === a.id ? { ...x, ...optimistic } : x)));
     try {
@@ -199,9 +199,7 @@ function AddonRow({ addon: a }: { addon: StreamAddon }) {
     }
   };
 
-  const homeOn = a.catalogs.filter((c) => c.home).map((c) => c.key);
-  const setHome = (keys: string[]) => update({ homeCatalogs: keys }, { catalogs: a.catalogs.map((c) => ({ ...c, home: keys.includes(c.key) })) });
-  const hasMenu = a.catalogs.length > 0 || a.configurable || !a.builtIn;
+  const hasMenu = a.configurable || !a.builtIn;
 
   return (
     <li
@@ -229,6 +227,15 @@ function AddonRow({ addon: a }: { addon: StreamAddon }) {
           </div>
           <p className="text-muted-foreground truncate text-xs">{a.description ?? a.host}</p>
           {a.enabled ? <HealthLine health={a.health} /> : <p className="text-muted-foreground text-xs">Off: Strata doesn't ask it.</p>}
+          {a.catalogs.length > 0 && (
+            <p className="text-muted-foreground text-xs">
+              Turn its rows on and order them in{" "}
+              <Link href="/settings/pages" className="text-foreground underline underline-offset-4">
+                Pages
+              </Link>
+              .
+            </p>
+          )}
         </div>
         <div className="hidden shrink-0 flex-wrap justify-end gap-1 md:flex md:max-w-56">
           {a.resources.includes("stream") && <Badge variant="outline">Streams</Badge>}
@@ -252,28 +259,6 @@ function AddonRow({ addon: a }: { addon: StreamAddon }) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
-            {a.catalogs.length > 0 && (
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <Rows3 /> Home rows{homeOn.length ? ` (${homeOn.length})` : ""}
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="max-h-96 w-72">
-                  <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">Ticked catalogs show as rows on Home, after Strata's own.</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {a.catalogs.map((c) => (
-                    <DropdownMenuCheckboxItem
-                      key={c.key}
-                      checked={c.home}
-                      onSelect={(e) => e.preventDefault()}
-                      onCheckedChange={(v) => setHome(v ? [...homeOn, c.key] : homeOn.filter((k) => k !== c.key))}
-                    >
-                      <span className="truncate">{c.name}</span>
-                      <span className="text-muted-foreground ml-auto pl-3 text-xs">{c.type === "movie" ? "Movies" : "Shows"}</span>
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            )}
             {a.configurable && (
               <DropdownMenuItem asChild>
                 <a href={api.addonConfigureUrl(a.id)} target="_blank" rel="noreferrer">

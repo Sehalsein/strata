@@ -346,6 +346,7 @@ extension View {
                 }
             case .browse(let type, let list): BrowseListView(type: type, list: list)
             case .animeList(let id, let title): AnimeListView(id: id, title: title)
+            case .rowList(let path, let title): AnimeListView(id: path, title: title, fullRow: true)
             case .shelf(let shelf): ShelfGridView(shelf: shelf)
             case .person(let id): PersonView(personId: id)
             case .myList: MyListView()

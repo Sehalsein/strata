@@ -5,6 +5,7 @@ import type { AnimeEntry, AnimeIds } from "./anime/ids";
 import { resolveEpisode } from "./anime/match";
 import { formatRef, parseRef, tmdbRef, type TitleRef } from "./ref";
 import { imageUrl, type Tmdb, type TmdbSeason, type TmdbShow } from "./tmdb";
+import { anilistUpcoming, filmReleases, RELEASE_TYPES, REMINDER_DAYS, showUpcoming, type Upcoming } from "./upcoming";
 
 const DAY_S = 86_400;
 /** How far back and ahead the calendar reaches. */
@@ -75,11 +76,6 @@ export interface CalendarEntry {
 }
 
 /** TMDB's release types worth a calendar entry, and how they read. */
-const RELEASE_TYPES: Record<number, { label: string; out: string }> = {
-  3: { label: "In cinemas", out: "is in cinemas today" },
-  4: { label: "Out to stream or rent", out: "is out to stream or rent today" },
-  5: { label: "Out on disc", out: "is out on disc today" },
-};
 
 /**
  * The calendar: episodes of the shows on a profile's list from the last week and the
@@ -106,7 +102,11 @@ export class CalendarService {
    * notification for each.
    */
   async entries(userId: string, now = Date.now()): Promise<{ entries: CalendarEntry[]; episodes: CalendarEpisode[] }> {
-    const [episodes, movies] = await Promise.all([this.episodes(userId, now), this.movieReleases(userId, now).catch(() => [] as CalendarEntry[])]);
+    const [episodes, movies, reminded] = await Promise.all([
+      this.episodes(userId, now),
+      this.movieReleases(userId, now).catch(() => [] as CalendarEntry[]),
+      this.remindedBeyond(userId, now).catch(() => [] as CalendarEntry[]),
+    ]);
     const today = new Date(now).toISOString().slice(0, 10);
     const fromEpisodes = episodes.map((e): CalendarEntry => {
       const code = e.season !== null ? `S${e.season} E${e.episode}` : `Episode ${e.episode}`;
@@ -127,7 +127,7 @@ export class CalendarService {
         alert: { title: e.title, body: `${[code, e.name].filter(Boolean).join(" · ")} ${out}.` },
       };
     });
-    const all = [...fromEpisodes, ...movies];
+    const all = [...fromEpisodes, ...movies, ...reminded];
     await this.markReady(all, today, now);
     const key = (e: CalendarEntry) => e.airsAt ?? `${e.date}T23:59:59Z`;
     return { entries: all.sort((a, b) => key(a).localeCompare(key(b)) || a.title.localeCompare(b.title)), episodes };
@@ -159,31 +159,29 @@ export class CalendarService {
     }
   }
 
-  /** Releases of the films on a person's list, in the household's region (else the US), in the calendar's window. */
+  /**
+   * Releases of the films on a person's list, in the household's region (else the US), in
+   * the calendar's window; and of films they asked to be reminded of, up to a year ahead.
+   */
   private async movieReleases(userId: string, now: number): Promise<CalendarEntry[]> {
     const today = Math.floor(now / 1000 / DAY_S) * DAY_S;
     const from = isoDate(today - CALENDAR_PAST_DAYS * DAY_S);
     const to = isoDate(today + (CALENDAR_FUTURE_DAYS + 1) * DAY_S);
-    const listed = (await this.progress.watchlist(userId)).filter((r) => r.type === "movie" && r.source === "tmdb");
+    const remindTo = isoDate(today + REMINDER_DAYS * DAY_S);
+    const [onList, reminders] = await Promise.all([this.progress.watchlist(userId), this.progress.reminders(userId)]);
+    const reminded = new Set(reminders.filter((r) => r.type === "movie" && r.source === "tmdb").map((r) => r.titleId));
+    const listed = [...new Set([...onList.filter((r) => r.type === "movie" && r.source === "tmdb").map((r) => r.titleId), ...reminded])];
     const region = this.region().toUpperCase();
     const out = await Promise.all(
-      listed.map(async (row) => {
-        const ref = tmdbRef("movie", row.titleId);
+      listed.map(async (titleId) => {
+        const ref = tmdbRef("movie", titleId);
         if (!(await this.allowed(userId, ref).catch(() => false))) return [];
-        const m = await this.tmdb.movie(row.titleId).catch(() => null);
+        const m = await this.tmdb.movie(titleId).catch(() => null);
         if (!m) return [];
-        const results = m.release_dates?.results ?? [];
-        const dates = (results.find((r) => r.iso_3166_1 === region) ?? results.find((r) => r.iso_3166_1 === "US"))?.release_dates ?? [];
-        // One entry per kind of release: the earliest of each.
-        const byType = new Map<number, string>();
-        for (const d of dates) {
-          const day = d.release_date?.slice(0, 10);
-          if (!day || !RELEASE_TYPES[d.type]) continue;
-          if (!byType.has(d.type) || day < byType.get(d.type)!) byType.set(d.type, day);
-        }
-        return [...byType.entries()]
-          .filter(([, day]) => day >= from && day < to)
-          .map(([type, day]): CalendarEntry => ({
+        const until = reminded.has(titleId) ? remindTo : to;
+        return filmReleases(m, region)
+          .filter(({ day }) => day >= from && day < until)
+          .map(({ type, day }): CalendarEntry => ({
             id: `${formatRef(ref)}:r:${type}:${day}`,
             kind: "movie",
             ref: formatRef(ref),
@@ -206,6 +204,56 @@ export class CalendarService {
     return flat;
   }
 
+  /**
+   * Titles someone asked to be reminded of that come out after the calendar's month (within
+   * the month, a reminded show is followed like any other): a show's next episode or
+   * premiere, an AniList film's release. One entry each, up to a year ahead.
+   */
+  private async remindedBeyond(userId: string, now: number): Promise<CalendarEntry[]> {
+    const today = Math.floor(now / 1000 / DAY_S) * DAY_S;
+    const from = isoDate(today - CALENDAR_PAST_DAYS * DAY_S);
+    const monthEnd = isoDate(today + (CALENDAR_FUTURE_DAYS + 1) * DAY_S);
+    const until = isoDate(today + REMINDER_DAYS * DAY_S);
+    const reminders = (await this.progress.reminders(userId)).filter((r) => !(r.source === "tmdb" && r.type === "movie"));
+    const out = await Promise.all(
+      reminders.map(async (r): Promise<CalendarEntry | null> => {
+        const ref: TitleRef = { source: r.source, type: r.type, id: r.titleId };
+        if (!(await this.allowed(userId, ref).catch(() => false))) return null;
+        let found: { title: string; poster: string | null; backdrop: string | null; tmdbId?: number; next: Upcoming | null } | null = null;
+        if (r.source === "tmdb") {
+          const s = await this.tmdb.show(r.titleId).catch(() => null);
+          if (s) found = { title: s.name, poster: imageUrl(s.poster_path, "w342"), backdrop: imageUrl(s.backdrop_path, "w780"), tmdbId: s.id, next: showUpcoming(s, isoDate(today - DAY_S)) };
+        } else if (this.anime) {
+          const m = await this.anime.anilist.title(r.titleId).catch(() => null);
+          if (m && !m.isAdult) {
+            const tmdbId = this.anime.ids.anilist(r.titleId)?.tmdbTv;
+            found = { title: m.title.english || m.title.romaji || "", poster: m.coverImage?.large ?? null, backdrop: m.bannerImage ?? null, ...(tmdbId ? { tmdbId } : {}), next: anilistUpcoming(m, r.type, today * 1000) };
+          }
+        }
+        const next = found?.next;
+        if (!found?.title || !next || next.date >= until) return null;
+        // A followed show's episodes this month are already on the calendar; an AniList film isn't.
+        if (r.type === "show" ? next.date < monthEnd : next.date < from) return null;
+        return {
+          id: `${formatRef(ref)}:soon:${next.date}`,
+          kind: r.type === "movie" ? "movie" : "episode",
+          ref: formatRef(ref),
+          ...(found.tmdbId ? { tmdbId: found.tmdbId } : {}),
+          title: found.title,
+          posterUrl: found.poster,
+          backdropUrl: found.backdrop,
+          label: next.label,
+          date: next.date,
+          airsAt: next.airsAt,
+          ready: false,
+          play: null,
+          alert: { title: found.title, body: `${found.title} ${next.out}.` },
+        };
+      }),
+    );
+    return out.filter((e): e is CalendarEntry => e !== null);
+  }
+
   async episodes(userId: string, now = Date.now()): Promise<CalendarEpisode[]> {
     // Whole days, so the window (and AniList's cache key) holds for a day.
     const today = Math.floor(now / 1000 / DAY_S) * DAY_S;
@@ -217,7 +265,8 @@ export class CalendarService {
     const watching = (await this.progress.history(userId))
       .filter((r) => r.mediaType === "episode" && r.updatedAt >= now - FOLLOW_WATCHING_DAYS * 86_400_000)
       .map((r): TitleRef => ({ source: r.source, type: "show", id: r.titleId }));
-    const onList = (await this.progress.watchlist(userId)).filter((r) => r.type === "show").map((r): TitleRef => ({ source: r.source, type: "show", id: r.titleId }));
+    const [list, reminders] = await Promise.all([this.progress.watchlist(userId), this.progress.reminders(userId)]);
+    const onList = [...list, ...reminders].filter((r) => r.type === "show").map((r): TitleRef => ({ source: r.source, type: "show", id: r.titleId }));
     const listed = [...new Map([...onList, ...watching].map((r) => [formatRef(r), r])).values()];
     const shown = (await Promise.all(listed.map(async (ref) => ((await this.allowed(userId, ref).catch(() => false)) ? ref : null)))).filter((ref): ref is TitleRef => ref !== null);
     const showIds = shown.filter((r) => r.source === "tmdb").map((r) => r.id);

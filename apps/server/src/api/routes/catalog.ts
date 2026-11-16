@@ -11,6 +11,7 @@ import { parseRef, tmdbRef, type TitleRef, type TitleTarget } from "../../catalo
 import { legacyCards, type Shelf } from "../../catalog/service";
 import { logger } from "../../log";
 import { collapseDuplicates, withFilters } from "../../sources/sourceFilters";
+import { PAGE_IDS, type PageId } from "../../catalog/pageLayouts";
 
 /** "fr" → "French", in the household's language. */
 function languageNamer(language: string): (code: string) => string {
@@ -86,8 +87,19 @@ function forApp<T extends { type: string; tmdbId?: number }>(c: Context<Env>, ca
   return c.req.header("X-Strata-Refs") === "1" ? cards : legacyCards(cards);
 }
 
-function shelvesForApp(c: Context<Env>, shelves: Shelf[]): Shelf[] {
-  return shelves.map((shelf) => ({ ...shelf, items: forApp(c, shelf.items) })).filter((shelf) => shelf.items.length > 0);
+function shelvesForApp(c: Context<Env>, shelves: Shelf[], page?: PageId): Shelf[] {
+  return shelves
+    .map((shelf) => ({ ...shelf, items: forApp(c, shelf.items), ...(page ? seeAllOf(page, shelf) : {}) }))
+    .filter((shelf) => shelf.items.length > 0);
+}
+
+/**
+ * Where a rail's "See all" goes: its row in full, from the server. Not for the hero, the
+ * continue rows, My List (the apps have its own page) or the Anime lists (they have theirs).
+ */
+function seeAllOf(page: PageId, shelf: Shelf): { seeAll?: string } {
+  if (shelf.kind !== "titles" || shelf.style === "hero" || shelf.more || shelf.id === "watchlist") return {};
+  return { seeAll: `/api/rows/${page}/${encodeURIComponent(shelf.id)}` };
 }
 
 /** What play and download both take, besides the title. */
@@ -120,16 +132,16 @@ export const catalogRoutes = new Hono<Env>()
   .use(requireAuth, requireHousehold)
 
   // Both parts at once, for apps that don't ask for them separately.
-  .get("/home", async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).home()) }))
+  .get("/home", async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).home(), "home") }))
   .get("/home/catalog", cacheFor(TTL.catalog), async (c) => {
-    const shelves = shelvesForApp(c, await viewer(c).homeCatalog());
+    const shelves = shelvesForApp(c, await viewer(c).homeCatalog(), "home");
     // An empty Home isn't kept: whatever made it empty, the next look should ask again.
     if (!shelves.length) c.header("Cache-Control", "no-store");
     return c.json({ shelves });
   })
   .get("/home/profile", async (c) => {
     c.header("Cache-Control", "no-store");
-    return c.json({ shelves: shelvesForApp(c, await viewer(c).homeProfile()) });
+    return c.json({ shelves: shelvesForApp(c, await viewer(c).homeProfile(), "home") });
   })
 
   .get("/genres/:type", cacheFor(TTL.catalog), async (c) => {
@@ -149,13 +161,22 @@ export const catalogRoutes = new Hono<Env>()
     return c.json({ items: episodes, entries });
   })
 
-  .get("/shows", cacheFor(TTL.catalog), async (c) => c.json({ shelves: await viewer(c).showsPage() }))
+  .get("/shows", cacheFor(TTL.catalog), async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).showsPage(), "shows") }))
+  .get("/movies", cacheFor(TTL.catalog), async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).moviesPage(), "movies") }))
+
+  // A row of a page in full, for its rail's "See all" (the rail shows only so many).
+  .get("/rows/:page/:row", cacheFor(TTL.catalog), async (c) => {
+    const page = z.enum(PAGE_IDS).parse(c.req.param("page"));
+    const shelf = await viewer(c).rowList(page, decodeURIComponent(c.req.param("row")).slice(0, 300));
+    if (!shelf) throw new HTTPException(404, { message: "That row isn't on this page any more." });
+    return c.json({ title: shelf.title, items: forApp(c, shelf.items) });
+  })
   .get("/anime/categories", cacheFor(TTL.catalog), (c) => c.json({ items: viewer(c).animeCategories() }))
 
   .get("/anime", cacheFor(TTL.catalog), async (c) => {
     const category = c.req.query("category") || undefined;
     if (category && !viewer(c).animeCategories().some((x) => x.id === category)) throw new HTTPException(400, { message: "Unknown anime category" });
-    return c.json({ shelves: shelvesForApp(c, await viewer(c).animePage(category)) });
+    return c.json({ shelves: shelvesForApp(c, await viewer(c).animePage(category), category ? undefined : "anime") });
   })
 
   // One of the Anime tab's lists in full, for its rail's "›".
@@ -334,5 +355,15 @@ export const catalogRoutes = new Hono<Env>()
     // Nothing above the profile's content limit goes on its list (taking it off is fine).
     await viewer(c).assertMayList(ref, input.on);
     await c.var.services.progress.setWatchlist(userOf(c), ref, input.on);
+    return c.json({ ok: true });
+  })
+
+  // "Remind me" when a title comes out: the calendar then lists it up to a year ahead, and
+  // the apps notify on the day.
+  .put("/reminders", async (c) => {
+    const input = await body(c, z.object({ ref: z.string(), on: z.boolean() }));
+    const ref = toTitle(input);
+    await viewer(c).assertMayList(ref, input.on);
+    await c.var.services.progress.setReminder(userOf(c), ref, input.on);
     return c.json({ ok: true });
   });

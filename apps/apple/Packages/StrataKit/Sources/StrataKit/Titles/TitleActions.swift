@@ -41,16 +41,20 @@ public struct PlayOptions: Sendable, Hashable {
 /// (Home, title pages) reload on any of them.
 public enum TitleChange: Sendable, Hashable {
     case list(TitleRef, on: Bool)
+    /// "Remind me" turned on or off.
+    case reminder(TitleRef, on: Bool)
     case watched(PlaybackTarget, Bool)
     case hiddenFromContinue(TitleRef)
     /// Playback stopped and its position was saved.
     case progress
 
-    /// A show joining or leaving My List moves its episodes on or off the calendar (and
-    /// its episode notifications).
+    /// A show joining or leaving My List, or a reminder, moves it on or off the calendar
+    /// (and its notifications).
     public var changesCalendar: Bool {
-        if case .list = self { return true }
-        return false
+        switch self {
+        case .list, .reminder: return true
+        default: return false
+        }
     }
 }
 
@@ -184,6 +188,12 @@ public final class TitleActions: Sendable {
     public func setOnList(_ ref: TitleRef, _ on: Bool) async throws {
         try await perform { try await $0.setWatchlist(ref, on) }
         continuation.yield(.list(ref, on: on))
+    }
+
+    /// "Remind me" when a title comes out, or not.
+    public func setReminder(_ ref: TitleRef, _ on: Bool) async throws {
+        try await perform { try await $0.setReminder(ref, on) }
+        continuation.yield(.reminder(ref, on: on))
     }
 
     /// Marks a movie or episode watched (it leaves Continue Watching) or unwatched.

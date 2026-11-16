@@ -305,6 +305,12 @@ public final class StrataClient: Sendable {
         return res.shelves
     }
 
+    /// `GET /api/movies`: the Movies tab's spotlight and rails, as the server lays it out (newer servers).
+    public func movies(_ policy: CachePolicy = .fresh) async throws -> [Shelf] {
+        let res: ShelvesResponse = try await get("/api/movies", policy: policy)
+        return res.shelves
+    }
+
     public func animeCategories(_ policy: CachePolicy = .fresh) async throws -> [AnimeCategory] {
         let res: ItemsResponse<AnimeCategory> = try await get("/api/anime/categories", policy: policy)
         return res.items
@@ -317,6 +323,12 @@ public final class StrataClient: Sendable {
     }
 
     /// One of the Anime tab's lists in full, for its rail's "See all".
+    /// A row in full, from the path its shelf's `seeAll` names (the rail shows only so many).
+    public func rowList(_ path: String, _ policy: CachePolicy = .fresh) async throws -> [TitleCard] {
+        let res: ItemsResponse<TitleCard> = try await get(path, policy: policy)
+        return res.items
+    }
+
     public func animeList(_ id: String, _ policy: CachePolicy = .fresh) async throws -> [TitleCard] {
         let res: ItemsResponse<TitleCard> = try await get("/api/anime/list/\(id)", policy: policy)
         return res.items
@@ -518,6 +530,12 @@ public final class StrataClient: Sendable {
     public func setWatchlist(_ ref: TitleRef, _ on: Bool) async throws {
         let body = ref.tmdbId.map { WatchlistBody(type: ref.type, tmdbId: $0, on: on) } ?? WatchlistBody(ref: ref, on: on)
         let _: OKResponse = try await send("PUT", "/api/watchlist", body: body)
+        await cache.remove(["/api/calendar"] + Self.titlePaths(ref))
+    }
+
+    /// "Remind me" when a title comes out, or not: the calendar lists it up to a year ahead.
+    public func setReminder(_ ref: TitleRef, _ on: Bool) async throws {
+        let _: OKResponse = try await send("PUT", "/api/reminders", body: ReminderBody(ref: ref, on: on))
         await cache.remove(["/api/calendar"] + Self.titlePaths(ref))
     }
 
@@ -734,6 +752,11 @@ private struct WatchlistBody: Encodable {
     var type: TitleType?
     var tmdbId: Int?
     var ref: TitleRef?
+    var on: Bool
+}
+
+private struct ReminderBody: Encodable {
+    var ref: TitleRef
     var on: Bool
 }
 

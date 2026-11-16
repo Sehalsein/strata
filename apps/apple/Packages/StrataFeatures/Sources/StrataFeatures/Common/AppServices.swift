@@ -185,6 +185,8 @@ public enum Route: Hashable {
     case browse(TitleType, BrowseList)
     /// An Anime tab list in full: its id and title.
     case animeList(String, String)
+    /// A row in full, from the server: the path its shelf names and its title.
+    case rowList(String, String)
     /// Every title of a shelf the server sent, past what its rail shows.
     case shelf(Shelf)
     case person(Int)

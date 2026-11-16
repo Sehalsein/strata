@@ -53,7 +53,7 @@ struct MovieDetailView: View {
             HeroBillboard(id: movie.id,
                           backdropURL: movie.backdropUrl,
                           fallbackURL: movie.posterUrl,
-                          eyebrow: movie.availabilityLabel ?? String(localized: "Movie", bundle: .module),
+                          eyebrow: movie.availabilityLabel ?? movie.remind?.text ?? String(localized: "Movie", bundle: .module),
                           title: movie.title,
                           logoURL: movie.logoUrl,
                           meta: [movie.genres.first, movie.yearText, movie.runtimeText, movie.certification, movie.ratings.tmdbStar(movie.ratingText)].compactMap { $0 },
@@ -76,6 +76,7 @@ struct MovieDetailView: View {
                 #if os(tvOS)
                 .focused($heroFocus, equals: .list)
                 #endif
+                if let remind = movie.remind { RemindButton(ref: movie.ref, reminder: remind) }
                 // Only when the server has sources to show.
                 if let sources = playOptions?.sources, !sources.isEmpty {
                     GlassButton(String(localized: "Sources", bundle: .module), systemImage: "rectangle.stack", iconOnly: !Metrics.isPadOrTV || Metrics.isTV, size: Metrics.heroControlSize) { showSources = true }

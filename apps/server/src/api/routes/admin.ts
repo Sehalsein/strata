@@ -9,6 +9,7 @@ import { dashboardUrls } from "../../platform/network";
 import { householdSettingsSchema, SECRET_KEYS, serverSettingsSchema, settingsSchema, type SecretKey } from "../../settings";
 import { toCandidate } from "../../sources/resolver";
 import { AddonError, addonBase, addonOrigin, catalogKey, isBuiltIn, type StreamAddon } from "../../sources/addons";
+import { MAX_ADDON_ROWS_PER_PAGE, PAGE_IDS, pageLayoutSchema } from "../../catalog/pageLayouts";
 import { imageUrl, yearOf } from "../../catalog/tmdb";
 import { formatRef, parseRef, targetRef, tmdbRef } from "../../catalog/ref";
 import { API_VERSION, VERSION } from "../../version";
@@ -152,6 +153,22 @@ export const adminRoutes = new Hono<Env>()
       throw err;
     }
     return c.json({ ok: true });
+  })
+
+  // Home, Movies, Shows and Anime as the household lays them out: each page's rows, in order, on or off.
+  .get("/pages", (c) => c.json({ pages: c.var.household.pages(), maxAddonRows: MAX_ADDON_ROWS_PER_PAGE }))
+
+  // Saves one page's layout: every row it should list, in order, each on or off.
+  .put("/pages/:page", async (c) => {
+    const page = z.enum(PAGE_IDS).parse(c.req.param("page"));
+    const { rows } = await body(c, z.object({ rows: pageLayoutSchema }));
+    try {
+      await c.var.household.setPageLayout(page, rows);
+    } catch (err) {
+      if (err instanceof AddonError) throw new HTTPException(400, { message: err.message });
+      throw err;
+    }
+    return c.json({ pages: c.var.household.pages() });
   })
 
   // The household's add-ons, without their URLs: those often hold a password or a key.

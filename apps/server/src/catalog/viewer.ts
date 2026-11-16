@@ -6,6 +6,7 @@ import type { PlayReportDevice, PlayReportInput } from "../playback/reports";
 import type { DiscoveryTarget } from "../sources/discovery";
 import { targetRef, tmdbRef, type TitleRef, type TitleTarget } from "./ref";
 import type { BrowseList, Shelf, TitleCard, TitleType } from "./service";
+import type { PageId } from "./pageLayouts";
 
 const notFound = () => new HTTPException(404, { message: "Title not found" });
 
@@ -43,7 +44,18 @@ export class Viewer {
   }
 
   showsPage(): Promise<Shelf[]> {
-    return this.household.catalog.showsPage().then((s) => this.shelves(s));
+    return this.household.catalog.showsPage(this.userId).then((s) => this.shelves(s));
+  }
+
+  /** One row of a page in full ("See all"), with this person's content limit; null for a row it doesn't have. */
+  async rowList(page: PageId, rowId: string): Promise<Shelf | null> {
+    const shelf = await this.household.catalog.rowList(page, rowId, this.userId);
+    if (!shelf) return null;
+    return (await this.shelves([shelf]))[0] ?? { ...shelf, items: [] };
+  }
+
+  moviesPage(): Promise<Shelf[]> {
+    return this.household.catalog.moviesPage(this.userId).then((s) => this.shelves(s));
   }
 
   animeCategories() {

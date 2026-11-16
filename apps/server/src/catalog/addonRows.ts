@@ -15,6 +15,10 @@ const log = logger("addon-rows");
 export interface ShelfSource {
   /** Its rows, in order. Never throws: a row that fails or is slow is left out. */
   shelves(): Promise<Shelf[]>;
+  /** These rows by id, in this order (the rows a page's layout turns on). */
+  rows(ids: string[], length?: number): Promise<Shelf[]>;
+  /** Row ids the household ticked for Home before it laid out its pages, optionally of one kind. */
+  tickedForHome(type?: "movie" | "series"): string[];
 }
 
 /** Cards per row, like the other rails. */
@@ -42,15 +46,40 @@ export class AddonRows implements ShelfSource {
     private readonly health?: AddonHealth,
   ) {}
 
+  /** The rows ticked for Home in the add-on list (a household that hasn't laid out its pages). */
   async shelves(): Promise<Shelf[]> {
-    const rows = this.addons()
+    return this.rows(this.tickedForHome());
+  }
+
+  /** Row ids ("addon:<addonId>:<type>/<catalog>") ticked for Home, optionally only of one kind. */
+  tickedForHome(type?: "movie" | "series"): string[] {
+    return this.addons()
       .filter((a) => a.enabled && hasCatalogs(a))
-      .flatMap((addon) => addon.catalogs.filter((c) => c.home).map((catalog) => ({ addon, catalog })))
-      // Saving the setting enforces the cap too; this holds it for lists saved before.
+      .flatMap((a) => a.catalogs.filter((c) => c.home && (!type || c.type === type)).map((c) => rowId(a, c)));
+  }
+
+  /** Every catalog of the household's add-ons, as rows a page could have. */
+  options(): { id: string; title: string; addon: string; type: "movie" | "series"; home: boolean }[] {
+    return this.addons()
+      .filter((a) => a.enabled && hasCatalogs(a))
+      .flatMap((a) => a.catalogs.map((c) => ({ id: rowId(a, c), title: rowTitle(c), addon: a.name, type: c.type, home: c.home })));
+  }
+
+  /** These rows (by id), in this order; ones whose add-on or catalog is gone or off are left out. */
+  async rows(ids: string[], length = ROW_LENGTH): Promise<Shelf[]> {
+    const byId = new Map(
+      this.addons()
+        .filter((a) => a.enabled && hasCatalogs(a))
+        .flatMap((addon) => addon.catalogs.map((catalog) => [rowId(addon, catalog), { addon, catalog }] as const)),
+    );
+    const rows = ids
+      .map((id) => byId.get(id))
+      .filter((r): r is { addon: StreamAddon; catalog: AddonCatalog } => !!r)
+      // Saving a layout enforces the cap too; this holds it for anything saved before.
       .slice(0, MAX_HOME_ROWS);
     const shelves = await Promise.all(
       rows.map(async ({ addon, catalog }) => {
-        const work = this.row(addon, catalog);
+        const work = this.row(addon, catalog, length);
         const timedOut = Symbol();
         const result = await Promise.race([work, runtime.sleep(ROW_BUDGET_MS).then(() => timedOut)]).catch((err) => {
           log.warn(`${addon.name}: ${catalog.name} failed`, err);
@@ -67,11 +96,11 @@ export class AddonRows implements ShelfSource {
     return shelves.filter((s): s is Shelf => !!s && s.items.length > 0);
   }
 
-  private async row(addon: StreamAddon, catalog: AddonCatalog): Promise<Shelf> {
+  private async row(addon: StreamAddon, catalog: AddonCatalog, length = ROW_LENGTH): Promise<Shelf> {
     const key = `${addon.id}:${addon.url}:${catalogKey(catalog)}`;
     const ask = () => addonCatalogItems(addon, catalog, this.fetchImpl);
     const metas = await this.items.get(key, () => (this.health ? this.health.track(addon.id, addon.name, ask) : ask()));
-    const placed = await Promise.all(metas.slice(0, ROW_LENGTH * 2).map(async (m) => ({ meta: m, ref: await this.ids.resolve(m.id, m.type === "movie" ? "movie" : "show") })));
+    const placed = await Promise.all(metas.slice(0, length * 2).map(async (m) => ({ meta: m, ref: await this.ids.resolve(m.id, m.type === "movie" ? "movie" : "show") })));
     const seen = new Set<string>();
     const kept = placed
       .filter((p): p is { meta: AddonMeta; ref: TitleRef } => {
@@ -81,7 +110,7 @@ export class AddonRows implements ShelfSource {
         seen.add(k);
         return true;
       })
-      .slice(0, ROW_LENGTH);
+      .slice(0, length);
     // What the card says comes from TMDB, the title Strata knows (and a profile's limit
     // judges); only the poster may be the add-on's (see TitleCard.addonPosterUrl). A title
     // TMDB doesn't have (an AniList one) keeps the add-on's name, without its words.
@@ -101,9 +130,12 @@ export class AddonRows implements ShelfSource {
       };
       return meta.poster ? { ...base, addonPosterUrl: meta.poster } : base;
     });
-    return { id: `addon:${addon.id}:${catalogKey(catalog)}`, title: rowTitle(catalog), kind: "titles", items };
+    return { id: rowId(addon, catalog), title: rowTitle(catalog), kind: "titles", items };
   }
 }
+
+/** A catalog's row id on a page. */
+export const rowId = (addon: Pick<StreamAddon, "id">, catalog: Pick<AddonCatalog, "type" | "id">) => `addon:${addon.id}:${catalogKey(catalog)}`;
 
 /** The row's name on Home: the catalog's, saying movies or shows when it doesn't ("Popular" → "Popular Movies"). */
 export function rowTitle(catalog: Pick<AddonCatalog, "name" | "type">): string {

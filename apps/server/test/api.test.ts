@@ -259,18 +259,32 @@ describe("setup and auth", () => {
     expect((await signIn("eve", "eves-password")).status).toBe(401);
   });
 
+  test("remind me: offered for titles still to come out, saved per person, and off again", async () => {
+    const page = async () => json(await server.request("/api/titles/movie/990001", { token }));
+    // Out long ago: nothing to remind of.
+    expect((await json(await server.request("/api/titles/movie/10378", { token }))).remind).toBeNull();
+    expect((await page()).remind).toEqual({ on: false, date: "2099-03-01", airsAt: null, label: "In cinemas" });
+    expect((await server.request("/api/reminders", { method: "PUT", token, json: { ref: "tmdb:movie:990001", on: true } })).status).toBe(200);
+    expect((await page()).remind.on).toBe(true);
+    expect((await server.request("/api/reminders", { method: "PUT", token, json: { ref: "tmdb:movie:990001", on: false } })).status).toBe(200);
+    expect((await page()).remind.on).toBe(false);
+    expect((await server.request("/api/reminders", { method: "PUT", token, json: { on: true } })).status).toBe(400);
+  });
+
   test("people can download everything kept about them, and delete their account", async () => {
     const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "dora@example.com", role: "member" } }));
     await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "dora@example.com", password: "doras-password", name: "dora", username: "dora", invitationId: invite.id } });
     const dora = (await signIn("dora", "doras-password")).token!;
     await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: dora, json: { invitationId: invite.id } });
     await server.request("/api/watchlist", { method: "PUT", token: dora, json: { type: "movie", tmdbId: 10378, on: true } });
+    await server.request("/api/reminders", { method: "PUT", token: dora, json: { ref: "tmdb:movie:990001", on: true } });
 
     const exported = await server.request("/api/me/export", { token: dora });
     expect(exported.headers.get("content-disposition")).toContain("strata-dora-data.json");
     const file = (await exported.json()) as any;
     expect(file.account).toMatchObject({ username: "dora", email: "dora@example.com" });
     expect(file.myList).toEqual([expect.objectContaining({ source: "tmdb", titleId: 10378 })]);
+    expect(file.reminders).toEqual([expect.objectContaining({ source: "tmdb", type: "movie", titleId: 990001 })]);
     expect((await json(await server.request("/api/watchlist", { token: dora }))).items).toEqual([expect.objectContaining({ type: "movie", tmdbId: 10378 })]);
     expect(file.devices.length).toBeGreaterThan(0);
     expect(JSON.stringify(file)).not.toContain(dora);
@@ -625,42 +639,73 @@ describe("playback", () => {
     server.services.sessions.stop(play.sessionId);
   }, 30_000);
 
-  test("catalog add-ons: their rows join Home as ordinary titles", async () => {
+  test("catalog add-ons: rows on any page, once laid out in Pages, as ordinary titles", async () => {
     const added = await json(await server.request("/api/admin/addons", { method: "POST", token, json: { url: "https://catalog.test/manifest.json" } }));
+    const movieRow = `addon:${added.id}:movie/trending`;
+    const showRow = `addon:${added.id}:series/popular`;
     try {
-      // Catalogs that need a search filled in aren't offered; the first few start on Home.
+      // Catalogs that need a search filled in aren't offered.
       expect(added.resources).toEqual(["catalog"]);
-      expect(added.catalogs.map((c: any) => [c.key, c.type, c.home])).toEqual([
-        ["movie/trending", "movie", true],
-        ["series/popular", "show", true],
+      expect(added.catalogs.map((c: any) => [c.key, c.type])).toEqual([
+        ["movie/trending", "movie"],
+        ["series/popular", "show"],
       ]);
+      // Pages list every page's rows; add-on rows start off, so Home is Strata's and each person's own.
+      const pages = (await json(await server.request("/api/admin/pages", { token }))).pages;
+      expect(pages.map((p: any) => p.id)).toEqual(["home", "movies", "shows", "anime"]);
+      for (const p of pages) expect(p.rows.filter((r: any) => r.source === "addon").every((r: any) => !r.on)).toBe(true);
+      expect(pages[0].rows.find((r: any) => r.id === movieRow)).toMatchObject({ source: "addon", addon: "Catalog Test", on: false });
+      let ids = (await json(await server.request("/api/home/catalog", { token }))).shelves.map((s: any) => s.id);
+      expect(ids).not.toContain(movieRow);
+
+      // Laid out: on, renamed, cut to a count, in the household's order; a row turned off goes.
+      const layout = [
+        { id: movieRow, on: true, name: "Film night", count: 1 },
+        { id: "trendingMovies", on: false },
+        { id: showRow, on: true },
+      ];
+      expect((await server.request("/api/admin/pages/home", { method: "PUT", token, json: { rows: layout } })).status).toBe(200);
       const shelves = (await json(await server.request("/api/home/catalog", { token }))).shelves;
-      const row = shelves.find((s: any) => s.id === `addon:${added.id}:movie/trending`);
+      ids = shelves.map((s: any) => s.id);
+      expect(ids).not.toContain("trendingMovies");
+      expect(ids.indexOf(movieRow)).toBeLessThan(ids.indexOf(showRow));
+      const row = shelves.find((s: any) => s.id === movieRow);
       // Matched to TMDB (by IMDb id), once even when listed twice; the unknown id is left out.
       // The card is TMDB's (what a profile's limit judges); only the poster is the add-on's.
-      expect(row.title).toBe("Trending Films");
+      expect(row.title).toBe("Film night");
       expect(row.items.map((i: any) => [i.ref, i.title, i.posterUrl])).toEqual([["tmdb:movie:10378", "Big Buck Bunny", "https://img.test/bbb.jpg"]]);
       expect(row.items[0]).not.toHaveProperty("addonPosterUrl");
-      expect(shelves.find((s: any) => s.id === `addon:${added.id}:series/popular`).items[0].ref).toBe("tmdb:show:9001");
-      // Home has room for 12 add-on rows in all, across add-ons.
+      expect(shelves.find((s: any) => s.id === showRow).items[0].ref).toBe("tmdb:show:9001");
+      // Every rail links to its full list, which isn't cut to the rail's count.
+      expect(row.seeAll).toBe(`/api/rows/home/${encodeURIComponent(movieRow)}`);
+      const full = await json(await server.request(row.seeAll, { token }));
+      expect(full).toMatchObject({ title: "Film night" });
+      expect(full.items.length).toBeGreaterThanOrEqual(row.items.length);
+      expect((await server.request(`/api/rows/home/${encodeURIComponent("nope")}`, { token })).status).toBe(404);
+      // The pages API says what was saved.
+      const home = (await json(await server.request("/api/admin/pages", { token }))).pages[0];
+      expect(home.rows.slice(0, 3).map((r: any) => [r.id, r.on, r.name ?? null, r.count ?? null])).toEqual([
+        [movieRow, true, "Film night", 1],
+        ["trendingMovies", false, null, null],
+        [showRow, true, null, null],
+      ]);
+      expect((await server.request("/api/admin/pages/home", { method: "PUT", token, json: { rows: [{ id: "nope", on: true }] } })).status).toBe(400);
+      expect((await server.request("/api/admin/pages/elsewhere", { method: "PUT", token, json: { rows: [] } })).status).toBe(400);
+
+      // A page shows 12 add-on rows at most.
       const many = await json(await server.request("/api/admin/addons", { method: "POST", token, json: { url: "https://many.test/manifest.json" } }));
       try {
-        expect(many.catalogs.filter((c: any) => c.home).length).toBe(3);
-        const all = many.catalogs.map((c: any) => c.key);
-        const tooMany = await server.request(`/api/admin/addons/${many.id}`, { method: "PATCH", token, json: { homeCatalogs: all } });
+        const rows = many.catalogs.map((c: any) => ({ id: `addon:${many.id}:${c.key}`, on: true }));
+        const tooMany = await server.request("/api/admin/pages/movies", { method: "PUT", token, json: { rows } });
         expect(tooMany.status).toBe(400);
         expect((await json(tooMany)).error).toContain("up to 12");
-        expect((await server.request(`/api/admin/addons/${many.id}`, { method: "PATCH", token, json: { homeCatalogs: all.slice(0, 10) } })).status).toBe(200);
+        expect((await server.request("/api/admin/pages/movies", { method: "PUT", token, json: { rows: rows.slice(0, 10) } })).status).toBe(200);
       } finally {
         await server.request(`/api/admin/addons/${many.id}`, { method: "DELETE", token });
+        await server.request("/api/admin/pages/movies", { method: "PUT", token, json: { rows: [] } });
       }
-      // Taken off Home in the dashboard: the row goes.
-      const after = await json(await server.request(`/api/admin/addons/${added.id}`, { method: "PATCH", token, json: { homeCatalogs: ["series/popular"] } }));
-      expect(after.items.find((a: any) => a.id === added.id).catalogs.map((c: any) => c.home)).toEqual([false, true]);
-      const ids = (await json(await server.request("/api/home/catalog", { token }))).shelves.map((s: any) => s.id);
-      expect(ids).not.toContain(`addon:${added.id}:movie/trending`);
-      expect(ids).toContain(`addon:${added.id}:series/popular`);
     } finally {
+      await server.request("/api/admin/pages/home", { method: "PUT", token, json: { rows: [] } });
       await server.request(`/api/admin/addons/${added.id}`, { method: "DELETE", token });
     }
   });

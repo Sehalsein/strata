@@ -3,7 +3,7 @@ import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { account, continueHidden, invitation, member, organization, passkey, progress, session, user, watchlist } from "../../db/schema";
+import { account, continueHidden, invitation, member, organization, passkey, progress, reminders, session, user, watchlist } from "../../db/schema";
 import { emailConfigured } from "../../email";
 import { API_VERSION, VERSION } from "../../version";
 import { body, permissions, requireAuth, requireHousehold, requireHouseholdAdmin, type Env } from "../context";
@@ -98,6 +98,7 @@ async function exportFor(c: Context<Env>, id: string): Promise<Response> {
   const savedPasskeys = await db.select({ name: passkey.name, createdAt: passkey.createdAt }).from(passkey).where(eq(passkey.userId, id));
   const watchProgress = await db.select().from(progress).where(eq(progress.userId, id));
   const myList = await db.select().from(watchlist).where(eq(watchlist.userId, id));
+  const releaseReminders = await db.select().from(reminders).where(eq(reminders.userId, id));
   const hiddenFromContinueWatching = await db.select().from(continueHidden).where(eq(continueHidden.userId, id));
   const strip = <T extends { userId?: unknown }>(rows: T[]) => rows.map(({ userId: _, ...r }) => r);
   const file = {
@@ -110,6 +111,7 @@ async function exportFor(c: Context<Env>, id: string): Promise<Response> {
     passkeys: savedPasskeys,
     watchProgress: strip(watchProgress),
     myList: strip(myList),
+    reminders: strip(releaseReminders),
     hiddenFromContinueWatching: strip(hiddenFromContinueWatching),
   };
   return new Response(JSON.stringify(file, null, 2), {

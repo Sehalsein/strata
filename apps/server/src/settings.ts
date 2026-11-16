@@ -1,3 +1,4 @@
+import { pageLayoutsSchema } from "./catalog/pageLayouts";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "./db";
@@ -66,6 +67,8 @@ export const householdSettingsSchema = z.object({
    * "foreign" also when the audio isn't in a subtitle language, "always" every time.
    */
   autoSubtitles: z.enum(["forced", "foreign", "always"]).default("forced"),
+  /** How Home, Movies, Shows and Anime are laid out: which rows, in what order (see pageLayouts.ts). */
+  pageLayouts: pageLayoutsSchema,
 });
 
 /** What a household's code sees: the server's settings with its own on top. */

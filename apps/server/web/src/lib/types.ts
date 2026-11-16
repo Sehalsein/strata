@@ -466,3 +466,29 @@ export interface LogEntry {
   message: string;
 }
 
+
+/** A page of the apps (Home, Movies, Shows, Anime) and the rows on it, in order. */
+export type PageId = "home" | "movies" | "shows" | "anime";
+
+export interface PageRow {
+  id: string;
+  title: string;
+  /** Strata's own row, one made for each person (Continue Watching, Top picks…), or an add-on catalog. */
+  source: "strata" | "personal" | "addon";
+  /** The add-on's name, for an add-on catalog. */
+  addon?: string;
+  /** The page's carousel: always first. */
+  hero?: boolean;
+  defaultOn: boolean;
+  on: boolean;
+  /** The household's name for it, shown in place of `title`. */
+  name?: string;
+  /** Titles the row shows before "See all"; unset is 15. */
+  count?: number;
+}
+
+export interface PageLayout {
+  id: PageId;
+  title: string;
+  rows: PageRow[];
+}
