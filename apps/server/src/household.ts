@@ -120,7 +120,10 @@ export class Household {
     const addonRows = new AddonRows(() => this.addons(), this.titleIds, (refs) => this.catalog.titleCards(refs), (refs) => this.library.availability(refs), shared.fetch, this.addonHealth);
     this.catalog = new CatalogService(tmdb, this.library, shared.progress, settings, shared.anime, this.omdb, [addonRows]);
     this.content = new ContentFilter(db, organizationId, tmdb, settings, shared.anime);
-    this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, show) => this.content.allowed(userId, show));
+    this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, show) => this.content.allowed(userId, show), () => this.settings().region,
+      // Out, not in the library, but ready on TorBox (or an add-on's ready link): it plays now too.
+      async ({ ref, season, episode }) =>
+        this.discovery.available && !!(await this.discovery.bestCached({ source: ref.source, mediaType: ref.type === "movie" ? "movie" : "episode", titleId: ref.id, season, episode })));
     this.housekeeping = new TorboxHousekeeping(db, organizationId, this.library);
     this.plays = new HouseholdPlays(shared.sessions, organizationId, this.library);
     this.playReports = new PlayReports(db, organizationId);

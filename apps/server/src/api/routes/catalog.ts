@@ -143,7 +143,11 @@ export const catalogRoutes = new Hono<Env>()
   })
 
   // Episodes of the shows on this profile's list: the last week and the next month.
-  .get("/calendar", cacheFor(TTL.calendar), async (c) => c.json({ items: await viewer(c).calendar() }))
+  // `items`: episodes, as older apps read them; `entries`: everything, worded for the apps (CalendarEntry).
+  .get("/calendar", cacheFor(TTL.calendar), async (c) => {
+    const { episodes, entries } = await viewer(c).calendar();
+    return c.json({ items: episodes, entries });
+  })
 
   .get("/shows", cacheFor(TTL.catalog), async (c) => c.json({ shelves: await viewer(c).showsPage() }))
   .get("/anime/categories", cacheFor(TTL.catalog), (c) => c.json({ items: viewer(c).animeCategories() }))

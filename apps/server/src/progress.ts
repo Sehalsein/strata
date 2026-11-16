@@ -119,6 +119,11 @@ export class ProgressStore {
       .limit(limit);
   }
 
+  /** A person's plays, newest first (for their taste: "For you" on Home). */
+  history(userId: string, limit = 500): Promise<ProgressRow[]> {
+    return this.db.select().from(progress).where(eq(progress.userId, userId)).orderBy(desc(progress.updatedAt)).limit(limit);
+  }
+
   /** The most recently completed episode per show, for Next Up. */
   async recentlyCompletedEpisodes(userId: string, limit = 30): Promise<ProgressRow[]> {
     const rows = await this.db

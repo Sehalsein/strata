@@ -1,5 +1,7 @@
 import type { FileProvider } from "../db/schema";
 import type { ShelfSource } from "./addonRows";
+import { bestFirst, tasteSeeds, topPicks, type Rec } from "./forYou";
+import { SharedWork } from "../inFlight";
 import { runtime } from "#runtime";
 import type { Library } from "../library";
 import { isResumable, type ProgressRow, type ProgressStore } from "../progress";
@@ -90,6 +92,10 @@ export interface ProgressDto {
 const progressDto = (row?: ProgressRow): ProgressDto | null => (row ? { positionMs: row.positionMs, durationMs: row.durationMs, completed: row.completed } : null);
 
 /** A Home rail that fails is left out rather than failing the page. */
+/** "For you" only recommends titles rated at least this well, by this many people. */
+const FOR_YOU_MIN_RATING = 6.3;
+const FOR_YOU_MIN_VOTES = 150;
+
 async function homeSafe<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
   try {
     return await fn();
@@ -248,6 +254,7 @@ export class CatalogService {
     if (cont?.length) shelves.push({ id: "continue", title: "Continue Watching", kind: "continue", items: cont });
     if (nextUp?.length) shelves.push({ id: "nextUp", title: "Up Next", kind: "continue", items: nextUp });
     if (watchlist?.length) shelves.push({ id: "watchlist", title: "My List", kind: "titles", items: watchlist });
+    shelves.push(...((await homeSafe("forYou", () => this.forYou(userId))) ?? []));
     return shelves;
   }
 
@@ -911,6 +918,61 @@ export class CatalogService {
       for (const card of await this.detailCards(type, ids)) out.set(card.ref, card);
     }
     return out;
+  }
+
+  /**
+   * "Top picks for you" and "Because you watched …": from this person's own plays and
+   * My List (see forYou.ts), with TMDB's recommendations for their strongest titles.
+   * Kept a while per person: it changes as they watch, not by the minute.
+   */
+  private forYou(userId: string): Promise<Shelf[]> {
+    return this.forYouMemo.get(userId, () => this.buildForYou(userId));
+  }
+
+  private forYouMemo = new SharedWork<string, Shelf[]>({ remember: true, ttlMs: 30 * 60_000, max: 500 });
+
+  private async buildForYou(userId: string): Promise<Shelf[]> {
+    const [history, listed] = await Promise.all([this.progress.history(userId), this.progress.watchlist(userId)]);
+    const seeds = tasteSeeds(history, listed.map((l) => ({ source: l.source, type: l.type, titleId: l.titleId, addedAt: l.addedAt })));
+    if (!seeds.length) return [];
+    // Everything they've started, finished or listed is left out, as are the seeds themselves.
+    const seen = new Set<string>([
+      ...history.map((h) => `${h.mediaType === "movie" ? "movie" : "show"}:${h.titleId}`),
+      ...listed.map((l) => `${l.type}:${l.titleId}`),
+    ]);
+    const details = await Promise.all(
+      seeds.map(async (seed) => {
+        const d = await (seed.type === "movie" ? this.tmdb.movie(seed.id) : this.tmdb.show(seed.id)).catch(() => null);
+        // TMDB lists a movie's recommendations as movies and a show's as shows.
+        // Only well-liked ones: TMDB's raw recommendations include plenty that aren't.
+        const items = (d?.recommendations?.results ?? []).filter((r) => (r.vote_average ?? 0) >= FOR_YOU_MIN_RATING && (r.vote_count ?? 0) >= FOR_YOU_MIN_VOTES);
+        return { seed, name: d ? ("title" in d ? d.title : d.name) : null, items };
+      }),
+    );
+    const usable = details.filter((d) => d.name && d.items.length);
+    if (!usable.length) return [];
+    const byKey = new Map<string, TmdbListItem>();
+    for (const d of usable) for (const r of d.items) byKey.set(`${d.seed.type}:${r.id}`, r);
+    const toCards = async (recs: Rec[]) => {
+      const out: TitleCard[] = [];
+      for (const type of ["movie", "show"] as const) {
+        const items = recs.filter((r) => r.type === type).map((r) => byKey.get(`${type}:${r.id}`)!).filter(Boolean);
+        out.push(...(await this.cards(items, type)));
+      }
+      // Back in the order they were picked.
+      const at = new Map(recs.map((r, i) => [formatRef(tmdbRef(r.type, r.id)), i]));
+      return out.sort((a, b) => (at.get(a.ref) ?? 0) - (at.get(b.ref) ?? 0));
+    };
+    const recsOf = (d: (typeof usable)[number]): Rec[] => d.items.map((r) => ({ type: d.seed.type, id: r.id, rating: r.vote_average }));
+    const shelves: Shelf[] = [];
+    const picks = topPicks(usable.map((d) => ({ seed: d.seed, recs: recsOf(d) })), new Set([...seen, ...seeds.map((s) => `${s.type}:${s.id}`)]));
+    // Pooling needs more than one title to say something the "Because" rows don't.
+    if (usable.length >= 2 && picks.length >= 6) shelves.push({ id: "forYou", title: "Top picks for you", kind: "titles", items: await toCards(picks) });
+    for (const d of usable.slice(0, 2)) {
+      const recs = bestFirst(recsOf(d).filter((r) => !seen.has(`${r.type}:${r.id}`))).slice(0, 20);
+      if (recs.length >= 4) shelves.push({ id: `because:${d.seed.type}:${d.seed.id}`, title: `Because you watched ${d.name}`, kind: "titles", items: await toCards(recs) });
+    }
+    return shelves;
   }
 
   /** A cast or crew member and the movies and shows they're known for, most popular first. */

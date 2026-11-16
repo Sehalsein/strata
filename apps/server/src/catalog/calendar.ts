@@ -37,6 +37,50 @@ export interface CalendarEpisode {
 
 const isoDate = (seconds: number) => new Date(seconds * 1000).toISOString().slice(0, 10);
 
+/** Shows someone is watching (any episode played this recently) are followed without being on My List. */
+const FOLLOW_WATCHING_DAYS = 90;
+/** Recently out titles that are checked for being ready to play (each check may search for releases). */
+const READY_CHECKS = 8;
+const READY_RECENT_DAYS = 14;
+
+/**
+ * Something on a person's calendar, ready for the apps to show and notify as it is: an
+ * episode of a show they follow (on My List, or one they're watching) or a release of a
+ * film on My List (in cinemas, to stream or rent, on disc). The server words it all.
+ */
+export interface CalendarEntry {
+  /** Stable, for notifications: the same entry keeps its id. */
+  id: string;
+  kind: "episode" | "movie";
+  /** The show or film (`formatRef`). */
+  ref: string;
+  tmdbId?: number;
+  title: string;
+  posterUrl: string | null;
+  backdropUrl: string | null;
+  /** What it is, in words: "S2 E5 · The One Where…", "Out to stream or rent", "In cinemas". */
+  label: string;
+  /** The day (YYYY-MM-DD) and, when known, the exact time (ISO). */
+  date: string;
+  airsAt: string | null;
+  /** It's out, and Strata can play it now (in the library, or ready on TorBox). */
+  ready: boolean;
+  /** What Play starts: the episode (show entries), or the film. */
+  play: { season: number; episode: number } | null;
+  /**
+   * The notification for it: at `airsAt` when there's a time, else on the morning of `date`
+   * (the device's own morning). A ready-to-play note has `now`: show it once, straight away.
+   */
+  alert: { title: string; body: string; now?: boolean } | null;
+}
+
+/** TMDB's release types worth a calendar entry, and how they read. */
+const RELEASE_TYPES: Record<number, { label: string; out: string }> = {
+  3: { label: "In cinemas", out: "is in cinemas today" },
+  4: { label: "Out to stream or rent", out: "is out to stream or rent today" },
+  5: { label: "Out on disc", out: "is out on disc today" },
+};
+
 /**
  * The calendar: episodes of the shows on a profile's list from the last week and the
  * next month. Anime come from AniList's schedule (exact times), everything else from
@@ -50,7 +94,117 @@ export class CalendarService {
     private readonly anime?: { ids: AnimeIds; anilist: Anilist },
     /** The profile's content limit: shows above it stay off its calendar. */
     private readonly allowed: (userId: string, show: TitleRef) => Promise<boolean> = async () => true,
+    /** The household's region, for film release dates. */
+    private readonly region: () => string = () => "US",
+    /** Whether a released title can play now beyond the library (a ready release on TorBox). */
+    private readonly readyElsewhere: (target: { ref: TitleRef; season?: number; episode?: number }) => Promise<boolean> = async () => false,
   ) {}
+
+  /**
+   * A person's calendar as entries the apps show as they are: episodes of the shows they
+   * follow, releases of the films on their list, with words, ready-to-play state and the
+   * notification for each.
+   */
+  async entries(userId: string, now = Date.now()): Promise<{ entries: CalendarEntry[]; episodes: CalendarEpisode[] }> {
+    const [episodes, movies] = await Promise.all([this.episodes(userId, now), this.movieReleases(userId, now).catch(() => [] as CalendarEntry[])]);
+    const today = new Date(now).toISOString().slice(0, 10);
+    const fromEpisodes = episodes.map((e): CalendarEntry => {
+      const code = e.season !== null ? `S${e.season} E${e.episode}` : `Episode ${e.episode}`;
+      const out = e.airsAt ? "is out now" : "airs today";
+      return {
+        id: `${e.ref}:e:${e.season ?? "x"}:${e.episode}:${e.airDate}`,
+        kind: "episode",
+        ref: e.ref,
+        ...(e.tmdbId ? { tmdbId: e.tmdbId } : {}),
+        title: e.title,
+        posterUrl: e.posterUrl,
+        backdropUrl: e.backdropUrl,
+        label: [code, e.name].filter(Boolean).join(" · "),
+        date: e.airDate,
+        airsAt: e.airsAt,
+        ready: e.available,
+        play: e.season !== null ? { season: e.season, episode: e.episode } : null,
+        alert: { title: e.title, body: `${[code, e.name].filter(Boolean).join(" · ")} ${out}.` },
+      };
+    });
+    const all = [...fromEpisodes, ...movies];
+    await this.markReady(all, today, now);
+    const key = (e: CalendarEntry) => e.airsAt ?? `${e.date}T23:59:59Z`;
+    return { entries: all.sort((a, b) => key(a).localeCompare(key(b)) || a.title.localeCompare(b.title)), episodes };
+  }
+
+  /**
+   * Ready to play: what's out and playable now. The library answers for everything; for the
+   * few most recently out that aren't in it, a ready release on TorBox counts too. Those
+   * get a "ready to play" note instead of the release one.
+   */
+  private async markReady(entries: CalendarEntry[], today: string, now: number) {
+    const out = entries.filter((e) => e.date <= today);
+    const recent = new Date(now - READY_RECENT_DAYS * 86_400_000).toISOString().slice(0, 10);
+    const candidates = out
+      .filter((e) => !e.ready && e.date >= recent)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, READY_CHECKS);
+    await Promise.all(
+      candidates.map(async (e) => {
+        const ref = parseRef(e.ref);
+        if (!ref) return;
+        e.ready = await this.readyElsewhere({ ref, season: e.play?.season, episode: e.play?.episode }).catch(() => false);
+      }),
+    );
+    for (const e of out) {
+      if (!e.ready || e.date < recent) continue;
+      const what = e.kind === "episode" ? `${e.label} of ${e.title}` : e.title;
+      e.alert = { title: e.title, body: `${what} is ready to play in Strata.`, now: true };
+    }
+  }
+
+  /** Releases of the films on a person's list, in the household's region (else the US), in the calendar's window. */
+  private async movieReleases(userId: string, now: number): Promise<CalendarEntry[]> {
+    const today = Math.floor(now / 1000 / DAY_S) * DAY_S;
+    const from = isoDate(today - CALENDAR_PAST_DAYS * DAY_S);
+    const to = isoDate(today + (CALENDAR_FUTURE_DAYS + 1) * DAY_S);
+    const listed = (await this.progress.watchlist(userId)).filter((r) => r.type === "movie" && r.source === "tmdb");
+    const region = this.region().toUpperCase();
+    const out = await Promise.all(
+      listed.map(async (row) => {
+        const ref = tmdbRef("movie", row.titleId);
+        if (!(await this.allowed(userId, ref).catch(() => false))) return [];
+        const m = await this.tmdb.movie(row.titleId).catch(() => null);
+        if (!m) return [];
+        const results = m.release_dates?.results ?? [];
+        const dates = (results.find((r) => r.iso_3166_1 === region) ?? results.find((r) => r.iso_3166_1 === "US"))?.release_dates ?? [];
+        // One entry per kind of release: the earliest of each.
+        const byType = new Map<number, string>();
+        for (const d of dates) {
+          const day = d.release_date?.slice(0, 10);
+          if (!day || !RELEASE_TYPES[d.type]) continue;
+          if (!byType.has(d.type) || day < byType.get(d.type)!) byType.set(d.type, day);
+        }
+        return [...byType.entries()]
+          .filter(([, day]) => day >= from && day < to)
+          .map(([type, day]): CalendarEntry => ({
+            id: `${formatRef(ref)}:r:${type}:${day}`,
+            kind: "movie",
+            ref: formatRef(ref),
+            tmdbId: m.id,
+            title: m.title,
+            posterUrl: imageUrl(m.poster_path, "w342"),
+            backdropUrl: imageUrl(m.backdrop_path, "w780"),
+            label: RELEASE_TYPES[type]!.label,
+            date: day,
+            airsAt: null,
+            ready: false,
+            play: null,
+            alert: { title: m.title, body: `${m.title} ${RELEASE_TYPES[type]!.out}.` },
+          }));
+      }),
+    );
+    const flat = out.flat();
+    const avail = await this.library.availability(flat.map((e) => parseRef(e.ref)!));
+    for (const e of flat) e.ready = (avail.get(e.ref)?.length ?? 0) > 0;
+    return flat;
+  }
 
   async episodes(userId: string, now = Date.now()): Promise<CalendarEpisode[]> {
     // Whole days, so the window (and AniList's cache key) holds for a day.
@@ -59,7 +213,12 @@ export class CalendarService {
     const to = today + (CALENDAR_FUTURE_DAYS + 1) * DAY_S;
     // TMDB shows' episodes come from TMDB (and AniList, through the anime id list);
     // AniList shows' from AniList's schedule.
-    const listed = (await this.progress.watchlist(userId)).filter((r) => r.type === "show").map((r): TitleRef => ({ source: r.source, type: "show", id: r.titleId }));
+    // Followed: shows on My List, and shows they've been watching lately.
+    const watching = (await this.progress.history(userId))
+      .filter((r) => r.mediaType === "episode" && r.updatedAt >= now - FOLLOW_WATCHING_DAYS * 86_400_000)
+      .map((r): TitleRef => ({ source: r.source, type: "show", id: r.titleId }));
+    const onList = (await this.progress.watchlist(userId)).filter((r) => r.type === "show").map((r): TitleRef => ({ source: r.source, type: "show", id: r.titleId }));
+    const listed = [...new Map([...onList, ...watching].map((r) => [formatRef(r), r])).values()];
     const shown = (await Promise.all(listed.map(async (ref) => ((await this.allowed(userId, ref).catch(() => false)) ? ref : null)))).filter((ref): ref is TitleRef => ref !== null);
     const showIds = shown.filter((r) => r.source === "tmdb").map((r) => r.id);
     const anilistIds = shown.filter((r) => r.source === "anilist").map((r) => r.id);

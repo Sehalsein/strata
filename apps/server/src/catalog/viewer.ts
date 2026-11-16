@@ -67,7 +67,7 @@ export class Viewer {
 
   /** Episodes of the shows on this person's list: the last week and the next month. */
   calendar() {
-    return this.household.calendar.episodes(this.userId);
+    return this.household.calendar.entries(this.userId);
   }
 
   async person(id: number) {

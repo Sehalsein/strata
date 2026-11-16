@@ -328,6 +328,21 @@ public final class StrataClient: Sendable {
         return res.items
     }
 
+    /// The calendar as the server words it (episodes and film releases). Older servers send
+    /// episodes only: those are turned into entries the way the app used to word them.
+    public func calendarEntries(_ policy: CachePolicy = .fresh) async throws -> [CalendarEntry] {
+        let res: CalendarResponse = try await get("/api/calendar", policy: policy)
+        if let entries = res.entries { return entries }
+        return res.items.map { e in
+            let label = [e.code, e.name].compactMap { $0 }.joined(separator: " · ")
+            return CalendarEntry(
+                id: e.id, kind: "episode", ref: e.ref, title: e.title, posterUrl: e.posterUrl, backdropUrl: e.backdropUrl, label: label,
+                date: e.airDate, airsAt: e.airsAt, ready: e.available, play: e.season.map { .init(season: $0, episode: e.episode) },
+                alert: .init(title: e.title, body: e.hasTime ? String(localized: "\(label) is out now.", bundle: .module) : String(localized: "\(label) airs today.", bundle: .module))
+            )
+        }
+    }
+
     public func person(_ id: Int, _ policy: CachePolicy = .fresh) async throws -> PersonDetail {
         try await get("/api/person/\(id)", policy: policy)
     }

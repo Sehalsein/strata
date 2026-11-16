@@ -87,11 +87,17 @@ export function heightToResolution(height: number, width: number): number {
 /** Where a copy plays from, when copies are otherwise alike: this server's disk, then TorBox, then an add-on's link. */
 const PROVIDER_RANK: Record<FileProvider, number> = { local: 0, torbox: 1, link: 2 };
 
-/** A title's library copies, best first: within the quality limit, then best quality, then where it plays from. */
+/**
+ * A title's library copies, best first: within the quality limit, then best quality, then
+ * where it plays from. An add-on link's quality is only what its add-on named it until the
+ * file itself has been read, so an unread link never outranks the household's own copies.
+ */
 export function rankCandidates(candidates: Candidate[], settings: Pick<Settings, "maxResolution">): Candidate[] {
   const withinCap = (c: Candidate) => (c.resolution ?? 1080) <= settings.maxResolution;
+  const unverified = (c: Candidate) => c.provider === "link" && !c.probed;
   return [...candidates].sort(
     (a, b) =>
+      Number(unverified(a)) - Number(unverified(b)) ||
       Number(withinCap(b)) - Number(withinCap(a)) ||
       (b.resolution ?? 0) - (a.resolution ?? 0) ||
       (SOURCE_RANK[b.source ?? "dvd"] ?? 0) - (SOURCE_RANK[a.source ?? "dvd"] ?? 0) ||

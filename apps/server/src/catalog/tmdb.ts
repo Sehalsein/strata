@@ -38,6 +38,7 @@ export interface TmdbListItem {
   poster_path?: string | null;
   backdrop_path?: string | null;
   vote_average?: number;
+  vote_count?: number;
   popularity?: number;
   genre_ids?: number[];
 }
@@ -73,7 +74,7 @@ export interface TmdbMovie {
   belongs_to_collection?: { id: number; name: string; poster_path?: string | null } | null;
   credits?: TmdbCredits;
   recommendations?: TmdbPage;
-  release_dates?: { results: { iso_3166_1: string; release_dates: { certification: string; type: number }[] }[] };
+  release_dates?: { results: { iso_3166_1: string; release_dates: { certification: string; type: number; release_date?: string; note?: string }[] }[] };
   external_ids?: { imdb_id?: string | null };
   videos?: { results: { key: string; site: string; type: string; official?: boolean; name: string }[] };
   /** With `images` appended: logos in the server's language, English and no language. */

@@ -578,3 +578,81 @@ public struct CalendarEpisode: Codable, Sendable, Hashable, Identifiable {
 extension CalendarEpisode: ListItem {
     var isUsable: Bool { sentRef != nil || tmdbId != nil }
 }
+
+/// Something on the calendar, worded by the server: an episode of a show the person follows,
+/// or a release of a film on their list ("In cinemas", "Out to stream or rent"). The app shows
+/// it as sent and notifies with the server's `alert`.
+public struct CalendarEntry: Codable, Sendable, Hashable, Identifiable {
+    public struct Play: Codable, Sendable, Hashable {
+        public var season: Int
+        public var episode: Int
+    }
+
+    public struct Alert: Codable, Sendable, Hashable {
+        public var title: String
+        public var body: String
+        /// Show it once, straight away (it's ready to play now), rather than at `date`.
+        public var now: Bool?
+    }
+
+    public var id: String
+    public var kind: String
+    public var ref: TitleRef
+    public var title: String
+    public var posterUrl: URL?
+    public var backdropUrl: URL?
+    /// What it is, in the server's words: "S2 E5 · The One Where…", "In cinemas".
+    public var label: String
+    /// `YYYY-MM-DD`, and the exact time when known (ISO).
+    public var date: String
+    public var airsAt: String?
+    /// Out, and Strata can play it now.
+    public var ready: Bool
+    public var play: Play?
+    public var alert: Alert?
+
+    public init(id: String, kind: String, ref: TitleRef, title: String, posterUrl: URL? = nil, backdropUrl: URL? = nil, label: String, date: String, airsAt: String? = nil, ready: Bool, play: Play? = nil, alert: Alert? = nil) {
+        self.id = id
+        self.kind = kind
+        self.ref = ref
+        self.title = title
+        self.posterUrl = posterUrl
+        self.backdropUrl = backdropUrl
+        self.label = label
+        self.date = date
+        self.airsAt = airsAt
+        self.ready = ready
+        self.play = play
+        self.alert = alert
+    }
+
+    /// When it is: the exact time, or the start of its day here.
+    public var when: Date {
+        if let airsAt, let time = CalendarDates.instant(airsAt) { return time }
+        return CalendarDates.day(date) ?? .distantPast
+    }
+
+    /// Whether `when` is a time of day, not just the day.
+    public var hasTime: Bool { airsAt.flatMap(CalendarDates.instant) != nil }
+}
+
+/// `GET /api/calendar`: episodes as older apps read them, and the server's worded entries.
+struct CalendarResponse: Codable, Sendable {
+    var items: [CalendarEpisode]
+    var entries: [CalendarEntry]?
+}
+
+enum CalendarDates {
+    static func instant(_ s: String) -> Date? {
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return withFraction.date(from: s) ?? ISO8601DateFormatter().date(from: s)
+    }
+
+    /// A calendar day, not an instant: midnight here.
+    static func day(_ s: String) -> Date? {
+        let parts = s.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+    }
+}

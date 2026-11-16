@@ -76,7 +76,15 @@ describe("rankCandidates", () => {
       ],
       { maxResolution: 2160 },
     );
-    expect(ranked.map((r) => r.id)).toEqual(["tb4kremux", "local4kweb", "tb4kweb", "link4kweb", "local1080"]);
+    // The link isn't read yet: it comes after every copy of the household's own.
+    expect(ranked.map((r) => r.id)).toEqual(["tb4kremux", "local4kweb", "tb4kweb", "local1080", "link4kweb"]);
+  });
+
+  test("an add-on link claiming better quality waits until its file has been read", () => {
+    const claim = c({ id: "link", provider: "link", resolution: 2160, source: "remux" });
+    const ranked = rankCandidates([claim, c({ id: "local", resolution: 1080 })], { maxResolution: 2160 });
+    expect(ranked.map((r) => r.id)).toEqual(["local", "link"]);
+    expect(rankCandidates([{ ...claim, probed: true }, c({ id: "local", resolution: 1080 })], { maxResolution: 2160 }).map((r) => r.id)).toEqual(["link", "local"]);
   });
 
   test("max resolution demotes but doesn't drop", () => {
