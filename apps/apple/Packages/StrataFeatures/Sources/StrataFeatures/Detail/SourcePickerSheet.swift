@@ -22,18 +22,22 @@ struct SourcePickerSheet: View {
 
     enum Purpose { case play, download }
 
-    @State private var sources: Loadable<[Candidate]> = .loading
+    @State private var sources: Loadable<SourceList> = .loading
     #if os(tvOS)
     /// Focus starts on the first copy, not the quality filter, once the list is in.
     @FocusState private var focusedRow: String?
     #endif
+    /// Only for servers that send no filters of their own (older ones).
     @State private var filter: Filter = .all
+    /// The server's filters: the option picked in each group, by group id.
+    @State private var picked: [String: String] = [:]
 
     /// The source you chose last time, which Play goes back to.
     private var lastPicked: String? {
         services.client.flatMap { SourceMemory.shared.pick(for: target, server: $0.baseURL) }
     }
 
+    /// Older servers' fallback: the quality picker the app used to work out itself.
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", uhd = "4K", hd = "1080p", sd = "720p"
         var id: String { rawValue }
@@ -79,18 +83,56 @@ struct SourcePickerSheet: View {
 
     private var heading: String { purpose == .download ? String(localized: "Download", bundle: .module) : String(localized: "Choose Source", bundle: .module) }
 
-    private var filterPicker: some View {
-        Picker(String(localized: "Quality", bundle: .module), selection: $filter) {
-            ForEach(Filter.allCases) { Text($0.title).tag($0) }
+    /// The server's filter groups, when it sends them; else the old quality picker.
+    private var groups: [SourceFilterGroup] { sources.value?.filters ?? [] }
+
+    /// What's shown: the sources matching the picked options.
+    private var shownSources: [Candidate] {
+        guard let list = sources.value else { return [] }
+        return groups.isEmpty ? list.items.filter(filter.matches) : list.matching(picked)
+    }
+
+    private var isFiltered: Bool { groups.isEmpty ? filter != .all : !picked.isEmpty }
+
+    @ViewBuilder private var filterPicker: some View {
+        if groups.isEmpty {
+            Picker(String(localized: "Quality", bundle: .module), selection: $filter) {
+                ForEach(Filter.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+        } else {
+            #if os(tvOS)
+            VStack(alignment: .leading, spacing: Metrics.space3) { groupPickers }
+            #else
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Metrics.space2) { groupPickers }
+            }
+            #endif
         }
-        .pickerStyle(.segmented)
+    }
+
+    /// One menu per group, as the server named it: "All" or one of its options (with counts).
+    @ViewBuilder private var groupPickers: some View {
+        ForEach(groups) { group in
+            Picker(group.title, selection: Binding(
+                get: { picked[group.id] ?? "" },
+                set: { picked[group.id] = $0.isEmpty ? nil : $0 }
+            )) {
+                Text("\(group.title): \(String(localized: "All", bundle: .module))").tag("")
+                ForEach(group.options) { option in
+                    Text("\(option.label) (\(option.count))").tag(option.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+        }
     }
 
     private func load() async {
-        guard lookFurther else { sources = .loaded(known); return }
-        if !known.isEmpty { sources = .loaded(known) } // shown while the server looks further
-        let found = await services.sources(for: target, discover: true)
-        sources = .loaded(found.isEmpty ? known : found)
+        guard lookFurther else { sources = .loaded(SourceList(items: known)); return }
+        if !known.isEmpty { sources = .loaded(SourceList(items: known)) } // shown while the server looks further
+        let found = await services.sourceList(for: target, discover: true)
+        if let found, !found.items.isEmpty { sources = .loaded(found) } else { sources = .loaded(SourceList(items: known)) }
     }
 
     /// The copy playing now first; the rest in the server's order.
@@ -116,10 +158,10 @@ struct SourcePickerSheet: View {
             .padding(.vertical, Metrics.space8)
         case .failed(let message):
             MessageView(systemImage: "exclamationmark.triangle", title: String(localized: "Couldn't load sources", bundle: .module), message: message)
-        case .loaded(let all):
-            let shown = ordered(all.filter(filter.matches))
+        case .loaded:
+            let shown = ordered(shownSources)
             if shown.isEmpty {
-                MessageView(systemImage: "rectangle.stack.badge.minus", title: String(localized: "No sources", bundle: .module), message: filter == .all ? String(localized: "There's nothing to play this from.", bundle: .module) : String(localized: "Try another quality.", bundle: .module))
+                MessageView(systemImage: "rectangle.stack.badge.minus", title: String(localized: "No sources", bundle: .module), message: isFiltered ? String(localized: "Nothing matches these filters. Try others.", bundle: .module) : String(localized: "There's nothing to play this from.", bundle: .module))
             } else {
                 #if os(tvOS)
                 // Native TV cards: each copy lifts with the system's focus effect.
@@ -160,7 +202,7 @@ struct SourcePickerSheet: View {
                 Text(heading).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
                 Text(title).font(.stHeadline).foregroundStyle(Theme.ink2).lineLimit(3)
                 filterPicker.padding(.top, Metrics.space4)
-                if let count = sources.value?.filter(filter.matches).count, count > 0 {
+                if sources.value != nil, case let count = shownSources.count, count > 0 {
                     Text("\(count) copies", bundle: .module).font(.stFootnote).foregroundStyle(Theme.ink3)
                 }
             }
@@ -179,8 +221,8 @@ struct SourcePickerSheet: View {
         .padding(.top, Metrics.space12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.bg.ignoresSafeArea())
-        .task(id: sources.value?.first?.id) {
-            guard let first = ordered(sources.value?.filter(filter.matches) ?? []).first?.id, focusedRow == nil else { return }
+        .task(id: sources.value?.items.first?.id) {
+            guard let first = ordered(shownSources).first?.id, focusedRow == nil else { return }
             try? await Task.sleep(for: .milliseconds(100))
             focusedRow = first
         }

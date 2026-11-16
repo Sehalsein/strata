@@ -188,9 +188,9 @@ export class Library {
     return this.db.select().from(files).where(and(this.mine(), eq(files.sourceHash, hash.toLowerCase()), eq(files.missing, false)));
   }
 
-  /** Hashes of every TorBox torrent already in the library. */
+  /** Hashes of every TorBox torrent (and keys of every add-on link) already in the library. */
   async knownHashes(): Promise<Set<string>> {
-    const rows = await this.db.selectDistinct({ h: files.sourceHash }).from(files).where(and(this.mine(), eq(files.provider, "torbox"), eq(files.missing, false)));
+    const rows = await this.db.selectDistinct({ h: files.sourceHash }).from(files).where(and(this.mine(), inArray(files.provider, ["torbox", "link"]), eq(files.missing, false)));
     return new Set(rows.map((r) => r.h).filter((h): h is string => !!h));
   }
 

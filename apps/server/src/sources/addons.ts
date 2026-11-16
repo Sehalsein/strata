@@ -36,8 +36,11 @@ export const streamAddonSchema = z.object({
   subtitleIdPrefixes: z.array(z.string()).nullable().default(null),
   /** Its catalogs of movies and shows that need nothing filled in, in its order. */
   catalogs: z.array(addonCatalogSchema).default([]),
-  /** AIOStreams also has a search API that says what Stremio's streams leave out (hashes). */
-  kind: z.enum(["stremio", "aiostreams"]).default("stremio"),
+  /**
+   * AIOStreams also has a search API that says what Stremio's streams leave out (hashes).
+   * "strata" is the built-in entry (see strataAddon): no manifest, the server's own sources.
+   */
+  kind: z.enum(["stremio", "aiostreams", "strata"]).default("stremio"),
   /** It has a configure page (<base>/configure), per its manifest. */
   configurable: z.boolean().default(false),
   /**
@@ -49,10 +52,33 @@ export const streamAddonSchema = z.object({
 export type StreamAddon = z.infer<typeof streamAddonSchema>;
 export const streamAddonListSchema = z.array(streamAddonSchema);
 
-/** What a household searches with before it sets up its own list: the server's Torrentio. */
-export function defaultAddons(torrentioUrl: string): StreamAddon[] {
-  if (!torrentioUrl) return [];
-  return [{ id: "default", url: manifestUrl(torrentioUrl), name: "Torrentio", enabled: true, resources: ["stream"], idPrefixes: ["tt", "kitsu"], subtitleIdPrefixes: null, catalogs: [], kind: "stremio", configurable: true, allowPrivate: true }];
+export const STRATA_ADDON_ID = "strata";
+
+/**
+ * The built-in "Strata" entry: the server's Torrentio, TorBox's own search and its cache
+ * check, as one add-on a household can move or switch off (never remove). Its address is
+ * a placeholder: it's never fetched.
+ */
+export function strataAddon(enabled = true): StreamAddon {
+  return { id: STRATA_ADDON_ID, url: "strata://builtin/manifest.json", name: "Strata", enabled, resources: ["stream"], idPrefixes: ["tt", "kitsu"], subtitleIdPrefixes: null, catalogs: [], kind: "strata", configurable: false, allowPrivate: true };
+}
+
+export const isBuiltIn = (a: Pick<StreamAddon, "kind">) => a.kind === "strata";
+
+/** What a household has before it sets up its own list: the Strata entry. */
+export function defaultAddons(): StreamAddon[] {
+  return [strataAddon()];
+}
+
+/**
+ * A saved list with the Strata entry in it: the old built-in Torrentio ("default") becomes
+ * it, in its place and with its switch; a list without either gets it first.
+ */
+export function withStrata(list: StreamAddon[]): StreamAddon[] {
+  if (list.some(isBuiltIn)) return list;
+  const legacy = list.findIndex((a) => a.id === "default");
+  if (legacy >= 0) return list.map((a, i) => (i === legacy ? strataAddon(a.enabled) : a));
+  return [strataAddon(), ...list];
 }
 
 /** A pasted add-on address as its manifest URL: stremio:// becomes https://, /manifest.json is added. */
@@ -418,32 +444,57 @@ export async function fetchSubtitleFile(url: string, addon: Pick<StreamAddon, "u
 }
 
 /**
- * Fetches something public an add-on points to (a subtitle file, a catalog), following up
- * to three redirects, each checked like the first address. An add-on the server's admin
+ * Where an add-on's playback link leads now: the file's own address after its redirects (a
+ * debrid service's download link), checked hop by hop like any add-on address. Nothing is
+ * downloaded: only the first byte is asked for. A link that answers itself (the add-on
+ * serves the file) is its own address.
+ */
+export async function followLink(url: string, addon: Pick<StreamAddon, "url" | "allowPrivate">, fetchImpl: typeof fetch = globalFetch): Promise<string> {
+  const { res, url: at } = await fetchFollowingAt(url, addon, fetchImpl, { headers: { Range: "bytes=0-0" }, signal: AbortSignal.timeout(20_000) });
+  await res.body?.cancel().catch(() => {});
+  if (!res.ok) throw new Error(`Link answered ${res.status}`);
+  return at;
+}
+
+/**
+ * Fetches something public an add-on points to (a subtitle file, a catalog, a playback
+ * link), following up to five redirects, each checked like the first address. An add-on the server's admin
  * let be on the home network may serve from its own host there, but it can't send Strata
  * anywhere else on that network.
  */
 async function fetchFollowing(url: string, addon: Pick<StreamAddon, "url" | "allowPrivate">, fetchImpl: typeof fetch, init: RequestInit = {}): Promise<Response> {
+  return (await fetchFollowingAt(url, addon, fetchImpl, init)).res;
+}
+
+/** fetchFollowing, with the address it ended up at. */
+async function fetchFollowingAt(url: string, addon: Pick<StreamAddon, "url" | "allowPrivate">, fetchImpl: typeof fetch, init: RequestInit = {}): Promise<{ res: Response; url: string }> {
   const ownHost = new URL(addon.url).host;
   let at = url;
-  for (let hop = 0; hop < 4; hop++) {
+  for (let hop = 0; hop < 6; hop++) {
     if (!/^https?:\/\//i.test(at)) throw new AddonError("That address isn't a web address.");
     if (!(addon.allowPrivate && new URL(at).host === ownHost)) await assertPublicHost(at);
     const res = await fetchImpl(at, { ...init, redirect: "manual", signal: init.signal ?? AbortSignal.timeout(15_000) });
     if (res.status >= 300 && res.status < 400) {
       const next = res.headers.get("location");
       if (!next) throw new Error(`${res.status} without a location`);
+      await res.body?.cancel().catch(() => {});
       at = new URL(next, at).toString();
       continue;
     }
-    return res;
+    return { res, url: at };
   }
   throw new Error("Redirected too many times");
 }
 
-/** A stream an add-on found, as far as discovery cares: a torrent, with what's known about it. */
+/**
+ * A stream an add-on found, as far as discovery cares: a torrent (`hash`), or a link the
+ * add-on plays from itself (`link`: a debrid add-on's own playback address), with what's
+ * known about it.
+ */
 export interface AddonStream {
-  hash: string;
+  hash?: string;
+  /** For a stream without a torrent: the address to play it from (followed when played). */
+  link?: string;
   title: string;
   fileName?: string;
   size?: number;
@@ -458,20 +509,24 @@ export interface AddonStream {
 }
 
 /**
- * Streams for `id` (an IMDb id, "tt…:S:E", or "kitsu:…"). Streams without an info-hash
- * (plain web links, usenet) are dropped: discovery adds torrents to TorBox itself.
+ * Streams for `id` (an IMDb id, "tt…:S:E", or "kitsu:…"): torrents, which discovery adds to
+ * TorBox itself, and links (debrid add-ons' own playback addresses, usenet), played from
+ * where they point. Links that need request headers the apps can't send, or that only ask
+ * for the add-on to be set up, are left out.
  */
 export async function addonStreams(addon: StreamAddon, type: "movie" | "series", id: string, fetchImpl: typeof fetch = globalFetch): Promise<AddonStream[]> {
   if (addon.kind === "aiostreams") {
     const viaSearch = await aioSearch(addon, type, id, fetchImpl);
-    if (viaSearch) return viaSearch;
+    // Its search only lists torrents; set up with a debrid service, its streams are links.
+    if (viaSearch?.length) return viaSearch;
   }
   const res = await addonFetch(`${addonBase(addon.url)}/stream/${type}/${id}.json`, addon.allowPrivate, fetchImpl, { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`${addon.name} ${res.status}`);
   const body = (await readJson(res)) as { streams?: StremioStream[] } | null;
   return (body?.streams ?? []).flatMap((s) => {
-    const hash = streamHash(s);
-    if (!hash) return [];
+    const hash = streamHash(s) ?? undefined;
+    const link = hash ? undefined : playableLink(s);
+    if (!hash && !link) return [];
     const lines = (s.title ?? s.description ?? "").split("\n");
     const hintName = s.behaviorHints?.filename ?? s.streamData?.filename ?? undefined;
     const title = s.streamData?.folderName || lines[0]?.trim() || hintName || "";
@@ -483,12 +538,13 @@ export async function addonStreams(addon: StreamAddon, type: "movie" | "series",
     return [
       {
         hash,
+        link,
         title,
         fileName,
         size: s.behaviorHints?.videoSize ?? s.streamData?.size ?? parseSize(meta),
         seeders: s.streamData?.torrent?.seeders ?? (Number(/👤\s*(\d+)/.exec(meta)?.[1] ?? 0) || undefined),
         resolution: resolutionFrom(parsedFile?.resolution) ?? resolutionFromName(s.name),
-        cached: service ? service.id === "torbox" && service.cached === true : /\[TB\+\]/.test(s.name ?? ""),
+        cached: link ? linkCached(s) : service ? service.id === "torbox" && service.cached === true : /\[TB\+\]/.test(s.name ?? ""),
         languages: languages.length ? languages : undefined,
         hdr: hdrFrom(parsedFile?.visualTags),
         videoCodec: codecFrom(parsedFile?.encode),
@@ -504,7 +560,7 @@ interface StremioStream {
   infoHash?: string;
   url?: string;
   fileIdx?: number;
-  behaviorHints?: { filename?: string; videoSize?: number; bingeGroup?: string };
+  behaviorHints?: { filename?: string; videoSize?: number; bingeGroup?: string; proxyHeaders?: unknown };
   /** AIOStreams' structured copy, on instances that hand it out. */
   streamData?: {
     filename?: string;
@@ -522,6 +578,34 @@ interface AioParsedFile {
   encode?: string;
   visualTags?: string[];
   languages?: string[];
+}
+
+/**
+ * A stream's own playback address, when it has one Strata can hand to the apps: https, no
+ * request headers needed, and not a note asking for the add-on to be set up.
+ */
+function playableLink(s: StremioStream): string | undefined {
+  if (!s.url || !/^https:\/\//i.test(s.url) || s.url.length > 4096) return undefined;
+  if (s.behaviorHints?.proxyHeaders) return undefined;
+  if (/configur|set ?up|api ?key|install/i.test(`${s.name ?? ""} ${s.title ?? ""} ${s.description ?? ""}`) && !s.behaviorHints?.filename) return undefined;
+  try {
+    new URL(s.url);
+  } catch {
+    return undefined;
+  }
+  return s.url;
+}
+
+/**
+ * Whether a link stream plays right away: the add-on's own word (AIOStreams' service
+ * state) or the marks debrid add-ons put in names (⚡, "+]" as in "[TB+]"); "⬇"/"⏳" mean
+ * it has to download first. Unmarked links are taken as ready.
+ */
+function linkCached(s: StremioStream): boolean {
+  if (s.streamData?.service?.cached !== undefined) return s.streamData.service.cached === true;
+  const text = `${s.name ?? ""} ${s.title ?? ""}`;
+  if (/⬇|⏳|uncached|download/i.test(text)) return false;
+  return true;
 }
 
 /** The stream's info-hash: given, or in a debrid link (Torrentio's /resolve/torbox/<key>/<hash>/…). */

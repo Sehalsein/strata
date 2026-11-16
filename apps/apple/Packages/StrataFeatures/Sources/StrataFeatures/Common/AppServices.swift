@@ -140,6 +140,11 @@ public final class AppServices {
     public func sources(for target: PlaybackTarget, discover: Bool) async -> [Candidate] {
         await load { try await $0.sources(target, discover: discover) }.value ?? []
     }
+
+    /// The sources with the server's filters for them; nil when they couldn't be loaded.
+    public func sourceList(for target: PlaybackTarget, discover: Bool) async -> SourceList? {
+        await load { try await $0.sourceList(target, discover: discover) }.value
+    }
 }
 
 public enum Loadable<T> {

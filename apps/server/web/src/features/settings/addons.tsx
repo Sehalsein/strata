@@ -7,6 +7,7 @@ import { api, errorMessage } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
 import type { StreamAddon } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { relativeTime } from "@/lib/format";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorAlert } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -28,8 +29,10 @@ const reload = () => queryClient.invalidateQueries({ queryKey: queryKeys.addons 
  * rows show the host and Configure goes through a server redirect.
  */
 export function AddonsSection() {
-  const addons = useQuery({ queryKey: queryKeys.addons, queryFn: api.addons });
+  // Polled, so each add-on's status light stays current while the page is open.
+  const addons = useQuery({ queryKey: queryKeys.addons, queryFn: api.addons, refetchInterval: 30_000 });
   const items = addons.data?.items ?? [];
+  const removable = items.filter((a) => !a.builtIn);
   const [adding, setAdding] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -70,7 +73,7 @@ export function AddonsSection() {
           <Button variant="outline" onClick={refresh} disabled={refreshing || !items.length}>
             <RefreshCw className={cn(refreshing && "animate-spin")} /> Refresh
           </Button>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setConfirmClear(true)} disabled={!items.length}>
+          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setConfirmClear(true)} disabled={!removable.length}>
             Delete all
           </Button>
           <Button onClick={() => setAdding(true)}>
@@ -124,7 +127,7 @@ export function AddonsSection() {
         open={confirmClear}
         onOpenChange={setConfirmClear}
         title="Delete every add-on?"
-        description="Strata stops asking all of them. You can add them again with their manifest URLs."
+        description="Strata stops asking all of them (its own built-in entry stays). You can add them again with their manifest URLs."
         confirmLabel="Delete all"
         onConfirm={clear}
       />
@@ -162,18 +165,19 @@ function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: numbe
   return (
     <div className="flex flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:gap-4">
       <div className="flex min-w-0 flex-1 items-start gap-3">
-        <span className={cn("mt-2 size-2 shrink-0 rounded-full", a.enabled ? "bg-emerald-500" : "bg-muted-foreground/40")} aria-hidden />
+        <span className={cn("mt-2 size-2 shrink-0 rounded-full", healthDot(a))} aria-hidden />
         <div className="min-w-0 space-y-0.5">
           <div className="flex flex-wrap items-center gap-2">
             <span className={cn("font-medium", !a.enabled && "text-muted-foreground")}>{a.name}</span>
-            {a.isDefault && <Badge variant="secondary">Default</Badge>}
+            {a.builtIn && <Badge variant="secondary">Built in</Badge>}
             {a.resources.includes("stream") && <Badge variant="outline">Streams</Badge>}
             {a.resources.includes("subtitles") && <Badge variant="outline">Subtitles</Badge>}
             {a.resources.includes("catalog") && <Badge variant="outline">Catalogs</Badge>}
             {a.anime && <Badge variant="outline">Anime</Badge>}
             {!a.enabled && <Badge variant="outline">Off</Badge>}
           </div>
-          <p className="text-muted-foreground truncate text-sm">{a.host}</p>
+          <p className="text-muted-foreground text-sm">{a.description ?? <span className="block truncate">{a.host}</span>}</p>
+          {a.enabled && <HealthLine health={a.health} />}
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 pl-5 lg:pl-0">
@@ -185,12 +189,16 @@ function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: numbe
             </a>
           </Button>
         )}
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => setEditing(true)}>
-          Edit
-        </Button>
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => setConfirmRemove(true)}>
-          Delete
-        </Button>
+        {!a.builtIn && (
+          <>
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => setEditing(true)}>
+              Edit
+            </Button>
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => setConfirmRemove(true)}>
+              Delete
+            </Button>
+          </>
+        )}
         <Button variant="outline" size="sm" disabled={busy || index === 0} onClick={() => update({ index: index - 1 })} aria-label={`Move ${a.name} up`}>
           Up
         </Button>
@@ -220,6 +228,29 @@ function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: numbe
         onConfirm={remove}
       />
     </div>
+  );
+}
+
+/** The status light: green answering, amber paused, red failing, grey not asked yet or off. */
+function healthDot(a: StreamAddon) {
+  if (!a.enabled) return "bg-muted-foreground/40";
+  return { ok: "bg-emerald-500", failing: "bg-red-500", paused: "bg-amber-500", unknown: "bg-muted-foreground/40" }[a.health.state];
+}
+
+/** How the add-on is doing, in a line: when it last answered, or what went wrong. */
+function HealthLine({ health: h }: { health: StreamAddon["health"] }) {
+  if (h.state === "unknown") return <p className="text-muted-foreground text-xs">Not asked since the server started.</p>;
+  if (h.state === "ok")
+    return (
+      <p className="text-muted-foreground text-xs">
+        Answered {relativeTime(h.at)}
+        {h.latencyMs !== undefined && ` in ${h.latencyMs < 1000 ? `${h.latencyMs} ms` : `${(h.latencyMs / 1000).toFixed(1)} s`}`}
+      </p>
+    );
+  return (
+    <p className={cn("text-xs", h.state === "failing" ? "text-destructive" : "text-amber-700 dark:text-amber-400")}>
+      {h.state === "paused" ? "Paused" : "Failing"}: {h.message ?? "it didn't answer."} {h.state === "paused" ? `Strata asks again ${relativeTime(h.pausedUntil)}.` : `(${relativeTime(h.at)})`}
+    </p>
   );
 }
 

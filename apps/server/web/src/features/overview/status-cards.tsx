@@ -49,7 +49,7 @@ export function ServerCard({ status }: { status: AdminStatus }) {
 }
 
 export function summarize(stats: LibraryStats) {
-  const out = { total: 0, matched: 0, pending: 0, unmatched: 0, ignored: 0, local: 0, torbox: 0 };
+  const out = { total: 0, matched: 0, pending: 0, unmatched: 0, ignored: 0, local: 0, torbox: 0, link: 0 };
   for (const r of stats.files) {
     out.total += r.count;
     out[r.provider] += r.count;

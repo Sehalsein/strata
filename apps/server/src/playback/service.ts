@@ -190,6 +190,10 @@ export class PlaybackService {
     private readonly onPlayedTorrent: (torrentId: number) => void = () => {},
     /** Subtitles from the household's subtitle add-ons, as tracks (never throws, never slow for long). */
     private readonly onlineSubtitles: (target: SessionTarget) => Promise<UnlabeledTrack[]> = async () => [],
+    /** Where an add-on link file (its sealed ref) plays from now; throws PlaybackError when it can't. */
+    private readonly resolveLink: (sealedRef: string) => Promise<string> = async () => {
+      throw new PlaybackError("This server can't play add-on links.", 503);
+    },
   ) {}
 
   async play(user: { userId: string }, req: PlayRequest): Promise<PlayResponse> {
@@ -392,6 +396,23 @@ export class PlaybackService {
    */
   private async chooseFile(req: PlayRequest): Promise<FileRow> {
     const target = targetOf(req);
+    // An add-on's link: only one discovery offered for this exact title (or one already in
+    // the library for it) may be kept and played.
+    if (req.candidateId?.startsWith("link:")) {
+      const key = req.candidateId;
+      if (!/^link:[0-9a-f]{40}$/.test(key)) throw new PlaybackError(GONE, 404);
+      const known = (await this.library.byHash(key)).some((r) => r.source === req.source && r.mediaType === req.mediaType && r.titleId === req.titleId && (req.mediaType === "movie" || (r.season === req.season && r.episode === req.episode)));
+      if (!known) {
+        if (!this.discovery.available) throw new PlaybackError("Looking beyond the library is turned off on this server.", 403);
+        if (!(await this.discovery.releases(target)).some((r) => r.hash === key)) throw new PlaybackError(GONE, 404);
+      }
+      try {
+        return await this.acquired(target, key);
+      } catch (err) {
+        if (err instanceof NoPlayableFileError) throw new PlaybackError(GONE, 404);
+        throw err;
+      }
+    }
     if (req.candidateId?.startsWith("hash:")) {
       const hash = req.candidateId.slice(5).toLowerCase();
       if (!isInfoHash(hash)) throw new PlaybackError(GONE, 404);
@@ -445,6 +466,7 @@ export class PlaybackService {
     } catch (err) {
       if (err instanceof NoPlayableFileError || err instanceof PlaybackError) throw err;
       log.warn("Getting a release ready failed", err);
+      if (hash.startsWith("link:")) throw new PlaybackError("That add-on's copy couldn't be got ready. Pick another source.", 502);
       throw new PlaybackError("TorBox couldn't get this ready just now. Try again, or pick another source.", 502);
     }
     if (result.status === "downloading") throw new NotReadyError(result);
@@ -476,6 +498,11 @@ export class PlaybackService {
     if (file.provider === "local") return { input: file.ref, inputKind: "path" };
     const cached = this.links.get(file.id);
     if (cached && Date.now() - cached.at < LINK_TTL_MS) return { input: cached.url, inputKind: "url" };
+    if (file.provider === "link") {
+      const url = await this.resolveLink(file.ref);
+      this.links.set(file.id, { url, at: Date.now() });
+      return { input: url, inputKind: "url" };
+    }
     const client = this.torbox();
     if (!client) throw new PlaybackError("TorBox is not configured", 503);
     const { kind, itemId, fileId } = parseTorboxRef(file.ref);
@@ -502,7 +529,7 @@ export class PlaybackService {
     if (!ff) {
       // No ffprobe here (the cloud server never has one): the app reads the file's
       // details itself from the same link and sends them (POST /files/:id/probe).
-      if (file.provider === "torbox") throw new NeedsProbeError(file.id, input);
+      if (file.provider !== "local") throw new NeedsProbeError(file.id, input);
       throw new PlaybackError("ffmpeg/ffprobe is not installed on the server", 503);
     }
     try {
@@ -552,8 +579,8 @@ export class PlaybackService {
   }
 
   private probeError(file: FileRow): PlaybackError {
-    return file.provider === "local"
-      ? new PlaybackError("Could not read this file", 502)
-      : new PlaybackError("TorBox didn't respond in time. Try again in a moment.", 502);
+    if (file.provider === "local") return new PlaybackError("Could not read this file", 502);
+    if (file.provider === "link") return new PlaybackError("The add-on's link didn't answer in time. Try again, or pick another source.", 502);
+    return new PlaybackError("TorBox didn't respond in time. Try again in a moment.", 502);
   }
 }

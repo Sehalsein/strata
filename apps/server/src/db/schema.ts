@@ -239,7 +239,8 @@ export const householdSettings = pgTable(
   (t) => [primaryKey({ columns: [t.organizationId, t.key] })],
 );
 
-export type FileProvider = "local" | "torbox";
+/** Where a file plays from: this server's disk, TorBox, or an add-on's link. */
+export type FileProvider = "local" | "torbox" | "link";
 export type MatchStatus = "pending" | "matched" | "unmatched" | "manual" | "ignored";
 
 export const files = pgTable(

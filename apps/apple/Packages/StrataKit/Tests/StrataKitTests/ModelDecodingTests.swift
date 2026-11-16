@@ -276,6 +276,25 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertNil(old.subtitleTracks[0].label)
     }
 
+    /// The server's filters: the app only matches tags; older servers send none.
+    func testSourceListFilters() throws {
+        let json = """
+        {"items":[
+          {"id":"hash:a","fileId":0,"provider":"torbox","name":"A","size":1,"probed":false,"availability":"cached","filterTags":["quality:2160","ready:now"]},
+          {"id":"link:b","fileId":0,"provider":"link","name":"B","size":1,"probed":false,"availability":"uncached","filterTags":["quality:1080"]}
+        ],
+        "filters":[{"id":"quality","title":"Quality","options":[{"id":"quality:2160","label":"4K","count":1},{"id":"quality:1080","label":"1080p","count":1}]}]}
+        """
+        let list = try JSONDecoder().decode(SourceList.self, from: Data(json.utf8))
+        XCTAssertEqual(list.filters.first?.options.map(\.label), ["4K", "1080p"])
+        XCTAssertEqual(list.matching([:]).map(\.id), ["hash:a", "link:b"])
+        XCTAssertEqual(list.matching(["quality": "quality:1080"]).map(\.id), ["link:b"])
+        XCTAssertEqual(list.matching(["quality": "quality:2160", "ready": "ready:now"]).map(\.id), ["hash:a"])
+        XCTAssertEqual(list.items[1].provider, .linked)
+        let old = try JSONDecoder().decode(SourceList.self, from: Data(#"{"items":[]}"#.utf8))
+        XCTAssertTrue(old.filters.isEmpty)
+    }
+
     func testPlayDevice() throws {
         let p = try Fixture.decode(PlayResponse.self, "play_device")
         XCTAssertEqual(p.mode, .device)

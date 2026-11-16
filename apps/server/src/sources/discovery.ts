@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { type AnimeIds, kitsuEpisode, tmdbEpisodeOf } from "../catalog/anime/ids";
 import { runtime } from "#runtime";
 import type { Tmdb } from "../catalog/tmdb";
@@ -9,9 +10,10 @@ import { detailLabel, type Candidate } from "./resolver";
 import type { TorboxClient, TorboxItem } from "./torbox/client";
 import { ingestItem } from "./torbox/sync";
 import { SharedWork } from "../inFlight";
+import { AddonPausedError, type AddonHealth } from "./addonHealth";
 import { globalFetch } from "../net";
 import { targetRef, type TitleTarget } from "../catalog/ref";
-import { addonStreams, defaultAddons, findsStreams, isInfoHash, type StreamAddon } from "./addons";
+import { addonStreams, defaultAddons, findsStreams, isBuiltIn, isInfoHash, manifestUrl, type StreamAddon } from "./addons";
 
 export { isInfoHash, parseSize } from "./addons";
 
@@ -28,9 +30,14 @@ const STRAGGLER_GRACE_MS = 3_000;
 /** The movie or episode releases are looked for. */
 export type DiscoveryTarget = TitleTarget;
 
-/** A torrent release found by a scraper, not (yet) in the library. */
+/**
+ * A release found by a scraper, not (yet) in the library: a torrent (keyed by its info-hash),
+ * or an add-on's link (keyed "link:<digest of the link>", with `link` set).
+ */
 export interface Release {
   hash: string;
+  /** A link stream: the add-on that gave it, and the link it plays from. */
+  link?: { url: string; addonId: string; addonName: string };
   title: string;
   fileName?: string;
   size?: number;
@@ -91,11 +98,17 @@ export class Discovery {
     /** Asked before anything is added to TorBox; throws to refuse (the household's daily limit). */
     private readonly allowAdd: () => Promise<void> = async () => {},
     /** The household's Stremio add-ons (the server's Torrentio until it sets up its own). */
-    private readonly addons: () => StreamAddon[] = () => defaultAddons(settings().torrentioUrl),
+    private readonly addons: () => StreamAddon[] = () => defaultAddons(),
+    /** How each add-on is doing (the dashboard's status), and which are paused. */
+    private readonly health?: AddonHealth,
+    /** Seals a link stream's add-on and address for keeping in the library (see acquireLink). */
+    private readonly sealLink?: (data: string) => string,
   ) {}
 
+  /** Whether it can find anything: TorBox for torrents, or a stream add-on (whose links play without it). */
   get available(): boolean {
-    return this.settings().discoveryEnabled && !!this.torbox();
+    if (!this.settings().discoveryEnabled) return false;
+    return !!this.torbox() || this.addons().some((a) => a.enabled && findsStreams(a) && !isBuiltIn(a));
   }
 
   /** Releases for a title, ranked, excluding ones already in the library. */
@@ -103,12 +116,14 @@ export class Discovery {
     if (!this.available) return [];
     const known = await this.library.knownHashes();
     const { showUncached } = this.settings();
+    // Torrents play through TorBox; without it, only add-ons' links are on offer.
+    const torbox = !!this.torbox();
     return (await this.releases(target))
-      .filter((r) => !known.has(r.hash) && (r.cached || showUncached))
+      .filter((r) => !known.has(r.hash) && (r.cached || showUncached) && (r.link || torbox))
       .map((r) => ({
-        id: `hash:${r.hash}`,
+        id: r.link ? r.hash : `hash:${r.hash}`,
         fileId: 0,
-        provider: "torbox" as const,
+        provider: r.link ? ("link" as const) : ("torbox" as const),
         name: r.fileName ?? r.title,
         size: r.size ?? 0,
         resolution: r.parsed.resolution,
@@ -119,9 +134,10 @@ export class Discovery {
         availability: r.cached ? ("cached" as const) : ("uncached" as const),
         seeders: r.seeders,
         releaseTitle: r.title,
+        languages: r.languages,
         isPack: r.isPack,
         label: r.title,
-        originLabel: "TorBox",
+        originLabel: r.link?.addonName ?? "TorBox",
         detail: detailLabel(r.size ?? 0, r.seeders),
       }));
   }
@@ -134,7 +150,8 @@ export class Discovery {
   /** Cached releases in the order Play tries them: within the size limit first, best first. */
   async cachedReleases(target: DiscoveryTarget): Promise<Release[]> {
     const maxBytes = this.settings().maxReleaseSizeGb * 1024 ** 3;
-    const releases = (await this.releases(target)).filter((r) => r.cached);
+    const torbox = !!this.torbox();
+    const releases = (await this.releases(target)).filter((r) => r.cached && (r.link || torbox));
     const fits = (r: Release) => !maxBytes || !r.size || r.size <= maxBytes;
     return [...releases.filter(fits), ...releases.filter((r) => !fits(r))];
   }
@@ -155,6 +172,7 @@ export class Discovery {
    * ready, and imports its files into the library matched to the target title.
    */
   async acquire(target: DiscoveryTarget, hash: string): Promise<AcquireResult> {
+    if (hash.startsWith("link:")) return this.acquireLink(target, hash);
     hash = hash.toLowerCase();
     if (!isInfoHash(hash)) throw new Error("Invalid info-hash");
     const existing = this.pickFile(await this.library.byHash(hash), target);
@@ -211,6 +229,32 @@ export class Discovery {
   }
 
   /**
+   * Makes a link stream playable: a library file for it, matched to the title, whose ref is
+   * the add-on's link sealed (it carries the add-on's settings, often a debrid key). Only a
+   * link discovery offered for this title qualifies. Followed afresh each time it plays.
+   */
+  private async acquireLink(target: DiscoveryTarget, key: string): Promise<AcquireResult> {
+    const existing = this.pickFile(await this.library.byHash(key), target);
+    if (existing) return { status: "ready", fileId: existing.id };
+    const release = (await this.releases(target)).find((r) => r.hash === key && r.link);
+    if (!release?.link) throw new NoPlayableFileError();
+    if (!this.sealLink) throw new Error("Links can't be kept on this server");
+    const parsed = parseFileName(release.fileName ?? release.title);
+    const row = await this.library.upsert({
+      provider: "link",
+      ref: this.sealLink(JSON.stringify({ a: release.link.addonId, u: release.link.url })),
+      name: release.fileName ?? release.title,
+      size: release.size ?? 0,
+      parsed,
+      sourceHash: key,
+    });
+    const t = targetRef(target);
+    if (target.mediaType === "movie") await this.library.setManualMatch(row.id, t, undefined, undefined, "matched");
+    else await this.library.setManualMatch(row.id, t, target.source === "anilist" ? 1 : target.season, target.episode, "matched");
+    return { status: "ready", fileId: row.id };
+  }
+
+  /**
    * Matches imported files to the title we know they belong to, skipping TMDB search.
    * Movies: only the file the scraper pointed at (or the largest one) — a torrent may be a
    * collection of many films. Shows: every file with a season/episode number.
@@ -261,7 +305,16 @@ export class Discovery {
    * an unreachable service (a host that stopped resolving) costs one log line, not one
    * per lookup.
    */
-  private async scrape(name: string, run: () => Promise<Release[]>): Promise<Release[]> {
+  private async scrape(name: string, run: () => Promise<Release[]>, addonId?: string): Promise<Release[]> {
+    // An add-on's: its health record times it, and pauses it after failures in a row.
+    if (addonId && this.health) {
+      try {
+        return await this.health.track(addonId, name, () => timeout(run(), name));
+      } catch (err) {
+        if (!(err instanceof AddonPausedError)) log.warn(`${name} failed`, err);
+        throw err;
+      }
+    }
     const downUntil = this.scraperDown.get(name) ?? 0;
     // Fails rather than answering "nothing", so the empty answer isn't kept as this source's.
     if (Date.now() < downUntil) throw new Error(`${name} is skipped for now`);
@@ -297,10 +350,17 @@ export class Discovery {
       const key = `${addon.name} (${addon.id})`;
       // Its place in the list is set after the cache: moving it doesn't need a new search.
       const at = (r: Release[]) => r.map((x) => ({ ...x, addonOrder: place * 10_000 + (x.addonOrder ?? 0) }));
-      if (imdbId && tmdbTarget) jobs.push(this.sourceCache.get(`${addon.id}:${cacheKey}:imdb`, () => this.scrape(key, () => this.fromAddon(addon, imdbId, tmdbTarget))).then(at));
-      if (kitsu && kitsuOk) jobs.push(this.sourceCache.get(`${addon.id}:${cacheKey}:kitsu`, () => this.scrape(key, () => this.fromAddon(addon, kitsu, target, true))).then(at));
+      // The built-in entry is the server's Torrentio and TorBox's own search, in its place.
+      if (isBuiltIn(addon)) {
+        const torrentio = this.serverTorrentio(settings.torrentioUrl);
+        if (torrentio && imdbId && tmdbTarget) jobs.push(this.sourceCache.get(`strata:${cacheKey}:imdb`, () => this.scrape("Strata (Torrentio)", () => this.fromAddon(torrentio, imdbId, tmdbTarget), addon.id)).then(at));
+        if (torrentio && kitsu) jobs.push(this.sourceCache.get(`strata:${cacheKey}:kitsu`, () => this.scrape("Strata (Torrentio)", () => this.fromAddon(torrentio, kitsu, target, true), addon.id)).then(at));
+        if (imdbId && tmdbTarget && client) jobs.push(this.sourceCache.get(`torbox:${cacheKey}`, () => this.scrape("TorBox search", () => this.torboxSearch(client, imdbId, tmdbTarget), addon.id)).then(at));
+        continue;
+      }
+      if (imdbId && tmdbTarget) jobs.push(this.sourceCache.get(`${addon.id}:${cacheKey}:imdb`, () => this.scrape(key, () => this.fromAddon(addon, imdbId, tmdbTarget), addon.id)).then(at));
+      if (kitsu && kitsuOk) jobs.push(this.sourceCache.get(`${addon.id}:${cacheKey}:kitsu`, () => this.scrape(key, () => this.fromAddon(addon, kitsu, target, true), addon.id)).then(at));
     }
-    if (imdbId && tmdbTarget && settings.useTorboxSearch && client) jobs.push(this.sourceCache.get(`torbox:${cacheKey}`, () => this.scrape("TorBox search", () => this.torboxSearch(client, imdbId, tmdbTarget))));
 
     // A partial answer isn't remembered: sources left behind finish into sourceCache, and
     // the next lookup puts them in.
@@ -334,10 +394,13 @@ export class Discovery {
     }
 
     // Releases found by IMDb id are checked against TMDB's numbering; Kitsu's are the episode.
+    // Torrents need TorBox to play; links play from their add-on.
     let releases = [...byHash.values()].filter((r) => relevant(r, tmdbTarget ?? target));
+    // A link is as ready as its add-on says.
+    releases = releases.map((r) => (r.link ? { ...r, cached: r.addonCached === true } : r));
     // Fill in cache state for releases TorBox's search didn't report on.
     // TorBox says what it has cached; an add-on's word for it only counts if TorBox can't be asked.
-    const unknown = releases.filter((r) => !r.cached).map((r) => r.hash);
+    const unknown = releases.filter((r) => !r.cached && !r.link).map((r) => r.hash);
     if (client && unknown.length) {
       try {
         const cached = await client.checkCached(unknown);
@@ -359,6 +422,16 @@ export class Discovery {
     const [imdbId, kitsu] = await Promise.all([tmdbTarget ? this.imdbId(tmdbTarget).catch(() => null) : null, this.kitsuId(target).catch(() => null)]);
     const imdb = imdbId && tmdbTarget ? (tmdbTarget.mediaType === "movie" ? imdbId : `${imdbId}:${tmdbTarget.season}:${tmdbTarget.episode}`) : null;
     return { imdb, kitsu };
+  }
+
+  /** The server's Torrentio (its admin sets the address), as an add-on the Strata entry asks. */
+  private serverTorrentio(url: string): StreamAddon | null {
+    if (!url) return null;
+    try {
+      return { id: "strata-torrentio", url: manifestUrl(url), name: "Torrentio", enabled: true, resources: ["stream"], idPrefixes: ["tt", "kitsu"], subtitleIdPrefixes: null, catalogs: [], kind: "stremio", configurable: false, allowPrivate: true };
+    } catch {
+      return null;
+    }
   }
 
   private async imdbId(target: DiscoveryTarget): Promise<string | null> {
@@ -413,8 +486,10 @@ export class Discovery {
     const streams = await addonStreams(addon, target.mediaType === "movie" ? "movie" : "series", id, this.fetchImpl);
     return streams.map((s, i) => {
       const parsed = parseFileName(s.fileName ?? s.title);
+      const link = s.link ? { url: s.link, addonId: addon.id, addonName: addon.name } : undefined;
       return {
-        hash: s.hash,
+        hash: s.hash ?? linkKey(s.link!),
+        link,
         title: s.title,
         fileName: s.fileName,
         size: s.size,
@@ -545,4 +620,9 @@ class ScraperTimeout extends Error {}
 
 function timeout<T>(promise: Promise<T>, label: string): Promise<T> {
   return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new ScraperTimeout(`${label} timed out`)), SCRAPER_TIMEOUT_MS))]);
+}
+
+/** A link stream's key: "link:" and a digest of its address (so the address itself isn't the key). */
+export function linkKey(url: string): string {
+  return `link:${createHash("sha256").update(url).digest("hex").slice(0, 40)}`;
 }

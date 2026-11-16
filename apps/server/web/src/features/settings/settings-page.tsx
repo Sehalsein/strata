@@ -23,7 +23,7 @@ import { UpdatesCard } from "./updates-card";
 import { useSession } from "@/app/session";
 import { Link, navigate, usePath } from "@/lib/router";
 
-const PROVIDER_LABEL: Record<Provider, string> = { local: "Local folders", torbox: "TorBox" };
+const PROVIDER_LABEL: Record<Provider, string> = { local: "Local folders", torbox: "TorBox", link: "Add-on links" };
 
 type SectionId = "general" | "library" | "discovery" | "addons" | "connections" | "server" | "network" | "updates";
 interface Section {
@@ -182,8 +182,7 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
               title="Finding releases"
               description="Playable releases for titles that aren't in the library yet. Cached releases come first, then ones in the household's language (from General), then ones within your limits."
             >
-              <ToggleRow label="Find releases" description="Look for TorBox releases of titles that aren't in the library." checked={draft.discoveryEnabled} onChange={(v) => set("discoveryEnabled", v)} />
-              <ToggleRow label="Use TorBox search" description={<>Also ask TorBox's own search, alongside your <Link href="/settings/addons">add-ons</Link>.</>} checked={draft.useTorboxSearch} onChange={(v) => set("useTorboxSearch", v)} />
+              <ToggleRow label="Find releases" description={<>Look for releases of titles that aren't in the library, with your <Link href="/settings/addons">add-ons</Link>.</>} checked={draft.discoveryEnabled} onChange={(v) => set("discoveryEnabled", v)} />
               <SettingRow
                 label="Order releases by"
                 description={
@@ -340,9 +339,9 @@ function ServerSections({ draft, set, localMedia }: { draft: Settings; set: SetF
           </SettingRow>
         )}
         <SettingRow
-          label="Default add-on"
+          label="Strata's Torrentio"
           htmlFor="default-addon-url"
-          description="The Torrentio-compatible add-on households search with until they set up their own under Add-ons. Empty means none."
+          description="The Torrentio address the built-in Strata add-on searches, for every household. Empty means Strata uses only TorBox's own search."
           error={urlInvalid ? "Enter a full http(s) address." : null}
         >
           <Input id="default-addon-url" className="font-mono sm:w-72" type="url" placeholder="https://torrentio.strem.fun" value={draft.torrentioUrl} onChange={(e) => set("torrentioUrl", e.target.value.trim())} spellCheck={false} autoCapitalize="off" />

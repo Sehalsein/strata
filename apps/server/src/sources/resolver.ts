@@ -23,6 +23,8 @@ export interface Candidate {
   seeders?: number;
   /** Torrent name, for discovered releases. */
   releaseTitle?: string;
+  /** Audio languages a found release says it has (ISO 639-1, "multi" for several). */
+  languages?: string[];
   isPack?: boolean;
   // For the apps to show as they are (they know nothing about providers).
   /** The source's name. */
@@ -33,7 +35,7 @@ export interface Candidate {
   detail?: string;
 }
 
-const PROVIDER_LABEL: Record<FileProvider, string> = { local: "Library", torbox: "TorBox" };
+const PROVIDER_LABEL: Record<FileProvider, string> = { local: "Library", torbox: "TorBox", link: "Add-on" };
 
 /** "48.3 GB", "700 MB"; undefined when unknown. */
 export function sizeLabel(bytes: number): string | undefined {
@@ -84,7 +86,7 @@ export function heightToResolution(height: number, width: number): number {
 
 export function rankCandidates(candidates: Candidate[], settings: Pick<Settings, "sourcePriority" | "maxResolution">): Candidate[] {
   const priority = (p: FileProvider) => {
-    const i = settings.sourcePriority.indexOf(p);
+    const i = (settings.sourcePriority as FileProvider[]).indexOf(p);
     return i === -1 ? 99 : i;
   };
   const withinCap = (c: Candidate) => (c.resolution ?? 1080) <= settings.maxResolution;

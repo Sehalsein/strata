@@ -191,7 +191,8 @@ export interface MediaFolder {
   kind: MediaFolderKind;
 }
 
-export type Provider = "local" | "torbox";
+/** Where a file plays from: this server's disk, TorBox, or an add-on's link. */
+export type Provider = "local" | "torbox" | "link";
 
 export interface Settings {
   serverName: string;
@@ -256,8 +257,13 @@ export interface StreamAddon {
   catalogs: { key: string; name: string; type: "movie" | "show"; home: boolean }[];
   /** It's asked for anime by Kitsu id too. */
   anime: boolean;
-  /** The server's Torrentio, until the household changes its list. */
+  /** The built-in Strata entry (always there; it can be moved or switched off, not edited or removed). */
   isDefault: boolean;
+  builtIn: boolean;
+  /** What a built-in add-on covers, in words. */
+  description?: string;
+  /** How it's doing, as the server last found it. */
+  health: { state: "ok" | "failing" | "paused" | "unknown"; message?: string; at?: number; latencyMs?: number; pausedUntil?: number };
 }
 
 export type SecretKey = "tmdbApiKey" | "torboxApiKey" | "omdbApiKey";

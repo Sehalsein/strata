@@ -3,6 +3,7 @@ import { logger } from "../log";
 import { globalFetch } from "../net";
 import { addonSubtitles, findsSubtitles, type AddonSubtitle, type StreamAddon } from "../sources/addons";
 import type { TitleTarget } from "../catalog/ref";
+import type { AddonHealth } from "../sources/addonHealth";
 
 const log = logger("addon-subtitles");
 
@@ -38,6 +39,7 @@ export class AddonSubtitleFinder {
     /** ISO 639-1 codes, most wanted first. */
     private readonly languages: () => string[],
     private readonly fetchImpl: typeof fetch = globalFetch,
+    private readonly health?: AddonHealth,
   ) {}
 
   /** Whether any add-on is set to find subtitles (so a lookup is worth starting). */
@@ -71,7 +73,8 @@ export class AddonSubtitleFinder {
         const id = ids.imdb && knows(ids.imdb) ? ids.imdb : ids.kitsu && knows(ids.kitsu) ? ids.kitsu : null;
         if (!id) return [];
         const key = `${addon.id}:${addon.url}:${id}:${extra.filename ?? ""}:${extra.videoSize ?? ""}`;
-        const lookup = this.cache.get(key, () => addonSubtitles(addon, type, id, extra, this.fetchImpl));
+        const ask = () => addonSubtitles(addon, type, id, extra, this.fetchImpl);
+        const lookup = this.cache.get(key, () => (this.health ? this.health.track(addon.id, addon.name, ask) : ask()));
         try {
           const found = await Promise.race([lookup, abortion(deadline)]);
           return pick(addon, found, wanted);

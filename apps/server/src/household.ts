@@ -14,7 +14,7 @@ import { ADDS_PER_HOUSEHOLD, PLAY_REPORTS_PER_USER, SEARCHES_PER_HOUSEHOLD, type
 import type { Db } from "./db";
 import { Library } from "./library";
 import type { FfmpegInfo } from "./platform/ffmpeg";
-import { PlaybackService, type UnlabeledTrack } from "./playback/service";
+import { PlaybackError, PlaybackService, type UnlabeledTrack } from "./playback/service";
 import { AddonSubtitleFinder, type OnlineSubtitle } from "./playback/addonSubtitles";
 import { subtitleLanguagesOf } from "./playback/subtitleChoice";
 import { toWebVtt } from "./playback/webvtt";
@@ -25,9 +25,10 @@ import type { ProgressStore } from "./progress";
 import type { SecretBox } from "./secrets";
 import { householdSettingsSchema, HOUSEHOLD_SECRET_KEYS, SettingsStore, type HouseholdSettingsStore, type ServerSettingsStore, type Settings } from "./settings";
 import { Discovery } from "./sources/discovery";
-import { AddonError, assertAddonReady, catalogKey, MAX_HOME_ROWS, defaultAddons, fetchSubtitleFile, findsSubtitles, inspectAddon, keepCatalogChoices, streamAddonListSchema, type StreamAddon } from "./sources/addons";
+import { AddonError, assertAddonReady, catalogKey, followLink, isBuiltIn, MAX_HOME_ROWS, withStrata, defaultAddons, fetchSubtitleFile, findsSubtitles, inspectAddon, keepCatalogChoices, streamAddonListSchema, type StreamAddon } from "./sources/addons";
 import { Buffer } from "node:buffer";
 import { TitleIds } from "./catalog/titleIds";
+import { AddonHealth } from "./sources/addonHealth";
 import { AddonRows } from "./catalog/addonRows";
 import { SharedWork } from "./inFlight";
 import type { TitleTarget } from "./catalog/ref";
@@ -37,9 +38,11 @@ import { syncTorbox } from "./sources/torbox/sync";
 import { scanLocal } from "./sources/local/scanner";
 import type { SecretKey } from "./settings";
 import { runtime } from "#runtime";
+import { logger } from "./log";
 import { AnimeMove } from "./jobs/anilistMove";
 
 const MINUTE = 60_000;
+const log = logger("household");
 
 const PROVIDER_NAMES: Record<SecretKey, string> = { tmdbApiKey: "TMDB", omdbApiKey: "OMDb", torboxApiKey: "TorBox" };
 
@@ -92,6 +95,8 @@ export class Household {
   readonly omdb: Omdb;
   /** Other sites' ids for a title (IMDb, TVDB, Kitsu…) as Strata's own. */
   readonly titleIds: TitleIds;
+  /** How each of its add-ons is doing, for the dashboard (and which are paused). */
+  readonly addonHealth = new AddonHealth();
   /** Subtitles from its subtitle add-ons. */
   readonly onlineSubtitles: AddonSubtitleFinder;
   /** Converted subtitle files, by the add-on's link. */
@@ -112,7 +117,7 @@ export class Household {
     const tmdb = this.tmdb;
     this.library = new Library(db, organizationId, tmdb, new Matcher(tmdb, new AnimeMatcher(shared.anime.anilist, shared.anime.ids, tmdb, shared.anime.kitsu)), shared.anime.anilist);
     this.titleIds = new TitleIds(tmdb, shared.anime.ids);
-    const addonRows = new AddonRows(() => this.addons(), this.titleIds, (refs) => this.catalog.titleCards(refs), (refs) => this.library.availability(refs), shared.fetch);
+    const addonRows = new AddonRows(() => this.addons(), this.titleIds, (refs) => this.catalog.titleCards(refs), (refs) => this.library.availability(refs), shared.fetch, this.addonHealth);
     this.catalog = new CatalogService(tmdb, this.library, shared.progress, settings, shared.anime, this.omdb, [addonRows]);
     this.content = new ContentFilter(db, organizationId, tmdb, settings, shared.anime);
     this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, show) => this.content.allowed(userId, show));
@@ -122,10 +127,33 @@ export class Household {
     const torbox = () => this.torbox();
     this.discovery = new Discovery(tmdb, this.library, settings, torbox, shared.fetch, (id, hash, name) => this.housekeeping.recordAdded(id, hash, name), shared.anime.ids,
       () => shared.throttle.spend(`adds:${organizationId}`, ADDS_PER_HOUSEHOLD, "This household has added a lot of releases to TorBox today."),
-      () => this.addons());
-    this.onlineSubtitles = new AddonSubtitleFinder(() => this.addons(), (t) => this.discovery.stremioIds(t), () => this.subtitleLanguages(), shared.fetch);
+      () => this.addons(), this.addonHealth, (data) => shared.box.seal(data, `link:${organizationId}`));
+    this.onlineSubtitles = new AddonSubtitleFinder(() => this.addons(), (t) => this.discovery.stremioIds(t), () => this.subtitleLanguages(), shared.fetch, this.addonHealth);
     this.playback = new PlaybackService(this.library, shared.sessions, shared.progress, settings, shared.ffmpeg, torbox, this.discovery, (show, s, e) => this.catalog.nextEpisode(show, s, e), (id) => this.housekeeping.recordPlayed(id),
-      (target) => this.subtitlesFor(target));
+      (target) => this.subtitlesFor(target), (ref) => this.followAddonLink(ref));
+  }
+
+  /**
+   * Where a kept add-on link (a library file's sealed ref) plays from now: its add-on's link
+   * followed to the file. The add-on must still be in the list and on.
+   */
+  private async followAddonLink(sealedRef: string): Promise<string> {
+    let claim: { a?: unknown; u?: unknown };
+    try {
+      claim = JSON.parse(this.shared.box.open(sealedRef, `link:${this.organizationId}`));
+    } catch {
+      throw new PlaybackError("This copy can't be played any more. Pick another source.", 410);
+    }
+    const addon = this.addons().find((a) => a.id === claim.a);
+    if (!addon || typeof claim.u !== "string") throw new PlaybackError("The add-on this copy came from has been removed. Pick another source.", 410);
+    if (!addon.enabled) throw new PlaybackError(`${addon.name} is switched off, so this copy can't play. Pick another source.`, 409);
+    const url = claim.u;
+    try {
+      return await this.addonHealth.track(addon.id, addon.name, () => followLink(url, addon, this.shared.fetch));
+    } catch (err) {
+      log.warn(`${addon.name}'s link didn't lead to a file`, err);
+      throw new PlaybackError(`${addon.name} couldn't play this copy just now. Try again, or pick another source.`, 502);
+    }
   }
 
   /** The languages its subtitle add-ons are asked for: as set, else the household's language. */
@@ -255,9 +283,9 @@ export class Household {
    */
   addons(): StreamAddon[] {
     const raw = this.settingsStore.getSecret("streamAddons");
-    if (raw === undefined) return defaultAddons(this.shared.serverSettings.get().torrentioUrl);
+    if (raw === undefined) return defaultAddons();
     const parsed = streamAddonListSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : [];
+    return withStrata(parsed.success ? parsed.data : []);
   }
 
   /**
@@ -305,6 +333,7 @@ export class Household {
     const list = this.addons();
     const at = list.findIndex((a) => a.id === id);
     if (at < 0) return null;
+    if (isBuiltIn(list[at]!)) throw new AddonError("Strata is built in: it has no address to change.");
     const found = await inspectAddon(url, this.shared.fetch, allowPrivate);
     await assertAddonReady(found, this.shared.fetch);
     if (list.some((a, i) => i !== at && a.url === found.url)) throw new AddonError("That add-on is already in the list.");
@@ -326,8 +355,9 @@ export class Household {
     const failed: string[] = [];
     const next = await Promise.all(
       list.map(async (a) => {
+        if (isBuiltIn(a)) return a;
         try {
-          const found = await inspectAddon(a.url, this.shared.fetch, a.allowPrivate);
+          const found = await this.addonHealth.track(a.id, a.name, () => inspectAddon(a.url, this.shared.fetch, a.allowPrivate));
           return { ...a, ...found, catalogs: keepCatalogChoices(found.catalogs, a.catalogs), id: a.id, enabled: a.enabled };
         } catch {
           failed.push(a.name);
@@ -339,14 +369,18 @@ export class Household {
     return failed;
   }
 
+  /** Removes every add-on but the built-in Strata entry (which can only be switched off). */
   async removeAllAddons(): Promise<void> {
-    await this.saveAddons([]);
+    await this.saveAddons(this.addons().filter(isBuiltIn));
   }
 
   async removeAddon(id: string): Promise<boolean> {
     const list = this.addons();
-    if (!list.some((a) => a.id === id)) return false;
+    const addon = list.find((a) => a.id === id);
+    if (!addon) return false;
+    if (isBuiltIn(addon)) throw new AddonError("Strata is built in: switch it off instead.");
     await this.saveAddons(list.filter((a) => a.id !== id));
+    this.addonHealth.forget(id);
     return true;
   }
 

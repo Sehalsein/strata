@@ -379,10 +379,14 @@ public final class StrataClient: Sendable {
     /// What the server can play a title from. `discover` asks it to look further than its
     /// library where it's set up to (takes a few seconds); the list is whatever it returns.
     public func sources(_ target: PlaybackTarget, discover: Bool = false) async throws -> [Candidate] {
+        try await sourceList(target, discover: discover).items
+    }
+
+    /// The sources with the filters the server offers for them (Choose Source).
+    public func sourceList(_ target: PlaybackTarget, discover: Bool = false) async throws -> SourceList {
         var query = target.queryItems
         if discover { query.append(URLQueryItem(name: "discover", value: "1")) }
-        let res: ItemsResponse<Candidate> = try await get("/api/sources", query: query, cached: false)
-        return res.items
+        return try await get("/api/sources", query: query, cached: false)
     }
 
     // MARK: - Playback

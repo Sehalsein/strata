@@ -10,6 +10,25 @@ import { mediaInfoSchema } from "../../media/probe";
 import { parseRef, tmdbRef, type TitleRef, type TitleTarget } from "../../catalog/ref";
 import { legacyCards, type Shelf } from "../../catalog/service";
 import { logger } from "../../log";
+import { collapseDuplicates, withFilters } from "../../sources/sourceFilters";
+
+/** "fr" → "French", in the household's language. */
+function languageNamer(language: string): (code: string) => string {
+  let names: Intl.DisplayNames | null = null;
+  try {
+    names = new Intl.DisplayNames([language, "en"], { type: "language" });
+  } catch {
+    names = null;
+  }
+  return (code) => {
+    try {
+      const n = names?.of(code);
+      return n ? n.charAt(0).toUpperCase() + n.slice(1) : code;
+    } catch {
+      return code;
+    }
+  };
+}
 
 const log = logger("catalog-routes");
 
@@ -181,11 +200,14 @@ export const catalogRoutes = new Hono<Env>()
     const episode = optionalInt(c.req.query("episode"));
     if (title.mediaType === "episode" && (season === undefined || episode === undefined)) throw new HTTPException(400, { message: "season and episode are required for episodes" });
     const target: TitleTarget = { ...title, season, episode };
-    const items = await viewer(c).sources(target);
+    let items = await viewer(c).sources(target);
     if (c.req.query("discover") === "1") {
       items.push(...(await viewer(c).discover(target)));
+      items = collapseDuplicates(items);
     }
-    return c.json({ items });
+    // The filters Choose Source offers, worked out here: the apps draw them as they come.
+    const names = languageNamer(c.var.household.settings().language);
+    return c.json(withFilters(items, names));
   })
 
   .post("/play", async (c) => {

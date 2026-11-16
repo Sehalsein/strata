@@ -7,6 +7,7 @@ import { addonCatalogItems, catalogKey, hasCatalogs, MAX_HOME_ROWS, type AddonCa
 import { formatRef, type TitleRef } from "./ref";
 import type { Shelf, TitleCard } from "./service";
 import type { TitleIds } from "./titleIds";
+import type { AddonHealth } from "../sources/addonHealth";
 
 const log = logger("addon-rows");
 
@@ -38,6 +39,7 @@ export class AddonRows implements ShelfSource {
     private readonly titleCards: (refs: TitleRef[]) => Promise<Map<string, TitleCard>>,
     private readonly availability: (refs: TitleRef[]) => Promise<Map<string, FileProvider[]>>,
     private readonly fetchImpl: typeof fetch = globalFetch,
+    private readonly health?: AddonHealth,
   ) {}
 
   async shelves(): Promise<Shelf[]> {
@@ -67,7 +69,8 @@ export class AddonRows implements ShelfSource {
 
   private async row(addon: StreamAddon, catalog: AddonCatalog): Promise<Shelf> {
     const key = `${addon.id}:${addon.url}:${catalogKey(catalog)}`;
-    const metas = await this.items.get(key, () => addonCatalogItems(addon, catalog, this.fetchImpl));
+    const ask = () => addonCatalogItems(addon, catalog, this.fetchImpl);
+    const metas = await this.items.get(key, () => (this.health ? this.health.track(addon.id, addon.name, ask) : ask()));
     const placed = await Promise.all(metas.slice(0, ROW_LENGTH * 2).map(async (m) => ({ meta: m, ref: await this.ids.resolve(m.id, m.type === "movie" ? "movie" : "show") })));
     const seen = new Set<string>();
     const kept = placed

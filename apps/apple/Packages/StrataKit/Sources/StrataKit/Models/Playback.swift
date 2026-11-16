@@ -124,6 +124,9 @@ public struct Candidate: Codable, Sendable, Hashable, Identifiable {
     public var label: String?
     public var originLabel: String?
     public var detail: String?
+    /// The filter options this source falls under (`SourceFilterGroup` option ids), as the
+    /// server says: the app only matches them, it never works them out.
+    public var filterTags: [String]?
 
     public var readiness: Readiness { Readiness(availability) }
 
@@ -175,6 +178,52 @@ public struct Candidate: Codable, Sendable, Hashable, Identifiable {
         case 8: "7.1"
         default: "\(channels)ch"
         }
+    }
+}
+
+/// A group of Choose Source's filters, as the server offers it ("Quality": 4K, 1080p…).
+/// One option per group can be picked; a source shows when its `filterTags` include every
+/// picked option.
+public struct SourceFilterGroup: Codable, Sendable, Hashable, Identifiable {
+    public struct Option: Codable, Sendable, Hashable, Identifiable {
+        public var id: String
+        public var label: String
+        public var count: Int
+    }
+
+    public var id: String
+    public var title: String
+    public var options: [Option]
+
+    public init(id: String, title: String, options: [Option]) {
+        self.id = id
+        self.title = title
+        self.options = options
+    }
+}
+
+/// `GET /api/sources`: the sources, best first, and the filters worth offering for them.
+/// Older servers send no filters.
+public struct SourceList: Codable, Sendable, Hashable {
+    public var items: [Candidate]
+    public var filters: [SourceFilterGroup]
+
+    public init(items: [Candidate], filters: [SourceFilterGroup] = []) {
+        self.items = items
+        self.filters = filters
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        items = try c.decode([Candidate].self, forKey: .items)
+        filters = (try? c.decodeIfPresent([SourceFilterGroup].self, forKey: .filters)) ?? []
+    }
+
+    /// The sources that match every picked option (by group id → option id).
+    public func matching(_ picked: [String: String]) -> [Candidate] {
+        let wanted = picked.values
+        guard !wanted.isEmpty else { return items }
+        return items.filter { c in wanted.allSatisfy { (c.filterTags ?? []).contains($0) } }
     }
 }
 

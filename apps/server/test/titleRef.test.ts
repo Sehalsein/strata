@@ -150,7 +150,7 @@ describe("the API by ref", () => {
     expect((await server.request("/api/sources?ref=tmdb:show:9001", { token })).status).toBe(400); // no episode
     expect((await server.request("/api/sources?ref=bad", { token })).status).toBe(400);
     // Nothing from AniList in the library yet.
-    expect(await json(await server.request("/api/sources?ref=anilist:movie:1&discover=1", { token }))).toEqual({ items: [] });
+    expect(await json(await server.request("/api/sources?ref=anilist:movie:1&discover=1", { token }))).toEqual({ items: [], filters: [] });
   });
 
   test("plays: kept by source and titleId; ones from before sources are TMDB's", async () => {
