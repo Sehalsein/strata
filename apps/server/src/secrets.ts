@@ -41,16 +41,6 @@ export class SecretBox {
     return createHmac("sha256", this.key).update("strata/signing").digest();
   }
 
-  /** A tag proving this server made `data` for `purpose` (base64url HMAC-SHA256). */
-  mac(purpose: string, data: string): string {
-    return createHmac("sha256", this.key).update(`strata/mac/${purpose}\0${data}`).digest("base64url");
-  }
-
-  /** Whether `tag` is this server's `mac(purpose, data)`, in constant time. */
-  verifyMac(purpose: string, data: string, tag: string): boolean {
-    return sameSecret(tag, this.mac(purpose, data));
-  }
-
   /** Seals `plain`, bound to `context` (the setting's name). */
   seal(plain: string, context: string): string {
     const iv = randomBytes(12);

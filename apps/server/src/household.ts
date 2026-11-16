@@ -25,7 +25,7 @@ import type { ProgressStore } from "./progress";
 import type { SecretBox } from "./secrets";
 import { householdSettingsSchema, HOUSEHOLD_SECRET_KEYS, SettingsStore, type HouseholdSettingsStore, type ServerSettingsStore, type Settings } from "./settings";
 import { Discovery } from "./sources/discovery";
-import { AddonError, defaultAddons, fetchSubtitleFile, findsSubtitles, inspectAddon, streamAddonListSchema, type StreamAddon } from "./sources/addons";
+import { AddonError, assertAddonReady, defaultAddons, fetchSubtitleFile, findsSubtitles, inspectAddon, streamAddonListSchema, type StreamAddon } from "./sources/addons";
 import { Buffer } from "node:buffer";
 import { SharedWork } from "./inFlight";
 import type { TitleTarget } from "./catalog/ref";
@@ -144,12 +144,13 @@ export class Household {
   }
 
   /**
-   * A link to one add-on subtitle that only this server could have made, for this household:
-   * it holds the add-on's file address, so it can't be used to fetch anything else.
+   * A link to one add-on subtitle that only this server could have made, for this household.
+   * The add-on and its file's address are sealed (encrypted and authenticated), so the apps
+   * never see the address (it may hold the add-on's key) and can't point it anywhere else.
    */
   private subtitleToken(s: OnlineSubtitle): string {
-    const data = Buffer.from(JSON.stringify({ a: s.addonId, u: s.url }), "utf8").toString("base64url");
-    return `${data}.${this.shared.box.mac(`subtitle:${this.organizationId}`, data)}`;
+    const sealed = this.shared.box.seal(JSON.stringify({ a: s.addonId, u: s.url }), `subtitle:${this.organizationId}`);
+    return Buffer.from(sealed, "utf8").toString("base64url");
   }
 
   /**
@@ -157,18 +158,16 @@ export class Household {
    * this household's or its add-on is gone or off. Throws when the file can't be had.
    */
   async addonSubtitleVtt(token: string): Promise<string | null> {
-    const [data, tag] = token.split(".");
-    if (!data || !tag || !this.shared.box.verifyMac(`subtitle:${this.organizationId}`, data, tag)) return null;
     let claim: { a?: unknown; u?: unknown };
     try {
-      claim = JSON.parse(Buffer.from(data, "base64url").toString("utf8"));
+      claim = JSON.parse(this.shared.box.open(Buffer.from(token, "base64url").toString("utf8"), `subtitle:${this.organizationId}`));
     } catch {
       return null;
     }
     const addon = this.addons().find((a) => a.id === claim.a && a.enabled && findsSubtitles(a));
     if (!addon || typeof claim.u !== "string") return null;
     const url = claim.u;
-    return this.subtitleFiles.get(url, async () => toWebVtt(await fetchSubtitleFile(url, addon.allowPrivate, this.shared.fetch)));
+    return this.subtitleFiles.get(url, async () => toWebVtt(await fetchSubtitleFile(url, addon, this.shared.fetch)));
   }
 
   /** One person's view of the catalog, with their content limit applied (see Viewer). */
@@ -261,6 +260,7 @@ export class Household {
    */
   async addAddon(url: string, allowPrivate = false): Promise<StreamAddon> {
     const found = await inspectAddon(url, this.shared.fetch, allowPrivate);
+    await assertAddonReady(found, this.shared.fetch);
     const list = this.addons();
     if (list.some((a) => a.url === found.url)) throw new AddonError("That add-on is already in the list.");
     if (list.length >= MAX_ADDONS) throw new AddonError(`A household can have up to ${MAX_ADDONS} add-ons.`);
@@ -287,6 +287,7 @@ export class Household {
     const at = list.findIndex((a) => a.id === id);
     if (at < 0) return null;
     const found = await inspectAddon(url, this.shared.fetch, allowPrivate);
+    await assertAddonReady(found, this.shared.fetch);
     if (list.some((a, i) => i !== at && a.url === found.url)) throw new AddonError("That add-on is already in the list.");
     // A new id: it's no longer the server's default once it points somewhere else.
     const addon: StreamAddon = { ...found, id: found.url === list[at]!.url ? id : crypto.randomUUID(), enabled: list[at]!.enabled };

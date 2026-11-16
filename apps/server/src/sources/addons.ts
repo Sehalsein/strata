@@ -193,7 +193,7 @@ const manifestSchema = z.object({
   resources: z.array(z.union([z.string(), z.object({ name: z.string(), types: z.array(z.string()).optional(), idPrefixes: z.array(z.string()).optional() })])).default([]),
   types: z.array(z.string()).default([]),
   idPrefixes: z.array(z.string()).optional(),
-  behaviorHints: z.object({ configurable: z.boolean().optional() }).passthrough().optional(),
+  behaviorHints: z.object({ configurable: z.boolean().optional(), configurationRequired: z.boolean().optional() }).passthrough().optional(),
 });
 
 /** Reads an add-on's manifest and checks it can find streams or subtitles for movies or shows. */
@@ -211,6 +211,7 @@ export async function inspectAddon(input: string, fetchImpl: typeof fetch = glob
   if (!parsed.success) throw new AddonError("That address isn't a Stremio add-on manifest.");
   const m = parsed.data;
   const label = m.name ?? "That add-on";
+  if (m.behaviorHints?.configurationRequired) throw new AddonError(needsSetup(label));
   const resource = (name: "stream" | "subtitles") => {
     const r = m.resources.find((x) => (typeof x === "string" ? x : x.name) === name);
     if (!r) return null;
@@ -235,6 +236,34 @@ export async function inspectAddon(input: string, fetchImpl: typeof fetch = glob
     configurable: !!m.behaviorHints?.configurable,
     allowPrivate,
   };
+}
+
+const needsSetup = (name: string) =>
+  `${name} needs setting up first. Open its configure page, set it up (most want your TorBox key), and paste the manifest URL it gives you.`;
+
+/** A film every stream add-on has, to see whether a new one answers with anything usable. */
+const KNOWN_MOVIE = "tt0111161";
+
+/**
+ * Refuses a stream add-on that answers but isn't set up: one that turns the request away
+ * (401/403) or answers only with a "configure this add-on" note, as Comet and Jackettio do
+ * at their bare address. Anything else (no answer, nothing for this film) is let through:
+ * it may only have some titles. Subtitle-only add-ons say so in their manifest instead.
+ */
+export async function assertAddonReady(addon: Omit<StreamAddon, "id" | "enabled">, fetchImpl: typeof fetch = globalFetch): Promise<void> {
+  if (!addon.resources.includes("stream") || addon.kind === "aiostreams") return;
+  let res: Response;
+  try {
+    res = await addonFetch(`${addonBase(addon.url)}/stream/movie/${KNOWN_MOVIE}.json`, addon.allowPrivate, fetchImpl, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
+  } catch {
+    return;
+  }
+  if (res.status === 401 || res.status === 403) throw new AddonError(needsSetup(addon.name));
+  if (!res.ok) return;
+  const body = (await readJson(res).catch(() => null)) as { streams?: StremioStream[] } | null;
+  const streams = body?.streams ?? [];
+  const asksForSetup = (st: StremioStream) => /configur|set ?up|api ?key|debrid|install/i.test(`${st.name ?? ""} ${st.title ?? ""} ${st.description ?? ""}`);
+  if (streams.length && streams.every((st) => !streamHash(st) && asksForSetup(st))) throw new AddonError(needsSetup(addon.name));
 }
 
 /** Whether an add-on is asked for streams / subtitles. */
@@ -280,14 +309,17 @@ export async function addonSubtitles(
 const MAX_SUBTITLE_BYTES = 5 * 1024 * 1024;
 
 /**
- * A subtitle file's bytes. Subtitle hosts often redirect to where the file is, so up to
- * three redirects are followed, each checked like the first address.
+ * A subtitle file's bytes, for one of `addon`'s subtitles. Subtitle hosts often redirect to
+ * where the file is, so up to three redirects are followed, each checked like the first.
  */
-export async function fetchSubtitleFile(url: string, allowPrivate: boolean, fetchImpl: typeof fetch = globalFetch): Promise<Uint8Array> {
+export async function fetchSubtitleFile(url: string, addon: Pick<StreamAddon, "url" | "allowPrivate">, fetchImpl: typeof fetch = globalFetch): Promise<Uint8Array> {
+  // An add-on the server's admin let be on the home network may serve its own files from
+  // there, but it can't send Strata anywhere else on that network.
+  const ownHost = new URL(addon.url).host;
   let at = url;
   for (let hop = 0; hop < 4; hop++) {
     if (!/^https?:\/\//i.test(at)) throw new AddonError("That subtitle's address isn't a web address.");
-    if (!allowPrivate) await assertPublicHost(at);
+    if (!(addon.allowPrivate && new URL(at).host === ownHost)) await assertPublicHost(at);
     const res = await fetchImpl(at, { redirect: "manual", signal: AbortSignal.timeout(15_000) });
     if (res.status >= 300 && res.status < 400) {
       const next = res.headers.get("location");

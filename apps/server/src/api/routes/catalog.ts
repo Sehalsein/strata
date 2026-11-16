@@ -207,8 +207,8 @@ export const catalogRoutes = new Hono<Env>()
   })
 
   // A subtitle from one of the household's subtitle add-ons, as WebVTT. The token (from a
-  // play response) is signed for this household and names the add-on and its file.
-  .get("/subtitles/:file{[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.vtt}", async (c) => {
+  // play response) is sealed for this household and names the add-on and its file.
+  .get("/subtitles/:file{[A-Za-z0-9_-]{1,4096}\\.vtt}", async (c) => {
     const token = c.req.param("file").replace(/\.vtt$/, "");
     let vtt: string | null;
     try {

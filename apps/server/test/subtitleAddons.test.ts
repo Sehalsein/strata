@@ -3,7 +3,6 @@ import { addonSubtitles, fetchSubtitleFile, inspectAddon, setResolverForTests, t
 import { AddonSubtitleFinder, normalizeLanguage } from "../src/playback/addonSubtitles";
 import { toWebVtt } from "../src/playback/webvtt";
 import { chooseSubtitle, labelTracks } from "../src/playback/subtitleChoice";
-import { SecretBox } from "../src/secrets";
 
 setResolverForTests(async (host) => (host.startsWith("rebound.") ? ["10.0.0.7"] : ["93.184.215.14"]));
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
@@ -82,8 +81,9 @@ describe("subtitle add-ons", () => {
       if (url === "https://dl.example/bad") return new Response(null, { status: 302, headers: { Location: "https://rebound.example/x" } });
       return new Response("?", { status: 404 });
     }) as unknown as typeof fetch;
-    expect(new TextDecoder().decode(await fetchSubtitleFile("https://dl.example/1", false, fetchImpl))).toBe("ok");
-    await expect(fetchSubtitleFile("https://dl.example/bad", false, fetchImpl)).rejects.toThrow("home network");
+    const addon = { url: "https://subs.example/manifest.json", allowPrivate: false };
+    expect(new TextDecoder().decode(await fetchSubtitleFile("https://dl.example/1", addon, fetchImpl))).toBe("ok");
+    await expect(fetchSubtitleFile("https://dl.example/bad", addon, fetchImpl)).rejects.toThrow("home network");
   });
 
   test("language codes become ISO 639-1", () => {
@@ -131,13 +131,19 @@ describe("finding a title's subtitles", () => {
   });
 });
 
-describe("signed subtitle links", () => {
-  test("a tag only matches its own purpose and data", () => {
-    const box = SecretBox.fromBase64(Buffer.alloc(32, 7).toString("base64"), "test");
-    const tag = box.mac("subtitle:org-1", "data");
-    expect(box.verifyMac("subtitle:org-1", "data", tag)).toBe(true);
-    expect(box.verifyMac("subtitle:org-2", "data", tag)).toBe(false);
-    expect(box.verifyMac("subtitle:org-1", "datb", tag)).toBe(false);
+describe("hostile subtitle files", () => {
+  test("a long line of unclosed brackets converts in linear time", () => {
+    const line = "{\\".repeat(200_000) + "<".repeat(200_000);
+    const t0 = performance.now();
+    expect(toWebVtt(enc(`1\n00:00:01,000 --> 00:00:02,000\nok${line}\n`))).toContain("ok{");
+    expect(performance.now() - t0).toBeLessThan(1_000);
+  });
+
+  test("a subtitle from a home-network add-on may only come from that add-on's own host", async () => {
+    const fetchImpl = (async (url: string) => new Response(`from ${new URL(url).host}`)) as unknown as typeof fetch;
+    const local = { url: "http://192.168.1.5:7000/manifest.json", allowPrivate: true };
+    expect(new TextDecoder().decode(await fetchSubtitleFile("http://192.168.1.5:7000/subs/1.srt", local, fetchImpl))).toBe("from 192.168.1.5:7000");
+    await expect(fetchSubtitleFile("http://192.168.1.9/admin", local, fetchImpl)).rejects.toThrow("home network");
   });
 });
 

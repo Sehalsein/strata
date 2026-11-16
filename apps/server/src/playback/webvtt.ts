@@ -79,9 +79,9 @@ function assCues(text: string): Cue[] {
     const get = (name: string) => fields[columns.indexOf(name)];
     const start = assTime(get("start"));
     const end = assTime(get("end"));
-    const raw = get("text") ?? "";
+    const { text: raw, drawing } = stripMarkup(get("text") ?? "");
     // Drawings ({\p1}…) are shapes, not words.
-    if (/\{[^}]*\\p[1-9]/.test(raw)) continue;
+    if (drawing) continue;
     const body = clean(raw.replace(/\\[Nn]/g, "\n").replace(/\\h/g, " "));
     if (start !== null && end !== null && body && end > start) cues.push({ start, end, text: body });
   }
@@ -93,12 +93,38 @@ function assTime(value?: string): number | null {
   return m ? ms(m[1], m[2]!, m[3]!, m[4]!) : null;
 }
 
+/**
+ * The text without {…} blocks (ASS overrides like {\an8}) and <…> tags, in one pass over it
+ * (a file is untrusted: no pattern that backtracks over a long line); `drawing` when a
+ * block turns on shape drawing ({\p1}).
+ */
+function stripMarkup(text: string): { text: string; drawing: boolean } {
+  const parts: string[] = [];
+  let drawing = false;
+  // Once a kind of bracket has no closing one ahead, it never will: stop looking.
+  const unclosed = { "{": false, "<": false };
+  let from = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if ((ch !== "{" && ch !== "<") || unclosed[ch]) continue;
+    const close = text.indexOf(ch === "{" ? "}" : ">", i + 1);
+    if (close < 0) {
+      unclosed[ch] = true;
+      continue;
+    }
+    if (ch === "{" && /\\p[1-9]/.test(text.slice(i + 1, close))) drawing = true;
+    parts.push(text.slice(from, i));
+    from = close + 1;
+    i = close;
+  }
+  parts.push(text.slice(from));
+  return { text: parts.join(""), drawing };
+}
+
 /** Plain lines: no ASS overrides ({\an8}), HTML-ish tags or entities, no blank lines. */
 function clean(text: string): string {
-  return text
-    .replace(/\{\\[^}]*\}/g, "")
-    .replace(/<[^>]*>/g, "")
-    .replace(/&nbsp;/g, " ")
+  return stripMarkup(text)
+    .text.replace(/&nbsp;/g, " ")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&amp;/g, "&")

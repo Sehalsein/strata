@@ -46,6 +46,9 @@ export function configureApiAuth(next: ApiAuth) {
   auth = next;
 }
 
+/** The request got no answer (the server is down or restarting), as opposed to an error from it. */
+export const isUnreachable = (err: unknown) => err instanceof ApiError && err.status === 0;
+
 export async function request<T>(method: string, path: string, body?: unknown, opts: { auth?: boolean } = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (opts.auth !== false) Object.assign(headers, auth.headers());

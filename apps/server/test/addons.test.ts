@@ -1,6 +1,6 @@
 import { newSetupCode } from "../src/setupCode";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { addonStreams, AddonError, assertPublicHost, setResolverForTests, inspectAddon, isPublicAddress, languageCodes, languagesFromText, manifestUrl, type StreamAddon } from "../src/sources/addons";
+import { addonStreams, AddonError, assertAddonReady, assertPublicHost, setResolverForTests, inspectAddon, isPublicAddress, languageCodes, languagesFromText, manifestUrl, type StreamAddon } from "../src/sources/addons";
 import { rankReleases, type Release } from "../src/sources/discovery";
 import { parseFileName } from "../src/media/parse";
 import { fakeTmdb, startTestServer, type TestServer } from "./helpers";
@@ -222,5 +222,37 @@ describe("add-ons in the dashboard", () => {
     // An empty list stays empty: it doesn't fall back to Torrentio.
     expect(await list()).toEqual([]);
     expect((await server.request("/api/admin/addons/nope", { method: "DELETE", token })).status).toBe(404);
+  });
+});
+
+describe("add-ons that aren't set up", () => {
+  const manifest = (over: Record<string, unknown> = {}) => ({ id: "x", name: "Thing", resources: ["stream"], types: ["movie"], ...over });
+
+  test("a manifest that says it needs configuring is refused, with what to do", async () => {
+    const fetchImpl = (async () => json(manifest({ resources: ["subtitles"], behaviorHints: { configurable: true, configurationRequired: true } }))) as unknown as typeof fetch;
+    await expect(inspectAddon("https://subs.example", fetchImpl)).rejects.toThrow("needs setting up first");
+  });
+
+  test("a stream add-on that turns requests away, or only asks to be configured, is refused", async () => {
+    const answers: Record<string, () => Response> = {
+      forbidden: () => new Response("no", { status: 403 }),
+      configure: () => json({ streams: [{ name: "Thing", title: "ℹ Kindly configure this addon to access streams.", url: "https://configure.example/x" }] }),
+      empty: () => json({ streams: [] }),
+      works: () => json({ streams: [{ name: "Thing", title: "Film 1080p", infoHash: H("a") }] }),
+      down: () => new Response("oops", { status: 500 }),
+    };
+    for (const [kind, expectRefused] of [["forbidden", true], ["configure", true], ["empty", false], ["works", false], ["down", false]] as const) {
+      const fetchImpl = (async () => answers[kind]!()) as unknown as typeof fetch;
+      const check = assertAddonReady({ ...addon(), name: "Thing" }, fetchImpl);
+      if (expectRefused) await expect(check).rejects.toThrow("Thing needs setting up first");
+      else await expect(check).resolves.toBeUndefined();
+    }
+  });
+
+  test("subtitle-only add-ons aren't asked for streams", async () => {
+    let called = false;
+    const fetchImpl = (async () => ((called = true), new Response("no", { status: 403 }))) as unknown as typeof fetch;
+    await assertAddonReady({ ...addon(), resources: ["subtitles"] }, fetchImpl);
+    expect(called).toBe(false);
   });
 });

@@ -641,11 +641,13 @@ describe("playback", () => {
       expect(vtt.status).toBe(200);
       expect(vtt.headers.get("content-type")).toContain("text/vtt");
       expect(await vtt.text()).toBe("WEBVTT\n\n00:00:01.000 --> 00:00:02.500\nBonjour de Strata\n");
-      // A changed link isn't this server's; without a token there's nothing at all.
-      const [data, tag] = online[0].url.replace("/api/subtitles/", "").replace(".vtt", "").split(".");
+      // The link doesn't show the add-on's file address, a made-up one isn't this server's,
+      // and without signing in there's nothing at all.
+      expect(online[0].url).not.toContain("subs.test");
+      expect(Buffer.from(online[0].url.replace("/api/subtitles/", "").replace(".vtt", ""), "base64url").toString()).not.toContain("subs.test");
       const forged = Buffer.from(JSON.stringify({ a: added.id, u: "https://subs.test/files/de.srt" })).toString("base64url");
-      expect((await server.request(`/api/subtitles/${forged}.${tag}.vtt`, { token })).status).toBe(404);
-      expect((await server.request(`/api/subtitles/${data}.${tag}.vtt`)).status).toBe(401);
+      expect((await server.request(`/api/subtitles/${forged}.vtt`, { token })).status).toBe(404);
+      expect((await server.request(online[0].url)).status).toBe(401);
       // An add-on that's off serves nothing.
       await server.request(`/api/admin/addons/${added.id}`, { method: "PATCH", token, json: { enabled: false } });
       expect((await server.request(online[0].url, { token })).status).toBe(404);

@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { CircleAlert, type LucideIcon } from "lucide-react";
-import { errorMessage } from "@/lib/api";
+import { errorMessage, isUnreachable } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -25,13 +25,21 @@ export function Page({ children, className }: { children: ReactNode; className?:
 
 /** A failed load, with an optional retry. */
 export function ErrorAlert({ error, title = "Something went wrong", onRetry, className }: { error: unknown; title?: string; onRetry?: () => void; className?: string }) {
+  const unreachable = isUnreachable(error);
+  // When the server didn't answer, try again by itself every few seconds: it's usually
+  // restarting, and the page should come back on its own once it's up.
+  useEffect(() => {
+    if (!unreachable || !onRetry) return;
+    const timer = setInterval(onRetry, 5_000);
+    return () => clearInterval(timer);
+  }, [unreachable, onRetry]);
   if (!error) return null;
   return (
     <Alert variant="destructive" className={className}>
       <CircleAlert />
-      <AlertTitle>{title}</AlertTitle>
+      <AlertTitle>{unreachable ? "Can't reach the server" : title}</AlertTitle>
       <AlertDescription>
-        <p>{typeof error === "string" ? error : errorMessage(error)}</p>
+        <p>{unreachable ? "It may be restarting. Trying again by itself…" : typeof error === "string" ? error : errorMessage(error)}</p>
         {onRetry && (
           <Button variant="outline" size="sm" className="mt-1" onClick={onRetry}>
             Try again
