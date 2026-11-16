@@ -46,6 +46,8 @@ public struct SavedSignIn: Codable, Sendable, Hashable, Identifiable {
     public var isServerAdmin: Bool
     /// Signed in with a temporary password from an admin: a new one comes first.
     public var mustChangePassword: Bool?
+    /// Joined without choosing a password: the app reminds them to set one.
+    public var needsPassword: Bool?
 
     public init(serverID: String, userID: String, username: String?, name: String, household: Household? = nil,
                 viewerOnly: Bool = false, isServerAdmin: Bool = false) {
@@ -339,6 +341,49 @@ public final class ServerStore {
         }
     }
 
+    /// How someone joins by invitation: a new account, or one they already have here.
+    public enum InvitationAccount: Sendable {
+        /// `password` nil: choose one later (the account gets a random one nobody knows and
+        /// is marked as needing one; a code from an admin signs it in meanwhile).
+        case new(email: String, username: String, name: String, password: String?)
+        case existing(login: String, password: String)
+    }
+
+    /// Joins a household by invitation (from its link or QR code): creates the account or
+    /// signs in to an existing one, accepts the invitation, opens its household, then saves
+    /// the sign-in and makes it active. Returns false and sets `lastError` on failure.
+    @discardableResult
+    public func acceptInvitation(_ invitationId: String, url: URL, as account: InvitationAccount) async -> Bool {
+        isAuthenticating = true
+        lastError = nil
+        defer { isAuthenticating = false }
+        do {
+            let anon = StrataClient(baseURL: url, session: session, cacheTTL: 0)
+            let info = try await anon.info()
+            let token: String
+            switch account {
+            case let .new(email, username, name, password):
+                let chosen = password ?? Self.randomPassword()
+                let made = try await anon.signUp(email: email, username: username, name: name, password: chosen, invitationId: invitationId, passwordLater: password == nil)
+                if let made { token = made } else { token = try await anon.signIn(login: username, password: chosen) }
+            case let .existing(login, password):
+                do {
+                    token = try await anon.signIn(login: login, password: password)
+                } catch let e as StrataError where e.status == 401 {
+                    throw StrataError(kind: .http, status: 401, message: String(localized: "Wrong username or password.", bundle: .module))
+                }
+            }
+            try await StrataClient(baseURL: url, token: token, session: session, cacheTTL: 0).acceptInvitation(id: invitationId)
+            try await adopt(token: token, url: url, info: info)
+            Log.auth.info("joined by invitation server=\(info.id, privacy: .public)")
+            return true
+        } catch {
+            lastError = StrataError.wrap(error).message
+            Log.auth.error("joining by invitation failed: \(StrataError.wrap(error).message, privacy: .public)")
+            return false
+        }
+    }
+
     /// Finishes a sign-in that produced `token` some other way (a TV approved by code from
     /// a phone): saves it and makes it active.
     @discardableResult
@@ -477,6 +522,19 @@ public final class ServerStore {
     }
 
     // MARK: - Account
+
+    /// A password nobody will know, for an account whose owner chooses theirs later.
+    private static func randomPassword() -> String {
+        (0..<4).map { _ in UUID().uuidString }.joined()
+    }
+
+    /// Sets the first password of the active account, which joined without choosing one
+    /// (`SavedSignIn.needsPassword`): no current password needed. Throws `StrataError`.
+    public func setFirstPassword(_ password: String) async throws {
+        guard let client else { throw Self.signedOut }
+        try await client.setFirstPassword(password)
+        await refreshActive()
+    }
 
     /// Changes the active account's password, which signs it out everywhere else; this
     /// device keeps going with the new session the server returns. Throws `StrataError`
@@ -713,5 +771,6 @@ extension SavedSignIn {
         viewerOnly = me.viewerOnly
         isServerAdmin = me.user.isServerAdmin
         mustChangePassword = me.mustChangePassword
+        needsPassword = me.needsPassword
     }
 }

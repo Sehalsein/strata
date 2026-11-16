@@ -110,15 +110,7 @@ export function App() {
     );
   } else if (inviteId && !info.data.setupRequired) {
     screen = (
-      <InvitePage
-        invitationId={decodeURIComponent(inviteId)}
-        serverName={info.data.serverName}
-        me={me.data ?? null}
-        onJoined={async () => {
-          await authChanged();
-          navigate("/", { replace: true });
-        }}
-      />
+      <InvitePage invitationId={decodeURIComponent(inviteId)} serverName={info.data.serverName} />
     );
   } else if (info.data.setupRequired || inWizard) {
     screen = (

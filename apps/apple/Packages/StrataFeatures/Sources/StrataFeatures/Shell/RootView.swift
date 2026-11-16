@@ -72,6 +72,10 @@ public struct RootView: View {
         .sheet(item: Binding(get: { services.coordinator.pendingSignIn }, set: { services.coordinator.pendingSignIn = $0 })) { request in
             SignInCodeView(request: request)
         }
+        // An invitation's QR code or link: create the account (or sign in) and join.
+        .sheet(item: Binding(get: { services.coordinator.pendingInvite }, set: { services.coordinator.pendingInvite = $0 })) { request in
+            InviteView(request: request)
+        }
         #if os(iOS)
         // A TV's sign-in link was opened: confirm and approve it.
         .sheet(item: Binding(get: { services.store.signIns.isEmpty ? nil : services.coordinator.pendingLink },

@@ -108,6 +108,9 @@ public struct Me: Codable, Sendable, Hashable {
     /// Signed in with a temporary password from an admin: until a new one is chosen, the
     /// server answers nothing else. Absent from older servers.
     public var mustChangePassword: Bool?
+    /// Joined by invitation without choosing a password: they sign in with a code from
+    /// their admin until they set one. Absent from older servers.
+    public var needsPassword: Bool?
 
     public init(user: User, viewerOnly: Bool = false, household: Household? = nil) {
         self.user = user
@@ -235,6 +238,20 @@ public struct DeviceCodeStatus: Codable, Sendable, Hashable {
     }
 
     public var isPending: Bool { status == "pending" }
+}
+
+/// An invitation to a household (`GET /api/invitations/<id>`), as whoever holds its link
+/// sees it.
+public struct Invitation: Codable, Sendable, Hashable {
+    /// The email it's for: signing up (or in) needs an account with this address.
+    public var email: String
+    /// The email already has an account on this server: joining asks only for its password.
+    public var hasAccount: Bool?
+    public var role: String
+    /// The household's name.
+    public var household: String
+    public var serverName: String
+    public var expiresAt: String
 }
 
 /// A sign-in's answer: the token is in the `set-auth-token` header and the body.

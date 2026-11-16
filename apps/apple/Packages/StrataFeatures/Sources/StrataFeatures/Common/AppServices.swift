@@ -213,6 +213,39 @@ public struct SignInCodeRequest: Identifiable, Hashable {
     public var id: String { code }
 }
 
+/// An invitation to a household: its QR code in the dashboard
+/// (`strata://invite?server=<address>&id=<id>`), or the link passed on as text
+/// (`https://<server>/invite/<id>`, whose page opens the app).
+public struct InviteRequest: Identifiable, Hashable {
+    public let server: URL
+    public let invitationId: String
+    public var id: String { invitationId }
+
+    public init?(_ url: URL) {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        switch url.scheme?.lowercased() {
+        case "strata" where url.host == "invite":
+            guard let id = query.first(where: { $0.name == "id" })?.value, !id.isEmpty,
+                  let server = query.first(where: { $0.name == "server" })?.value.flatMap(URL.init(string:)),
+                  server.scheme == "http" || server.scheme == "https", server.host != nil else { return nil }
+            self.server = server
+            self.invitationId = id
+        case "http", "https":
+            let parts = url.pathComponents.filter { $0 != "/" }
+            guard parts.count == 2, parts[0] == "invite", !parts[1].isEmpty,
+                  var origin = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+            origin.path = ""
+            origin.query = nil
+            origin.fragment = nil
+            guard let server = origin.url else { return nil }
+            self.server = server
+            self.invitationId = parts[1]
+        default:
+            return nil
+        }
+    }
+}
+
 /// A TV's sign-in code to approve, from a scanned QR code or typed in Settings.
 public struct LinkRequest: Identifiable, Hashable {
     public let code: String
@@ -242,6 +275,7 @@ public struct TVLinkRequest: Identifiable, Hashable {
 /// title's page: a link never starts playback by itself),
 /// `strata://link?user_code=<code>&server=<id or address>` (approve a TV's sign-in),
 /// `strata://sign-in?server=<address>&code=<code>` (a member's QR code: sign in as them),
+/// `strata://invite?server=<address>&id=<id>` (an invitation: join its household),
 /// `strata://tv-link?key=<key>` (a TV with no server yet: send it this phone's), and
 /// the TV's own `https://<server>/link?user_code=<code>` when it opens the app.
 @MainActor
@@ -251,6 +285,7 @@ public final class AppCoordinator {
     public var pendingLink: LinkRequest?
     public var pendingSignIn: SignInCodeRequest?
     public var pendingTVLink: TVLinkRequest?
+    public var pendingInvite: InviteRequest?
 
     public init() {}
 
@@ -259,6 +294,10 @@ public final class AppCoordinator {
         func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
         // The QR code on the TV is the server's own page; opened in the app, the server is
         // the link's origin.
+        if let invite = InviteRequest(url) {
+            pendingInvite = invite
+            return
+        }
         if url.scheme == "http" || url.scheme == "https" {
             guard url.path == "/link", let code = value("user_code") else { return }
             link(code, server: url.absoluteString)

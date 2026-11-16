@@ -103,6 +103,37 @@ public final class StrataClient: Sendable {
         try await get("/api/me", cached: false)
     }
 
+    // MARK: Invitations
+
+    /// An invitation, as whoever holds its link sees it (no account needed): who it's for
+    /// and which household. 404 once it's used, canceled or expired.
+    public func invitation(id: String) async throws -> Invitation {
+        try await get("/api/invitations/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id)", cached: false)
+    }
+
+    /// Creates an account from an invitation (the server only allows sign-up with one, for
+    /// its email). Returns the session's token, or nil where signing up doesn't sign in
+    /// (servers that confirm new accounts' email): sign in with the password then.
+    public func signUp(email: String, username: String, name: String, password: String, invitationId: String, passwordLater: Bool = false) async throws -> String? {
+        let body = SignUpBody(email: email, username: username, name: name, password: password, invitationId: invitationId, passwordLater: passwordLater ? true : nil)
+        let (data, response) = try await performWithResponse(request("POST", "/api/auth/sign-up/email", body: body))
+        if let token = response.value(forHTTPHeaderField: "set-auth-token"), !token.isEmpty { return token }
+        return (try? JSONDecoder().decode(SignInResponse.self, from: data))?.token.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// The first password of an account that joined without choosing one (`Me.needsPassword`):
+    /// no current password needed. 409 once it has one.
+    public func setFirstPassword(_ password: String) async throws {
+        let _: OKResponse = try await send("POST", "/api/me/password", body: FirstPasswordBody(password: password))
+    }
+
+    /// Accepts an invitation for this account (its email must be the invitation's), then
+    /// makes its household this session's.
+    public func acceptInvitation(id: String) async throws {
+        let res: AcceptInvitationResponse = try await send("POST", "/api/auth/organization/accept-invitation", body: AcceptInvitationBody(invitationId: id))
+        if let household = res.invitation?.organizationId { try await setActiveHousehold(household) }
+    }
+
     // MARK: Profile pictures
 
     /// The server's profile pictures, grouped.
@@ -655,6 +686,13 @@ private struct Credentials: Encodable { var username: String; var password: Stri
 private struct EmailCredentials: Encodable { var email: String; var password: String }
 private struct SetupBody: Encodable { var username: String; var password: String; var householdName: String?; var setupCode: String? }
 private struct SetActiveBody: Encodable { var organizationId: String }
+private struct SignUpBody: Encodable { var email: String; var username: String; var name: String; var password: String; var invitationId: String; var passwordLater: Bool? }
+private struct FirstPasswordBody: Encodable { var password: String }
+private struct AcceptInvitationBody: Encodable { var invitationId: String }
+private struct AcceptInvitationResponse: Decodable {
+    struct Accepted: Decodable { var organizationId: String? }
+    var invitation: Accepted?
+}
 private struct ChangePasswordBody: Encodable { var currentPassword: String; var newPassword: String; var revokeOtherSessions: Bool }
 private struct JoinBody: Encodable { var userId: String? }
 private struct AvatarsResponse: Decodable { var groups: [AvatarGroup] }

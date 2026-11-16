@@ -305,7 +305,7 @@ export function createAuth(options: AuthOptions) {
         const userId = String((ctx.body as { userId?: unknown } | undefined)?.userId ?? "");
         if (!userId || !returnedOk(ctx)) return;
         await ctx.context.internalAdapter.deleteUserSessions(userId);
-        await db.update(schema.user).set({ mustChangePassword: true }).where(eq(schema.user.id, userId));
+        await db.update(schema.user).set({ mustChangePassword: true, needsPassword: false }).where(eq(schema.user.id, userId));
       },
     },
     "/admin/remove-user": { before: mayManageTarget },
@@ -334,14 +334,29 @@ export function createAuth(options: AuthOptions) {
           .limit(1);
         if (!pending) throw new APIError("FORBIDDEN", { message: "Signing up needs an invitation to a household. Ask its owner for one." });
       },
-      after: ownHousehold,
+      after: async (ctx) => {
+        await ownHousehold(ctx);
+        // Joining by invitation, the password can wait: the app made one nobody knows and
+        // asks them to choose their own (/api/me/password, no current password needed).
+        // Only the account this sign-up made: where new accounts confirm their email, Better
+        // Auth answers an address that's taken with a made-up success (its user isn't saved),
+        // and marking by email would flag that existing account instead.
+        const body = (ctx.body ?? {}) as { email?: unknown; invitationId?: unknown; passwordLater?: unknown };
+        const created = returnedOk(ctx) ? (ctx.context.returned as { user?: { id?: unknown } } | null)?.user?.id : undefined;
+        if (body.passwordLater === true && body.invitationId && typeof created === "string" && created) {
+          await db
+            .update(schema.user)
+            .set({ needsPassword: true })
+            .where(and(eq(schema.user.id, created), eq(schema.user.email, String(body.email ?? "").toLowerCase())));
+        }
+      },
     },
     "/callback/:id": { after: ownHousehold },
     // Choosing a new password replaces a temporary one from an admin.
     "/change-password": {
       after: async (ctx) => {
         const userId = ctx.context.session?.user.id;
-        if (userId && returnedOk(ctx)) await db.update(schema.user).set({ mustChangePassword: false }).where(eq(schema.user.id, userId));
+        if (userId && returnedOk(ctx)) await db.update(schema.user).set({ mustChangePassword: false, needsPassword: false }).where(eq(schema.user.id, userId));
       },
     },
     // The TV joins the household the approving phone is in: noted at approval…
@@ -518,7 +533,7 @@ export function createAuth(options: AuthOptions) {
       resetPasswordTokenExpiresIn: 60 * 60,
       // A password chosen by its owner replaces any temporary one.
       onPasswordReset: async ({ user }) => {
-        await db.update(schema.user).set({ mustChangePassword: false }).where(eq(schema.user.id, user.id));
+        await db.update(schema.user).set({ mustChangePassword: false, needsPassword: false }).where(eq(schema.user.id, user.id));
       },
       sendResetPassword: async ({ user, url }) => {
         await sendEmail({
@@ -570,6 +585,9 @@ export function createAuth(options: AuthOptions) {
         // Set when an admin resets the password to a temporary one (api/routes/auth.ts);
         // cleared by choosing a new one.
         mustChangePassword: { type: "boolean", required: false, defaultValue: false, input: false },
+        // Joined by invitation and left the password for later (`passwordLater` at sign-up):
+        // the apps remind them, and /api/me/password sets one without the current.
+        needsPassword: { type: "boolean", required: false, defaultValue: false, input: false },
       },
       changeEmail: { enabled: false },
       // Accounts are deleted by a household's admins (Members, Better Auth's admin

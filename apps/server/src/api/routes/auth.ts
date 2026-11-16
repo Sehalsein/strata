@@ -3,7 +3,7 @@ import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { account, continueHidden, member, organization, passkey, progress, session, user, watchlist } from "../../db/schema";
+import { account, continueHidden, invitation, member, organization, passkey, progress, session, user, watchlist } from "../../db/schema";
 import { emailConfigured } from "../../email";
 import { API_VERSION, VERSION } from "../../version";
 import { body, permissions, requireAuth, requireHousehold, requireHouseholdAdmin, type Env } from "../context";
@@ -234,6 +234,40 @@ export const authRoutes = new Hono<Env>()
   })
 
   // What the privacy page shows about this server: who runs it and what's switched on.
+  // An invitation, as whoever holds its link sees it: who it's for and which household.
+  // Public, like the link itself (its id is what lets someone sign up into it), so the
+  // apps can show "You're invited" before there's an account. Also its links for the
+  // dashboard's QR code, at an address a phone can reach.
+  .get("/invitations/:id", async (c) => {
+    const id = c.req.param("id");
+    const [row] = await c.var.services.db
+      .select({ email: invitation.email, role: invitation.role, status: invitation.status, expiresAt: invitation.expiresAt, household: organization.name })
+      .from(invitation)
+      .innerJoin(organization, eq(organization.id, invitation.organizationId))
+      .where(eq(invitation.id, id));
+    if (!row || row.status !== "pending" || row.expiresAt.getTime() <= Date.now()) {
+      throw new HTTPException(404, { message: "This invitation has expired, was canceled or was already used. Ask for a new one." });
+    }
+    // Whether the email already has an account here (say, in another household): the apps
+    // then ask only for its password. Told only to whoever holds the invitation's link.
+    const [existing] = await c.var.services.db.select({ id: user.id }).from(user).where(eq(user.email, row.email.toLowerCase()));
+    const server = addressForDevices(c);
+    c.header("cache-control", "no-store");
+    return c.json({
+      email: row.email,
+      hasAccount: !!existing,
+      role: row.role ?? "member",
+      household: row.household,
+      serverName: c.var.services.settings.get().serverName,
+      expiresAt: row.expiresAt.toISOString(),
+      server,
+      /** What the QR code holds: the Strata apps (and the iPhone's camera) open it. */
+      link: `strata://invite?${new URLSearchParams({ server, id })}`,
+      /** The same as a web page, for passing on as text: it hands over to the app. */
+      page: `${server}/invite/${encodeURIComponent(id)}`,
+    });
+  })
+
   .get("/privacy", async (c) => {
     const s = c.var.services;
     const { google, passkeys } = signInMethods();
@@ -260,7 +294,37 @@ export const authRoutes = new Hono<Env>()
       : [];
     // Role of the household this device is in, for what it may do (`permissions`).
     if (household) c.var.session.role = household.role;
-    return c.json({ user: me, viewerOnly, mustChangePassword: c.var.session.mustChangePassword, household: household ?? null, permissions: permissions(c) });
+    const [flags] = await db.select({ needsPassword: user.needsPassword }).from(user).where(eq(user.id, me.id));
+    return c.json({
+      user: me,
+      viewerOnly,
+      mustChangePassword: c.var.session.mustChangePassword,
+      // Joined without choosing a password: they sign in with a code from their admin until
+      // they set one (the apps remind them).
+      needsPassword: !!flags?.needsPassword,
+      household: household ?? null,
+      permissions: permissions(c),
+    });
+  })
+
+  // A first password, for an account that joined by invitation without choosing one (it
+  // has a random one nobody knows, so there's no current password to give). Once set, the
+  // usual change-password applies. Never from a watch-only session (a home-network join, a
+  // TV, a sign-in code): those must not turn into a full one, and a home join needs no
+  // credential at all, so it would hand anyone on the network the account (an admin's too).
+  .post("/me/password", requireAuth, async (c) => {
+    if (c.var.session.viewerOnly) {
+      throw new HTTPException(403, { message: "Set your password on the device you joined from, or ask your household's admin to set one for you." });
+    }
+    const { password } = await body(c, z.object({ password: z.string().min(8, "Use at least 8 characters.").max(256) }));
+    const s = c.var.services;
+    const id = c.var.session.user.id;
+    const [row] = await s.db.select({ needsPassword: user.needsPassword }).from(user).where(eq(user.id, id));
+    if (!row?.needsPassword) throw new HTTPException(409, { message: "This account already has a password. Change it with your current one." });
+    const ctx = await s.auth.$context;
+    await ctx.internalAdapter.updatePassword(id, await ctx.password.hash(password));
+    await s.db.update(user).set({ needsPassword: false }).where(eq(user.id, id));
+    return c.json({ ok: true });
   })
 
   // Whose accounts the signed-in person may manage here (reset a password, download their

@@ -10,6 +10,7 @@ import { queryKeys, useApiMutation } from "@/lib/query";
 import type { ContentLimit, HouseholdRole, Invitation, Member } from "@/lib/types";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { SignInCodeDialog } from "./sign-in-code-dialog";
+import { InviteQr, InviteQrDialog } from "./invite-qr";
 import { ResetPasswordDialog } from "./reset-password-dialog";
 import { EmptyState, ErrorAlert, InlineError } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -289,6 +290,7 @@ export function MemberList({ selfId }: { selfId: string }) {
 export function InvitationList({ compact }: { compact?: boolean }) {
   const household = useHousehold();
   const cancel = useApiMutation((inv: Invitation) => authClient.cancelInvitation(inv.id), { success: (_, inv) => `Canceled the invitation for ${inv.email}`, invalidate: [queryKeys.household] });
+  const [showing, setShowing] = useState<Invitation | null>(null);
   const pending = (household.data?.invitations ?? []).filter((i) => i.status === "pending" && new Date(i.expiresAt).getTime() > Date.now());
   if (!household.data) return null;
   if (pending.length === 0) {
@@ -299,25 +301,31 @@ export function InvitationList({ compact }: { compact?: boolean }) {
     );
   }
   return (
-    <ul className="divide-y rounded-lg border">
-      {pending.map((inv) => (
-        <li key={inv.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
-          <div className="min-w-0 flex-1">
-            <p className="flex items-center gap-2 truncate text-sm font-medium">
-              {inv.email}
-              <Badge variant="secondary">{ROLE_LABELS[primaryRole(inv.role)].label}</Badge>
-            </p>
-            <p className="text-muted-foreground text-xs">Expires {relativeTime(new Date(inv.expiresAt).getTime())}</p>
-          </div>
-          <div className="flex gap-1">
-            <CopyButton value={invitationLink(inv.id)} label="Copy link" />
-            <Button variant="ghost" size="sm" className="text-destructive" onClick={() => cancel.mutate(inv)} disabled={cancel.isPending && cancel.variables?.id === inv.id}>
-              <X /> Cancel
-            </Button>
-          </div>
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="divide-y rounded-lg border">
+        {pending.map((inv) => (
+          <li key={inv.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
+            <div className="min-w-0 flex-1">
+              <p className="flex items-center gap-2 truncate text-sm font-medium">
+                {inv.email}
+                <Badge variant="secondary">{ROLE_LABELS[primaryRole(inv.role)].label}</Badge>
+              </p>
+              <p className="text-muted-foreground text-xs">Expires {relativeTime(new Date(inv.expiresAt).getTime())}</p>
+            </div>
+            <div className="flex gap-1">
+              <Button variant="outline" size="sm" onClick={() => setShowing(inv)}>
+                <QrCodeIcon /> QR code
+              </Button>
+              <CopyButton value={invitationLink(inv.id)} label="Copy link" />
+              <Button variant="ghost" size="sm" className="text-destructive" onClick={() => cancel.mutate(inv)} disabled={cancel.isPending && cancel.variables?.id === inv.id}>
+                <X /> Cancel
+              </Button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <InviteQrDialog invitation={showing} onOpenChange={(open) => !open && setShowing(null)} />
+    </>
   );
 }
 
@@ -385,21 +393,22 @@ function InviteForm({ householdId, defaultRole, allowOwner, onDone }: { househol
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<HouseholdRole>(defaultRole);
   const [touched, setTouched] = useState(false);
-  const [link, setLink] = useState<string | null>(null);
+  const [created, setCreated] = useState<{ id: string; link: string } | null>(null);
   const invite = useApiMutation(() => authClient.invite({ email: email.trim().toLowerCase(), role, householdId }), {
     silentError: true,
     invalidate: [queryKeys.household],
-    onSuccess: (inv) => setLink(invitationLink(inv.id)),
+    onSuccess: (inv) => setCreated({ id: inv.id, link: invitationLink(inv.id) }),
   });
   const emailError = touched && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) ? "Enter their email address." : null;
 
-  if (link) {
+  if (created) {
     return (
       <FieldGroup>
         <p className="text-sm">
-          Send this link to <span className="font-medium">{email.trim()}</span>. Opening it lets them create their account (or sign in to an existing one) and join.
+          Have <span className="font-medium">{email.trim()}</span> scan this code with their iPhone or iPad, or send them the link. Either opens the Strata app, where they create their account (or sign in to one they have) and join.
         </p>
-        <LinkBox link={link} />
+        <InviteQr invitationId={created.id} email={email.trim()} />
+        <LinkBox link={created.link} />
         <DialogFooter>
           <Button onClick={onDone}>Done</Button>
         </DialogFooter>

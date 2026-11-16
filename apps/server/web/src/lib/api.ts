@@ -16,6 +16,7 @@ import type {
   ContentLimit,
   HouseholdDevice,
   SignInCode,
+  InvitationInfo,
   PlayReport,
   PlayLink,
 } from "./types";
@@ -98,6 +99,9 @@ export const api = {
   /** A member's sign-in QR code (works once, for a minute; ask again every 30 seconds). */
   signInCode: (memberId: string) =>
     request<SignInCode>("POST", `/household/members/${encodeURIComponent(memberId)}/sign-in-code`),
+
+  /** An invitation's details and its link at an address phones can reach (for its QR code). */
+  invitation: (invitationId: string) => request<InvitationInfo>("GET", `/invitations/${encodeURIComponent(invitationId)}`),
 
   status: () => request<AdminStatus>("GET", "/admin/status"),
   settings: () => request<SettingsResponse>("GET", "/admin/settings"),

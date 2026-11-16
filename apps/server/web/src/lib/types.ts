@@ -131,6 +131,23 @@ export interface SignInCode {
   link: string;
 }
 
+/** GET /api/invitations/:id: an invitation, as whoever holds its link sees it. */
+export interface InvitationInfo {
+  email: string;
+  /** The email already has an account on this server. */
+  hasAccount: boolean;
+  role: string;
+  household: string;
+  serverName: string;
+  expiresAt: string;
+  /** The server's address for devices (not this machine's localhost). */
+  server: string;
+  /** strata://invite?server=…&id=…: what the QR code holds (opens the app). */
+  link: string;
+  /** https://<server>/invite/<id>: the same, to pass on as text; the page opens the app. */
+  page: string;
+}
+
 /** GET /api/admin/devices: a device signed in to the household, and whose it is. */
 export interface HouseholdDevice {
   id: string;

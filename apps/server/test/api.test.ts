@@ -64,6 +64,13 @@ describe("setup and auth", () => {
     expect((await signUp("bob@example.com", "bob")).status).toBe(403);
     const invited = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "bob@example.com", role: "member" } }));
     expect(invited.id).toBeTruthy();
+    // Whoever holds the link can see who it's for (the apps show it before there's an account).
+    const shown = await json(await server.request(`/api/invitations/${invited.id}`));
+    expect(shown).toMatchObject({ email: "bob@example.com", role: "member", household: "sehal's home", hasAccount: false });
+    expect(shown.link).toStartWith("strata://invite?");
+    expect(new URL(shown.link).searchParams.get("id")).toBe(invited.id);
+    expect(shown.page).toEndWith(`/invite/${invited.id}`);
+    expect((await server.request("/api/invitations/not-a-real-one")).status).toBe(404);
     // Knowing the email isn't enough: the invitation's id (from its link) is.
     expect((await signUp("bob@example.com", "bob")).status).toBe(403);
     expect((await signUp("bob@example.com", "bob", invited.id)).status).toBe(200);
@@ -71,9 +78,40 @@ describe("setup and auth", () => {
     expect((await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: bob, json: { invitationId: invited.id } })).status).toBe(200);
     const me = await json(await server.request("/api/me", { token: bob }));
     expect(me.household).toMatchObject({ role: "member" });
+    // Used, it's gone.
+    expect((await server.request(`/api/invitations/${invited.id}`)).status).toBe(404);
     // Members watch; they don't run the household.
     expect((await server.request("/api/home", { token: bob })).status).toBe(200);
     expect((await server.request("/api/admin/settings", { token: bob })).status).toBe(403);
+  });
+
+  test("someone invited can join now and choose a password later", async () => {
+    const invited = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "fay@example.com", role: "member" } }));
+    // The app sends a random password nobody knows, and says the real one comes later.
+    const r = await server.request("/api/auth/sign-up/email", {
+      method: "POST",
+      json: { email: "fay@example.com", password: crypto.randomUUID(), name: "fay", username: "fay", invitationId: invited.id, passwordLater: true },
+    });
+    expect(r.status).toBe(200);
+    const fay = r.headers.get("set-auth-token")!;
+    expect((await json(await server.request("/api/me", { token: fay }))).needsPassword).toBe(true);
+    expect((await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: fay, json: { invitationId: invited.id } })).status).toBe(200);
+    // A watch-only session (here a sign-in code; a home-network join or a TV are the same)
+    // can't choose it: that would turn it into a full sign-in, an admin's too.
+    const full = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const fayMember = full.members.find((m: any) => m.user.email === "fay@example.com");
+    const issued = await json(await server.request(`/api/household/members/${fayMember.id}/sign-in-code`, { method: "POST", token }));
+    const viewer = (await json(await server.request(`/api/auth/magic-link/verify?token=${encodeURIComponent(new URL(issued.link).searchParams.get("code")!)}`))).token;
+    expect((await json(await server.request("/api/me", { token: viewer }))).viewerOnly).toBe(true);
+    expect((await server.request("/api/me/password", { method: "POST", token: viewer, json: { password: "someone-elses" } })).status).toBe(403);
+    expect((await server.request("/api/me/password", { method: "POST", token: fay, json: { password: "short" } })).status).toBe(400);
+    expect((await server.request("/api/me/password", { method: "POST", token: fay, json: { password: "fays-own-password" } })).status).toBe(200);
+    expect((await json(await server.request("/api/me", { token: fay }))).needsPassword).toBe(false);
+    expect((await signIn("fay", "fays-own-password")).token).toBeTruthy();
+    // Once there's a password, changing it needs the current one.
+    expect((await server.request("/api/me/password", { method: "POST", token: fay, json: { password: "another-password" } })).status).toBe(409);
+    // Signing up the usual way doesn't mark anything.
+    expect((await json(await server.request("/api/me", { token }))).needsPassword).toBe(false);
   });
 
   test("a member's QR sign-in code signs a device in as them, once, to watch", async () => {
@@ -275,6 +313,8 @@ describe("setup and auth", () => {
     const owner = full.members.find((m: any) => m.role.includes("owner"));
     // Carol owns the neighbours' household and joins this one too.
     const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "carol@example.com", role: "member" } }));
+    // Carol has an account here already: the apps ask only for her password.
+    expect((await json(await server.request(`/api/invitations/${invite.id}`))).hasAccount).toBe(true);
     const carol = (await signIn("carol", "carols-password")).token!;
     expect((await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: carol, json: { invitationId: invite.id } })).status).toBe(200);
     const carolId = (await json(await server.request("/api/me", { token: carol }))).user.id;
@@ -367,7 +407,7 @@ describe("setup and auth", () => {
 
     expect((await server.request("/api/join", { method: "POST", ip: "203.0.113.9", json: {} })).status).toBe(403);
     const choices = await json(await server.request("/api/join", { method: "POST", ip: "192.168.2.40", json: {} }));
-    expect(choices.members.map((m: any) => m.name)).toEqual(["sehal", "bob"]);
+    expect(choices.members.map((m: any) => m.name)).toEqual(["sehal", "bob", "fay"]);
     const bobId = choices.members.find((m: any) => m.name === "bob").id;
     const joined = await json(await server.request("/api/join", { method: "POST", ip: "192.168.2.40", json: { userId: bobId } }));
     const me = await json(await server.request("/api/me", { token: joined.token }));

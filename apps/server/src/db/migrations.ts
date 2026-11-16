@@ -283,4 +283,7 @@ export const migrations: string[] = [
   );
   CREATE INDEX play_reports_recent ON play_reports(organization_id, created_at);
   `,
+  /* 8: joined by invitation without choosing a password yet (the apps ask them to set one) */ `
+  ALTER TABLE "user" ADD COLUMN needs_password BOOLEAN NOT NULL DEFAULT FALSE;
+  `,
 ];
