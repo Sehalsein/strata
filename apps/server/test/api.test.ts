@@ -625,6 +625,32 @@ describe("playback", () => {
     server.services.sessions.stop(play.sessionId);
   }, 30_000);
 
+  test("catalog add-ons: their rows join Home as ordinary titles", async () => {
+    const added = await json(await server.request("/api/admin/addons", { method: "POST", token, json: { url: "https://catalog.test/manifest.json" } }));
+    try {
+      // Catalogs that need a search filled in aren't offered; the first few start on Home.
+      expect(added.resources).toEqual(["catalog"]);
+      expect(added.catalogs.map((c: any) => [c.key, c.type, c.home])).toEqual([
+        ["movie/trending", "movie", true],
+        ["series/popular", "show", true],
+      ]);
+      const shelves = (await json(await server.request("/api/home/catalog", { token }))).shelves;
+      const row = shelves.find((s: any) => s.id === `addon:${added.id}:movie/trending`);
+      // Matched to TMDB (by IMDb id), once even when listed twice; the unknown id is left out; the add-on's artwork kept.
+      expect(row.title).toBe("Trending Films");
+      expect(row.items.map((i: any) => [i.ref, i.title, i.posterUrl])).toEqual([["tmdb:movie:10378", "Big Buck Bunny (add-on)", "https://img.test/bbb.jpg"]]);
+      expect(shelves.find((s: any) => s.id === `addon:${added.id}:series/popular`).items[0].ref).toBe("tmdb:show:9001");
+      // Taken off Home in the dashboard: the row goes.
+      const after = await json(await server.request(`/api/admin/addons/${added.id}`, { method: "PATCH", token, json: { homeCatalogs: ["series/popular"] } }));
+      expect(after.items.find((a: any) => a.id === added.id).catalogs.map((c: any) => c.home)).toEqual([false, true]);
+      const ids = (await json(await server.request("/api/home/catalog", { token }))).shelves.map((s: any) => s.id);
+      expect(ids).not.toContain(`addon:${added.id}:movie/trending`);
+      expect(ids).toContain(`addon:${added.id}:series/popular`);
+    } finally {
+      await server.request(`/api/admin/addons/${added.id}`, { method: "DELETE", token });
+    }
+  });
+
   test.skipIf(noFfmpeg)("subtitle add-ons: the server names, picks and serves their subtitles", async () => {
     const added = await json(await server.request("/api/admin/addons", { method: "POST", token, json: { url: "https://subs.test/manifest.json" } }));
     expect(added).toMatchObject({ name: "Subs Test", resources: ["subtitles"] });

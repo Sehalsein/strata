@@ -44,6 +44,7 @@ export interface RawEntry {
 export class AnimeIds {
   private byAnilist = new Map<number, AnimeEntry>();
   private byKitsu = new Map<number, AnimeEntry>();
+  private byMal = new Map<number, AnimeEntry>();
   private byTv = new Map<number, AnimeEntry[]>();
   private byMovie = new Map<number, AnimeEntry>();
   private loadedAt = 0;
@@ -90,6 +91,10 @@ export class AnimeIds {
     return this.byKitsu.get(id);
   }
 
+  mal(id: number) {
+    return this.byMal.get(id);
+  }
+
   /** Every entry for a TMDB show, in TMDB order (season, then offset). */
   show(tmdbId: number): AnimeEntry[] {
     return this.byTv.get(tmdbId) ?? [];
@@ -103,6 +108,7 @@ export class AnimeIds {
   index(raw: RawEntry[]) {
     this.byAnilist.clear();
     this.byKitsu.clear();
+    this.byMal.clear();
     this.byTv.clear();
     this.byMovie.clear();
     // Downloaded data: only whole numbers in range go into TMDB paths and episode math.
@@ -130,6 +136,7 @@ export class AnimeIds {
       };
       if (entry.anilistId) this.byAnilist.set(entry.anilistId, entry);
       if (entry.kitsuId) this.byKitsu.set(entry.kitsuId, entry);
+      if (entry.malId && !this.byMal.has(entry.malId)) this.byMal.set(entry.malId, entry);
       if (entry.tmdbMovie) this.byMovie.set(entry.tmdbMovie, entry);
       if (entry.tmdbTv) {
         const list = this.byTv.get(entry.tmdbTv) ?? [];

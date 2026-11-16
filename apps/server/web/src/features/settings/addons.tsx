@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { LoaderCircle, Plus, RefreshCw } from "lucide-react";
+import { ChevronDown, LoaderCircle, Plus, RefreshCw } from "lucide-react";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
@@ -21,8 +22,8 @@ const reload = () => queryClient.invalidateQueries({ queryKey: queryKeys.addons 
 
 /**
  * The household's add-ons: Torrentio, AIOStreams, Comet or any other that finds streams,
- * and OpenSubtitles or any other that finds subtitles, each added by its manifest URL, as
- * in Stremio. Discovery and playback ask every one that's on.
+ * OpenSubtitles or any other that finds subtitles, and AIO Metadata or any other with
+ * catalogs (rows on Home), each added by its manifest URL, as in Stremio.
  * Changes save straight away; their URLs stay on the server (they often hold a key), so
  * rows show the host and Configure goes through a server redirect.
  */
@@ -103,14 +104,15 @@ export function AddonsSection() {
       <p className="text-muted-foreground px-1 text-xs">
         Paste an add-on's manifest URL, the same one you'd install in Stremio. Every add-on that's on is asked for releases, top to bottom. Strata adds what it finds to your TorBox
         itself, so an add-on has to say which torrent each result is: most do (Torrentio, Comet, MediaFusion, Jackettio). AIOStreams is asked through its search API, with the uuid
-        and password in its URL. Subtitle add-ons, like OpenSubtitles v3, are asked as a title starts, in the languages set under General.
+        and password in its URL. Subtitle add-ons, like OpenSubtitles v3, are asked as a title starts, in the languages set under General. Catalog add-ons, like
+        AIO Metadata, add rows to Home: pick them under Home rows.
       </p>
 
       <UrlDialog
         open={adding}
         onOpenChange={setAdding}
         title="Add an add-on"
-        description="Paste its manifest URL. Strata reads the manifest first to check it finds streams or subtitles for movies or shows."
+        description="Paste its manifest URL. Strata reads the manifest first to check it has streams, subtitles or catalogs of movies or shows."
         submitLabel="Add"
         onSubmit={async (url) => {
           const added = await api.addAddon(url);
@@ -135,7 +137,7 @@ function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: numbe
   const [editing, setEditing] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
 
-  const update = async (patch: { enabled?: boolean; index?: number }) => {
+  const update = async (patch: { enabled?: boolean; index?: number; homeCatalogs?: string[] }) => {
     setBusy(true);
     try {
       setItems((await api.updateAddon(a.id, patch)).items);
@@ -167,6 +169,7 @@ function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: numbe
             {a.isDefault && <Badge variant="secondary">Default</Badge>}
             {a.resources.includes("stream") && <Badge variant="outline">Streams</Badge>}
             {a.resources.includes("subtitles") && <Badge variant="outline">Subtitles</Badge>}
+            {a.resources.includes("catalog") && <Badge variant="outline">Catalogs</Badge>}
             {a.anime && <Badge variant="outline">Anime</Badge>}
             {!a.enabled && <Badge variant="outline">Off</Badge>}
           </div>
@@ -174,6 +177,7 @@ function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: numbe
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 pl-5 lg:pl-0">
+        {a.catalogs.length > 0 && <HomeRowsMenu addon={a} busy={busy} onChange={(keys) => update({ homeCatalogs: keys })} />}
         {a.configurable && (
           <Button variant="outline" size="sm" asChild>
             <a href={api.addonConfigureUrl(a.id)} target="_blank" rel="noreferrer">
@@ -216,6 +220,35 @@ function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: numbe
         onConfirm={remove}
       />
     </div>
+  );
+}
+
+/** Which of an add-on's catalogs are rows on Home: ticked in a menu, saved as they change. */
+function HomeRowsMenu({ addon: a, busy, onChange }: { addon: StreamAddon; busy: boolean; onChange: (keys: string[]) => void }) {
+  const on = a.catalogs.filter((c) => c.home).map((c) => c.key);
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" disabled={busy}>
+          Home rows{on.length ? ` (${on.length})` : ""} <ChevronDown className="text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-h-96 w-72">
+        <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">Ticked catalogs show as rows on Home, after Strata's own.</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {a.catalogs.map((c) => (
+          <DropdownMenuCheckboxItem
+            key={c.key}
+            checked={c.home}
+            onSelect={(e) => e.preventDefault()}
+            onCheckedChange={(v) => onChange(v ? [...on, c.key] : on.filter((k) => k !== c.key))}
+          >
+            <span className="truncate">{c.name}</span>
+            <span className="text-muted-foreground ml-auto pl-3 text-xs">{c.type === "movie" ? "Movies" : "Shows"}</span>
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

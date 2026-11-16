@@ -320,7 +320,7 @@ public final class AppCoordinator {
         let parts = url.pathComponents.dropFirst().compactMap { Int($0) }
         switch url.host {
         case "title":
-            if let text = url.pathComponents.dropFirst().first, let ref = TitleRef(string: text), ref.isSupported { pendingRoute = .title(ref) }
+            if let text = url.pathComponents.dropFirst().first, let ref = TitleRef(string: text) { pendingRoute = .title(ref) }
         case "movie": if let id = parts.first { pendingRoute = .title(.tmdb(.movie, id)) }
         case "show": if let id = parts.first { pendingRoute = .title(.tmdb(.show, id)) }
         case "watch":

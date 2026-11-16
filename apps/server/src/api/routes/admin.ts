@@ -8,7 +8,7 @@ import { recentLogs } from "../../log";
 import { dashboardUrls } from "../../platform/network";
 import { householdSettingsSchema, SECRET_KEYS, serverSettingsSchema, settingsSchema, type SecretKey } from "../../settings";
 import { toCandidate } from "../../sources/resolver";
-import { AddonError, addonBase, addonOrigin, type StreamAddon } from "../../sources/addons";
+import { AddonError, addonBase, addonOrigin, catalogKey, type StreamAddon } from "../../sources/addons";
 import { imageUrl, yearOf } from "../../catalog/tmdb";
 import { formatRef, parseRef, targetRef, tmdbRef } from "../../catalog/ref";
 import { API_VERSION, VERSION } from "../../version";
@@ -174,9 +174,18 @@ export const adminRoutes = new Hono<Env>()
     return c.json({ items: c.var.household.addons().map(addonDto), failed });
   })
 
-  // Turns an add-on on or off, moves it, or points it at another manifest URL (checked first).
+  // Turns an add-on on or off, moves it, picks its Home rows, or points it at another manifest URL (checked first).
   .patch("/addons/:id", async (c) => {
-    const { url, ...patch } = await body(c, z.object({ enabled: z.boolean().optional(), index: z.number().int().min(0).optional(), url: z.string().trim().min(1).max(2048).optional() }));
+    const { url, ...patch } = await body(
+      c,
+      z.object({
+        enabled: z.boolean().optional(),
+        index: z.number().int().min(0).optional(),
+        url: z.string().trim().min(1).max(2048).optional(),
+        // Which of its catalogs are rows on Home, by key ("movie/tmdb.trending").
+        homeCatalogs: z.array(z.string().max(300)).max(100).optional(),
+      }),
+    );
     const h = c.var.household;
     let id = c.req.param("id");
     if (url !== undefined) {
@@ -467,6 +476,8 @@ function addonDto(a: StreamAddon) {
     kind: a.kind,
     configurable: a.configurable,
     resources: a.resources,
+    // Its catalogs, as the dashboard lists them: name, movies or shows, and whether Home shows it.
+    catalogs: a.catalogs.map((cat) => ({ key: catalogKey(cat), name: cat.name, type: cat.type === "movie" ? "movie" : "show", home: cat.home })),
     anime: streams && (!a.idPrefixes || a.idPrefixes.some((p) => p.startsWith("kitsu"))),
     isDefault: a.id === "default",
   };

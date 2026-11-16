@@ -9,7 +9,7 @@ const H = (c: string) => c.repeat(40);
 // Names in these tests resolve to a public address, except ones that say otherwise.
 setResolverForTests(async (host) => (host.startsWith("rebound.") ? ["10.0.0.7"] : host.startsWith("nowhere.") ? Promise.reject(new Error("ENOTFOUND")) : ["93.184.215.14"]));
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
-const addon = (over: Partial<StreamAddon> = {}): StreamAddon => ({ id: "x", url: "https://addon.example/cfg/manifest.json", name: "Addon", enabled: true, resources: ["stream"], idPrefixes: null, subtitleIdPrefixes: null, kind: "stremio", configurable: false, allowPrivate: false, ...over });
+const addon = (over: Partial<StreamAddon> = {}): StreamAddon => ({ id: "x", url: "https://addon.example/cfg/manifest.json", name: "Addon", enabled: true, resources: ["stream"], idPrefixes: null, subtitleIdPrefixes: null, catalogs: [], kind: "stremio", configurable: false, allowPrivate: false, ...over });
 
 describe("add-on addresses", () => {
   test("pasted addresses become manifest URLs", () => {
@@ -29,9 +29,10 @@ describe("add-on addresses", () => {
       return m ? json(m) : new Response("nope", { status: 404 });
     }) as unknown as typeof fetch;
 
-    expect(await inspectAddon("https://t.example", fetchImpl)).toEqual({ url: "https://t.example/manifest.json", name: "Torrentio", resources: ["stream"], idPrefixes: ["tt", "kitsu"], subtitleIdPrefixes: null, kind: "stremio", configurable: true, allowPrivate: false });
+    expect(await inspectAddon("https://t.example", fetchImpl)).toEqual({ url: "https://t.example/manifest.json", name: "Torrentio", resources: ["stream"], idPrefixes: ["tt", "kitsu"], subtitleIdPrefixes: null, catalogs: [], kind: "stremio", configurable: true, allowPrivate: false });
     expect(await inspectAddon("https://a.example/stremio/u-1/enc%3Apw/manifest.json", fetchImpl)).toMatchObject({ name: "AIOStreams", idPrefixes: ["tt"], kind: "aiostreams" });
-    await expect(inspectAddon("https://c.example/catalog/manifest.json", fetchImpl)).rejects.toThrow("doesn't find streams or subtitles");
+    // It offers catalogs, but lists none Strata can show.
+    await expect(inspectAddon("https://c.example/catalog/manifest.json", fetchImpl)).rejects.toThrow("doesn't have movies or shows");
     await expect(inspectAddon("https://c.example/missing", fetchImpl)).rejects.toThrow("answered 404");
   });
 });

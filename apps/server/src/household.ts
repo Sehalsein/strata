@@ -25,8 +25,10 @@ import type { ProgressStore } from "./progress";
 import type { SecretBox } from "./secrets";
 import { householdSettingsSchema, HOUSEHOLD_SECRET_KEYS, SettingsStore, type HouseholdSettingsStore, type ServerSettingsStore, type Settings } from "./settings";
 import { Discovery } from "./sources/discovery";
-import { AddonError, assertAddonReady, defaultAddons, fetchSubtitleFile, findsSubtitles, inspectAddon, streamAddonListSchema, type StreamAddon } from "./sources/addons";
+import { AddonError, assertAddonReady, catalogKey, defaultAddons, fetchSubtitleFile, findsSubtitles, inspectAddon, keepCatalogChoices, streamAddonListSchema, type StreamAddon } from "./sources/addons";
 import { Buffer } from "node:buffer";
+import { TitleIds } from "./catalog/titleIds";
+import { AddonRows } from "./catalog/addonRows";
 import { SharedWork } from "./inFlight";
 import type { TitleTarget } from "./catalog/ref";
 import { TorboxHousekeeping } from "./sources/torbox/cleanup";
@@ -88,6 +90,8 @@ export class Household {
   readonly tmdb: Tmdb;
   /** OMDb ratings, with its key (or the server's). */
   readonly omdb: Omdb;
+  /** Other sites' ids for a title (IMDb, TVDB, Kitsu…) as Strata's own. */
+  readonly titleIds: TitleIds;
   /** Subtitles from its subtitle add-ons. */
   readonly onlineSubtitles: AddonSubtitleFinder;
   /** Converted subtitle files, by the add-on's link. */
@@ -107,7 +111,9 @@ export class Household {
     this.omdb = new Omdb(shared.cache, () => settingsStore.getSecret("omdbApiKey"), shared.fetch);
     const tmdb = this.tmdb;
     this.library = new Library(db, organizationId, tmdb, new Matcher(tmdb, new AnimeMatcher(shared.anime.anilist, shared.anime.ids, tmdb, shared.anime.kitsu)), shared.anime.anilist);
-    this.catalog = new CatalogService(tmdb, this.library, shared.progress, settings, shared.anime, this.omdb);
+    this.titleIds = new TitleIds(tmdb, shared.anime.ids);
+    const addonRows = new AddonRows(() => this.addons(), this.titleIds, (refs) => this.library.availability(refs), shared.fetch);
+    this.catalog = new CatalogService(tmdb, this.library, shared.progress, settings, shared.anime, this.omdb, [addonRows]);
     this.content = new ContentFilter(db, organizationId, tmdb, settings, shared.anime);
     this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, show) => this.content.allowed(userId, show));
     this.housekeeping = new TorboxHousekeeping(db, organizationId, this.library);
@@ -269,13 +275,20 @@ export class Household {
     return addon;
   }
 
-  /** Turns an add-on on or off, or moves it (`index`); false when there's no such add-on. */
-  async updateAddon(id: string, patch: { enabled?: boolean; index?: number }): Promise<boolean> {
+  /**
+   * Turns an add-on on or off, moves it (`index`), or says which of its catalogs are rows on
+   * Home (`homeCatalogs`, by catalogKey); false when there's no such add-on.
+   */
+  async updateAddon(id: string, patch: { enabled?: boolean; index?: number; homeCatalogs?: string[] }): Promise<boolean> {
     const list = this.addons();
     const at = list.findIndex((a) => a.id === id);
     if (at < 0) return false;
     const [addon] = list.splice(at, 1);
     if (patch.enabled !== undefined) addon!.enabled = patch.enabled;
+    if (patch.homeCatalogs) {
+      const on = new Set(patch.homeCatalogs);
+      addon!.catalogs = addon!.catalogs.map((c) => ({ ...c, home: on.has(catalogKey(c)) }));
+    }
     list.splice(Math.max(0, Math.min(patch.index ?? at, list.length)), 0, addon!);
     await this.saveAddons(list);
     return true;
@@ -290,7 +303,12 @@ export class Household {
     await assertAddonReady(found, this.shared.fetch);
     if (list.some((a, i) => i !== at && a.url === found.url)) throw new AddonError("That add-on is already in the list.");
     // A new id: it's no longer the server's default once it points somewhere else.
-    const addon: StreamAddon = { ...found, id: found.url === list[at]!.url ? id : crypto.randomUUID(), enabled: list[at]!.enabled };
+    const addon: StreamAddon = {
+      ...found,
+      catalogs: keepCatalogChoices(found.catalogs, list[at]!.catalogs),
+      id: found.url === list[at]!.url ? id : crypto.randomUUID(),
+      enabled: list[at]!.enabled,
+    };
     list[at] = addon;
     await this.saveAddons(list);
     return addon;
@@ -303,7 +321,8 @@ export class Household {
     const next = await Promise.all(
       list.map(async (a) => {
         try {
-          return { ...a, ...(await inspectAddon(a.url, this.shared.fetch, a.allowPrivate)), id: a.id, enabled: a.enabled };
+          const found = await inspectAddon(a.url, this.shared.fetch, a.allowPrivate);
+          return { ...a, ...found, catalogs: keepCatalogChoices(found.catalogs, a.catalogs), id: a.id, enabled: a.enabled };
         } catch {
           failed.push(a.name);
           return a;

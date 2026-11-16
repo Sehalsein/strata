@@ -217,6 +217,11 @@ export class Tmdb {
   topRated(type: "movie" | "tv") {
     return this.get<TmdbPage>(`/${type}/top_rated`, {}, DAY);
   }
+  /** The movie or show TMDB knows by another site's id: IMDb ("tt…") or TVDB. */
+  find(externalId: string, source: "imdb_id" | "tvdb_id") {
+    if (!/^(tt\d{1,10}|\d{1,10})$/.test(externalId)) throw new TmdbError("That isn't an id TMDB can look up.", 400);
+    return this.get<{ movie_results: TmdbListItem[]; tv_results: TmdbListItem[] }>(`/find/${externalId}`, { external_source: source }, 7 * DAY);
+  }
   /** Films in cinemas in `region` now. */
   nowPlaying(region: string, page = 1) {
     return this.get<TmdbPage>("/movie/now_playing", { region, ...(page > 1 ? { page: String(page) } : {}) }, 6 * HOUR);

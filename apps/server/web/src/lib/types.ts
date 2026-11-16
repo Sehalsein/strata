@@ -251,7 +251,9 @@ export interface StreamAddon {
   /** It has its own configure page (opened through /api/admin/addons/:id/configure). */
   configurable: boolean;
   /** What it's asked for. */
-  resources: ("stream" | "subtitles")[];
+  resources: ("stream" | "subtitles" | "catalog")[];
+  /** Its catalogs of titles, and whether each is a row on Home. */
+  catalogs: { key: string; name: string; type: "movie" | "show"; home: boolean }[];
   /** It's asked for anime by Kitsu id too. */
   anime: boolean;
   /** The server's Torrentio, until the household changes its list. */

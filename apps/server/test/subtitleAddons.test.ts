@@ -15,6 +15,7 @@ const subsAddon = (over: Partial<StreamAddon> = {}): StreamAddon => ({
   resources: ["subtitles"],
   idPrefixes: null,
   subtitleIdPrefixes: ["tt"],
+  catalogs: [],
   kind: "stremio",
   configurable: false,
   allowPrivate: false,

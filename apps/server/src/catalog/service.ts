@@ -1,4 +1,5 @@
 import type { FileProvider } from "../db/schema";
+import type { ShelfSource } from "./addonRows";
 import { runtime } from "#runtime";
 import type { Library } from "../library";
 import { isResumable, type ProgressRow, type ProgressStore } from "../progress";
@@ -174,6 +175,8 @@ export class CatalogService {
     private readonly settings: () => Settings,
     private readonly anime?: { ids: AnimeIds; anilist: Anilist; kitsu?: Kitsu },
     private readonly omdb?: Omdb,
+    /** More Home rows, after TMDB's own: the household's add-on catalogs. */
+    private readonly rowSources: ShelfSource[] = [],
   ) {}
 
   /** IMDb / Rotten Tomatoes ratings, or null; like AniList, the page waits at most 1.5s. */
@@ -295,6 +298,7 @@ export class CatalogService {
     if (trendingMovies?.length) shelves.push({ id: "trendingMovies", title: "Trending Movies", kind: "titles", items: trendingMovies });
     if (trendingShows?.length) shelves.push({ id: "trendingShows", title: "Trending Shows", kind: "titles", items: trendingShows });
     if (trendingAnime.length) shelves.push({ id: "trendingAnime", title: "Trending Anime", kind: "titles", items: trendingAnime });
+    for (const source of this.rowSources) shelves.push(...((await safe("rowSource", () => source.shelves())) ?? []));
     return shelves;
   }
 

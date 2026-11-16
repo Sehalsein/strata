@@ -21,6 +21,27 @@ export const fakeTmdb: typeof fetch = (async (input: string | URL | Request) => 
     if (path.startsWith("/subtitles/movie/tt1254207")) return json({ subtitles: [{ id: "1", url: "https://subs.test/files/fr.srt", lang: "fre" }, { id: "2", url: "https://subs.test/files/de.srt", lang: "ger" }] });
     if (path === "/files/fr.srt") return new Response("1\n00:00:01,000 --> 00:00:02,500\nBonjour de Strata\n");
   }
+  // A catalog add-on (AIO Metadata-like): a trending row of films by IMDb, TMDB and unknown ids.
+  if (url.host === "catalog.test") {
+    if (path === "/manifest.json")
+      return json({
+        id: "catalog.test", name: "Catalog Test", resources: ["catalog", "meta"], types: ["movie", "series"],
+        catalogs: [
+          { type: "movie", id: "trending", name: "Trending Films" },
+          { type: "series", id: "popular", name: "Popular Shows" },
+          { type: "movie", id: "search", name: "Search", extra: [{ name: "search", isRequired: true }] },
+        ],
+      });
+    if (path === "/catalog/movie/trending.json")
+      return json({ metas: [
+        { id: "tt1254207", type: "movie", name: "Big Buck Bunny (add-on)", poster: "https://img.test/bbb.jpg", releaseInfo: "2008" },
+        { id: "tmdb:10378", type: "movie", name: "Same film again" },
+        { id: "xyz:1", type: "movie", name: "Nobody knows this id" },
+      ] });
+    if (path === "/catalog/series/popular.json") return json({ metas: [{ id: "tt9000001", type: "series", name: "Test Show" }] });
+  }
+  if (path === "/find/tt1254207") return json({ movie_results: [{ id: 10378, title: "Big Buck Bunny" }], tv_results: [] });
+  if (path === "/find/tt9000001") return json({ movie_results: [], tv_results: [{ id: 9001, name: "Test Show" }] });
   if (path === "/configuration") return json({ images: {} });
   if (path === "/search/movie") {
     const results = q.includes("big buck") ? [{ id: 10378, title: "Big Buck Bunny", release_date: "2008-05-30", poster_path: "/bbb.jpg" }] : [];

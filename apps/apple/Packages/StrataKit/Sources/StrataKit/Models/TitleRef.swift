@@ -4,7 +4,8 @@ import Foundation
 /// "anilist:show:154587". TMDB has movies and shows; AniList has anime TMDB may not.
 /// Encodes as that one string.
 public struct TitleRef: Codable, Sendable, Hashable, CustomStringConvertible {
-    /// Where the id is from. One this app doesn't know is kept as sent, but isn't supported.
+    /// Where the id is from, as the server names it. The app doesn't judge sources: it
+    /// shows and plays whatever title the server sends, and hands the ref back as it came.
     public struct Source: RawRepresentable, Codable, Sendable, Hashable {
         public var rawValue: String
         public init(rawValue: String) { self.rawValue = rawValue }
@@ -12,8 +13,6 @@ public struct TitleRef: Codable, Sendable, Hashable, CustomStringConvertible {
         public static let tmdb = Source(rawValue: "tmdb")
         public static let anilist = Source(rawValue: "anilist")
 
-        /// One this app can show and play.
-        public var isSupported: Bool { self == .tmdb || self == .anilist }
     }
 
     public var source: Source
@@ -49,8 +48,6 @@ public struct TitleRef: Codable, Sendable, Hashable, CustomStringConvertible {
     /// The TMDB id, when this is a TMDB title.
     public var tmdbId: Int? { source == .tmdb ? id : nil }
 
-    public var isSupported: Bool { source.isSupported }
-
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let text = try container.decode(String.self)
@@ -68,7 +65,7 @@ public struct TitleRef: Codable, Sendable, Hashable, CustomStringConvertible {
 
 // MARK: - Lists that leave out what this app can't use
 
-/// A list item this app may not be able to use (a title from a source it doesn't know).
+/// A list item this app may not be able to use (one that names no title at all).
 protocol ListItem {
     var isUsable: Bool { get }
 }

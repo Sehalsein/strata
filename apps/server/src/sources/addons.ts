@@ -3,11 +3,24 @@ import { isVideoFile, type ParsedName } from "../media/parse";
 import { globalFetch } from "../net";
 import { runtime } from "#runtime";
 
+/** One of an add-on's catalogs (a list of titles), and whether Home shows it as a row. */
+export const addonCatalogSchema = z.object({
+  type: z.enum(["movie", "series"]),
+  id: z.string().min(1).max(200),
+  name: z.string().min(1).max(100),
+  home: z.boolean().default(false),
+});
+export type AddonCatalog = z.infer<typeof addonCatalogSchema>;
+
+/** A catalog's key within its add-on ("movie/tmdb.trending"). */
+export const catalogKey = (c: Pick<AddonCatalog, "type" | "id">) => `${c.type}/${c.id}`;
+
 /**
  * A Stremio add-on a household uses: one that finds releases (Torrentio, AIOStreams, Comet,
  * MediaFusion…: anything that answers `/stream/{movie|series}/{id}.json`), one that finds
- * subtitles (OpenSubtitles v3: `/subtitles/…`), or both. Kept sealed, since their URLs
- * often carry a password or a debrid key.
+ * subtitles (OpenSubtitles v3: `/subtitles/…`), one with catalogs of titles (AIO Metadata:
+ * `/catalog/…`), or several of these. Kept sealed, since their URLs often carry a password
+ * or a debrid key.
  */
 export const streamAddonSchema = z.object({
   id: z.string().min(1),
@@ -16,11 +29,13 @@ export const streamAddonSchema = z.object({
   name: z.string().min(1).max(100),
   enabled: z.boolean().default(true),
   /** What it's asked for. Lists saved before subtitles came along only find streams. */
-  resources: z.array(z.enum(["stream", "subtitles"])).min(1).default(["stream"]),
+  resources: z.array(z.enum(["stream", "subtitles", "catalog"])).min(1).default(["stream"]),
   /** The ids it finds streams for ("tt", "kitsu"…), from its manifest; null when it doesn't say. */
   idPrefixes: z.array(z.string()).nullable().default(null),
   /** The ids it finds subtitles for; null when it doesn't say. */
   subtitleIdPrefixes: z.array(z.string()).nullable().default(null),
+  /** Its catalogs of movies and shows that need nothing filled in, in its order. */
+  catalogs: z.array(addonCatalogSchema).default([]),
   /** AIOStreams also has a search API that says what Stremio's streams leave out (hashes). */
   kind: z.enum(["stremio", "aiostreams"]).default("stremio"),
   /** It has a configure page (<base>/configure), per its manifest. */
@@ -37,7 +52,7 @@ export const streamAddonListSchema = z.array(streamAddonSchema);
 /** What a household searches with before it sets up its own list: the server's Torrentio. */
 export function defaultAddons(torrentioUrl: string): StreamAddon[] {
   if (!torrentioUrl) return [];
-  return [{ id: "default", url: manifestUrl(torrentioUrl), name: "Torrentio", enabled: true, resources: ["stream"], idPrefixes: ["tt", "kitsu"], subtitleIdPrefixes: null, kind: "stremio", configurable: true, allowPrivate: true }];
+  return [{ id: "default", url: manifestUrl(torrentioUrl), name: "Torrentio", enabled: true, resources: ["stream"], idPrefixes: ["tt", "kitsu"], subtitleIdPrefixes: null, catalogs: [], kind: "stremio", configurable: true, allowPrivate: true }];
 }
 
 /** A pasted add-on address as its manifest URL: stremio:// becomes https://, /manifest.json is added. */
@@ -194,7 +209,24 @@ const manifestSchema = z.object({
   types: z.array(z.string()).default([]),
   idPrefixes: z.array(z.string()).optional(),
   behaviorHints: z.object({ configurable: z.boolean().optional(), configurationRequired: z.boolean().optional() }).passthrough().optional(),
+  catalogs: z
+    .array(
+      z
+        .object({
+          type: z.string(),
+          id: z.string(),
+          name: z.string().optional(),
+          extra: z.array(z.object({ name: z.string(), isRequired: z.boolean().optional() }).passthrough()).optional(),
+          extraRequired: z.array(z.string()).optional(),
+        })
+        .passthrough(),
+    )
+    .catch([])
+    .default([]),
 });
+
+/** Catalogs Home rows start with when an add-on is added: its first few. */
+const HOME_CATALOGS_AT_FIRST = 3;
 
 /** Reads an add-on's manifest and checks it can find streams or subtitles for movies or shows. */
 export async function inspectAddon(input: string, fetchImpl: typeof fetch = globalFetch, allowPrivate = false): Promise<Omit<StreamAddon, "id" | "enabled">> {
@@ -221,17 +253,26 @@ export async function inspectAddon(input: string, fetchImpl: typeof fetch = glob
   };
   const stream = resource("stream");
   const subtitles = resource("subtitles");
-  if (!stream && !subtitles) {
-    const offered = m.resources.some((r) => ["stream", "subtitles"].includes(typeof r === "string" ? r : r.name));
-    throw new AddonError(offered ? `${label} doesn't have movies or shows.` : `${label} doesn't find streams or subtitles, so Strata can't use it.`);
+  // Catalogs Strata can show as rows: of movies or shows, needing no genre or search filled in.
+  const offersCatalogs = m.resources.some((r) => (typeof r === "string" ? r : r.name) === "catalog");
+  const catalogs: AddonCatalog[] = offersCatalogs
+    ? m.catalogs
+        .filter((c) => (c.type === "movie" || c.type === "series") && !c.extra?.some((e) => e.isRequired) && !c.extraRequired?.length)
+        .slice(0, 100)
+        .map((c, i) => ({ type: c.type as "movie" | "series", id: c.id.slice(0, 200), name: (c.name?.trim() || c.id).slice(0, 100), home: i < HOME_CATALOGS_AT_FIRST }))
+    : [];
+  if (!stream && !subtitles && !catalogs.length) {
+    const offered = m.resources.some((r) => ["stream", "subtitles", "catalog"].includes(typeof r === "string" ? r : r.name));
+    throw new AddonError(offered ? `${label} doesn't have movies or shows.` : `${label} doesn't find streams, subtitles or catalogs, so Strata can't use it.`);
   }
   const aio = !!stream && /aiostreams/i.test(`${m.id ?? ""} ${m.name ?? ""}`) && aioCredentials(url) !== null;
   return {
     url,
     name: (m.name ?? addonOrigin(url)).slice(0, 100),
-    resources: [...(stream ? (["stream"] as const) : []), ...(subtitles ? (["subtitles"] as const) : [])],
+    resources: [...(stream ? (["stream"] as const) : []), ...(subtitles ? (["subtitles"] as const) : []), ...(catalogs.length ? (["catalog"] as const) : [])],
     idPrefixes: stream?.idPrefixes ?? null,
     subtitleIdPrefixes: subtitles?.idPrefixes ?? null,
+    catalogs,
     kind: aio ? "aiostreams" : "stremio",
     configurable: !!m.behaviorHints?.configurable,
     allowPrivate,
@@ -269,6 +310,62 @@ export async function assertAddonReady(addon: Omit<StreamAddon, "id" | "enabled"
 /** Whether an add-on is asked for streams / subtitles. */
 export const findsStreams = (a: StreamAddon) => a.resources.includes("stream");
 export const findsSubtitles = (a: StreamAddon) => a.resources.includes("subtitles");
+export const hasCatalogs = (a: StreamAddon) => a.resources.includes("catalog") && a.catalogs.length > 0;
+
+/**
+ * A manifest read again: its catalogs as it lists them now, keeping which ones the
+ * household put on Home (new ones start off).
+ */
+export function keepCatalogChoices(fresh: AddonCatalog[], before: AddonCatalog[]): AddonCatalog[] {
+  if (!before.length) return fresh;
+  const chosen = new Map(before.map((c) => [catalogKey(c), c.home]));
+  return fresh.map((c) => ({ ...c, home: chosen.get(catalogKey(c)) ?? false }));
+}
+
+/** A title in an add-on's catalog, as far as a Home row needs it. */
+export interface AddonMeta {
+  /** Its id in the add-on: "tt0111161", "tmdb:278", "kitsu:1376", "mal:5114"… */
+  id: string;
+  type: "movie" | "series";
+  name: string;
+  poster?: string;
+  background?: string;
+  description?: string;
+  /** "1994", "2008-2013". */
+  releaseInfo?: string;
+  imdbRating?: number;
+}
+
+/** The titles in one of an add-on's catalogs, first page. */
+export async function addonCatalogItems(addon: StreamAddon, catalog: Pick<AddonCatalog, "type" | "id">, fetchImpl: typeof fetch = globalFetch): Promise<AddonMeta[]> {
+  // Catalogs are public lists, often served from elsewhere (Cinemeta redirects to its own catalog host).
+  const res = await fetchFollowing(`${addonBase(addon.url)}/catalog/${catalog.type}/${encodeURIComponent(catalog.id)}.json`, addon, fetchImpl, { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`${addon.name} ${res.status}`);
+  const body = (await readJson(res)) as { metas?: Record<string, unknown>[] } | null;
+  const text = (v: unknown, max = 2048) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined);
+  const image = (v: unknown) => {
+    const u = text(v);
+    return u && /^https:\/\//i.test(u) ? u : undefined;
+  };
+  return (body?.metas ?? []).slice(0, 100).flatMap((m) => {
+    const id = text(m.id, 100);
+    const name = text(m.name, 300);
+    if (!id || !name) return [];
+    const rating = Number(m.imdbRating);
+    return [
+      {
+        id,
+        type: m.type === "series" ? "series" : catalog.type,
+        name,
+        poster: image(m.poster),
+        background: image(m.background),
+        description: text(m.description, 1000),
+        releaseInfo: text(m.releaseInfo ?? m.year, 20),
+        imdbRating: Number.isFinite(rating) && rating > 0 ? rating : undefined,
+      },
+    ];
+  });
+}
 
 /** A subtitle an add-on found: its file's address and language. */
 export interface AddonSubtitle {
@@ -310,27 +407,36 @@ const MAX_SUBTITLE_BYTES = 5 * 1024 * 1024;
 
 /**
  * A subtitle file's bytes, for one of `addon`'s subtitles. Subtitle hosts often redirect to
- * where the file is, so up to three redirects are followed, each checked like the first.
+ * where the file is (see fetchFollowing).
  */
 export async function fetchSubtitleFile(url: string, addon: Pick<StreamAddon, "url" | "allowPrivate">, fetchImpl: typeof fetch = globalFetch): Promise<Uint8Array> {
-  // An add-on the server's admin let be on the home network may serve its own files from
-  // there, but it can't send Strata anywhere else on that network.
+  const res = await fetchFollowing(url, addon, fetchImpl);
+  if (!res.ok) throw new Error(`Subtitle download ${res.status}`);
+  return readBytes(res, MAX_SUBTITLE_BYTES);
+}
+
+/**
+ * Fetches something public an add-on points to (a subtitle file, a catalog), following up
+ * to three redirects, each checked like the first address. An add-on the server's admin
+ * let be on the home network may serve from its own host there, but it can't send Strata
+ * anywhere else on that network.
+ */
+async function fetchFollowing(url: string, addon: Pick<StreamAddon, "url" | "allowPrivate">, fetchImpl: typeof fetch, init: RequestInit = {}): Promise<Response> {
   const ownHost = new URL(addon.url).host;
   let at = url;
   for (let hop = 0; hop < 4; hop++) {
-    if (!/^https?:\/\//i.test(at)) throw new AddonError("That subtitle's address isn't a web address.");
+    if (!/^https?:\/\//i.test(at)) throw new AddonError("That address isn't a web address.");
     if (!(addon.allowPrivate && new URL(at).host === ownHost)) await assertPublicHost(at);
-    const res = await fetchImpl(at, { redirect: "manual", signal: AbortSignal.timeout(15_000) });
+    const res = await fetchImpl(at, { ...init, redirect: "manual", signal: init.signal ?? AbortSignal.timeout(15_000) });
     if (res.status >= 300 && res.status < 400) {
       const next = res.headers.get("location");
-      if (!next) throw new Error(`Subtitle ${res.status} without a location`);
+      if (!next) throw new Error(`${res.status} without a location`);
       at = new URL(next, at).toString();
       continue;
     }
-    if (!res.ok) throw new Error(`Subtitle download ${res.status}`);
-    return readBytes(res, MAX_SUBTITLE_BYTES);
+    return res;
   }
-  throw new Error("Subtitle download redirected too many times");
+  throw new Error("Redirected too many times");
 }
 
 /** A stream an add-on found, as far as discovery cares: a torrent, with what's known about it. */

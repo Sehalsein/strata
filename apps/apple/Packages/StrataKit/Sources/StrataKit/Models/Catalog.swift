@@ -113,8 +113,8 @@ public struct TitleCard: Codable, Sendable, Hashable, Identifiable {
 }
 
 extension TitleCard: ListItem {
-    /// From a source this app knows, and naming its title one way or another.
-    var isUsable: Bool { sentRef.map(\.isSupported) ?? (tmdbId != nil) }
+    /// Naming its title one way or another (any source: the server decides what's a title).
+    var isUsable: Bool { sentRef != nil || tmdbId != nil }
 }
 
 public struct Shelf: Codable, Sendable, Hashable, Identifiable {
@@ -576,5 +576,5 @@ public struct CalendarEpisode: Codable, Sendable, Hashable, Identifiable {
 }
 
 extension CalendarEpisode: ListItem {
-    var isUsable: Bool { sentRef.map(\.isSupported) ?? (tmdbId != nil) }
+    var isUsable: Bool { sentRef != nil || tmdbId != nil }
 }

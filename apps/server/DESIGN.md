@@ -147,6 +147,26 @@ whether to show uncached releases. The next episode is pre-warmed during playbac
 
 Scrapers need IMDb ids; these come from TMDB `external_ids`. Anime adds AniList/Kitsu ids.
 
+## Catalog sources
+
+TMDB stays the source of a title's identity (with AniList for anime TMDB doesn't have):
+file matching, progress, My List, the calendar, content ratings and discovery all key off
+it. Other catalogs plug in around it:
+
+- **Catalog add-ons** (AIO Metadata, Cinemeta, MDBList… any Stremio add-on with the
+  `catalog` resource) sit in the household's add-on list. Their catalogs that need nothing
+  filled in are offered as Home rows; the household ticks which ones show
+  (`homeCatalogs`), and the first few start on.
+- `TitleIds` (`src/catalog/titleIds.ts`) is the one place that knows other sites' ids:
+  IMDb and TVDB (looked up on TMDB), TMDB's own, and Kitsu, MAL and AniList (through the
+  anime id list). Every add-on title becomes a Strata title, so it opens, plays and keeps
+  progress like any other; one nobody can place is left out.
+- `AddonRows` (`src/catalog/addonRows.ts`) is a `ShelfSource`: Home asks every source for
+  its rows after TMDB's own. A row waits at most 6 s and keeps the add-on's artwork.
+
+The apps don't know where a row or title came from: they draw the rows the server sends
+and pass a title's ref back as they got it, whatever its source.
+
 ## Playback
 
 `POST /api/play { tmdbId, season?, episode?, candidateId?, startMs?, caps }` →
