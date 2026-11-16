@@ -173,14 +173,25 @@ body {
   min-height: 100svh;
 }
 /*
- * The layout is shadcn's inset sidebar (dashboard-01): the sidebar sits on a plain, solid
- * page, and the content is a raised panel beside it that holds the colour, for the glass
- * cards on it to pick up. On phones there's no panel: the page and its colour show.
+ * The layout is shadcn's inset sidebar (dashboard-01), as two matching raised panels on a
+ * plain, solid page: the sidebar, and the content beside it, which holds the colour for the
+ * glass cards on it to pick up. On phones there are no panels: the page and its colour show.
  */
 [data-slot="sidebar-inset"] {
   background-color: transparent;
 }
 @media (min-width: 768px) {
+  /* The sidebar is a panel too, matching the content's, in the same gutter. */
+  [data-variant="inset"] [data-slot="sidebar-inner"] {
+    background-color: var(--panel);
+    background-image: radial-gradient(28rem 24rem at 0% -10%, var(--glow-1), transparent 70%);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    box-shadow:
+      inset 0 1px 0 var(--glass-edge),
+      var(--glass-shadow);
+    overflow: hidden;
+  }
   .peer[data-variant="inset"] ~ [data-slot="sidebar-inset"] {
     background-color: var(--panel);
     background-image:
