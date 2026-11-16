@@ -345,13 +345,19 @@ public final class ServerStore {
         case existing(login: String, password: String)
     }
 
+    /// Set when joining as a new account found the email already has one (where the server
+    /// doesn't say beforehand, the cloud): sign in to it instead.
+    public private(set) var joinFoundExistingAccount = false
+
     /// Joins a household by invitation (from its link or QR code): creates the account or
     /// signs in to an existing one, accepts the invitation, opens its household, then saves
-    /// the sign-in and makes it active. Returns false and sets `lastError` on failure.
+    /// the sign-in and makes it active. Returns false and sets `lastError` on failure (and
+    /// `joinFoundExistingAccount` when a new account's email turned out to have one).
     @discardableResult
     public func acceptInvitation(_ invitationId: String, url: URL, as account: InvitationAccount) async -> Bool {
         isAuthenticating = true
         lastError = nil
+        joinFoundExistingAccount = false
         defer { isAuthenticating = false }
         do {
             let anon = StrataClient(baseURL: url, session: session, cacheTTL: 0)
@@ -359,8 +365,28 @@ public final class ServerStore {
             let token: String
             switch account {
             case let .new(email, username, name, password):
-                let made = try await anon.signUp(email: email, username: username, name: name, password: password, invitationId: invitationId)
-                if let made { token = made } else { token = try await anon.signIn(login: username, password: password) }
+                // The email may have an account already. A server that confirms new accounts'
+                // email answers that like any sign-up (so nobody learns which emails have
+                // one), and then the new username doesn't sign in; others say so outright.
+                let existing = { () -> StrataError in
+                    self.joinFoundExistingAccount = true
+                    return StrataError(kind: .http, status: 409, message: String(localized: "\(email) already has an account here. Sign in with its password to join.", bundle: .module))
+                }
+                let made: String?
+                do {
+                    made = try await anon.signUp(email: email, username: username, name: name, password: password, invitationId: invitationId)
+                } catch let e as StrataError where e.code == "USER_ALREADY_EXISTS" || e.code == "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL" {
+                    throw existing()
+                }
+                if let made {
+                    token = made
+                } else {
+                    do {
+                        token = try await anon.signIn(login: username, password: password)
+                    } catch let e as StrataError where e.status == 401 {
+                        throw existing()
+                    }
+                }
             case let .existing(login, password):
                 do {
                     token = try await anon.signIn(login: login, password: password)

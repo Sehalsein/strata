@@ -57,6 +57,16 @@ export function createApp(services: Services) {
   app.route("/api", catalogRoutes);
 
   app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));
+
+  // Lets the Strata apps save and fill passwords for this server's address in the iOS
+  // Passwords app: Apple fetches this file to check the app may use the domain. Only where
+  // STRATA_APPLE_APP_IDS names the apps ("<team id>.com.sehalsein.strata", comma-separated):
+  // the cloud server, whose address is built into the apps.
+  app.get("/.well-known/apple-app-site-association", (c) => {
+    const apps = (process.env.STRATA_APPLE_APP_IDS ?? "").split(",").map((a) => a.trim()).filter(Boolean);
+    if (!apps.length) return c.json({ error: "Not found" }, 404);
+    return c.json({ webcredentials: { apps } }, 200, { "cache-control": "public, max-age=3600" });
+  });
   app.get("*", webHandler(services.config.webDir));
 
   app.onError((err, c) => {

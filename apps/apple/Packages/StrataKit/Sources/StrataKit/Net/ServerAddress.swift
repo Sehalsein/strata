@@ -67,6 +67,18 @@ public enum ServerAddress {
         host.contains(":") || host.split(separator: ".").allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
     }
 
+    /// The one address the app may save passwords for in the Passwords app (its Associated
+    /// Domains entitlement, and the server's apple-app-site-association file): the cloud
+    /// server's. A home server's address can be anything, so it can't be listed.
+    public static let passwordDomain = "app.strata.sehalsein.com"
+
+    /// Whether password fields for the server at `url` should tell iOS what they are (so it
+    /// offers to save and fill them). Only for the cloud server: iOS files every password
+    /// the app saves under that domain, so a home server's would end up under the wrong one.
+    public static func savesPasswords(_ url: URL) -> Bool {
+        url.scheme?.lowercased() == "https" && url.host?.lowercased() == passwordDomain
+    }
+
     /// "host:port" for messages.
     public static func display(_ url: URL) -> String {
         guard let host = url.host else { return url.absoluteString }

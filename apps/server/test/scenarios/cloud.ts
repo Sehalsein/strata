@@ -27,6 +27,8 @@ try {
 
   // Someone invited joins that household instead of getting one of their own.
   const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token: annToken, json: { email: "ben@example.com", role: "member" } }));
+  // Anyone can make an invitation here, so it doesn't tell whether its email has an account.
+  expect("hasAccount" in (await json(await server.request(`/api/invitations/${invite.id}`)))).toBe(false);
   const ben = await signUp("ben@example.com", "ben", invite.id);
   expect(ben.status).toBe(200);
   const benToken = ben.headers.get("set-auth-token")!;

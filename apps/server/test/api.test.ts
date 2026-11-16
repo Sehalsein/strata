@@ -57,6 +57,19 @@ describe("setup and auth", () => {
     expect(me.household).toMatchObject({ name: "sehal's home", role: "owner" });
   });
 
+  test("Apple's app-site-association file lists the apps only when they're set", async () => {
+    expect((await server.request("/.well-known/apple-app-site-association")).status).toBe(404);
+    process.env.STRATA_APPLE_APP_IDS = "ABCDE12345.com.sehalsein.strata";
+    try {
+      const res = await server.request("/.well-known/apple-app-site-association");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("application/json");
+      expect(await res.json()).toEqual({ webcredentials: { apps: ["ABCDE12345.com.sehalsein.strata"] } });
+    } finally {
+      delete process.env.STRATA_APPLE_APP_IDS;
+    }
+  });
+
   test("people join a household by invitation only", async () => {
     // Nobody signs up without an invitation.
     const signUp = (email: string, username: string, invitationId?: string) =>

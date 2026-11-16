@@ -15,6 +15,8 @@ struct ChooseNewPasswordView: View {
 
     /// The server's minimum.
     private static let minimumLength = 8
+    /// The Passwords app saves these only for the cloud server (`ServerAddress.savesPasswords`).
+    private var autofill: Bool { services.store.activeServer?.addresses.contains(where: ServerAddress.savesPasswords) == true }
     private var name: String { services.store.active?.name ?? String(localized: "You", bundle: .module) }
 
     private var problem: String? {
@@ -41,9 +43,9 @@ struct ChooseNewPasswordView: View {
                 }
                 #else
                 VStack(spacing: Metrics.space3) {
-                    SecureField(String(localized: "Temporary password", bundle: .module), text: $current).textContentType(.password).modifier(FieldStyle())
-                    SecureField(String(localized: "New password", bundle: .module), text: $new).textContentType(.newPassword).modifier(FieldStyle())
-                    SecureField(String(localized: "Confirm new password", bundle: .module), text: $confirm).textContentType(.newPassword).modifier(FieldStyle())
+                    SecureField(String(localized: "Temporary password", bundle: .module), text: $current).textContentType(autofill ? .password : nil).modifier(FieldStyle())
+                    SecureField(String(localized: "New password", bundle: .module), text: $new).textContentType(autofill ? .newPassword : nil).modifier(FieldStyle())
+                    SecureField(String(localized: "Confirm new password", bundle: .module), text: $confirm).textContentType(autofill ? .newPassword : nil).modifier(FieldStyle())
                 }
                 if let message = error ?? problem {
                     Label(message, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)

@@ -223,26 +223,39 @@ public struct InviteRequest: Identifiable, Hashable {
 
     public init?(_ url: URL) {
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let named: URL?
+        let id: String?
         switch url.scheme?.lowercased() {
         case "strata" where url.host == "invite":
-            guard let id = query.first(where: { $0.name == "id" })?.value, !id.isEmpty,
-                  let server = query.first(where: { $0.name == "server" })?.value.flatMap(URL.init(string:)),
-                  server.scheme == "http" || server.scheme == "https", server.host != nil else { return nil }
-            self.server = server
-            self.invitationId = id
+            named = query.first(where: { $0.name == "server" })?.value.flatMap(URL.init(string:))
+            id = query.first(where: { $0.name == "id" })?.value
         case "http", "https":
             let parts = url.pathComponents.filter { $0 != "/" }
-            guard parts.count == 2, parts[0] == "invite", !parts[1].isEmpty,
-                  var origin = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
-            origin.path = ""
-            origin.query = nil
-            origin.fragment = nil
-            guard let server = origin.url else { return nil }
-            self.server = server
-            self.invitationId = parts[1]
+            guard parts.count == 2, parts[0] == "invite" else { return nil }
+            named = url
+            id = parts[1]
         default:
             return nil
         }
+        guard let id, !id.isEmpty, let named, let server = Self.origin(named) else { return nil }
+        self.server = server
+        self.invitationId = id
+    }
+
+    /// Only the scheme, host and port of the server a link names. A link with a user or
+    /// password in its address ("https://my.server@elsewhere.example") is refused: it's
+    /// only ever used to make one address look like another.
+    static func origin(_ url: URL) -> URL? {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = parts.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = parts.host, !host.isEmpty,
+              parts.user == nil, parts.password == nil else { return nil }
+        parts.scheme = scheme
+        parts.host = host.lowercased()
+        parts.path = ""
+        parts.query = nil
+        parts.fragment = nil
+        return parts.url
     }
 }
 

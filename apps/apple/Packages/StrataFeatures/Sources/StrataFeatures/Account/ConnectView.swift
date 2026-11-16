@@ -609,10 +609,14 @@ struct SignInView: View {
         #endif
     }
 
+    /// The Passwords app saves and fills these only for the cloud server (see
+    /// `ServerAddress.savesPasswords`).
+    private var autofill: Bool { ServerAddress.savesPasswords(target.url) }
+
     private var fields: some View {
         VStack(spacing: Metrics.space3) {
             TextField(String(localized: "Username or email", bundle: .module), text: $login)
-                .textContentType(.username)
+                .textContentType(autofill ? .username : nil)
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
                 .keyboardType(.emailAddress)
@@ -623,7 +627,7 @@ struct SignInView: View {
                 .onSubmit { field = .password }
                 .modifier(FieldStyle())
             SecureField(String(localized: "Password", bundle: .module), text: $password)
-                .textContentType(.password)
+                .textContentType(autofill ? .password : nil)
                 .focused($field, equals: .password)
                 .submitLabel(.go)
                 .onSubmit { Task { await signIn() } }

@@ -28,6 +28,10 @@ struct InviteView: View {
     @State private var password = ""
     @State private var joining = false
     @State private var error: String?
+    /// Signing up found the email has an account (the cloud doesn't say beforehand).
+    @State private var foundAccount = false
+    /// A server this device has signed in to before: no warning before its password.
+    @State private var knownServer = false
     @FocusState private var focused: Bool
 
     /// The server's rules for a new account.
@@ -35,7 +39,9 @@ struct InviteView: View {
     private static let usernamePattern = #/[a-zA-Z0-9_.\-]{2,64}/#
 
     private var address: String { ServerAddress.display(request.server) }
-    private var hasAccount: Bool { invitation?.hasAccount == true }
+    private var hasAccount: Bool { invitation?.hasAccount == true || foundAccount }
+    /// Not encrypted, and not provably on this network: anyone on the way could read it.
+    private var unencrypted: Bool { request.server.scheme == "http" && !ServerAddress.isLocal(request.server) }
     private var steps: [Step] {
         if signedIn != nil { return [.joinAs] }
         return hasAccount ? [.password] : [.username, .password]
@@ -43,6 +49,12 @@ struct InviteView: View {
     private var index: Int { steps.firstIndex(of: step) ?? 0 }
     private var isLast: Bool { index == steps.count - 1 }
     private var trimmedUsername: String { username.trimmingCharacters(in: .whitespaces) }
+    /// The Passwords app saves and fills these only for the cloud server (see
+    /// `ServerAddress.savesPasswords`).
+    private var autofill: Bool { ServerAddress.savesPasswords(request.server) }
+    /// What the account signs in with: shown above its password, so the Passwords app saves
+    /// the two together.
+    private var accountLogin: String { hasAccount ? (invitation?.email ?? "") : trimmedUsername }
 
     /// Why Continue is off, once there's something to judge.
     private var problem: String? {
@@ -134,6 +146,18 @@ struct InviteView: View {
                 Text(title).font(.stHeadline).foregroundStyle(Theme.ink)
                 Text(detail).font(.stFootnote).foregroundStyle(Theme.ink3)
             }
+            if step == .password, hasAccount, !knownServer {
+                // A link can name any server, and one could pretend the account is there to
+                // collect the password: say plainly where it goes.
+                Label(String(localized: "This sends your password to \(address), a server this device hasn't signed in to before. Only continue if it's yours.", bundle: .module),
+                      systemImage: "exclamationmark.shield.fill")
+                    .font(.stFootnote).foregroundStyle(Theme.warning)
+            }
+            if step != .joinAs, unencrypted {
+                Label(String(localized: "\(address) isn't using a secure connection, so others on the way could see what you send.", bundle: .module),
+                      systemImage: "lock.open.fill")
+                    .font(.stFootnote).foregroundStyle(Theme.warning)
+            }
             field
             if let message = error ?? problem {
                 Label(message, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
@@ -177,7 +201,7 @@ struct InviteView: View {
         switch step {
         case .username:
             TextField(String(localized: "Username", bundle: .module), text: $username)
-                .textContentType(.username)
+                .textContentType(autofill ? .username : nil)
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
                 #endif
@@ -187,8 +211,16 @@ struct InviteView: View {
                 .onSubmit { advance() }
                 .modifier(FieldStyle())
         case .password:
+            TextField(String(localized: "Account", bundle: .module), text: .constant(accountLogin))
+                .textContentType(autofill ? .username : nil)
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                #endif
+                .autocorrectionDisabled()
+                .foregroundStyle(Theme.ink2)
+                .modifier(FieldStyle())
             SecureField(String(localized: "Password", bundle: .module), text: $password)
-                .textContentType(hasAccount ? .password : .newPassword)
+                .textContentType(autofill ? (hasAccount ? .password : .newPassword) : nil)
                 .focused($focused)
                 .submitLabel(.join)
                 .onSubmit { advance() }
@@ -213,12 +245,13 @@ struct InviteView: View {
     private func load() async {
         do {
             let found = try await StrataClient(baseURL: request.server, cacheTTL: 0).invitation(id: request.invitationId)
-            // An account already: this device may be signed in to it (only one this device
-            // already has for that server, and only a full sign-in: a watch-only one can't
-            // join households).
-            if found.hasAccount == true {
+            // This device may be signed in to the invited account already (only a sign-in it
+            // has for that server, and only a full one: a watch-only one can't join households).
+            // Asked whether or not the server says the email has an account: the cloud doesn't.
+            if found.hasAccount != false {
                 signedIn = await services.store.signIn(forEmail: found.email, serverAt: request.server)
             }
+            knownServer = services.store.savedServer(matching: request.server.absoluteString) != nil
             invitation = found
             step = steps.first ?? .username
         } catch {
@@ -247,6 +280,12 @@ struct InviteView: View {
             services.refreshClient()
             dismiss()
             onJoined()
+        } else if !hasAccount, services.store.joinFoundExistingAccount {
+            // The email had an account after all: sign in to it instead.
+            foundAccount = true
+            password = ""
+            step = .password
+            error = services.store.lastError
         } else {
             error = services.store.lastError ?? String(localized: "Couldn't join.", bundle: .module)
         }

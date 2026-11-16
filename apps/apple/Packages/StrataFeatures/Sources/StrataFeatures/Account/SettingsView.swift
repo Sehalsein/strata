@@ -340,6 +340,8 @@ struct ChangePasswordView: View {
 
     /// The server's minimum.
     private static let minimumLength = 8
+    /// The Passwords app saves these only for the cloud server (`ServerAddress.savesPasswords`).
+    private var autofill: Bool { services.store.activeServer?.addresses.contains(where: ServerAddress.savesPasswords) == true }
 
     private var problem: String? {
         if new.isEmpty { return nil }
@@ -352,13 +354,13 @@ struct ChangePasswordView: View {
         NavigationStack {
             Form {
                 Section {
-                    SecureField(String(localized: "Current password", bundle: .module), text: $current).textContentType(.password)
+                    SecureField(String(localized: "Current password", bundle: .module), text: $current).textContentType(autofill ? .password : nil)
                 } footer: {
                     Text("Other devices signed in as \(services.store.active?.name ?? "you") will be signed out.", bundle: .module)
                 }
                 Section {
-                    SecureField(String(localized: "New password", bundle: .module), text: $new).textContentType(.newPassword)
-                    SecureField(String(localized: "Confirm new password", bundle: .module), text: $confirm).textContentType(.newPassword)
+                    SecureField(String(localized: "New password", bundle: .module), text: $new).textContentType(autofill ? .newPassword : nil)
+                    SecureField(String(localized: "Confirm new password", bundle: .module), text: $confirm).textContentType(autofill ? .newPassword : nil)
                 } footer: {
                     if let message = error ?? problem {
                         Text(message).foregroundStyle(Theme.danger)

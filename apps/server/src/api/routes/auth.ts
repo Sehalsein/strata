@@ -249,13 +249,17 @@ export const authRoutes = new Hono<Env>()
       throw new HTTPException(404, { message: "This invitation has expired, was canceled or was already used. Ask for a new one." });
     }
     // Whether the email already has an account here (say, in another household): the apps
-    // then ask only for its password. Told only to whoever holds the invitation's link.
-    const [existing] = await c.var.services.db.select({ id: user.id }).from(user).where(eq(user.email, row.email.toLowerCase()));
+    // then ask only for its password. Not where anyone can sign up (the cloud): there anyone
+    // can make an invitation, so this would tell them which emails have accounts. The apps
+    // find out there when signing up meets an account that's already there.
+    const [existing] = c.var.services.profile.openSignUp
+      ? []
+      : await c.var.services.db.select({ id: user.id }).from(user).where(eq(user.email, row.email.toLowerCase()));
     const server = addressForDevices(c);
     c.header("cache-control", "no-store");
     return c.json({
       email: row.email,
-      hasAccount: !!existing,
+      ...(c.var.services.profile.openSignUp ? {} : { hasAccount: !!existing }),
       role: row.role ?? "member",
       household: row.household,
       serverName: c.var.services.settings.get().serverName,
