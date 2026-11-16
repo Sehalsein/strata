@@ -25,7 +25,7 @@ import type { ProgressStore } from "./progress";
 import type { SecretBox } from "./secrets";
 import { householdSettingsSchema, HOUSEHOLD_SECRET_KEYS, SettingsStore, type HouseholdSettingsStore, type ServerSettingsStore, type Settings } from "./settings";
 import { Discovery } from "./sources/discovery";
-import { AddonError, assertAddonReady, catalogKey, defaultAddons, fetchSubtitleFile, findsSubtitles, inspectAddon, keepCatalogChoices, streamAddonListSchema, type StreamAddon } from "./sources/addons";
+import { AddonError, assertAddonReady, catalogKey, MAX_HOME_ROWS, defaultAddons, fetchSubtitleFile, findsSubtitles, inspectAddon, keepCatalogChoices, streamAddonListSchema, type StreamAddon } from "./sources/addons";
 import { Buffer } from "node:buffer";
 import { TitleIds } from "./catalog/titleIds";
 import { AddonRows } from "./catalog/addonRows";
@@ -112,7 +112,7 @@ export class Household {
     const tmdb = this.tmdb;
     this.library = new Library(db, organizationId, tmdb, new Matcher(tmdb, new AnimeMatcher(shared.anime.anilist, shared.anime.ids, tmdb, shared.anime.kitsu)), shared.anime.anilist);
     this.titleIds = new TitleIds(tmdb, shared.anime.ids);
-    const addonRows = new AddonRows(() => this.addons(), this.titleIds, (refs) => this.library.availability(refs), shared.fetch);
+    const addonRows = new AddonRows(() => this.addons(), this.titleIds, (refs) => this.catalog.titleCards(refs), (refs) => this.library.availability(refs), shared.fetch);
     this.catalog = new CatalogService(tmdb, this.library, shared.progress, settings, shared.anime, this.omdb, [addonRows]);
     this.content = new ContentFilter(db, organizationId, tmdb, settings, shared.anime);
     this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, show) => this.content.allowed(userId, show));
@@ -270,7 +270,10 @@ export class Household {
     const list = this.addons();
     if (list.some((a) => a.url === found.url)) throw new AddonError("That add-on is already in the list.");
     if (list.length >= MAX_ADDONS) throw new AddonError(`A household can have up to ${MAX_ADDONS} add-ons.`);
-    const addon: StreamAddon = { ...found, id: crypto.randomUUID(), enabled: true };
+    // Its first catalogs start on Home, while there's room.
+    let room = MAX_HOME_ROWS - list.reduce((n, a) => n + a.catalogs.filter((c) => c.home).length, 0);
+    const catalogs = found.catalogs.map((c) => (c.home && room > 0 ? (room--, c) : { ...c, home: false }));
+    const addon: StreamAddon = { ...found, catalogs, id: crypto.randomUUID(), enabled: true };
     await this.saveAddons([...list, addon]);
     return addon;
   }
@@ -287,6 +290,9 @@ export class Household {
     if (patch.enabled !== undefined) addon!.enabled = patch.enabled;
     if (patch.homeCatalogs) {
       const on = new Set(patch.homeCatalogs);
+      const others = list.reduce((n, a) => n + a.catalogs.filter((c) => c.home).length, 0);
+      const mine = addon!.catalogs.filter((c) => on.has(catalogKey(c))).length;
+      if (others + mine > MAX_HOME_ROWS) throw new AddonError(`Home can show up to ${MAX_HOME_ROWS} add-on rows. Untick one first.`);
       addon!.catalogs = addon!.catalogs.map((c) => ({ ...c, home: on.has(catalogKey(c)) }));
     }
     list.splice(Math.max(0, Math.min(patch.index ?? at, list.length)), 0, addon!);

@@ -50,6 +50,11 @@ export interface TitleCard {
   badge?: string;
   /** The title's logo, on hero cards only: the apps show it in place of the name. */
   logoUrl?: string;
+  /**
+   * An add-on's own poster for it (rated posters, say). Never sent as is: the Viewer uses it
+   * in place of `posterUrl` for profiles without a content limit, and drops it.
+   */
+  addonPosterUrl?: string;
 }
 
 export interface EpisodeRef {
@@ -892,6 +897,20 @@ export class CatalogService {
     await Promise.all(Array.from({ length: Math.min(8, tmdbIds.length) }, worker));
     // One availability query for the lot, not one per card.
     return await this.cards(details.filter((d): d is TmdbListItem => d !== null), type);
+  }
+
+  /**
+   * TMDB's own cards for these titles (title, overview, artwork, availability), by ref;
+   * titles TMDB doesn't have (AniList's) are left out.
+   */
+  async titleCards(refs: TitleRef[]): Promise<Map<string, TitleCard>> {
+    const out = new Map<string, TitleCard>();
+    for (const type of ["movie", "show"] as const) {
+      const ids = [...new Set(refs.filter((r) => r.source === "tmdb" && r.type === type).map((r) => r.id))];
+      if (!ids.length) continue;
+      for (const card of await this.detailCards(type, ids)) out.set(card.ref, card);
+    }
+    return out;
   }
 
   /** A cast or crew member and the movies and shows they're known for, most popular first. */

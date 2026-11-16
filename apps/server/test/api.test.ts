@@ -636,10 +636,24 @@ describe("playback", () => {
       ]);
       const shelves = (await json(await server.request("/api/home/catalog", { token }))).shelves;
       const row = shelves.find((s: any) => s.id === `addon:${added.id}:movie/trending`);
-      // Matched to TMDB (by IMDb id), once even when listed twice; the unknown id is left out; the add-on's artwork kept.
+      // Matched to TMDB (by IMDb id), once even when listed twice; the unknown id is left out.
+      // The card is TMDB's (what a profile's limit judges); only the poster is the add-on's.
       expect(row.title).toBe("Trending Films");
-      expect(row.items.map((i: any) => [i.ref, i.title, i.posterUrl])).toEqual([["tmdb:movie:10378", "Big Buck Bunny (add-on)", "https://img.test/bbb.jpg"]]);
+      expect(row.items.map((i: any) => [i.ref, i.title, i.posterUrl])).toEqual([["tmdb:movie:10378", "Big Buck Bunny", "https://img.test/bbb.jpg"]]);
+      expect(row.items[0]).not.toHaveProperty("addonPosterUrl");
       expect(shelves.find((s: any) => s.id === `addon:${added.id}:series/popular`).items[0].ref).toBe("tmdb:show:9001");
+      // Home has room for 12 add-on rows in all, across add-ons.
+      const many = await json(await server.request("/api/admin/addons", { method: "POST", token, json: { url: "https://many.test/manifest.json" } }));
+      try {
+        expect(many.catalogs.filter((c: any) => c.home).length).toBe(3);
+        const all = many.catalogs.map((c: any) => c.key);
+        const tooMany = await server.request(`/api/admin/addons/${many.id}`, { method: "PATCH", token, json: { homeCatalogs: all } });
+        expect(tooMany.status).toBe(400);
+        expect((await json(tooMany)).error).toContain("up to 12");
+        expect((await server.request(`/api/admin/addons/${many.id}`, { method: "PATCH", token, json: { homeCatalogs: all.slice(0, 10) } })).status).toBe(200);
+      } finally {
+        await server.request(`/api/admin/addons/${many.id}`, { method: "DELETE", token });
+      }
       // Taken off Home in the dashboard: the row goes.
       const after = await json(await server.request(`/api/admin/addons/${added.id}`, { method: "PATCH", token, json: { homeCatalogs: ["series/popular"] } }));
       expect(after.items.find((a: any) => a.id === added.id).catalogs.map((c: any) => c.home)).toEqual([false, true]);

@@ -5,7 +5,7 @@ import type { PlayRequest } from "../playback/service";
 import type { PlayReportDevice, PlayReportInput } from "../playback/reports";
 import type { DiscoveryTarget } from "../sources/discovery";
 import { targetRef, tmdbRef, type TitleRef, type TitleTarget } from "./ref";
-import type { BrowseList, Shelf, TitleType } from "./service";
+import type { BrowseList, Shelf, TitleCard, TitleType } from "./service";
 
 const notFound = () => new HTTPException(404, { message: "Title not found" });
 
@@ -214,10 +214,20 @@ export class Viewer {
     return (await this.limited()) ? this.household.content.filter(this.userId, cards) : cards;
   }
 
-  /** Drops titles above the limit, and shelves left empty. */
+  /**
+   * Drops titles above the limit, and shelves left empty. An add-on's own poster is shown
+   * only without a limit: under one, every card shows TMDB's, so what the profile sees is
+   * the title the limit judged.
+   */
   private async shelves(shelves: Shelf[]): Promise<Shelf[]> {
-    if (!(await this.limited())) return shelves;
-    const filtered = await Promise.all(shelves.map(async (shelf) => ({ ...shelf, items: await this.cards(shelf.items) })));
+    const limited = await this.limited();
+    const artwork = <T extends TitleCard>(c: T): T => {
+      if (c.addonPosterUrl === undefined) return c;
+      const { addonPosterUrl, ...card } = c;
+      return { ...card, posterUrl: limited ? card.posterUrl : addonPosterUrl } as T;
+    };
+    if (!limited) return shelves.map((shelf) => ({ ...shelf, items: shelf.items.map(artwork) }));
+    const filtered = await Promise.all(shelves.map(async (shelf) => ({ ...shelf, items: (await this.cards(shelf.items)).map(artwork) })));
     return filtered.filter((shelf) => shelf.items.length > 0);
   }
 

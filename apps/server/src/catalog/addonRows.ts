@@ -3,7 +3,7 @@ import { SharedWork } from "../inFlight";
 import { logger } from "../log";
 import { globalFetch } from "../net";
 import { runtime } from "#runtime";
-import { addonCatalogItems, catalogKey, hasCatalogs, type AddonCatalog, type AddonMeta, type StreamAddon } from "../sources/addons";
+import { addonCatalogItems, catalogKey, hasCatalogs, MAX_HOME_ROWS, type AddonCatalog, type AddonMeta, type StreamAddon } from "../sources/addons";
 import { formatRef, type TitleRef } from "./ref";
 import type { Shelf, TitleCard } from "./service";
 import type { TitleIds } from "./titleIds";
@@ -34,6 +34,8 @@ export class AddonRows implements ShelfSource {
   constructor(
     private readonly addons: () => StreamAddon[],
     private readonly ids: TitleIds,
+    /** TMDB's own cards for titles, by ref (CatalogService.titleCards). */
+    private readonly titleCards: (refs: TitleRef[]) => Promise<Map<string, TitleCard>>,
     private readonly availability: (refs: TitleRef[]) => Promise<Map<string, FileProvider[]>>,
     private readonly fetchImpl: typeof fetch = globalFetch,
   ) {}
@@ -41,7 +43,9 @@ export class AddonRows implements ShelfSource {
   async shelves(): Promise<Shelf[]> {
     const rows = this.addons()
       .filter((a) => a.enabled && hasCatalogs(a))
-      .flatMap((addon) => addon.catalogs.filter((c) => c.home).map((catalog) => ({ addon, catalog })));
+      .flatMap((addon) => addon.catalogs.filter((c) => c.home).map((catalog) => ({ addon, catalog })))
+      // Saving the setting enforces the cap too; this holds it for lists saved before.
+      .slice(0, MAX_HOME_ROWS);
     const shelves = await Promise.all(
       rows.map(async ({ addon, catalog }) => {
         const work = this.row(addon, catalog);
@@ -75,20 +79,25 @@ export class AddonRows implements ShelfSource {
         return true;
       })
       .slice(0, ROW_LENGTH);
-    const avail = await this.availability(kept.map((k) => k.ref));
-    const items: TitleCard[] = kept.map(({ meta, ref }) => ({
-      type: ref.type,
-      ref: formatRef(ref),
-      ...(ref.source === "tmdb" ? { tmdbId: ref.id } : {}),
-      title: meta.name,
-      year: Number(/\b(\d{4})/.exec(meta.releaseInfo ?? "")?.[1]) || null,
-      overview: meta.description,
-      // The add-on's own artwork: it may be set up with rated posters, say.
-      posterUrl: meta.poster ?? null,
-      backdropUrl: meta.background ?? null,
-      rating: meta.imdbRating,
-      available: avail.get(formatRef(ref)) ?? [],
-    }));
+    // What the card says comes from TMDB, the title Strata knows (and a profile's limit
+    // judges); only the poster may be the add-on's (see TitleCard.addonPosterUrl). A title
+    // TMDB doesn't have (an AniList one) keeps the add-on's name, without its words.
+    const refs = kept.map((k) => k.ref);
+    const [tmdbCards, avail] = await Promise.all([this.titleCards(refs), this.availability(refs)]);
+    const items: TitleCard[] = kept.map(({ meta, ref }) => {
+      const key = formatRef(ref);
+      const tmdb = tmdbCards.get(key);
+      const base: TitleCard = tmdb ?? {
+        type: ref.type,
+        ref: key,
+        title: meta.name,
+        year: Number(/\b(\d{4})/.exec(meta.releaseInfo ?? "")?.[1]) || null,
+        posterUrl: null,
+        backdropUrl: null,
+        available: avail.get(key) ?? [],
+      };
+      return meta.poster ? { ...base, addonPosterUrl: meta.poster } : base;
+    });
     return { id: `addon:${addon.id}:${catalogKey(catalog)}`, title: rowTitle(catalog), kind: "titles", items };
   }
 }

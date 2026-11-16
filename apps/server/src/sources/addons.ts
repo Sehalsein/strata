@@ -227,6 +227,8 @@ const manifestSchema = z.object({
 
 /** Catalogs Home rows start with when an add-on is added: its first few. */
 const HOME_CATALOGS_AT_FIRST = 3;
+/** Add-on rows Home shows at most, across all of a household's add-ons (each is a fan-out of lookups). */
+export const MAX_HOME_ROWS = 12;
 
 /** Reads an add-on's manifest and checks it can find streams or subtitles for movies or shows. */
 export async function inspectAddon(input: string, fetchImpl: typeof fetch = globalFetch, allowPrivate = false): Promise<Omit<StreamAddon, "id" | "enabled">> {

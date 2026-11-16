@@ -198,7 +198,12 @@ export const adminRoutes = new Hono<Env>()
         throw err;
       }
     }
-    if (!(await h.updateAddon(id, patch))) throw new HTTPException(404, { message: "No such add-on" });
+    try {
+      if (!(await h.updateAddon(id, patch))) throw new HTTPException(404, { message: "No such add-on" });
+    } catch (err) {
+      if (err instanceof AddonError) throw new HTTPException(400, { message: err.message });
+      throw err;
+    }
     return c.json({ items: h.addons().map(addonDto) });
   })
 

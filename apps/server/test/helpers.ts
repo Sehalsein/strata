@@ -40,6 +40,8 @@ export const fakeTmdb: typeof fetch = (async (input: string | URL | Request) => 
       ] });
     if (path === "/catalog/series/popular.json") return json({ metas: [{ id: "tt9000001", type: "series", name: "Test Show" }] });
   }
+  if (url.host === "many.test" && path === "/manifest.json")
+    return json({ id: "many.test", name: "Many", resources: ["catalog"], types: ["movie"], catalogs: Array.from({ length: 14 }, (_, i) => ({ type: "movie", id: `c${i}`, name: `List ${i}` })) });
   if (path === "/find/tt1254207") return json({ movie_results: [{ id: 10378, title: "Big Buck Bunny" }], tv_results: [] });
   if (path === "/find/tt9000001") return json({ movie_results: [], tv_results: [{ id: 9001, name: "Test Show" }] });
   if (path === "/configuration") return json({ images: {} });
