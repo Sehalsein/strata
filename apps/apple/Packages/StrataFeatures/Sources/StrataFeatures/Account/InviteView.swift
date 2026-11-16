@@ -49,9 +49,6 @@ struct InviteView: View {
     private var index: Int { steps.firstIndex(of: step) ?? 0 }
     private var isLast: Bool { index == steps.count - 1 }
     private var trimmedUsername: String { username.trimmingCharacters(in: .whitespaces) }
-    /// The Passwords app saves and fills these only for the cloud server (see
-    /// `ServerAddress.savesPasswords`).
-    private var autofill: Bool { ServerAddress.savesPasswords(request.server) }
     /// What the account signs in with: shown above its password, so the Passwords app saves
     /// the two together.
     private var accountLogin: String { hasAccount ? (invitation?.email ?? "") : trimmedUsername }
@@ -201,7 +198,7 @@ struct InviteView: View {
         switch step {
         case .username:
             TextField(String(localized: "Username", bundle: .module), text: $username)
-                .textContentType(autofill ? .username : nil)
+                .textContentType(.username)
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
                 #endif
@@ -212,7 +209,7 @@ struct InviteView: View {
                 .modifier(FieldStyle())
         case .password:
             TextField(String(localized: "Account", bundle: .module), text: .constant(accountLogin))
-                .textContentType(autofill ? .username : nil)
+                .textContentType(.username)
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
                 #endif
@@ -220,7 +217,7 @@ struct InviteView: View {
                 .foregroundStyle(Theme.ink2)
                 .modifier(FieldStyle())
             SecureField(String(localized: "Password", bundle: .module), text: $password)
-                .textContentType(autofill ? (hasAccount ? .password : .newPassword) : nil)
+                .textContentType(hasAccount ? .password : .newPassword)
                 .focused($focused)
                 .submitLabel(.join)
                 .onSubmit { advance() }
