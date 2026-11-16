@@ -9,6 +9,7 @@
 // --public (the hosted demo): sign in as "demo" / "strata-demo", a viewer-only account;
 // the admin's password is random and never shown, admin routes are refused for everyone,
 // and nothing reaches out (no TorBox, release search, updates or home-network join).
+import { newSetupCode } from "../../src/setupCode";
 import { randomBytes, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { mkdtempSync } from "node:fs";
@@ -95,7 +96,7 @@ services = await createServices({ dataDir, port, host: "0.0.0.0" }, { fetch: dem
 const admin = publicDemo ? { username: `admin_${randomBytes(4).toString("hex")}`, password: randomBytes(24).toString("base64url") } : { username: "Alex", password: "demo-password" };
 const setupApp = createApp(services);
 const setup = await setupApp.fetch(
-  new Request("http://localhost/api/setup/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...admin, householdName: "The Demo House" }) }),
+  new Request("http://localhost/api/setup/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...admin, householdName: "The Demo House", setupCode: await newSetupCode(services.db) }) }),
   { requestIP: () => ({ address: "127.0.0.1" }) },
 );
 const { householdId } = (await setup.json()) as { householdId: string };

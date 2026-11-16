@@ -1,3 +1,4 @@
+import { newSetupCode } from "../src/setupCode";
 import type { SecretKey } from "../src/settings";
 import { mkdirSync, mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -181,7 +182,7 @@ export async function makeFixtures(): Promise<string> {
 
 /** Runs first-run setup (as the server's own machine): the admin's token and their household. */
 export async function setUp(server: TestServer, username = "admin", password = "test-password") {
-  const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username, password } });
+  const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { setupCode: await newSetupCode(server.services.db), username, password } });
   const { token } = (await res.json()) as { token: string };
   return { token, household: await server.household() };
 }

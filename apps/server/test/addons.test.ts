@@ -1,3 +1,4 @@
+import { newSetupCode } from "../src/setupCode";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { addonStreams, AddonError, assertPublicHost, setResolverForTests, inspectAddon, isPublicAddress, languageCodes, languagesFromText, manifestUrl, type StreamAddon } from "../src/sources/addons";
 import { rankReleases, type Release } from "../src/sources/discovery";
@@ -182,7 +183,7 @@ describe("add-ons in the dashboard", () => {
       return fakeTmdb(input, init);
     }) as typeof fetch;
     server = await startTestServer(fetchImpl, { ffmpeg: null });
-    token = ((await (await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "aa", password: "password1" } })).json()) as { token: string }).token;
+    token = ((await (await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { setupCode: await newSetupCode(server.services.db), username: "aa", password: "password1" } })).json()) as { token: string }).token;
   }, 60_000);
 
   afterAll(() => server.services.shutdown());

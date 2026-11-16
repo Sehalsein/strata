@@ -1,3 +1,4 @@
+import { newSetupCode } from "../src/setupCode";
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -49,7 +50,7 @@ afterAll(() => server.services.shutdown());
 
 test("first-run info and setup", async () => {
   expect(missing(fixture("info"), await live("/api/info"))).toEqual([]);
-  const setup = await live("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "owner", password: "owner-password" } });
+  const setup = await live("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { setupCode: await newSetupCode(server.services.db), username: "owner", password: "owner-password" } });
   expect(missing(fixture("setup"), setup)).toEqual([]);
   token = (setup as { token: string }).token;
   expect(missing(fixture("info_home"), await live("/api/info", { ip: "192.168.1.20" }))).toEqual([]);

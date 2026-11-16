@@ -9,10 +9,11 @@ import { API_VERSION, VERSION } from "../../version";
 import { body, permissions, requireAuth, requireHousehold, requireHouseholdAdmin, type Env } from "../context";
 import { CONTENT_LIMITS } from "../../catalog/contentRating";
 import { clientAddress, isLocalRequest, isLoopbackRequest } from "../localNetwork";
-import { checkSetupCode, clearSetupCode } from "../../setupCode";
+import { checkSetupCode, clearSetupCode, newSetupCode } from "../../setupCode";
 import { retryMessage, SETUP_PER_ADDRESS, STARTS_PER_ADDRESS } from "../../throttle";
 import { publicCapabilities } from "../../profile";
 import { launchSecret } from "../../platform/launcher";
+import { sameSecret } from "../../secrets";
 import { dashboardUrls } from "../../platform/network";
 import { describeDevice } from "../deviceInfo";
 import { roleRank } from "../../auth/permissions";
@@ -134,7 +135,8 @@ export const authRoutes = new Hono<Env>()
       /** Home servers make their admin first; the cloud has no setup (anyone signs up). */
       setupRequired: s.profile.firstRunSetup && !(await s.hasAccounts()),
       /** Setup asks for the code from the server's log (not from the server's own machine). */
-      setupCodeRequired: !isLoopbackRequest(c),
+      // Always: even from this machine, which a reverse proxy on it would make everyone.
+      setupCodeRequired: true,
       /** True when this client may join without a password (see /join). */
       localJoin: await canJoinLocally(c),
       /** Ways in besides a password that this server is set up for (the sign-in page's buttons). */
@@ -155,8 +157,19 @@ export const authRoutes = new Hono<Env>()
     return c.json({ proof: sign(`${challenge}|${port}`), version: VERSION, versionProof: sign(`${challenge}|${port}|${VERSION}`) });
   })
 
+  // Strata.app opens the dashboard for first-run setup with the code already in it: it
+  // asks here, with the secret it gave the server it started, from this Mac.
+  .post("/launcher/setup-code", async (c) => {
+    const s = c.var.services;
+    const secret = launchSecret();
+    if (!secret || !isLoopbackRequest(c) || !sameSecret(c.req.header("x-strata-launch-secret") ?? "", secret)) throw new HTTPException(404, { message: "Not found" });
+    if (!s.profile.firstRunSetup || (await s.hasAccounts())) throw new HTTPException(409, { message: "Setup already completed" });
+    return c.json({ code: await newSetupCode(s.db) });
+  })
+
   // First run: the server admin's account and their household. Needs the code the
-  // server prints in its log, unless asked from the server's own machine.
+  // server prints in its log (or hands Strata.app), from anywhere: a reverse proxy on this
+  // machine would make everyone's requests come from it.
   .post("/setup/admin", async (c) => {
     if (!c.var.services.profile.firstRunSetup) throw new HTTPException(404, { message: "Not found" });
     const s = c.var.services;
@@ -171,7 +184,7 @@ export const authRoutes = new Hono<Env>()
       }),
     );
     if (await s.hasAccounts()) throw new HTTPException(409, { message: "Setup already completed" });
-    if (!isLoopbackRequest(c)) {
+    {
       const key = `setup:${clientAddress(c)}`;
       const wait = await s.throttle.retryAfter(key);
       if (wait) throw new HTTPException(429, { message: retryMessage(wait) });

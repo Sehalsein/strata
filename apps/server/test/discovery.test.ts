@@ -1,3 +1,4 @@
+import { newSetupCode } from "../src/setupCode";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { parseSize, rankReleases, relevant, type Release } from "../src/sources/discovery";
@@ -108,7 +109,7 @@ describe("discovery end to end", () => {
 
     // No ffprobe here, as on the cloud server: the app reads files itself.
     server = await startTestServer(fakeFetch, { ffmpeg: null, keys: { tmdbApiKey: "test-key", torboxApiKey: "tb-test" } });
-    token = ((await (await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "aa", password: "password1" } })).json()) as { token: string }).token;
+    token = ((await (await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { setupCode: await newSetupCode(server.services.db), username: "aa", password: "password1" } })).json()) as { token: string }).token;
   }, 60_000);
 
   afterAll(() => {

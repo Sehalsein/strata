@@ -5,9 +5,11 @@ import type { Env } from "./context";
 const PROXY_HEADERS = ["forwarded", "x-forwarded-for", "x-real-ip", "cf-connecting-ip", "true-client-ip"];
 
 /**
- * Whether the request comes straight from this machine or the home network
- * (loopback, private IPv4 ranges, link-local, IPv6 unique-local). Proxied
- * requests never count, whatever address the proxy connects from.
+ * Whether the request comes straight from another device on the home network (private
+ * IPv4 ranges, link-local, IPv6 unique-local). Proxied requests never count, whatever
+ * address the proxy connects from; nor does this machine itself: a reverse proxy on it,
+ * even one that adds no forwarding header, connects from here, and makes everyone's
+ * requests come from here.
  */
 export function isLocalRequest(c: Context<Env>): boolean {
   // A cloud server has no home network: its "local" peers are its host's proxies.
@@ -18,7 +20,12 @@ export function isLocalRequest(c: Context<Env>): boolean {
   if (c.req.header("origin") !== undefined) return false;
   if (!isLocalHost(c.req.header("host") ?? new URL(c.req.url).host)) return false;
   const address = c.env?.requestIP?.(c.req.raw)?.address;
-  return address ? isLocalAddress(address) : false;
+  return address ? isLocalAddress(address) && !isLoopbackAddress(address) : false;
+}
+
+function isLoopbackAddress(raw: string): boolean {
+  const address = raw.toLowerCase().replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/, "");
+  return address === "::1" || /^127\./.test(address);
 }
 
 /**

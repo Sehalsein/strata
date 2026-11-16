@@ -275,8 +275,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 setState("Couldn't verify the server on port \(port). Choose Restart Server.", running: false)
                 return
             }
-            NSWorkspace.shared.open(dashboardURL)
+            NSWorkspace.shared.open(await setupCode().map(dashboardURLWithSetupCode) ?? dashboardURL)
         }
+    }
+
+    /// Before the first account exists, setup needs the code the server prints in its log;
+    /// this app, which started the server and shares its secret, asks for one so the
+    /// dashboard opens with it filled in. Nil once the server is set up.
+    private func setupCode() async -> String? {
+        var info = URLRequest(url: dashboardURL.appendingPathComponent("api/info"))
+        info.timeoutInterval = 2
+        guard let (data, _) = try? await URLSession.shared.data(for: info),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              json["setupRequired"] as? Bool == true else { return nil }
+        var request = URLRequest(url: dashboardURL.appendingPathComponent("api/launcher/setup-code"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 2
+        request.setValue(launchSecret, forHTTPHeaderField: "X-Strata-Launch-Secret")
+        guard let (body, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let reply = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let code = reply["code"] as? String,
+              code.range(of: "^[A-Z0-9-]{12,14}$", options: .regularExpression) != nil else { return nil }
+        return code
+    }
+
+    /// The dashboard with the setup code in the fragment, which the browser never sends on.
+    private func dashboardURLWithSetupCode(_ code: String) -> URL {
+        var parts = URLComponents(url: dashboardURL, resolvingAgainstBaseURL: false)!
+        parts.fragment = "setup=\(code)"
+        return parts.url ?? dashboardURL
     }
 
     /// Keep update checks in the authenticated dashboard, using its signed update feed.

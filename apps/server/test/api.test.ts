@@ -1,3 +1,4 @@
+import { newSetupCode } from "../src/setupCode";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { makeFixtures, noFfmpeg, startTestServer, type TestServer } from "./helpers";
@@ -40,20 +41,20 @@ describe("setup and auth", () => {
   });
 
   test("first admin is created once, with their household", async () => {
-    // Only this machine skips the setup code, and a web page can't pass for it: not a domain
-    // made to resolve to 127.0.0.1 (DNS rebinding), nor a page on another origin.
+    // Setup always needs the code from the server's log, even from this machine: a reverse
+    // proxy on it (or a web page rebinding its domain to 127.0.0.1) would come from here too.
     const setupFrom = (headers: Record<string, string>) =>
       server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", headers, json: { username: "evil", password: "evil-password" } });
-    const infoFrom = async (headers: Record<string, string>) => (await json(await server.request("/api/info", { ip: "127.0.0.1", headers }))).setupCodeRequired;
-    expect(await infoFrom({ Host: "rebind.evil.example:8420" })).toBe(true);
-    expect(await infoFrom({})).toBe(false);
-    expect((await setupFrom({ Host: "rebind.evil.example:8420" })).status).not.toBe(200);
-    expect((await setupFrom({ Host: "rebind.evil.example:8420", Origin: "http://rebind.evil.example:8420" })).status).not.toBe(200);
-    expect((await setupFrom({ Origin: "http://evil.example" })).status).not.toBe(200);
-    const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", headers: { Origin: "http://localhost:8420" }, json: { username: "sehal", password: "correct-horse" } });
+    expect((await json(await server.request("/api/info", { ip: "127.0.0.1" }))).setupCodeRequired).toBe(true);
+    expect((await setupFrom({})).status).toBe(403);
+    expect((await setupFrom({ Host: "rebind.evil.example:8420" })).status).toBe(403);
+    expect((await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { setupCode: "AAAA-BBBB-CCCC", username: "evil", password: "evil-password" } })).status).toBe(403);
+    // Strata.app gets one with the secret it gave the server; nobody else can ask.
+    expect((await server.request("/api/launcher/setup-code", { method: "POST", ip: "127.0.0.1" })).status).toBe(404);
+    const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", headers: { Origin: "http://localhost:8420" }, json: { setupCode: await newSetupCode(server.services.db), username: "sehal", password: "correct-horse" } });
     expect(res.status).toBe(200);
     token = (await json(res)).token;
-    const again = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "other", password: "another-pass" } });
+    const again = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { setupCode: await newSetupCode(server.services.db), username: "other", password: "another-pass" } });
 
     expect(again.status).toBe(409);
   });
@@ -392,6 +393,10 @@ describe("setup and auth", () => {
     expect(await info({ ip: "192.168.2.40" })).toBe(true);
     expect(await info({ ip: "::ffff:10.0.0.7" })).toBe(true);
     expect(await info({ ip: "203.0.113.9" })).toBe(false);
+    // Nor this machine itself: a reverse proxy on it makes everyone come from here, even
+    // one that adds no forwarding header.
+    expect(await info({ ip: "127.0.0.1", headers: { Host: "192.168.2.10:8420" } })).toBe(false);
+    expect(await info({ ip: "::1", headers: { Host: "192.168.2.10:8420" } })).toBe(false);
     expect(await info({})).toBe(false);
     // Behind a proxy every client looks local, so proxied requests never qualify.
     expect(await info({ ip: "127.0.0.1", headers: { "X-Forwarded-For": "203.0.113.9" } })).toBe(false);
