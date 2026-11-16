@@ -39,9 +39,16 @@ struct WatchView: View {
 
             // The title's artwork while it starts, rather than a black screen.
             if isStarting {
-                // Blurred, so a small image does (as the hero's blurred posters).
-                RemoteImage(url: (engine.meta ?? request.meta).artworkURL, maxPixel: 320, blur: 12, priority: .userInitiated) { Color.black }
-                    .overlay(Color.black.opacity(0.55))
+                // Blurred, so a small image does (as the hero's blurred posters). Laid over a
+                // screen-sized colour rather than in the stack itself: an image that fills
+                // keeps its own proportions, and a wide one would stretch the whole player
+                // (and its controls) past the screen's edges.
+                Color.black
+                    .overlay {
+                        RemoteImage(url: (engine.meta ?? request.meta).artworkURL, maxPixel: 320, blur: 12, priority: .userInitiated) { Color.black }
+                            .overlay(Color.black.opacity(0.55))
+                    }
+                    .clipped()
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
                     .transition(.opacity)
