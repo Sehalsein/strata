@@ -105,7 +105,7 @@ export class CalendarService {
     const [episodes, movies, reminded] = await Promise.all([
       this.episodes(userId, now),
       this.movieReleases(userId, now).catch(() => [] as CalendarEntry[]),
-      this.remindedBeyond(userId, now).catch(() => [] as CalendarEntry[]),
+      this.reminded(userId, now).catch(() => [] as CalendarEntry[]),
     ]);
     const today = new Date(now).toISOString().slice(0, 10);
     const fromEpisodes = episodes.map((e): CalendarEntry => {
@@ -127,7 +127,9 @@ export class CalendarService {
         alert: { title: e.title, body: `${[code, e.name].filter(Boolean).join(" · ")} ${out}.` },
       };
     });
-    const all = [...fromEpisodes, ...movies, ...reminded];
+    // A reminded premiere that's already there as a followed show's episode isn't listed twice.
+    const listedDays = new Set(fromEpisodes.map((e) => `${e.ref}|${e.date}`));
+    const all = [...fromEpisodes, ...movies, ...reminded.filter((e) => !listedDays.has(`${e.ref}|${e.date}`))];
     await this.markReady(all, today, now);
     const key = (e: CalendarEntry) => e.airsAt ?? `${e.date}T23:59:59Z`;
     return { entries: all.sort((a, b) => key(a).localeCompare(key(b)) || a.title.localeCompare(b.title)), episodes };
@@ -205,14 +207,13 @@ export class CalendarService {
   }
 
   /**
-   * Titles someone asked to be reminded of that come out after the calendar's month (within
-   * the month, a reminded show is followed like any other): a show's next episode or
-   * premiere, an AniList film's release. One entry each, up to a year ahead.
+   * Premieres of the shows someone asked to be reminded of (a new season, or the show's
+   * first episode), and releases of AniList films, up to a year ahead. One entry each: a
+   * reminder isn't following the show, which is what My List is for.
    */
-  private async remindedBeyond(userId: string, now: number): Promise<CalendarEntry[]> {
+  private async reminded(userId: string, now: number): Promise<CalendarEntry[]> {
     const today = Math.floor(now / 1000 / DAY_S) * DAY_S;
     const from = isoDate(today - CALENDAR_PAST_DAYS * DAY_S);
-    const monthEnd = isoDate(today + (CALENDAR_FUTURE_DAYS + 1) * DAY_S);
     const until = isoDate(today + REMINDER_DAYS * DAY_S);
     const reminders = (await this.progress.reminders(userId)).filter((r) => !(r.source === "tmdb" && r.type === "movie"));
     const out = await Promise.all(
@@ -232,8 +233,7 @@ export class CalendarService {
         }
         const next = found?.next;
         if (!found?.title || !next || next.date >= until) return null;
-        // A followed show's episodes this month are already on the calendar; an AniList film isn't.
-        if (r.type === "show" ? next.date < monthEnd : next.date < from) return null;
+        if (next.date < from) return null;
         return {
           id: `${formatRef(ref)}:soon:${next.date}`,
           kind: r.type === "movie" ? "movie" : "episode",
@@ -265,8 +265,7 @@ export class CalendarService {
     const watching = (await this.progress.history(userId))
       .filter((r) => r.mediaType === "episode" && r.updatedAt >= now - FOLLOW_WATCHING_DAYS * 86_400_000)
       .map((r): TitleRef => ({ source: r.source, type: "show", id: r.titleId }));
-    const [list, reminders] = await Promise.all([this.progress.watchlist(userId), this.progress.reminders(userId)]);
-    const onList = [...list, ...reminders].filter((r) => r.type === "show").map((r): TitleRef => ({ source: r.source, type: "show", id: r.titleId }));
+    const onList = (await this.progress.watchlist(userId)).filter((r) => r.type === "show").map((r): TitleRef => ({ source: r.source, type: "show", id: r.titleId }));
     const listed = [...new Map([...onList, ...watching].map((r) => [formatRef(r), r])).values()];
     const shown = (await Promise.all(listed.map(async (ref) => ((await this.allowed(userId, ref).catch(() => false)) ? ref : null)))).filter((ref): ref is TitleRef => ref !== null);
     const showIds = shown.filter((r) => r.source === "tmdb").map((r) => r.id);

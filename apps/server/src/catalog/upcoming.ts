@@ -47,12 +47,18 @@ export function movieUpcoming(m: Pick<TmdbMovie, "release_dates" | "release_date
   return null;
 }
 
-const premiere = (season: number, episode: number) =>
-  episode === 1 ? (season <= 1 ? { label: "Premieres", out: "premieres today" } : { label: `Season ${season} premieres`, out: `season ${season} premieres today` }) : { label: `S${season} E${episode} airs`, out: `S${season} E${episode} airs today` };
-
+/**
+ * A show's next premiere: a new season's first episode, or the show's first air date. Only
+ * premieres: an episode mid-season is what following a show (My List) is for, and a reminder
+ * that fired for every episode would never be done.
+ */
 export function showUpcoming(s: Pick<TmdbShow, "next_episode_to_air" | "first_air_date">, today: string): Upcoming | null {
   const n = s.next_episode_to_air;
-  if (n?.air_date && n.air_date > today) return { date: n.air_date, airsAt: null, ...premiere(n.season_number, n.episode_number) };
+  if (n?.air_date && n.air_date > today && n.episode_number === 1) {
+    return n.season_number <= 1
+      ? { date: n.air_date, airsAt: null, label: "Premieres", out: "premieres today" }
+      : { date: n.air_date, airsAt: null, label: `Season ${n.season_number} premieres`, out: `season ${n.season_number} premieres today` };
+  }
   if (s.first_air_date && s.first_air_date > today) return { date: s.first_air_date, airsAt: null, label: "Premieres", out: "premieres today" };
   return null;
 }
@@ -62,15 +68,21 @@ const fullDate = (d: AnilistDate | null | undefined) => (d?.year && d.month && d
 export function anilistUpcoming(m: Pick<AnilistTitle, "nextAiringEpisode" | "startDate">, type: "movie" | "show", now: number): Upcoming | null {
   const today = new Date(now).toISOString().slice(0, 10);
   const next = m.nextAiringEpisode;
-  if (type === "show" && next && next.airingAt * 1000 > now) {
+  // An AniList entry is one season: its premiere is its first episode.
+  if (type === "show" && next && next.episode === 1 && next.airingAt * 1000 > now) {
     const at = new Date(next.airingAt * 1000);
-    const words = next.episode === 1 ? { label: "Premieres", out: "premieres today" } : { label: `Episode ${next.episode} airs`, out: `episode ${next.episode} airs today` };
-    return { date: at.toISOString().slice(0, 10), airsAt: at.toISOString(), ...words };
+    return { date: at.toISOString().slice(0, 10), airsAt: at.toISOString(), label: "Premieres", out: "premieres today" };
   }
   const start = fullDate(m.startDate);
   if (start && start > today) return { date: start, airsAt: null, ...(type === "movie" ? { label: "Out", out: "is out today" } : { label: "Premieres", out: "premieres today" }) };
   return null;
 }
 
-/** What a title page offers: whether they're reminded, and of what. Null: nothing dated to come. */
-export const remindOf = (u: Upcoming | null, on: boolean) => (u ? { on, date: u.date, airsAt: u.airsAt, label: u.label } : null);
+/**
+ * What a title page offers: whether they're reminded, and of what. Null when there's nothing
+ * dated to come and no reminder; a reminder that's on is always shown, so it can be turned off.
+ */
+export function remindOf(u: Upcoming | null, on: boolean): { on: boolean; date: string | null; airsAt: string | null; label: string | null } | null {
+  if (u) return { on, date: u.date, airsAt: u.airsAt, label: u.label };
+  return on ? { on, date: null, airsAt: null, label: null } : null;
+}

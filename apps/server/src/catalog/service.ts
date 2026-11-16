@@ -98,7 +98,10 @@ const progressDto = (row?: ProgressRow): ProgressDto | null => (row ? { position
 /** A Home rail that fails is left out rather than failing the page. */
 /** Building a page in full, for a row's "See all" (more of TMDB's pages, every add-on title). */
 export interface PageOpts {
+  /** Every row in full (See all), not cut to what a rail shows. */
   full?: boolean;
+  /** Only this add-on row ("" for none): See all builds just the row it shows. */
+  only?: string;
 }
 const FULL_PAGES = 3;
 const FULL_ADDON_ROW = 100;
@@ -1056,7 +1059,13 @@ export class CatalogService {
    * TMDB's lists, every title an add-on gives) and not cut to the rail's length.
    */
   async rowList(page: PageId, rowId: string, userId: string): Promise<Shelf | null> {
-    const full = { full: true };
+    // Only the row asked for: an add-on's row on its own; a page's own row without fetching
+    // the page's add-on rows.
+    if (rowId.startsWith("addon:")) {
+      const rows = await this.pageAddonRows(page, { full: true, only: rowId });
+      return applyLayout(rows, this.layout(page), { cut: false }).find((s) => s.id === rowId) ?? null;
+    }
+    const full = { full: true, only: "" };
     const shelves =
       page === "home"
         ? [...(await this.homeProfile(userId, full)), ...(await this.homeCatalog(full))]
@@ -1075,7 +1084,10 @@ export class CatalogService {
 
   /** The add-on rows a page shows: those its layout turns on (none until it's laid out). */
   private async pageAddonRows(page: PageId, opts: PageOpts = {}): Promise<Shelf[]> {
-    const rows = await Promise.all(this.rowSources.map((s) => homeSafe("rowSource", () => s.rows(addonRowsOn(this.layout(page), []), opts.full ? FULL_ADDON_ROW : undefined))));
+    const on = addonRowsOn(this.layout(page), []);
+    const ids = opts.only === undefined ? on : on.filter((id) => id === opts.only);
+    if (!ids.length) return [];
+    const rows = await Promise.all(this.rowSources.map((s) => homeSafe("rowSource", () => s.rows(ids, opts.full ? FULL_ADDON_ROW : undefined))));
     return rows.flat().filter((s): s is Shelf => !!s);
   }
 

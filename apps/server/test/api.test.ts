@@ -528,7 +528,8 @@ describe("library", () => {
   test("catalog answers say how long the apps may keep them; errors and the rest don't", async () => {
     const cacheControl = async (path: string) => (await server.request(path, { token })).headers.get("cache-control");
     expect(await cacheControl("/api/genres/movie")).toBe("private, max-age=86400, stale-while-revalidate=604800");
-    expect(await cacheControl("/api/home/catalog")).toBe("private, max-age=86400, stale-while-revalidate=604800");
+    // Pages follow the household's layout: kept only briefly.
+    expect(await cacheControl("/api/home/catalog")).toBe("private, max-age=600, stale-while-revalidate=604800");
     expect(await cacheControl("/api/home/profile")).toBe("no-store");
     expect(await cacheControl("/api/home")).toBeNull();
     expect(await cacheControl("/api/genres/nope")).toBeNull();
@@ -690,6 +691,13 @@ describe("playback", () => {
         [showRow, true, null, null],
       ]);
       expect((await server.request("/api/admin/pages/home", { method: "PUT", token, json: { rows: [{ id: "nope", on: true }] } })).status).toBe(400);
+      // A row listed twice is refused; Movies offers movie catalogs and Shows series ones.
+      expect((await server.request("/api/admin/pages/home", { method: "PUT", token, json: { rows: [{ id: "forYou", on: true }, { id: "forYou", on: false }] } })).status).toBe(400);
+      const [, moviesPage, showsPage] = (await json(await server.request("/api/admin/pages", { token }))).pages;
+      expect(moviesPage.rows.map((r: any) => r.id)).toContain(movieRow);
+      expect(moviesPage.rows.map((r: any) => r.id)).not.toContain(showRow);
+      expect(showsPage.rows.map((r: any) => r.id)).toContain(showRow);
+      expect(showsPage.rows.map((r: any) => r.id)).not.toContain(movieRow);
       expect((await server.request("/api/admin/pages/elsewhere", { method: "PUT", token, json: { rows: [] } })).status).toBe(400);
 
       // A page shows 12 add-on rows at most.

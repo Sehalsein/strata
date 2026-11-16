@@ -384,22 +384,24 @@ public struct MovieDetail: Codable, Sendable, Hashable, Identifiable {
 }
 
 /// What's still to come for a title, as the server words it, and whether this person asked
-/// to be reminded. The calendar then lists it and the app notifies on the day.
+/// to be reminded. The calendar then lists it and the app notifies on the day. A reminder
+/// that's on comes without a date once there's nothing dated to come, so it can be turned off.
 public struct Reminder: Codable, Sendable, Hashable {
     public var on: Bool
-    /// YYYY-MM-DD.
-    public var date: String
+    /// YYYY-MM-DD; nil when nothing dated is to come.
+    public var date: String?
     /// The exact time, when known.
     public var airsAt: String?
-    /// "In cinemas", "Season 2 premieres".
-    public var label: String
+    /// "In cinemas", "Season 2 premieres"; nil with no date.
+    public var label: String?
 
-    public init(on: Bool, date: String, airsAt: String? = nil, label: String) {
+    public init(on: Bool, date: String? = nil, airsAt: String? = nil, label: String? = nil) {
         self.on = on; self.date = date; self.airsAt = airsAt; self.label = label
     }
 
-    /// "In cinemas · Mar 1, 2027".
-    public var text: String {
+    /// "In cinemas · Mar 1, 2027"; nil when nothing dated is to come.
+    public var text: String? {
+        guard let label else { return nil }
         let when = airsAt.flatMap { try? Date($0, strategy: .iso8601) } ?? Formatting.date(date)
         guard let when else { return label }
         return "\(label) · \(when.formatted(.dateTime.month(.abbreviated).day().year()))"

@@ -126,14 +126,16 @@ const viewer = (c: Context<Env>) => c.var.household.viewer(userOf(c));
 // How long the apps keep each answer (see cacheFor). Catalog lists and title pages barely
 // change; the calendar follows the person's list, which the apps drop themselves when they
 // change it. Home's own rails (Continue Watching, Next Up, My List) aren't kept at all.
-const TTL = { catalog: DAY, title: DAY, calendar: 6 * HOUR, search: HOUR } as const;
+// Pages follow the household's layout (and Movies, Shows and See all carry the person's own
+// rows), so they're kept only briefly: a change in Pages shows up within minutes.
+const TTL = { catalog: DAY, page: 10 * 60, title: DAY, calendar: 6 * HOUR, search: HOUR } as const;
 
 export const catalogRoutes = new Hono<Env>()
   .use(requireAuth, requireHousehold)
 
   // Both parts at once, for apps that don't ask for them separately.
   .get("/home", async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).home(), "home") }))
-  .get("/home/catalog", cacheFor(TTL.catalog), async (c) => {
+  .get("/home/catalog", cacheFor(TTL.page), async (c) => {
     const shelves = shelvesForApp(c, await viewer(c).homeCatalog(), "home");
     // An empty Home isn't kept: whatever made it empty, the next look should ask again.
     if (!shelves.length) c.header("Cache-Control", "no-store");
@@ -161,19 +163,20 @@ export const catalogRoutes = new Hono<Env>()
     return c.json({ items: episodes, entries });
   })
 
-  .get("/shows", cacheFor(TTL.catalog), async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).showsPage(), "shows") }))
-  .get("/movies", cacheFor(TTL.catalog), async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).moviesPage(), "movies") }))
+  .get("/shows", cacheFor(TTL.page), async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).showsPage(), "shows") }))
+  .get("/movies", cacheFor(TTL.page), async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).moviesPage(), "movies") }))
 
   // A row of a page in full, for its rail's "See all" (the rail shows only so many).
-  .get("/rows/:page/:row", cacheFor(TTL.catalog), async (c) => {
+  .get("/rows/:page/:row", cacheFor(TTL.page), async (c) => {
     const page = z.enum(PAGE_IDS).parse(c.req.param("page"));
-    const shelf = await viewer(c).rowList(page, decodeURIComponent(c.req.param("row")).slice(0, 300));
+    // Hono has already decoded the path parameter: decoding it again would break ids with "%".
+    const shelf = await viewer(c).rowList(page, c.req.param("row").slice(0, 300));
     if (!shelf) throw new HTTPException(404, { message: "That row isn't on this page any more." });
     return c.json({ title: shelf.title, items: forApp(c, shelf.items) });
   })
   .get("/anime/categories", cacheFor(TTL.catalog), (c) => c.json({ items: viewer(c).animeCategories() }))
 
-  .get("/anime", cacheFor(TTL.catalog), async (c) => {
+  .get("/anime", cacheFor(TTL.page), async (c) => {
     const category = c.req.query("category") || undefined;
     if (category && !viewer(c).animeCategories().some((x) => x.id === category)) throw new HTTPException(400, { message: "Unknown anime category" });
     return c.json({ shelves: shelvesForApp(c, await viewer(c).animePage(category), category ? undefined : "anime") });

@@ -24,7 +24,7 @@ struct RemindButton: View {
                     iconOnly: !Metrics.isPadOrTV || Metrics.isTV, size: Metrics.heroControlSize) {
             Task { await toggle() }
         }
-        .accessibilityHint(Text("Notifies you when it comes out: \(reminder.text)", bundle: .module))
+        .accessibilityHint(reminder.text.map { Text("Notifies you when it comes out: \($0)", bundle: .module) } ?? Text("Notifies you when it comes out", bundle: .module))
         .onChange(of: reminder) { on = reminder.on }
         .alert(String(localized: "Notifications are off for Strata", bundle: .module), isPresented: $notificationsOff) {
             Button(String(localized: "OK", bundle: .module), role: .cancel) {}

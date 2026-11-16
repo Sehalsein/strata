@@ -182,7 +182,10 @@ export class Household {
       const options: RowOption[] = [
         ...BUILT_IN_ROWS[page].map((r) => ({ ...r, defaultOn: true })),
         // Add-on rows start off: a page shows Strata's own and the per-person rows until laid out.
-        ...addonOptions.map((o) => ({ id: o.id, title: o.title, source: "addon" as const, addon: o.addon, defaultOn: false })),
+        // Movie catalogs for Movies, series catalogs for Shows; Home and Anime take either.
+        ...addonOptions
+          .filter((o) => (page === "movies" ? o.type === "movie" : page === "shows" ? o.type === "series" : true))
+          .map((o) => ({ id: o.id, title: o.title, source: "addon" as const, addon: o.addon, defaultOn: false })),
       ];
       const layout = this.settings().pageLayouts?.[page];
       if (!layout?.length) return { id: page, title: PAGE_TITLES[page], rows: options.map((o) => ({ ...o, on: o.defaultOn })) };
@@ -196,6 +199,9 @@ export class Household {
   /** Saves a page's layout (rows by id, in order, on or off); throws AddonError for rows it doesn't have or too many add-on rows. */
   async setPageLayout(page: PageId, rows: PageLayout) {
     const known = new Set(this.pages().find((p) => p.id === page)!.rows.map((r) => r.id));
+    const seen = new Set<string>();
+    const twice = rows.find((r) => seen.size === seen.add(r.id).size);
+    if (twice) throw new AddonError(`"${twice.id}" is listed twice.`);
     const unknown = rows.find((r) => !known.has(r.id));
     if (unknown) throw new AddonError(`${PAGE_TITLES[page]} has no row "${unknown.id}".`);
     if (rows.filter((r) => r.on && r.id.startsWith("addon:")).length > MAX_ADDON_ROWS_PER_PAGE) throw new AddonError(`A page can show up to ${MAX_ADDON_ROWS_PER_PAGE} add-on rows. Turn one off first.`);
