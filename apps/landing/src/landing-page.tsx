@@ -6,6 +6,8 @@ import { Features, Steps } from "./showcase";
 import { GlassLink, GlassMark, Glow, Heading } from "./ui";
 
 const SOURCE_URL = "https://github.com/Sehalsein/strata";
+/** The knowledge base: setup guides (apps/docs). */
+const DOCS_URL = "https://docs.strata.sehalsein.com";
 /** The Mac app (the server, in the menu bar), and how to install on Linux. */
 const MAC_DOWNLOAD = "https://github.com/Sehalsein/strata/releases/download/server-stable/Strata.dmg";
 const LINUX_INSTALL = "https://github.com/Sehalsein/strata/blob/main/apps/server/README.md#install";
@@ -48,6 +50,7 @@ function Nav() {
         </a>
         {[
           ["Install", "#install"],
+          ["Docs", DOCS_URL],
           ["Get the app", APP_STORE_URL],
           ["Source", SOURCE_URL],
           ["Privacy", "/privacy"],
@@ -300,6 +303,9 @@ function Footer() {
         <nav className="flex gap-6">
           <a href="#install" className="hover:text-white">
             Install
+          </a>
+          <a href={DOCS_URL} className="hover:text-white">
+            Docs
           </a>
           <a href={APP_STORE_URL} className="hover:text-white">
             App Store

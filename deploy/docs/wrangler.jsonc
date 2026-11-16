@@ -1,0 +1,13 @@
+// The knowledge base at docs.strata.sehalsein.com (apps/docs): static files only, no
+// Worker code. Deploy with deploy.sh (Workers Builds runs it on merge to main; README.md).
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "strata-docs",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "../../apps/docs/dist",
+    // Every guide's path (/addons/install, …) gets index.html; the app picks the article.
+    "not_found_handling": "single-page-application"
+  },
+  "routes": [{ "pattern": "docs.strata.sehalsein.com", "custom_domain": true }]
+}
