@@ -13,13 +13,15 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { KeyGuideButton } from "./key-guides";
+import tmdbLogo from "@/assets/logos/tmdb.svg";
+import torboxLogo from "@/assets/logos/torbox.png";
 import { NumberInput, type SetFn } from "./fields";
 
 interface Provider {
   key: SecretKey;
   name: string;
-  /** Initials and colour for its mark. */
-  mark: { text: string; className: string };
+  /** Its mark: the service's own logo on its tile colour, or initials where it has none. */
+  mark: { logo?: string; text: string; className: string };
   what: string;
   required?: boolean;
 }
@@ -28,14 +30,16 @@ const PROVIDERS: Provider[] = [
   {
     key: "tmdbApiKey",
     name: "TMDB",
-    mark: { text: "TM", className: "bg-sky-600 text-white" },
+    // TMDB's own square logo, on its navy (themoviedb.org/about/logos-attribution).
+    mark: { logo: tmdbLogo, text: "TMDB", className: "bg-[#0d253f] p-1" },
     what: "The catalog: titles, artwork, cast, and matching your files to them.",
     required: true,
   },
   {
     key: "torboxApiKey",
     name: "TorBox",
-    mark: { text: "TB", className: "bg-emerald-600 text-white" },
+    // TorBox's app icon (torbox.app).
+    mark: { logo: torboxLogo, text: "TorBox", className: "bg-white" },
     what: "Plays your TorBox library straight from TorBox, and finds releases of titles you don't have. Saving a key starts a library sync.",
   },
   {
@@ -117,8 +121,8 @@ function ProviderCard({ provider: p, configured, children }: { provider: Provide
   return (
     <Card className="gap-0 py-0">
       <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start">
-        <div className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg text-xs font-bold", p.mark.className)} aria-hidden>
-          {p.mark.text}
+        <div className={cn("flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg text-xs font-bold", p.mark.className)} aria-hidden>
+          {p.mark.logo ? <img src={p.mark.logo} alt="" className="size-full object-contain" /> : p.mark.text}
         </div>
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
