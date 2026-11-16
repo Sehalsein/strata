@@ -13,6 +13,8 @@ public struct DownloadResponse: Codable, Sendable, Hashable {
     public var audioTracks: [AudioTrack]
     /// Text tracks inside the file, read as it plays.
     public var subtitleTracks: [SubtitleTrack]
+    /// The subtitle track to turn on as it starts playing (the server decides); nil for none.
+    public var selectedSubtitleId: String?
     public var chapters: [Chapter]
 }
 
@@ -88,7 +90,7 @@ public struct DownloadItem: Codable, Sendable, Hashable, Identifiable {
         let start = resumeMs.map { $0 < response.durationMs - 10_000 ? $0 : 0 } ?? 0
         return PlayResponse(sessionId: "offline-\(id)", mode: response.mode, url: fileURL, remux: response.remux,
                             startOffsetMs: 0, seekToMs: start, durationMs: response.durationMs, candidate: response.candidate,
-                            audioTracks: response.audioTracks, subtitleTracks: response.subtitleTracks, chapters: response.chapters,
+                            audioTracks: response.audioTracks, subtitleTracks: response.subtitleTracks, selectedSubtitleId: response.selectedSubtitleId, chapters: response.chapters,
                             reasons: [String(localized: "Downloaded", bundle: .module)], nextEpisode: nil)
     }
 }

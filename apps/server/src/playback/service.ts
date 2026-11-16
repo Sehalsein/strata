@@ -10,6 +10,7 @@ import { parseTorboxRef } from "../sources/torbox/sync";
 import { decide, type ClientCaps, type PlaybackPlan } from "./decide";
 import { NoPlayableFileError, NotReadyError, isInfoHash, type Discovery } from "../sources/discovery";
 import { embeddedTracks, findSidecars } from "./subtitles";
+import { chooseSubtitle, labelTracks, subtitleLanguagesOf } from "./subtitleChoice";
 import type { EpisodeRef } from "../catalog/service";
 import { targetRef, type TitleRef } from "../catalog/ref";
 import type { SessionManager, SessionTarget, PlaybackSession } from "./sessions";
@@ -51,6 +52,8 @@ export interface DownloadResponse {
   audioTracks: PlayResponse["audioTracks"];
   /** Embedded text tracks only: the app reads them from the file. */
   subtitleTracks: PlayResponse["subtitleTracks"];
+  /** The track to turn on when it starts playing (see PlayResponse). */
+  selectedSubtitleId: string | null;
   chapters: PlayResponse["chapters"];
 }
 
@@ -77,12 +80,35 @@ export interface PlayResponse {
    * In device mode embedded text tracks have none: the app reads them from the stream
    * (`embedded`, at `streamIndex`), so the server never reads the whole file for them.
    */
-  subtitleTracks: { id: string; codec: string; language?: string; title?: string; forced: boolean; isDefault: boolean; external: boolean; url: string | null; embedded?: boolean; streamIndex?: number }[];
+  subtitleTracks: {
+    id: string;
+    codec: string;
+    language?: string;
+    title?: string;
+    forced: boolean;
+    isDefault: boolean;
+    external: boolean;
+    url: string | null;
+    embedded?: boolean;
+    streamIndex?: number;
+    /** Where it came from, to tell tracks apart ("OpenSubtitles v3 · 2"); part of `label`. */
+    detail?: string;
+    /** What the apps show for it, as it is ("English (Forced)", "French · OpenSubtitles v3"). */
+    label: string;
+  }[];
+  /**
+   * The subtitle track to turn on as playback starts, or null for none: decided here (the
+   * household's subtitle settings and the audio's language), so the apps just do it.
+   */
+  selectedSubtitleId: string | null;
   chapters: { startMs: number; title?: string }[];
   reasons: string[];
   /** For episodes: what Up Next should offer, and whether it can play right away. */
   nextEpisode: { season: number; episode: number; name: string; stillUrl: string | null; available: boolean } | null;
 }
+
+/** A subtitle track before the server names it for the apps. */
+export type UnlabeledTrack = Omit<PlayResponse["subtitleTracks"][number], "label">;
 
 const LINK_TTL_MS = 30 * 60_000;
 /** Ready releases Play tries in turn when the library has nothing. */
@@ -162,11 +188,18 @@ export class PlaybackService {
     private readonly findNextEpisode: (show: TitleRef, season: number, episode: number) => Promise<EpisodeRef | null>,
     /** Told when a TorBox torrent is played, so housekeeping keeps it. */
     private readonly onPlayedTorrent: (torrentId: number) => void = () => {},
+    /** Subtitles from the household's subtitle add-ons, as tracks (never throws, never slow for long). */
+    private readonly onlineSubtitles: (target: SessionTarget) => Promise<UnlabeledTrack[]> = async () => [],
   ) {}
 
   async play(user: { userId: string }, req: PlayRequest): Promise<PlayResponse> {
     // Started now so the (possibly uncached) season lookup overlaps the probe and link.
     const nextLookup = req.mediaType === "episode" ? this.findNextEpisode(targetRef(req), req.season!, req.episode!).catch(() => null) : Promise.resolve(null);
+    // Asked alongside getting the file ready, so add-ons that answer in time cost no wait.
+    const onlineLookup = this.onlineSubtitles(targetOf(req)).catch((err) => {
+      log.warn("Subtitle add-ons failed", err);
+      return [] as UnlabeledTrack[];
+    });
     let prepared = await this.prepare(req);
     // Picked for the person (not chosen): a copy this device can't play gives way to the
     // next library copy that it can, among those whose details are already known.
@@ -220,7 +253,7 @@ export class PlaybackService {
       throw new PlaybackError(err instanceof Error ? err.message : String(err), 503);
     }
 
-    const next = await nextLookup;
+    const [next, online] = await Promise.all([nextLookup, onlineLookup]);
     const nextTarget: SessionTarget | null = next ? { source: req.source, mediaType: "episode", titleId: req.titleId, season: next.season, episode: next.episode } : null;
     const nextInLibrary = nextTarget ? await findCandidates(this.library, this.settings(), nextTarget) : [];
     if (nextTarget) runtime.background(this.prewarm(nextTarget, nextInLibrary).catch((err) => log.debug("Pre-warm failed", err)));
@@ -235,7 +268,8 @@ export class PlaybackService {
       durationMs: info.durationMs,
       candidate,
       audioTracks,
-      subtitleTracks: session.subtitles.map((t) => ({
+      ...this.subtitles([
+        ...session.subtitles.map((t): UnlabeledTrack => ({
         id: t.id,
         codec: t.codec,
         language: t.language,
@@ -246,7 +280,9 @@ export class PlaybackService {
         ...(plan.mode === "device" && !t.external
           ? { url: null, embedded: t.text, streamIndex: typeof t.source === "number" ? t.source : undefined }
           : { url: t.text ? `/api/stream/${session.id}/subtitles/${t.id}.vtt` : null }),
-      })),
+        })),
+        ...online,
+      ], info, plan.audioStreamIndex),
       chapters: info.chapters,
       reasons: plan.reasons,
       nextEpisode: next ? { ...next, available: nextInLibrary.length > 0 || this.discovery.available } : null,
@@ -268,11 +304,23 @@ export class PlaybackService {
       candidate,
       audioTracks,
       // Read from the file as it plays: text, and pictures (embedded false) the app draws.
-      subtitleTracks: embeddedTracks(info)
-        .filter((t) => typeof t.source === "number")
-        .map((t) => ({ id: t.id, codec: t.codec, language: t.language, title: t.title, forced: t.forced, isDefault: t.isDefault, external: false, url: null, embedded: t.text, streamIndex: t.source as number })),
+      ...this.subtitles(
+        embeddedTracks(info)
+          .filter((t) => typeof t.source === "number")
+          .map((t) => ({ id: t.id, codec: t.codec, language: t.language, title: t.title, forced: t.forced, isDefault: t.isDefault, external: false, url: null, embedded: t.text, streamIndex: t.source as number })),
+        info,
+        plan.audioStreamIndex,
+      ),
       chapters: info.chapters,
     };
+  }
+
+  /** The tracks as the apps show them, and the one to turn on. */
+  private subtitles(tracks: UnlabeledTrack[], info: MediaInfo, audioStreamIndex: number | undefined): Pick<PlayResponse, "subtitleTracks" | "selectedSubtitleId"> {
+    const settings = this.settings();
+    const labeled = labelTracks(tracks, settings.language);
+    const audio = info.audio.find((a) => a.index === audioStreamIndex) ?? info.audio[0];
+    return { subtitleTracks: labeled, selectedSubtitleId: chooseSubtitle(labeled, audio?.language, settings.autoSubtitles, subtitleLanguagesOf(settings)) };
   }
 
   /**

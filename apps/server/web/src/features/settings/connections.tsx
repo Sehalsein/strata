@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import { KeyGuideButton } from "./key-guides";
 import tmdbLogo from "@/assets/logos/tmdb.svg";
 import torboxLogo from "@/assets/logos/torbox.png";
-import { NumberInput, type SetFn } from "./fields";
+import { ChoiceSelect, minutesLabel, type SetFn } from "./fields";
 
 interface Provider {
   key: SecretKey;
@@ -23,6 +23,8 @@ interface Provider {
   /** Its mark: the service's own logo on its tile colour, or initials where it has none. */
   mark: { logo?: string; text: string; className: string };
   what: string;
+  /** Small print under the card's text (an attribution its terms ask for). */
+  note?: React.ReactNode;
   required?: boolean;
 }
 
@@ -33,6 +35,16 @@ const PROVIDERS: Provider[] = [
     // TMDB's own square logo, on its navy (themoviedb.org/about/logos-attribution).
     mark: { logo: tmdbLogo, text: "TMDB", className: "bg-[#0d253f] p-1" },
     what: "The catalog: titles, artwork, cast, and matching your files to them.",
+    // TMDB's API terms ask for this attribution in the product.
+    note: (
+      <>
+        This product uses the{" "}
+        <a href="https://www.themoviedb.org" target="_blank" rel="noreferrer" className="underline underline-offset-4">
+          TMDB
+        </a>{" "}
+        API but is not endorsed or certified by TMDB.
+      </>
+    ),
     required: true,
   },
   {
@@ -130,6 +142,7 @@ function ProviderCard({ provider: p, configured, children }: { provider: Provide
             {status}
           </div>
           <p className="text-muted-foreground text-sm">{p.what}</p>
+          {p.note && <p className="text-muted-foreground/80 text-xs">{p.note}</p>}
           {configured && p.key === "torboxApiKey" && <TorboxAccountLine />}
         </div>
         {!entering && (
@@ -222,9 +235,9 @@ function TorboxSync({ draft, set }: { draft: Settings; set: SetFn }) {
       <SyncRow
         id="torbox-sync"
         label="Sync every"
-        hint={draft.torboxSyncMinutes === 0 ? "Off: new TorBox items show up only when you add them here." : "Picks up what's new in your TorBox account. 0 turns it off."}
+        hint={draft.torboxSyncMinutes === 0 ? "Off: new TorBox items show up only when you add them here." : "Picks up what's new in your TorBox account."}
       >
-        <NumberInput id="torbox-sync" min={0} suffix="min" value={draft.torboxSyncMinutes} onChange={(v) => set("torboxSyncMinutes", v)} />
+        <ChoiceSelect id="torbox-sync" className="sm:w-48" value={draft.torboxSyncMinutes} options={SYNC_INTERVALS} describe={minutesLabel} onChange={(v) => set("torboxSyncMinutes", v)} />
       </SyncRow>
       <SyncRow
         id="torbox-cleanup"
@@ -232,10 +245,10 @@ function TorboxSync({ draft, set }: { draft: Settings; set: SetFn }) {
         hint={
           draft.torboxCleanupDays === 0
             ? "Off: everything Strata adds stays in TorBox."
-            : "Removes releases Strata added for you once nobody has played them this long. What you add yourself is never touched. 0 keeps everything."
+            : "Removes releases Strata added for you once nobody has played them this long. What you add yourself is never touched."
         }
       >
-        <NumberInput id="torbox-cleanup" min={0} max={365} suffix="days" value={draft.torboxCleanupDays} onChange={(v) => set("torboxCleanupDays", v)} />
+        <ChoiceSelect id="torbox-cleanup" className="sm:w-48" value={draft.torboxCleanupDays} options={CLEANUP_DAYS} describe={(d) => `After ${d} days`} onChange={(v) => set("torboxCleanupDays", v)} />
       </SyncRow>
     </div>
   );
@@ -267,3 +280,8 @@ function TorboxAccountLine() {
   const planName = typeof plan === "number" ? (["Free", "Essential", "Pro", "Standard"][plan] ?? `Plan ${plan}`) : plan;
   return <p className="text-sm pt-1">{[email, planName && `${planName} plan`, until && `until ${until}`].filter(Boolean).join(" · ")}</p>;
 }
+
+// The scheduled sync runs every 15 minutes, so nothing shorter is offered.
+const SYNC_INTERVALS = [{ value: 0, label: "Off" }, ...[15, 30, 60, 180, 360, 720, 1440].map((m) => ({ value: m, label: minutesLabel(m) }))];
+
+const CLEANUP_DAYS = [{ value: 0, label: "Never" }, ...[3, 7, 14, 30, 60, 90, 180, 365].map((d) => ({ value: d, label: `After ${d} days` }))];

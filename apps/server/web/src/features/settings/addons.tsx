@@ -21,7 +21,8 @@ const reload = () => queryClient.invalidateQueries({ queryKey: queryKeys.addons 
 
 /**
  * The household's add-ons: Torrentio, AIOStreams, Comet or any other that finds streams,
- * each added by its manifest URL, as in Stremio. Discovery asks every one that's on.
+ * and OpenSubtitles or any other that finds subtitles, each added by its manifest URL, as
+ * in Stremio. Discovery and playback ask every one that's on.
  * Changes save straight away; their URLs stay on the server (they often hold a key), so
  * rows show the host and Configure goes through a server redirect.
  */
@@ -89,7 +90,7 @@ export function AddonsSection() {
           </div>
         ) : items.length === 0 ? (
           <div className="flex flex-col items-start gap-3 px-5 py-8">
-            <p className="text-muted-foreground text-sm">No add-ons, so only TorBox's own search finds releases (if it's on under Discovery).</p>
+            <p className="text-muted-foreground text-sm">No add-ons, so only TorBox's own search finds releases (if it's on under Discovery), and subtitles come only from the files.</p>
             <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
               <Plus /> Add add-on
             </Button>
@@ -102,14 +103,14 @@ export function AddonsSection() {
       <p className="text-muted-foreground px-1 text-xs">
         Paste an add-on's manifest URL, the same one you'd install in Stremio. Every add-on that's on is asked for releases, top to bottom. Strata adds what it finds to your TorBox
         itself, so an add-on has to say which torrent each result is: most do (Torrentio, Comet, MediaFusion, Jackettio). AIOStreams is asked through its search API, with the uuid
-        and password in its URL.
+        and password in its URL. Subtitle add-ons, like OpenSubtitles v3, are asked as a title starts, in the languages set under General.
       </p>
 
       <UrlDialog
         open={adding}
         onOpenChange={setAdding}
         title="Add an add-on"
-        description="Paste its manifest URL. Strata reads the manifest first to check it finds movie or show streams."
+        description="Paste its manifest URL. Strata reads the manifest first to check it finds streams or subtitles for movies or shows."
         submitLabel="Add"
         onSubmit={async (url) => {
           const added = await api.addAddon(url);
@@ -121,7 +122,7 @@ export function AddonsSection() {
         open={confirmClear}
         onOpenChange={setConfirmClear}
         title="Delete every add-on?"
-        description="Strata stops searching all of them. You can add them again with their manifest URLs."
+        description="Strata stops asking all of them. You can add them again with their manifest URLs."
         confirmLabel="Delete all"
         onConfirm={clear}
       />
@@ -164,6 +165,8 @@ function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: numbe
           <div className="flex flex-wrap items-center gap-2">
             <span className={cn("font-medium", !a.enabled && "text-muted-foreground")}>{a.name}</span>
             {a.isDefault && <Badge variant="secondary">Default</Badge>}
+            {a.resources.includes("stream") && <Badge variant="outline">Streams</Badge>}
+            {a.resources.includes("subtitles") && <Badge variant="outline">Subtitles</Badge>}
             {a.anime && <Badge variant="outline">Anime</Badge>}
             {!a.enabled && <Badge variant="outline">Off</Badge>}
           </div>
@@ -208,7 +211,7 @@ function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: numbe
         open={confirmRemove}
         onOpenChange={setConfirmRemove}
         title={`Delete ${a.name}?`}
-        description="Strata stops searching it. You can add it again with its manifest URL."
+        description="Strata stops asking it. You can add it again with its manifest URL."
         confirmLabel="Delete"
         onConfirm={remove}
       />

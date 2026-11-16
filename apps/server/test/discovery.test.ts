@@ -245,8 +245,8 @@ describe("slow add-ons", () => {
     const tmdb = { movie: async () => ({ id: 1, imdb_id: "tt1" }) } as never;
     const settings = settingsSchema.parse({ useTorboxSearch: false });
     const addons = [
-      { id: "fast", url: "https://fast.example/manifest.json", name: "Fast", enabled: true, idPrefixes: ["tt"], kind: "stremio" as const, configurable: false, allowPrivate: false },
-      { id: "slow", url: "https://slow.example/manifest.json", name: "Slow", enabled: true, idPrefixes: ["tt"], kind: "stremio" as const, configurable: false, allowPrivate: false },
+      { id: "fast", url: "https://fast.example/manifest.json", name: "Fast", enabled: true, resources: ["stream" as const], idPrefixes: ["tt"], subtitleIdPrefixes: null, kind: "stremio" as const, configurable: false, allowPrivate: false },
+      { id: "slow", url: "https://slow.example/manifest.json", name: "Slow", enabled: true, resources: ["stream" as const], idPrefixes: ["tt"], subtitleIdPrefixes: null, kind: "stremio" as const, configurable: false, allowPrivate: false },
     ];
     const discovery = new Discovery(tmdb, {} as never, () => settings as never, () => null, fetchImpl, () => {}, undefined, async () => {}, () => addons);
     const target = { source: "tmdb" as const, mediaType: "movie" as const, titleId: 1 };
@@ -273,7 +273,7 @@ describe("an add-on's word on what's cached", () => {
     const fetchImpl = (async () => Response.json({ streams: [{ name: "[TB+] Torrentio", title: "Film.2008.1080p.WEB", infoHash: "a".repeat(40) }] })) as unknown as typeof fetch;
     const tmdb = { movie: async () => ({ id: 1, imdb_id: "tt1" }) } as never;
     const settings = settingsSchema.parse({ useTorboxSearch: false });
-    const addons = [{ id: "t", url: "https://t.example/manifest.json", name: "T", enabled: true, idPrefixes: ["tt"], kind: "stremio" as const, configurable: false, allowPrivate: false }];
+    const addons = [{ id: "t", url: "https://t.example/manifest.json", name: "T", enabled: true, resources: ["stream" as const], idPrefixes: ["tt"], subtitleIdPrefixes: null, kind: "stremio" as const, configurable: false, allowPrivate: false }];
     const target = { source: "tmdb" as const, mediaType: "movie" as const, titleId: 1 };
     const library = { knownHashes: async () => new Set<string>() } as never;
 

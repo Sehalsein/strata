@@ -257,6 +257,9 @@ public struct SubtitleTrack: Codable, Sendable, Hashable, Identifiable {
     public var embedded: Bool?
     /// The track's stream index in the file (device mode).
     public var streamIndex: Int?
+    /// The name to show, written by the server ("French · OpenSubtitles v3"). Older servers
+    /// don't send one, so `displayTitle` falls back to naming it from its fields.
+    public var label: String?
 
     public var isEmbedded: Bool { embedded == true && streamIndex != nil }
     public var isTextBased: Bool { url != nil || isEmbedded }
@@ -265,6 +268,7 @@ public struct SubtitleTrack: Codable, Sendable, Hashable, Identifiable {
     /// The player can show it: text, or a picture read from the file.
     public var isShowable: Bool { isTextBased || isPicture }
     public var displayTitle: String {
+        if let label, !label.isEmpty { return label }
         let lang = language.flatMap(LanguageName.display)
         var head = title?.isEmpty == false ? title! : (lang ?? String(localized: "Track \(id)", bundle: .module))
         if forced, !head.localizedCaseInsensitiveContains("forced") { head += String(localized: " (Forced)", bundle: .module) }
@@ -324,6 +328,8 @@ public struct PlayResponse: Codable, Sendable, Hashable {
     public var candidate: Candidate
     public var audioTracks: [AudioTrack]
     public var subtitleTracks: [SubtitleTrack]
+    /// The subtitle track to turn on as playback starts (the server decides); nil for none.
+    public var selectedSubtitleId: String?
     public var chapters: [Chapter]
     public var reasons: [String]
     public var nextEpisode: NextEpisode?

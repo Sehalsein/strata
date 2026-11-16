@@ -14,7 +14,10 @@ import { ADDS_PER_HOUSEHOLD, PLAY_REPORTS_PER_USER, SEARCHES_PER_HOUSEHOLD, type
 import type { Db } from "./db";
 import { Library } from "./library";
 import type { FfmpegInfo } from "./platform/ffmpeg";
-import { PlaybackService } from "./playback/service";
+import { PlaybackService, type UnlabeledTrack } from "./playback/service";
+import { AddonSubtitleFinder, type OnlineSubtitle } from "./playback/addonSubtitles";
+import { subtitleLanguagesOf } from "./playback/subtitleChoice";
+import { toWebVtt } from "./playback/webvtt";
 import { HouseholdPlays } from "./playback/plays";
 import { PlayReports } from "./playback/reports";
 import type { SessionManager } from "./playback/sessions";
@@ -22,7 +25,10 @@ import type { ProgressStore } from "./progress";
 import type { SecretBox } from "./secrets";
 import { householdSettingsSchema, HOUSEHOLD_SECRET_KEYS, SettingsStore, type HouseholdSettingsStore, type ServerSettingsStore, type Settings } from "./settings";
 import { Discovery } from "./sources/discovery";
-import { AddonError, defaultAddons, inspectAddon, streamAddonListSchema, type StreamAddon } from "./sources/addons";
+import { AddonError, defaultAddons, fetchSubtitleFile, findsSubtitles, inspectAddon, streamAddonListSchema, type StreamAddon } from "./sources/addons";
+import { Buffer } from "node:buffer";
+import { SharedWork } from "./inFlight";
+import type { TitleTarget } from "./catalog/ref";
 import { TorboxHousekeeping } from "./sources/torbox/cleanup";
 import { TorboxClient } from "./sources/torbox/client";
 import { syncTorbox } from "./sources/torbox/sync";
@@ -82,6 +88,10 @@ export class Household {
   readonly tmdb: Tmdb;
   /** OMDb ratings, with its key (or the server's). */
   readonly omdb: Omdb;
+  /** Subtitles from its subtitle add-ons. */
+  readonly onlineSubtitles: AddonSubtitleFinder;
+  /** Converted subtitle files, by the add-on's link. */
+  private subtitleFiles = new SharedWork<string, string>({ remember: true, ttlMs: 6 * 3_600_000, max: 100 });
   private torboxClient?: { key: string; client: TorboxClient };
 
   /** Use `Households.get`: the settings must be loaded before the rest is built. */
@@ -107,7 +117,58 @@ export class Household {
     this.discovery = new Discovery(tmdb, this.library, settings, torbox, shared.fetch, (id, hash, name) => this.housekeeping.recordAdded(id, hash, name), shared.anime.ids,
       () => shared.throttle.spend(`adds:${organizationId}`, ADDS_PER_HOUSEHOLD, "This household has added a lot of releases to TorBox today."),
       () => this.addons());
-    this.playback = new PlaybackService(this.library, shared.sessions, shared.progress, settings, shared.ffmpeg, torbox, this.discovery, (show, s, e) => this.catalog.nextEpisode(show, s, e), (id) => this.housekeeping.recordPlayed(id));
+    this.onlineSubtitles = new AddonSubtitleFinder(() => this.addons(), (t) => this.discovery.stremioIds(t), () => this.subtitleLanguages(), shared.fetch);
+    this.playback = new PlaybackService(this.library, shared.sessions, shared.progress, settings, shared.ffmpeg, torbox, this.discovery, (show, s, e) => this.catalog.nextEpisode(show, s, e), (id) => this.housekeeping.recordPlayed(id),
+      (target) => this.subtitlesFor(target));
+  }
+
+  /** The languages its subtitle add-ons are asked for: as set, else the household's language. */
+  subtitleLanguages(): string[] {
+    return subtitleLanguagesOf(this.settings());
+  }
+
+  /** Subtitles the household's add-ons have for a title, as tracks the apps fetch from this server. */
+  private async subtitlesFor(target: TitleTarget): Promise<UnlabeledTrack[]> {
+    if (!this.onlineSubtitles.active) return [];
+    const found = await this.onlineSubtitles.find(target);
+    return found.map((s, i) => ({
+      id: `a${i}`,
+      codec: "webvtt",
+      language: s.language,
+      forced: false,
+      isDefault: false,
+      external: true,
+      detail: s.rank > 1 ? `${s.source} · ${s.rank}` : s.source,
+      url: `/api/subtitles/${this.subtitleToken(s)}.vtt`,
+    }));
+  }
+
+  /**
+   * A link to one add-on subtitle that only this server could have made, for this household:
+   * it holds the add-on's file address, so it can't be used to fetch anything else.
+   */
+  private subtitleToken(s: OnlineSubtitle): string {
+    const data = Buffer.from(JSON.stringify({ a: s.addonId, u: s.url }), "utf8").toString("base64url");
+    return `${data}.${this.shared.box.mac(`subtitle:${this.organizationId}`, data)}`;
+  }
+
+  /**
+   * The subtitle a token from `subtitlesFor` names, as WebVTT; null when the token isn't
+   * this household's or its add-on is gone or off. Throws when the file can't be had.
+   */
+  async addonSubtitleVtt(token: string): Promise<string | null> {
+    const [data, tag] = token.split(".");
+    if (!data || !tag || !this.shared.box.verifyMac(`subtitle:${this.organizationId}`, data, tag)) return null;
+    let claim: { a?: unknown; u?: unknown };
+    try {
+      claim = JSON.parse(Buffer.from(data, "base64url").toString("utf8"));
+    } catch {
+      return null;
+    }
+    const addon = this.addons().find((a) => a.id === claim.a && a.enabled && findsSubtitles(a));
+    if (!addon || typeof claim.u !== "string") return null;
+    const url = claim.u;
+    return this.subtitleFiles.get(url, async () => toWebVtt(await fetchSubtitleFile(url, addon.allowPrivate, this.shared.fetch)));
   }
 
   /** One person's view of the catalog, with their content limit applied (see Viewer). */

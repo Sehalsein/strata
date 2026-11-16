@@ -11,7 +11,7 @@ import { ingestItem } from "./torbox/sync";
 import { SharedWork } from "../inFlight";
 import { globalFetch } from "../net";
 import { targetRef, type TitleTarget } from "../catalog/ref";
-import { addonStreams, defaultAddons, isInfoHash, type StreamAddon } from "./addons";
+import { addonStreams, defaultAddons, findsStreams, isInfoHash, type StreamAddon } from "./addons";
 
 export { isInfoHash, parseSize } from "./addons";
 
@@ -291,7 +291,7 @@ export class Discovery {
     const client = this.torbox();
     const jobs: Promise<Release[]>[] = [];
     for (const [place, addon] of this.addons().entries()) {
-      if (!addon.enabled) continue;
+      if (!addon.enabled || !findsStreams(addon)) continue;
       // Asked by Kitsu id only if it says it knows them (or doesn't say).
       const kitsuOk = !addon.idPrefixes || addon.idPrefixes.some((p) => p.startsWith("kitsu"));
       const key = `${addon.name} (${addon.id})`;
@@ -348,6 +348,17 @@ export class Discovery {
       }
     }
     return { releases: rankReleases(releases, settings), partial };
+  }
+
+  /**
+   * The ids Stremio add-ons know a title by: IMDb ("tt…", ":S:E" added for an episode, in
+   * TMDB's numbering) and, for anime, Kitsu ("kitsu:<id>[:<episode>]"). Either may be null.
+   */
+  async stremioIds(target: DiscoveryTarget): Promise<{ imdb: string | null; kitsu: string | null }> {
+    const tmdbTarget = target.source === "anilist" ? await this.tmdbTargetOf(target).catch(() => null) : target;
+    const [imdbId, kitsu] = await Promise.all([tmdbTarget ? this.imdbId(tmdbTarget).catch(() => null) : null, this.kitsuId(target).catch(() => null)]);
+    const imdb = imdbId && tmdbTarget ? (tmdbTarget.mediaType === "movie" ? imdbId : `${imdbId}:${tmdbTarget.season}:${tmdbTarget.episode}`) : null;
+    return { imdb, kitsu };
   }
 
   private async imdbId(target: DiscoveryTarget): Promise<string | null> {

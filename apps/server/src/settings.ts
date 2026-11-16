@@ -62,6 +62,16 @@ export const householdSettingsSchema = z.object({
   showUncached: z.boolean().default(true),
   /** Largest release discovery will pick automatically, in GB (0 = no limit). */
   maxReleaseSizeGb: z.number().min(0).default(0),
+  /**
+   * Languages to fetch subtitles in from subtitle add-ons, as ISO 639-1 codes, most wanted
+   * first. Empty means the household's language.
+   */
+  subtitleLanguages: z.array(z.string().regex(/^[a-z]{2}$/)).max(10).default([]),
+  /**
+   * When subtitles turn on as a title starts: "forced" only forced tracks (foreign dialogue),
+   * "foreign" also when the audio isn't in a subtitle language, "always" every time.
+   */
+  autoSubtitles: z.enum(["forced", "foreign", "always"]).default("forced"),
 });
 
 /** What a household's code sees: the server's settings with its own on top. */

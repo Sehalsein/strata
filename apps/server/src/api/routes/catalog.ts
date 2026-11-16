@@ -9,6 +9,9 @@ import { NeedsProbeError } from "../../playback/service";
 import { mediaInfoSchema } from "../../media/probe";
 import { parseRef, tmdbRef, type TitleRef, type TitleTarget } from "../../catalog/ref";
 import { legacyCards, type Shelf } from "../../catalog/service";
+import { logger } from "../../log";
+
+const log = logger("catalog-routes");
 
 /** A title by its ref ("tmdb:show:1399"), for path and query params; 400 when it isn't one. */
 function refParam(text: string | undefined): TitleRef {
@@ -201,6 +204,21 @@ export const catalogRoutes = new Hono<Env>()
     const id = intParam(c, "id");
     const url = await viewer(c).fileLink(id);
     return c.json({ url: url ?? `/api/files/${id}/content` });
+  })
+
+  // A subtitle from one of the household's subtitle add-ons, as WebVTT. The token (from a
+  // play response) is signed for this household and names the add-on and its file.
+  .get("/subtitles/:file{[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.vtt}", async (c) => {
+    const token = c.req.param("file").replace(/\.vtt$/, "");
+    let vtt: string | null;
+    try {
+      vtt = await c.var.household.addonSubtitleVtt(token);
+    } catch (err) {
+      log.warn("Add-on subtitle download failed", err);
+      throw new HTTPException(502, { message: "Couldn't download that subtitle. Try another one." });
+    }
+    if (vtt === null) throw new HTTPException(404, { message: "That subtitle isn't available any more." });
+    return c.body(vtt, 200, { "Content-Type": "text/vtt; charset=utf-8", "Cache-Control": "private, max-age=21600" });
   })
 
   // A file on this server's disk, for downloading (TorBox files download from TorBox).

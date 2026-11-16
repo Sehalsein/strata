@@ -11,14 +11,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { NumberInput, type SetFn } from "./fields";
+import { ChoiceSelect, minutesLabel, type SetFn } from "./fields";
 import { MediaFolders } from "./media-folders";
 import { Connections } from "./connections";
 import { AddonsSection } from "./addons";
 import { SettingRow, SettingsSection, ToggleRow } from "./layout";
+import { CATALOG_LANGUAGES, languageName, REGIONS, regionName, SUBTITLE_LANGUAGES } from "./languages";
+import { ChevronDown } from "lucide-react";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { UpdatesCard } from "./updates-card";
 import { useSession } from "@/app/session";
-import { navigate } from "@/lib/router";
+import { Link, navigate, usePath } from "@/lib/router";
 
 const PROVIDER_LABEL: Record<Provider, string> = { local: "Local folders", torbox: "TorBox" };
 
@@ -30,14 +33,15 @@ interface Section {
   group: "household" | "server";
 }
 
-/** Old links (#keys, #playback) still land in the right place. */
+/** Old names (keys, playback) still land in the right place. */
 const ALIASES: Record<string, SectionId> = { keys: "connections", playback: "discovery" };
+const SERVER_SECTIONS = ["server", "network", "updates"];
 
-function sectionFromHash(available: Section[]): SectionId {
-  const h = location.hash.slice(1);
-  const id = (ALIASES[h] ?? h) as SectionId;
-  return available.some((s) => s.id === id) ? id : available[0]!.id;
-}
+/** The section a path names (/settings/discovery → "discovery"), as written; "" for none. */
+const sectionIn = (path: string, base: string) => {
+  const rest = path.startsWith(base) ? path.slice(base.length).replace(/^\/+|\/+$/g, "") : "";
+  return ALIASES[rest] ?? rest;
+};
 
 /**
  * Settings, by whose they are: this household's (its owner and admins, under Settings) or
@@ -64,13 +68,24 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
     ] as Section[]
   ).filter((s) => s.group === scope);
   const title = scope === "server" ? "Server settings" : "Settings";
-  // The server's sections moved to the backoffice: old links (/settings#updates) follow.
+  // Each section has its own path: /settings/discovery, /backoffice/settings/updates.
+  const base = scope === "server" ? "/backoffice/settings" : "/settings";
+  const path = usePath();
+  const named = sectionIn(path, base);
+  const section: SectionId = sections.some((s) => s.id === named) ? (named as SectionId) : sections[0]!.id;
+  const pathOf = (id: SectionId) => (id === sections[0]!.id ? base : `${base}/${id}`);
+  // Old links (/settings#addons) and the server's sections under household settings (they
+  // moved to the backoffice) go to where they are now.
   useEffect(() => {
-    if (scope === "household" && ["server", "network", "updates"].includes(location.hash.slice(1))) navigate(`/backoffice/settings${location.search}${location.hash}`, { replace: true });
-  }, [scope]);
+    const hash = location.hash.slice(1);
+    const wanted = ALIASES[hash] ?? hash ?? "";
+    const target = wanted || named;
+    if (scope === "household" && SERVER_SECTIONS.includes(target)) navigate(`/backoffice/settings/${target}${location.search}`, { replace: true });
+    else if (wanted) navigate(`${base}/${wanted}${location.search}`, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, path]);
   const settings = useQuery({ queryKey: queryKeys.settings, queryFn: api.settings, staleTime: Infinity });
   const [draft, setDraft] = useState<Settings | null>(null);
-  const [section, setSection] = useState<SectionId>(() => sectionFromHash(sections));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const data = settings.data;
@@ -78,13 +93,6 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
   useEffect(() => {
     if (data && !draft) setDraft(data.settings);
   }, [data, draft]);
-
-  useEffect(() => {
-    const onHash = () => setSection(sectionFromHash(sections));
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isServerAdmin, capabilities, scope]);
 
   const dirty = useMemo(() => !!data && !!draft && JSON.stringify(data.settings) !== JSON.stringify(draft), [data, draft]);
 
@@ -98,10 +106,7 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
     );
   }
 
-  const go = (id: SectionId) => {
-    setSection(id);
-    history.replaceState(null, "", `${location.pathname}${location.search}${id === sections[0]!.id ? "" : `#${id}`}`);
-  };
+  const go = (id: SectionId) => navigate(`${pathOf(id)}${location.search}`);
 
   const set: SetFn = (key, value) => setDraft((d) => (d ? { ...d, [key]: value } : d));
 
@@ -141,32 +146,23 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
       <PageHeader title={title} description={scope === "server" ? "For the whole server and every household on it." : undefined} />
 
       <div className="flex flex-col gap-6 md:flex-row md:items-start md:gap-10">
-        {sections.length > 1 && <SettingsNav sections={sections} current={section} onChange={go} />}
+        {sections.length > 1 && <SettingsNav sections={sections} current={section} hrefOf={pathOf} />}
 
         <div className="flex min-w-0 flex-1 flex-col gap-6">
           {/* Add-ons draws its own heading, with its count and actions. */}
           {sections.length > 1 && section !== "addons" && <h2 className="text-xl font-semibold">{current.label}</h2>}
 
           {section === "general" && (
-            <SettingsSection title="Catalog" description="How titles and dates are shown.">
-              <SettingRow
-                label="Language"
-                htmlFor="language"
-                description="For titles, overviews and artwork, as a TMDB language tag: en-US, fr-FR, ja-JP."
-                error={draft.language && !/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(draft.language) ? "Use a tag like en-US." : null}
-              >
-                <Input id="language" className="font-mono sm:w-48" value={draft.language} onChange={(e) => set("language", e.target.value)} spellCheck={false} autoCapitalize="off" />
+            <SettingsSection title="Catalog" description="The language titles and artwork are shown in, and the country release dates and age ratings follow.">
+              <SettingRow label="Language" htmlFor="language" description="Titles, overviews and artwork from TMDB, where it has them in this language.">
+                <ChoiceSelect id="language" value={draft.language} options={CATALOG_LANGUAGES.map((l) => ({ value: l.code, label: l.name }))} describe={languageName} onChange={(v) => set("language", v)} />
               </SettingRow>
-              <SettingRow
-                label="Region"
-                htmlFor="region"
-                description="Two-letter country code for release dates and age ratings: US, GB."
-                error={draft.region && !/^[A-Z]{2}$/.test(draft.region) ? "Use two letters, like US." : null}
-              >
-                <Input id="region" className="font-mono sm:w-24" value={draft.region} maxLength={2} onChange={(e) => set("region", e.target.value.toUpperCase())} spellCheck={false} autoCapitalize="characters" />
+              <SettingRow label="Region" htmlFor="region" description="The country whose release dates and age ratings are shown.">
+                <ChoiceSelect id="region" value={draft.region} options={REGIONS.map((r) => ({ value: r.code, label: r.name }))} describe={regionName} onChange={(v) => set("region", v)} />
               </SettingRow>
             </SettingsSection>
           )}
+          {section === "general" && <SubtitlesSection draft={draft} set={set} />}
 
           {section === "library" && (
             <>
@@ -187,7 +183,7 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
               description="Playable releases for titles that aren't in the library yet. Cached releases come first, then ones in the household's language (from General), then ones within your limits."
             >
               <ToggleRow label="Find releases" description="Look for TorBox releases of titles that aren't in the library." checked={draft.discoveryEnabled} onChange={(v) => set("discoveryEnabled", v)} />
-              <ToggleRow label="Use TorBox search" description={<>Also ask TorBox's own search, alongside your <a href="#addons">add-ons</a>.</>} checked={draft.useTorboxSearch} onChange={(v) => set("useTorboxSearch", v)} />
+              <ToggleRow label="Use TorBox search" description={<>Also ask TorBox's own search, alongside your <Link href="/settings/addons">add-ons</Link>.</>} checked={draft.useTorboxSearch} onChange={(v) => set("useTorboxSearch", v)} />
               <SettingRow
                 label="Order releases by"
                 description={
@@ -206,8 +202,8 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
                 </ToggleGroup>
               </SettingRow>
               <ToggleRow label="Show uncached releases" description="Offer releases TorBox hasn't cached yet. They download before they can play." checked={draft.showUncached} onChange={(v) => set("showUncached", v)} />
-              <SettingRow label="Largest automatic pick" htmlFor="max-size" description="Discovery won't pick a bigger release by itself. 0 means no limit.">
-                <NumberInput id="max-size" min={0} step={0.5} suffix="GB" value={draft.maxReleaseSizeGb} onChange={(v) => set("maxReleaseSizeGb", v)} />
+              <SettingRow label="Largest automatic pick" htmlFor="max-size" description="Discovery won't pick a bigger release by itself. You can still choose one.">
+                <ChoiceSelect id="max-size" value={draft.maxReleaseSizeGb} options={RELEASE_SIZES} describe={(gb) => `Up to ${gb} GB`} onChange={(v) => set("maxReleaseSizeGb", v)} />
               </SettingRow>
             </SettingsSection>
           )}
@@ -252,7 +248,7 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
 }
 
 /** Sections grouped by whose they are: a column on wide screens, a scrolling row on narrow ones. */
-function SettingsNav({ sections, current, onChange }: { sections: Section[]; current: SectionId; onChange: (id: SectionId) => void }) {
+function SettingsNav({ sections, current, hrefOf }: { sections: Section[]; current: SectionId; hrefOf: (id: SectionId) => string }) {
   // The household is the one the sidebar's switcher shows; the server's sections are its admin's.
   const groups = [
     { id: "household" as const, label: "Household" },
@@ -267,10 +263,9 @@ function SettingsNav({ sections, current, onChange }: { sections: Section[]; cur
             {sections
               .filter((s) => s.group === g.id)
               .map((s) => (
-                <button
+                <Link
                   key={s.id}
-                  type="button"
-                  onClick={() => onChange(s.id)}
+                  href={hrefOf(s.id)}
                   aria-current={current === s.id ? "page" : undefined}
                   className={cn(
                     "flex shrink-0 items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors",
@@ -279,7 +274,7 @@ function SettingsNav({ sections, current, onChange }: { sections: Section[]; cur
                 >
                   <s.icon className="size-4" />
                   {s.label}
-                </button>
+                </Link>
               ))}
           </div>
         ))}
@@ -340,8 +335,8 @@ function ServerSections({ draft, set, localMedia }: { draft: Settings; set: SetF
       </SettingsSection>
       <SettingsSection title="Library" description="For every household.">
         {localMedia && (
-          <SettingRow label="Scan folders every" htmlFor="scan-every" description="How often every household's media folders are checked for new files. 0 turns it off.">
-            <NumberInput id="scan-every" min={0} suffix="min" value={draft.scanIntervalMinutes} onChange={(v) => set("scanIntervalMinutes", v)} />
+          <SettingRow label="Scan folders every" htmlFor="scan-every" description="How often every household's media folders are checked for new files.">
+            <ChoiceSelect id="scan-every" value={draft.scanIntervalMinutes} options={SCAN_INTERVALS} describe={minutesLabel} onChange={(v) => set("scanIntervalMinutes", v)} />
           </SettingRow>
         )}
         <SettingRow
@@ -356,8 +351,8 @@ function ServerSections({ draft, set, localMedia }: { draft: Settings; set: SetF
       {localMedia && (
         <SettingsSection title="Transcoding" description="Only for files on this server's disk; TorBox video plays straight from TorBox.">
           <ToggleRow label="Hardware acceleration" description="VideoToolbox, VAAPI or QSV when a file has to be converted." checked={draft.hardwareAcceleration} onChange={(v) => set("hardwareAcceleration", v)} />
-          <SettingRow label="At the same time" htmlFor="max-transcodes" description="How many conversions may run at once (1–16).">
-            <NumberInput id="max-transcodes" min={1} max={16} value={draft.maxTranscodes} onChange={(v) => set("maxTranscodes", v)} />
+          <SettingRow label="At the same time" htmlFor="max-transcodes" description="How many conversions may run at once.">
+            <ChoiceSelect id="max-transcodes" value={draft.maxTranscodes} options={TRANSCODE_LIMITS} describe={(n) => `${n} at once`} onChange={(v) => set("maxTranscodes", v)} />
           </SettingRow>
         </SettingsSection>
       )}
@@ -406,3 +401,65 @@ function NetworkSection({ draft, set }: { draft: Settings; set: SetFn }) {
     </>
   );
 }
+
+/** Which languages subtitle add-ons are asked for, and when the apps turn subtitles on. */
+function SubtitlesSection({ draft, set }: { draft: Settings; set: SetFn }) {
+  const chosen = draft.subtitleLanguages;
+  const catalog = languageName(draft.language.split("-")[0] ?? "en");
+  const first = chosen[0] ? languageName(chosen[0]) : catalog;
+  return (
+    <SettingsSection title="Subtitles" description="Subtitles inside a file are always offered. Subtitle add-ons are asked for the languages below.">
+      <SettingRow
+        label="Languages"
+        htmlFor="subtitle-languages"
+        description={chosen.length ? "In the order you ticked them: subtitles turn on in the first one a title has." : "The languages to get subtitles in. None ticked means the catalog language."}
+      >
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <Button id="subtitle-languages" variant="outline" className="w-full justify-between font-normal sm:w-64">
+              <span className="truncate">{chosen.length ? chosen.map(languageName).join(", ") : `Catalog language (${catalog})`}</span>
+              <ChevronDown className="text-muted-foreground" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="max-h-80 w-64">
+            <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">Ticked first come first. Up to 10.</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {SUBTITLE_LANGUAGES.map((l) => {
+              const on = chosen.includes(l.code);
+              return (
+                <DropdownMenuCheckboxItem
+                  key={l.code}
+                  checked={on}
+                  disabled={!on && chosen.length >= 10}
+                  // Stays open, so several can be ticked in one go.
+                  onSelect={(e) => e.preventDefault()}
+                  onCheckedChange={(v) => set("subtitleLanguages", v ? [...chosen, l.code] : chosen.filter((c) => c !== l.code))}
+                >
+                  {l.name}
+                </DropdownMenuCheckboxItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SettingRow>
+      <SettingRow label="Turn on automatically" htmlFor="auto-subtitles" description={AUTO_SUBTITLES.find((o) => o.value === draft.autoSubtitles)!.description(first)}>
+        <ChoiceSelect id="auto-subtitles" value={draft.autoSubtitles} options={AUTO_SUBTITLES} onChange={(v) => set("autoSubtitles", v)} />
+      </SettingRow>
+    </SettingsSection>
+  );
+}
+
+const AUTO_SUBTITLES: { value: Settings["autoSubtitles"]; label: string; description: (first: string) => string }[] = [
+  { value: "forced", label: "Only for foreign dialogue", description: () => "Only forced subtitles, which translate lines in another language than the audio." },
+  { value: "foreign", label: "When the audio is foreign", description: (first) => `Also when a title's audio isn't in one of your languages: in ${first}, if it has them.` },
+  { value: "always", label: "Always", description: (first) => `Every title starts with subtitles on, in ${first} if it has them.` },
+];
+
+const RELEASE_SIZES = [
+  { value: 0, label: "No limit" },
+  ...[2, 5, 10, 15, 20, 30, 50, 80].map((gb) => ({ value: gb, label: `Up to ${gb} GB` })),
+];
+
+const SCAN_INTERVALS = [{ value: 0, label: "Off" }, ...[15, 30, 60, 180, 360, 720, 1440].map((m) => ({ value: m, label: minutesLabel(m) }))];
+
+const TRANSCODE_LIMITS = [1, 2, 3, 4, 6, 8, 12, 16].map((n) => ({ value: n, label: n === 1 ? "1 at once" : `${n} at once` }));

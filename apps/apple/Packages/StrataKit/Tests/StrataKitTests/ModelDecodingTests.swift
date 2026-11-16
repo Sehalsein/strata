@@ -256,6 +256,26 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(p.reasons, ["container mkv → HLS"])
     }
 
+    /// The server names every track and picks the one to turn on; the app shows and does what it says.
+    func testPlayServerLabelsAndSubtitleChoice() throws {
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Fixture.data("play_remux")) as? [String: Any])
+        var tracks = try XCTUnwrap(json["subtitleTracks"] as? [[String: Any]])
+        tracks[0]["label"] = "English"
+        tracks.append(["id": "a0", "codec": "webvtt", "language": "fr", "forced": false, "isDefault": false, "external": true,
+                       "url": "/api/subtitles/abc.def.vtt", "detail": "OpenSubtitles v3", "label": "French · OpenSubtitles v3"])
+        json["subtitleTracks"] = tracks
+        json["selectedSubtitleId"] = "a0"
+        let p = try JSONDecoder().decode(PlayResponse.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(p.selectedSubtitleId, "a0")
+        XCTAssertEqual(p.subtitleTracks.map(\.displayTitle).first, "English")
+        XCTAssertEqual(p.subtitleTracks.last?.displayTitle, "French · OpenSubtitles v3")
+        XCTAssertTrue(p.subtitleTracks.last?.isShowable == true)
+        // Older servers send neither: nothing is turned on, and tracks are named from their fields.
+        let old = try Fixture.decode(PlayResponse.self, "play_remux")
+        XCTAssertNil(old.selectedSubtitleId)
+        XCTAssertNil(old.subtitleTracks[0].label)
+    }
+
     func testPlayDevice() throws {
         let p = try Fixture.decode(PlayResponse.self, "play_device")
         XCTAssertEqual(p.mode, .device)

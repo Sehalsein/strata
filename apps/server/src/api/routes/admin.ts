@@ -157,7 +157,7 @@ export const adminRoutes = new Hono<Env>()
   // The household's add-ons, without their URLs: those often hold a password or a key.
   .get("/addons", (c) => c.json({ items: c.var.household.addons().map(addonDto) }))
 
-  // Adds an add-on by its manifest URL, once it's answered with a manifest that finds streams.
+  // Adds an add-on by its manifest URL, once it's answered with a manifest that finds streams or subtitles.
   .post("/addons", async (c) => {
     const { url } = await body(c, z.object({ url: z.string().trim().min(1).max(2048) }));
     try {
@@ -458,5 +458,16 @@ async function sessionDtoFor(services: Services, h: Household) {
 
 /** What the dashboard sees of an add-on: never its URL's path, where its secrets are. */
 function addonDto(a: StreamAddon) {
-  return { id: a.id, name: a.name, host: addonOrigin(a.url), enabled: a.enabled, kind: a.kind, configurable: a.configurable, anime: !a.idPrefixes || a.idPrefixes.some((p) => p.startsWith("kitsu")), isDefault: a.id === "default" };
+  const streams = a.resources.includes("stream");
+  return {
+    id: a.id,
+    name: a.name,
+    host: addonOrigin(a.url),
+    enabled: a.enabled,
+    kind: a.kind,
+    configurable: a.configurable,
+    resources: a.resources,
+    anime: streams && (!a.idPrefixes || a.idPrefixes.some((p) => p.startsWith("kitsu"))),
+    isDefault: a.id === "default",
+  };
 }

@@ -61,14 +61,6 @@ export default function AppLayout() {
         <TopBar title={route?.title ?? "Not found"} />
         <div id="main" tabIndex={-1} className="flex flex-1 flex-col px-4 py-6 outline-none md:px-8">
           <Suspense fallback={<PageSkeleton />}>{Page_ ? <Page_ key={route!.path} /> : route ? <NotAllowed /> : <NotFound path={path} />}</Suspense>
-          {/* Required by TMDB's API terms. */}
-          <footer className="text-muted-foreground mx-auto mt-12 w-full max-w-6xl text-xs">
-            Movie and show data from{" "}
-            <a href="https://www.themoviedb.org" target="_blank" rel="noreferrer" className="underline">
-              TMDB
-            </a>
-            . This product uses the TMDB API but is not endorsed or certified by TMDB.
-          </footer>
         </div>
       </SidebarInset>
     </SidebarProvider>

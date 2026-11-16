@@ -1,7 +1,8 @@
 import { useId, type ReactNode } from "react";
 import type { Settings } from "@/lib/types";
 import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 
 export type SetFn = <K extends keyof Settings>(key: K, value: Settings[K]) => void;
@@ -20,36 +21,45 @@ export function SwitchField({ checked, onChange, label, description }: { checked
   );
 }
 
-/** Number input with a unit suffix ("min", "GB"). */
-export function NumberInput({
+/**
+ * One of a few values, as a dropdown. A current value that isn't among the options (set
+ * by hand before, or by an older version) is shown too, named by `describe`.
+ */
+export function ChoiceSelect<T extends string | number>({
+  id,
   value,
+  options,
   onChange,
-  suffix,
-  min,
-  max,
-  step,
-  ...rest
-}: { value: number; onChange: (v: number) => void; suffix?: string; min?: number; max?: number; step?: number; id?: string; "aria-describedby"?: string; "aria-invalid"?: boolean }) {
+  describe,
+  className,
+}: {
+  id?: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+  describe?: (v: T) => string;
+  className?: string;
+}) {
+  const all = options.some((o) => o.value === value) ? options : [...options, { value, label: describe?.(value) ?? String(value) }];
   return (
-    <div className="relative w-full max-w-48">
-      <Input
-        {...rest}
-        type="number"
-        className="pr-14 font-mono"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => {
-          const n = Number(e.target.value);
-          if (!Number.isFinite(n)) return;
-          let v = step && step < 1 ? n : Math.round(n);
-          if (min !== undefined) v = Math.max(min, v);
-          if (max !== undefined) v = Math.min(max, v);
-          onChange(v);
-        }}
-      />
-      {suffix && <span className="text-muted-foreground pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm">{suffix}</span>}
-    </div>
+    <Select value={String(value)} onValueChange={(v) => onChange(all.find((o) => String(o.value) === v)!.value)}>
+      <SelectTrigger id={id} className={cn("w-full sm:w-64", className)}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {all.map((o) => (
+          <SelectItem key={String(o.value)} value={String(o.value)}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
+}
+
+/** "90" minutes → "1 hr 30 min"; whole days and hours as such. */
+export function minutesLabel(m: number): string {
+  if (m % 1440 === 0) return m === 1440 ? "Every day" : `Every ${m / 1440} days`;
+  if (m % 60 === 0) return m === 60 ? "Every hour" : `Every ${m / 60} hours`;
+  return `Every ${m} minutes`;
 }

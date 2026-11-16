@@ -4,9 +4,10 @@ import { globalFetch } from "../net";
 import { runtime } from "#runtime";
 
 /**
- * A Stremio stream add-on a household searches for releases (Torrentio, AIOStreams, Comet,
- * MediaFusion…): anything that answers `/stream/{movie|series}/{id}.json`. Kept sealed,
- * since their URLs often carry a password or a debrid key.
+ * A Stremio add-on a household uses: one that finds releases (Torrentio, AIOStreams, Comet,
+ * MediaFusion…: anything that answers `/stream/{movie|series}/{id}.json`), one that finds
+ * subtitles (OpenSubtitles v3: `/subtitles/…`), or both. Kept sealed, since their URLs
+ * often carry a password or a debrid key.
  */
 export const streamAddonSchema = z.object({
   id: z.string().min(1),
@@ -14,8 +15,12 @@ export const streamAddonSchema = z.object({
   url: z.string().url(),
   name: z.string().min(1).max(100),
   enabled: z.boolean().default(true),
-  /** The ids it answers for ("tt", "kitsu"…), from its manifest; null when it doesn't say. */
+  /** What it's asked for. Lists saved before subtitles came along only find streams. */
+  resources: z.array(z.enum(["stream", "subtitles"])).min(1).default(["stream"]),
+  /** The ids it finds streams for ("tt", "kitsu"…), from its manifest; null when it doesn't say. */
   idPrefixes: z.array(z.string()).nullable().default(null),
+  /** The ids it finds subtitles for; null when it doesn't say. */
+  subtitleIdPrefixes: z.array(z.string()).nullable().default(null),
   /** AIOStreams also has a search API that says what Stremio's streams leave out (hashes). */
   kind: z.enum(["stremio", "aiostreams"]).default("stremio"),
   /** It has a configure page (<base>/configure), per its manifest. */
@@ -32,7 +37,7 @@ export const streamAddonListSchema = z.array(streamAddonSchema);
 /** What a household searches with before it sets up its own list: the server's Torrentio. */
 export function defaultAddons(torrentioUrl: string): StreamAddon[] {
   if (!torrentioUrl) return [];
-  return [{ id: "default", url: manifestUrl(torrentioUrl), name: "Torrentio", enabled: true, idPrefixes: ["tt", "kitsu"], kind: "stremio", configurable: true, allowPrivate: true }];
+  return [{ id: "default", url: manifestUrl(torrentioUrl), name: "Torrentio", enabled: true, resources: ["stream"], idPrefixes: ["tt", "kitsu"], subtitleIdPrefixes: null, kind: "stremio", configurable: true, allowPrivate: true }];
 }
 
 /** A pasted add-on address as its manifest URL: stremio:// becomes https://, /manifest.json is added. */
@@ -78,9 +83,15 @@ async function addonFetch(url: string, allowPrivate: boolean, fetchImpl: typeof 
 
 /** The body as JSON, refusing one past MAX_BODY_BYTES. */
 async function readJson(res: Response): Promise<unknown> {
+  const bytes = await readBytes(res, MAX_BODY_BYTES);
+  return bytes.byteLength ? JSON.parse(new TextDecoder().decode(bytes)) : null;
+}
+
+/** The body, refusing one past `max` bytes. */
+async function readBytes(res: Response, max: number): Promise<Uint8Array> {
   const declared = Number(res.headers.get("content-length") ?? 0);
-  if (declared > MAX_BODY_BYTES) throw new Error("Add-on answer too large");
-  if (!res.body) return null;
+  if (declared > max) throw new Error("Add-on answer too large");
+  if (!res.body) return new Uint8Array();
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -88,7 +99,7 @@ async function readJson(res: Response): Promise<unknown> {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > MAX_BODY_BYTES) {
+    if (size > max) {
       await reader.cancel();
       throw new Error("Add-on answer too large");
     }
@@ -100,7 +111,7 @@ async function readJson(res: Response): Promise<unknown> {
     all.set(c, at);
     at += c.byteLength;
   }
-  return JSON.parse(new TextDecoder().decode(all));
+  return all;
 }
 
 /**
@@ -185,7 +196,7 @@ const manifestSchema = z.object({
   behaviorHints: z.object({ configurable: z.boolean().optional() }).passthrough().optional(),
 });
 
-/** Reads an add-on's manifest and checks it can find streams for movies or shows. */
+/** Reads an add-on's manifest and checks it can find streams or subtitles for movies or shows. */
 export async function inspectAddon(input: string, fetchImpl: typeof fetch = globalFetch, allowPrivate = false): Promise<Omit<StreamAddon, "id" | "enabled">> {
   const url = manifestUrl(input);
   let res: Response;
@@ -199,13 +210,95 @@ export async function inspectAddon(input: string, fetchImpl: typeof fetch = glob
   const parsed = manifestSchema.safeParse(await readJson(res).catch(() => null));
   if (!parsed.success) throw new AddonError("That address isn't a Stremio add-on manifest.");
   const m = parsed.data;
-  const stream = m.resources.find((r) => (typeof r === "string" ? r : r.name) === "stream");
-  if (!stream) throw new AddonError(`${m.name ?? "That add-on"} doesn't find streams, so it can't find releases.`);
-  const types = (typeof stream === "object" && stream.types) || m.types;
-  if (!types.some((t) => t === "movie" || t === "series")) throw new AddonError(`${m.name ?? "That add-on"} doesn't have movies or shows.`);
-  const idPrefixes = (typeof stream === "object" && stream.idPrefixes) || m.idPrefixes || null;
-  const aio = /aiostreams/i.test(`${m.id ?? ""} ${m.name ?? ""}`) && aioCredentials(url) !== null;
-  return { url, name: (m.name ?? addonOrigin(url)).slice(0, 100), idPrefixes, kind: aio ? "aiostreams" : "stremio", configurable: !!m.behaviorHints?.configurable, allowPrivate };
+  const label = m.name ?? "That add-on";
+  const resource = (name: "stream" | "subtitles") => {
+    const r = m.resources.find((x) => (typeof x === "string" ? x : x.name) === name);
+    if (!r) return null;
+    const types = (typeof r === "object" && r.types) || m.types;
+    if (!types.some((t) => t === "movie" || t === "series")) return null;
+    return { idPrefixes: (typeof r === "object" && r.idPrefixes) || m.idPrefixes || null };
+  };
+  const stream = resource("stream");
+  const subtitles = resource("subtitles");
+  if (!stream && !subtitles) {
+    const offered = m.resources.some((r) => ["stream", "subtitles"].includes(typeof r === "string" ? r : r.name));
+    throw new AddonError(offered ? `${label} doesn't have movies or shows.` : `${label} doesn't find streams or subtitles, so Strata can't use it.`);
+  }
+  const aio = !!stream && /aiostreams/i.test(`${m.id ?? ""} ${m.name ?? ""}`) && aioCredentials(url) !== null;
+  return {
+    url,
+    name: (m.name ?? addonOrigin(url)).slice(0, 100),
+    resources: [...(stream ? (["stream"] as const) : []), ...(subtitles ? (["subtitles"] as const) : [])],
+    idPrefixes: stream?.idPrefixes ?? null,
+    subtitleIdPrefixes: subtitles?.idPrefixes ?? null,
+    kind: aio ? "aiostreams" : "stremio",
+    configurable: !!m.behaviorHints?.configurable,
+    allowPrivate,
+  };
+}
+
+/** Whether an add-on is asked for streams / subtitles. */
+export const findsStreams = (a: StreamAddon) => a.resources.includes("stream");
+export const findsSubtitles = (a: StreamAddon) => a.resources.includes("subtitles");
+
+/** A subtitle an add-on found: its file's address and language. */
+export interface AddonSubtitle {
+  /** The add-on's own id for it, when it gives one. */
+  id?: string;
+  url: string;
+  /** As the add-on gives it: usually ISO 639-2 ("eng", "pob"…). */
+  lang: string;
+}
+
+/**
+ * Subtitles for `id` (an IMDb id, "tt…:S:E", or "kitsu:…"). `extra` helps it match the
+ * release (OpenSubtitles goes by file name and size).
+ */
+export async function addonSubtitles(
+  addon: StreamAddon,
+  type: "movie" | "series",
+  id: string,
+  extra: { filename?: string; videoSize?: number } = {},
+  fetchImpl: typeof fetch = globalFetch,
+  signal?: AbortSignal,
+): Promise<AddonSubtitle[]> {
+  const params = Object.entries(extra)
+    .filter(([, v]) => v !== undefined && v !== "")
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+    .join("&");
+  const path = `${addonBase(addon.url)}/subtitles/${type}/${encodeURIComponent(id)}${params ? `/${params}` : ""}.json`;
+  const res = await addonFetch(path, addon.allowPrivate, fetchImpl, { headers: { Accept: "application/json" }, signal: signal ?? AbortSignal.timeout(8_000) });
+  if (!res.ok) throw new Error(`${addon.name} ${res.status}`);
+  const body = (await readJson(res)) as { subtitles?: { id?: unknown; url?: unknown; lang?: unknown }[] } | null;
+  return (body?.subtitles ?? []).flatMap((s) => {
+    if (typeof s.url !== "string" || !/^https?:\/\//i.test(s.url)) return [];
+    return [{ id: typeof s.id === "string" || typeof s.id === "number" ? String(s.id) : undefined, url: s.url, lang: typeof s.lang === "string" ? s.lang : "und" }];
+  });
+}
+
+/** Largest subtitle file read (a film's worth of lines is well under 1 MB). */
+const MAX_SUBTITLE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * A subtitle file's bytes. Subtitle hosts often redirect to where the file is, so up to
+ * three redirects are followed, each checked like the first address.
+ */
+export async function fetchSubtitleFile(url: string, allowPrivate: boolean, fetchImpl: typeof fetch = globalFetch): Promise<Uint8Array> {
+  let at = url;
+  for (let hop = 0; hop < 4; hop++) {
+    if (!/^https?:\/\//i.test(at)) throw new AddonError("That subtitle's address isn't a web address.");
+    if (!allowPrivate) await assertPublicHost(at);
+    const res = await fetchImpl(at, { redirect: "manual", signal: AbortSignal.timeout(15_000) });
+    if (res.status >= 300 && res.status < 400) {
+      const next = res.headers.get("location");
+      if (!next) throw new Error(`Subtitle ${res.status} without a location`);
+      at = new URL(next, at).toString();
+      continue;
+    }
+    if (!res.ok) throw new Error(`Subtitle download ${res.status}`);
+    return readBytes(res, MAX_SUBTITLE_BYTES);
+  }
+  throw new Error("Subtitle download redirected too many times");
 }
 
 /** A stream an add-on found, as far as discovery cares: a torrent, with what's known about it. */

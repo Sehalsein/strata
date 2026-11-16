@@ -625,6 +625,37 @@ describe("playback", () => {
     server.services.sessions.stop(play.sessionId);
   }, 30_000);
 
+  test.skipIf(noFfmpeg)("subtitle add-ons: the server names, picks and serves their subtitles", async () => {
+    const added = await json(await server.request("/api/admin/addons", { method: "POST", token, json: { url: "https://subs.test/manifest.json" } }));
+    expect(added).toMatchObject({ name: "Subs Test", resources: ["subtitles"] });
+    await server.request("/api/admin/settings", { method: "PATCH", token, json: { subtitleLanguages: ["fr"], autoSubtitles: "foreign" } });
+    try {
+      const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, startMs: 0 } }));
+      const online = play.subtitleTracks.filter((t: any) => t.id.startsWith("a"));
+      // Only French was asked for, and it comes after the file's own tracks.
+      expect(online.map((t: any) => [t.id, t.language, t.label])).toEqual([["a0", "fr", "French · Subs Test"]]);
+      expect(play.subtitleTracks.map((t: any) => t.label)).toEqual(["English", "English (Forced) · External", "French · Subs Test"]);
+      // The file's forced lines win over the add-on's (its audio has no language, so they match it).
+      expect(play.selectedSubtitleId).toBe("x0");
+      const vtt = await server.request(online[0].url, { token });
+      expect(vtt.status).toBe(200);
+      expect(vtt.headers.get("content-type")).toContain("text/vtt");
+      expect(await vtt.text()).toBe("WEBVTT\n\n00:00:01.000 --> 00:00:02.500\nBonjour de Strata\n");
+      // A changed link isn't this server's; without a token there's nothing at all.
+      const [data, tag] = online[0].url.replace("/api/subtitles/", "").replace(".vtt", "").split(".");
+      const forged = Buffer.from(JSON.stringify({ a: added.id, u: "https://subs.test/files/de.srt" })).toString("base64url");
+      expect((await server.request(`/api/subtitles/${forged}.${tag}.vtt`, { token })).status).toBe(404);
+      expect((await server.request(`/api/subtitles/${data}.${tag}.vtt`)).status).toBe(401);
+      // An add-on that's off serves nothing.
+      await server.request(`/api/admin/addons/${added.id}`, { method: "PATCH", token, json: { enabled: false } });
+      expect((await server.request(online[0].url, { token })).status).toBe(404);
+      server.services.sessions.stop(play.sessionId);
+    } finally {
+      await server.request(`/api/admin/addons/${added.id}`, { method: "DELETE", token });
+      await server.request("/api/admin/settings", { method: "PATCH", token, json: { subtitleLanguages: [], autoSubtitles: "forced" } });
+    }
+  }, 30_000);
+
   test.skipIf(noFfmpeg)("DTS audio is transcoded", async () => {
     const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 2 } }));
     expect(play.mode).toBe("remux");

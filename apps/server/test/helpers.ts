@@ -15,6 +15,12 @@ export const fakeTmdb: typeof fetch = (async (input: string | URL | Request) => 
   const json = (data: unknown) => new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
   const q = url.searchParams.get("query")?.toLowerCase() ?? "";
 
+  // A subtitle add-on (OpenSubtitles-like), for the play tests.
+  if (url.host === "subs.test") {
+    if (path === "/manifest.json") return json({ id: "subs.test", name: "Subs Test", resources: ["subtitles"], types: ["movie", "series"], idPrefixes: ["tt"] });
+    if (path.startsWith("/subtitles/movie/tt1254207")) return json({ subtitles: [{ id: "1", url: "https://subs.test/files/fr.srt", lang: "fre" }, { id: "2", url: "https://subs.test/files/de.srt", lang: "ger" }] });
+    if (path === "/files/fr.srt") return new Response("1\n00:00:01,000 --> 00:00:02,500\nBonjour de Strata\n");
+  }
   if (path === "/configuration") return json({ images: {} });
   if (path === "/search/movie") {
     const results = q.includes("big buck") ? [{ id: 10378, title: "Big Buck Bunny", release_date: "2008-05-30", poster_path: "/bbb.jpg" }] : [];

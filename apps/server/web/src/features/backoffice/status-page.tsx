@@ -44,7 +44,7 @@ export default function StatusPage() {
                 {data.update.state === "downloading" && " Downloading…"}
               </p>
               <Button size="sm" variant="outline" asChild className="mt-1">
-                <Link href="/backoffice/settings#updates">{data.update.state === "available" ? "Update now" : "View"}</Link>
+                <Link href="/backoffice/settings/updates">{data.update.state === "available" ? "Update now" : "View"}</Link>
               </Button>
             </AlertDescription>
           </Alert>

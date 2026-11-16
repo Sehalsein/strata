@@ -210,6 +210,9 @@ export interface Settings {
   releaseOrder: "strata" | "addons";
   showUncached: boolean;
   maxReleaseSizeGb: number;
+  /** ISO 639-1 codes, most wanted first; empty means the household's language. */
+  subtitleLanguages: string[];
+  autoSubtitles: "forced" | "foreign" | "always";
   bonjourEnabled: boolean;
   localJoin: boolean;
   torboxCleanupDays: number;
@@ -238,7 +241,7 @@ export interface UpdateStatus {
   lastUpdate: { result: "ok" | "rolled-back"; fromVersion: string; toVersion: string; at: string; message?: string } | null;
 }
 
-/** A Stremio stream add-on the household finds releases with (its URL stays on the server). */
+/** A Stremio add-on the household finds releases or subtitles with (its URL stays on the server). */
 export interface StreamAddon {
   id: string;
   name: string;
@@ -247,6 +250,8 @@ export interface StreamAddon {
   kind: "stremio" | "aiostreams";
   /** It has its own configure page (opened through /api/admin/addons/:id/configure). */
   configurable: boolean;
+  /** What it's asked for. */
+  resources: ("stream" | "subtitles")[];
   /** It's asked for anime by Kitsu id too. */
   anime: boolean;
   /** The server's Torrentio, until the household changes its list. */
