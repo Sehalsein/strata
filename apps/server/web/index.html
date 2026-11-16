@@ -4,16 +4,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#0b0c0f" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#07080a" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f3f3f6" media="(prefers-color-scheme: light)" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Strata</title>
     <script>
       // Apply the saved theme before first paint so there's no light/dark flash.
       (function () {
-        var t = "system";
+        // Dark unless someone chose otherwise (theme-provider.tsx, DEFAULT_THEME).
+        var t = "dark";
         try {
-          t = localStorage.getItem("strata.theme") || "system";
+          t = localStorage.getItem("strata.theme") || "dark";
         } catch (e) {}
         var dark = t === "dark" || (t !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.classList.toggle("dark", dark);

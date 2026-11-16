@@ -198,6 +198,7 @@ export default function DevicesPage() {
   return (
     <Page>
       <PageHeader
+        guide="/people/devices"
         title="Devices"
         description={
           isAdmin

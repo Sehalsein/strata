@@ -4,19 +4,22 @@ export type Theme = "light" | "dark" | "system";
 
 const STORAGE_KEY = "strata.theme";
 
+/** Dark unless someone chose otherwise, like the landing site and the apps. */
+const DEFAULT_THEME: Theme = "dark";
+
 function readTheme(): Theme {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    return v === "light" || v === "dark" ? v : "system";
+    return v === "light" || v === "dark" || v === "system" ? v : DEFAULT_THEME;
   } catch {
-    return "system";
+    return DEFAULT_THEME;
   }
 }
 
 function writeTheme(theme: Theme) {
   try {
-    if (theme === "system") localStorage.removeItem(STORAGE_KEY);
-    else localStorage.setItem(STORAGE_KEY, theme);
+    // "system" is kept too: with nothing saved, the default (dark) applies.
+    localStorage.setItem(STORAGE_KEY, theme);
   } catch {
     /* storage unavailable: the choice lasts for this page only */
   }

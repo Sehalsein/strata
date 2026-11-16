@@ -7,6 +7,7 @@ import { queryClient, queryKeys } from "@/lib/query";
 import type { ServerInfo, Settings, SettingsResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ErrorAlert, Page, PageHeader, PageSkeleton } from "@/components/page";
+import { SETTINGS_GUIDES } from "@/lib/docs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -143,7 +144,7 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
 
   return (
     <Page className="max-w-5xl pb-24">
-      <PageHeader title={title} description={scope === "server" ? "For the whole server and every household on it." : undefined} />
+      <PageHeader title={title} description={scope === "server" ? "For the whole server and every household on it." : undefined} guide={SETTINGS_GUIDES[section]} />
 
       <div className="flex flex-col gap-6 md:flex-row md:items-start md:gap-10">
         {sections.length > 1 && <SettingsNav sections={sections} current={section} hrefOf={pathOf} />}

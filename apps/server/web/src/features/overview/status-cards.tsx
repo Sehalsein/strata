@@ -1,3 +1,4 @@
+import type * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, errorMessage } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
@@ -7,7 +8,7 @@ import type { AdminStatus, LibraryStats } from "@/lib/types";
 import { KeyValue, KeyValueList } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function ServerCard({ status }: { status: AdminStatus }) {
@@ -59,24 +60,70 @@ export function summarize(stats: LibraryStats) {
   return out;
 }
 
+/** One figure, in the style of shadcn's dashboard-01 section cards. */
+function StatCard({ label, value, badge, line, detail }: { label: string; value: number; badge?: React.ReactNode; line: React.ReactNode; detail?: React.ReactNode }) {
+  return (
+    <Card className="@container/card from-primary/[0.04] to-card bg-gradient-to-t">
+      <CardHeader>
+        <CardDescription>{label}</CardDescription>
+        <CardTitle className="text-2xl font-semibold tabular-nums @[220px]/card:text-3xl">{value.toLocaleString()}</CardTitle>
+        {badge && <CardAction>{badge}</CardAction>}
+      </CardHeader>
+      <CardFooter className="flex-col items-start gap-1 text-sm">
+        <div className="line-clamp-1 font-medium">{line}</div>
+        {detail && <div className="text-muted-foreground line-clamp-1">{detail}</div>}
+      </CardFooter>
+    </Card>
+  );
+}
+
+/** The household's library at a glance: titles, files, and what needs fixing. */
+export function SectionCards({ stats }: { stats: LibraryStats }) {
+  const s = summarize(stats);
+  const matchedShare = s.total ? Math.round((s.matched / s.total) * 100) : 0;
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatCard label="Movies" value={stats.titles.movie ?? 0} line="Titles in the catalog" detail="From your folders and TorBox" />
+      <StatCard label="Shows" value={stats.titles.show ?? 0} line="Series in the catalog" detail="Seasons and episodes matched" />
+      <StatCard
+        label="Files"
+        value={s.total}
+        badge={s.total > 0 ? <Badge variant="outline">{matchedShare}% matched</Badge> : undefined}
+        line={`${s.local.toLocaleString()} local · ${s.torbox.toLocaleString()} TorBox`}
+        detail={s.link ? `${s.link.toLocaleString()} add-on links` : "Every copy Strata can play"}
+      />
+      <StatCard
+        label="To fix"
+        value={s.unmatched}
+        badge={s.unmatched > 0 ? <Badge variant="warning">Needs a look</Badge> : <Badge variant="success">All good</Badge>}
+        line={
+          s.unmatched > 0 ? (
+            <Link href="/library?status=unmatched" className="text-brand-text hover:underline">
+              Fix matches in Library
+            </Link>
+          ) : (
+            "Nothing unmatched"
+          )
+        }
+        detail={`${s.pending.toLocaleString()} waiting to match`}
+      />
+    </div>
+  );
+}
+
 export function LibraryCard({ stats }: { stats: LibraryStats }) {
   const s = summarize(stats);
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Contents</CardTitle>
+        <CardTitle>Matching</CardTitle>
         <CardAction>
           <Button variant="ghost" size="sm" asChild>
             <Link href="/library">Open</Link>
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-5">
-        <div className="grid grid-cols-3 gap-2">
-          <Figure value={stats.titles.movie ?? 0} label="Movies" />
-          <Figure value={stats.titles.show ?? 0} label="Shows" />
-          <Figure value={s.total} label="Files" />
-        </div>
+      <CardContent>
         <KeyValueList>
           <KeyValue k="Matched">{s.matched}</KeyValue>
           <KeyValue k="Unmatched">
@@ -95,15 +142,6 @@ export function LibraryCard({ stats }: { stats: LibraryStats }) {
         </KeyValueList>
       </CardContent>
     </Card>
-  );
-}
-
-function Figure({ value, label }: { value: number; label: string }) {
-  return (
-    <div className="flex flex-col">
-      <span className="text-2xl font-semibold tabular-nums">{value.toLocaleString()}</span>
-      <span className="text-muted-foreground text-xs">{label}</span>
-    </div>
   );
 }
 

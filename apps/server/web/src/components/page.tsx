@@ -1,20 +1,37 @@
 import { useEffect, type ReactNode } from "react";
-import { CircleAlert, type LucideIcon } from "lucide-react";
+import { BookOpen, CircleAlert, type LucideIcon } from "lucide-react";
+import { docsUrl } from "@/lib/docs";
 import { errorMessage, isUnreachable } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
-/** Page title, one-line description and actions, shared by every admin page. */
-export function PageHeader({ title, description, actions }: { title: string; description?: ReactNode; actions?: ReactNode }) {
+/** A link to the docs guide for what's on screen. */
+export function GuideLink({ path, label = "Guide" }: { path: string; label?: string }) {
+  return (
+    <Button variant="outline" size="sm" asChild>
+      <a href={docsUrl(path)} target="_blank" rel="noreferrer">
+        <BookOpen /> {label}
+      </a>
+    </Button>
+  );
+}
+
+/** Page title, one-line description and actions, shared by every admin page; `guide` adds a link to its docs guide. */
+export function PageHeader({ title, description, actions, guide }: { title: string; description?: ReactNode; actions?: ReactNode; guide?: string }) {
   return (
     <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         {description && <p className="text-muted-foreground max-w-prose text-sm">{description}</p>}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {(actions || guide) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {guide && <GuideLink path={guide} />}
+          {actions}
+        </div>
+      )}
     </header>
   );
 }
