@@ -178,18 +178,6 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
                 </SettingsSection>
               )}
               <SourcesSection draft={draft} set={set} />
-              <SettingsSection title="TorBox" description="Keeping the household's TorBox library in step.">
-                <SettingRow label="Sync every" htmlFor="torbox-sync" description="How often Strata picks up what's new in TorBox. 0 turns it off.">
-                  <NumberInput id="torbox-sync" min={0} suffix="min" value={draft.torboxSyncMinutes} onChange={(v) => set("torboxSyncMinutes", v)} />
-                </SettingRow>
-                <SettingRow
-                  label="Clean up after"
-                  htmlFor="torbox-cleanup"
-                  description="Releases Strata added to TorBox for you are removed once nobody has played them for this long. What you add yourself is never touched. 0 keeps everything."
-                >
-                  <NumberInput id="torbox-cleanup" min={0} max={365} suffix="days" value={draft.torboxCleanupDays} onChange={(v) => set("torboxCleanupDays", v)} />
-                </SettingRow>
-              </SettingsSection>
             </>
           )}
 
@@ -226,7 +214,7 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
 
           {section === "addons" && <AddonsSection />}
 
-          {section === "connections" && <Connections secrets={data.secrets} />}
+          {section === "connections" && <Connections secrets={data.secrets} draft={draft} set={set} />}
 
           {section === "server" && isServerAdmin && <ServerSections draft={draft} set={set} localMedia={capabilities.localMedia} />}
           {section === "network" && isServerAdmin && (capabilities.homeNetworkJoin || capabilities.bonjour) && <NetworkSection draft={draft} set={set} />}

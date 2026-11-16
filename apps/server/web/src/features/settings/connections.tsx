@@ -4,7 +4,7 @@ import { LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
-import type { SecretKey, SettingsResponse } from "@/lib/types";
+import type { SecretKey, Settings, SettingsResponse } from "@/lib/types";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { KeyGuideButton } from "./key-guides";
+import { NumberInput, type SetFn } from "./fields";
 
 interface Provider {
   key: SecretKey;
@@ -50,18 +51,20 @@ const PROVIDERS: Provider[] = [
  * another's, nor the server's. Keys are checked with the provider before they're saved,
  * then stored encrypted and never shown again. New add-ons join this list.
  */
-export function Connections({ secrets }: { secrets: SettingsResponse["secrets"] }) {
+export function Connections({ secrets, draft, set }: { secrets: SettingsResponse["secrets"]; draft: Settings; set: SetFn }) {
   return (
     <div className="flex flex-col gap-3">
       {PROVIDERS.map((p) => (
-        <ProviderCard key={p.key} provider={p} configured={!!secrets[p.key]} />
+        <ProviderCard key={p.key} provider={p} configured={!!secrets[p.key]}>
+          {p.key === "torboxApiKey" && <TorboxSync draft={draft} set={set} />}
+        </ProviderCard>
       ))}
       <p className="text-muted-foreground pt-2 text-xs">Keys are checked with each service before they're saved, then stored encrypted. They're never shown again.</p>
     </div>
   );
 }
 
-function ProviderCard({ provider: p, configured }: { provider: Provider; configured: boolean }) {
+function ProviderCard({ provider: p, configured, children }: { provider: Provider; configured: boolean; children?: React.ReactNode }) {
   const [entering, setEntering] = useState(false);
   const [value, setValue] = useState("");
   const [pending, setPending] = useState(false);
@@ -145,6 +148,9 @@ function ProviderCard({ provider: p, configured }: { provider: Provider; configu
         )}
       </div>
 
+      {/* The service's own settings, once it's connected. */}
+      {configured && !entering && children}
+
       {entering && (
         <form onSubmit={save} noValidate className="bg-muted/30 flex flex-col gap-3 border-t p-5">
           <div className="flex items-center justify-between gap-3">
@@ -199,6 +205,51 @@ function ProviderCard({ provider: p, configured }: { provider: Provider; configu
         onConfirm={remove}
       />
     </Card>
+  );
+}
+
+/**
+ * How Strata keeps the household's TorBox library in step: picking up what's new, and
+ * clearing out what it added that nobody plays. Saved with the page's Save bar.
+ */
+function TorboxSync({ draft, set }: { draft: Settings; set: SetFn }) {
+  return (
+    <div className="divide-y border-t">
+      <SyncRow
+        id="torbox-sync"
+        label="Sync every"
+        hint={draft.torboxSyncMinutes === 0 ? "Off: new TorBox items show up only when you add them here." : "Picks up what's new in your TorBox account. 0 turns it off."}
+      >
+        <NumberInput id="torbox-sync" min={0} suffix="min" value={draft.torboxSyncMinutes} onChange={(v) => set("torboxSyncMinutes", v)} />
+      </SyncRow>
+      <SyncRow
+        id="torbox-cleanup"
+        label="Clean up after"
+        hint={
+          draft.torboxCleanupDays === 0
+            ? "Off: everything Strata adds stays in TorBox."
+            : "Removes releases Strata added for you once nobody has played them this long. What you add yourself is never touched. 0 keeps everything."
+        }
+      >
+        <NumberInput id="torbox-cleanup" min={0} max={365} suffix="days" value={draft.torboxCleanupDays} onChange={(v) => set("torboxCleanupDays", v)} />
+      </SyncRow>
+    </div>
+  );
+}
+
+function SyncRow({ id, label, hint, children }: { id: string; label: string; hint: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:pl-[4.75rem]">
+      <div className="min-w-0 space-y-0.5">
+        <label htmlFor={id} className="text-sm font-medium">
+          {label}
+        </label>
+        <p id={`${id}-hint`} className="text-muted-foreground max-w-md text-xs">
+          {hint}
+        </p>
+      </div>
+      <div className="w-36 shrink-0">{children}</div>
+    </div>
   );
 }
 

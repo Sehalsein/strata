@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
-import { LogOut, MapPin, MonitorSmartphone } from "lucide-react";
+import { Laptop, LogOut, MapPin, Monitor, MonitorSmartphone, Smartphone, Tablet, Tv, type LucideIcon } from "lucide-react";
 import { useSession } from "@/app/session";
 import { authClient } from "@/lib/auth-client";
 import { relativeTime } from "@/lib/format";
@@ -102,6 +102,26 @@ interface DeviceRow {
 /** The row's title: the app's own name for the device, else what its user agent says. */
 function rowTitle(row: DeviceRow): string {
   return row.name || deviceName(row);
+}
+
+/** The device's kind, as a small tile beside its name. */
+function DeviceIcon({ icon: Icon }: { icon: LucideIcon }) {
+  return (
+    <div className="bg-muted text-muted-foreground mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg" aria-hidden>
+      <Icon className="size-4.5" />
+    </div>
+  );
+}
+
+/** What kind of device it is, from the app's model and name or the browser's user agent. */
+function deviceIcon(row: DeviceRow): LucideIcon {
+  const text = `${row.model ?? ""} ${row.name ?? ""} ${row.userAgent ?? ""}`;
+  if (/AppleTV|Apple TV|tvOS/i.test(text)) return Tv;
+  if (/iPad/.test(text) || (/Android/.test(text) && !/Mobile/.test(text))) return Tablet;
+  if (/iPhone|iPod|Android/.test(text)) return Smartphone;
+  if (/Macintosh|Mac OS X|macOS|\bMac\b/.test(text)) return Laptop;
+  if (/Windows|Linux|CrOS/.test(text)) return Monitor;
+  return MonitorSmartphone;
 }
 
 /** "iPhone17,1 · iOS 27.0", under the title (nothing it already says). */
@@ -223,19 +243,24 @@ export default function DevicesPage() {
                 return (
                   <TableRow key={row.id} className="align-top">
                     <TableCell className="py-3 pl-4 whitespace-normal">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <span className="font-medium" title={row.userAgent ?? undefined}>
-                          {rowTitle(row)}
-                        </span>
-                        {row.isCurrent && <Badge variant="success">This browser</Badge>}
-                      </div>
-                      {detail && <p className="text-muted-foreground text-xs">{detail}</p>}
-                      {/* On narrow screens the network and activity sit under the device. */}
-                      <div className="mt-1 flex flex-col gap-0.5 lg:hidden">
-                        <NetworkDetails row={row} />
-                        <p className="text-muted-foreground text-xs md:hidden" title={new Date(row.updatedAt).toLocaleString()}>
-                          Active {relativeTime(time(row.updatedAt))}
-                        </p>
+                      <div className="flex items-start gap-3">
+                        <DeviceIcon icon={deviceIcon(row)} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <span className="font-medium" title={row.userAgent ?? undefined}>
+                              {rowTitle(row)}
+                            </span>
+                            {row.isCurrent && <Badge variant="success">This browser</Badge>}
+                          </div>
+                          {detail && <p className="text-muted-foreground text-xs">{detail}</p>}
+                          {/* On narrow screens the network and activity sit under the device. */}
+                          <div className="mt-1 flex flex-col gap-0.5 lg:hidden">
+                            <NetworkDetails row={row} />
+                            <p className="text-muted-foreground text-xs md:hidden" title={new Date(row.updatedAt).toLocaleString()}>
+                              Active {relativeTime(time(row.updatedAt))}
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell className={isAdmin ? "py-3" : "text-muted-foreground py-3"}>{(isAdmin ? row.person : row.household) ?? "—"}</TableCell>
