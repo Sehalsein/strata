@@ -103,6 +103,31 @@ public final class StrataClient: Sendable {
         try await get("/api/me", cached: false)
     }
 
+    // MARK: Invitations
+
+    /// An invitation, as whoever holds its link sees it (no account needed): who it's for
+    /// and which household. 404 once it's used, canceled or expired.
+    public func invitation(id: String) async throws -> Invitation {
+        try await get("/api/invitations/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id)", cached: false)
+    }
+
+    /// Creates an account from an invitation (the server only allows sign-up with one, for
+    /// its email). Returns the session's token, or nil where signing up doesn't sign in
+    /// (servers that confirm new accounts' email): sign in with the password then.
+    public func signUp(email: String, username: String, name: String, password: String, invitationId: String) async throws -> String? {
+        let body = SignUpBody(email: email, username: username, name: name, password: password, invitationId: invitationId)
+        let (data, response) = try await performWithResponse(request("POST", "/api/auth/sign-up/email", body: body))
+        if let token = response.value(forHTTPHeaderField: "set-auth-token"), !token.isEmpty { return token }
+        return (try? JSONDecoder().decode(SignInResponse.self, from: data))?.token.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// Accepts an invitation for this account (its email must be the invitation's), then
+    /// makes its household this session's.
+    public func acceptInvitation(id: String) async throws {
+        let res: AcceptInvitationResponse = try await send("POST", "/api/auth/organization/accept-invitation", body: AcceptInvitationBody(invitationId: id))
+        if let household = res.invitation?.organizationId { try await setActiveHousehold(household) }
+    }
+
     // MARK: Profile pictures
 
     /// The server's profile pictures, grouped.
@@ -222,6 +247,12 @@ public final class StrataClient: Sendable {
     public func homeCatalog(_ policy: CachePolicy = .fresh) async throws -> [Shelf] {
         do {
             let res: ShelvesResponse = try await get("/api/home/catalog", policy: policy)
+            // A kept empty Home (from before the server had its TMDB key, say) isn't one to
+            // trust: ask again. Servers now don't let an empty one be kept.
+            if res.shelves.isEmpty, policy == .fresh {
+                let again: ShelvesResponse = try await get("/api/home/catalog", policy: .reload)
+                return again.shelves
+            }
             return res.shelves
         } catch let error as StrataError where error.isUnsupportedHere {
             return try await home()
@@ -274,6 +305,12 @@ public final class StrataClient: Sendable {
         return res.shelves
     }
 
+    /// `GET /api/movies`: the Movies tab's spotlight and rails, as the server lays it out (newer servers).
+    public func movies(_ policy: CachePolicy = .fresh) async throws -> [Shelf] {
+        let res: ShelvesResponse = try await get("/api/movies", policy: policy)
+        return res.shelves
+    }
+
     public func animeCategories(_ policy: CachePolicy = .fresh) async throws -> [AnimeCategory] {
         let res: ItemsResponse<AnimeCategory> = try await get("/api/anime/categories", policy: policy)
         return res.items
@@ -286,6 +323,12 @@ public final class StrataClient: Sendable {
     }
 
     /// One of the Anime tab's lists in full, for its rail's "See all".
+    /// A row in full, from the path its shelf's `seeAll` names (the rail shows only so many).
+    public func rowList(_ path: String, _ policy: CachePolicy = .fresh) async throws -> [TitleCard] {
+        let res: ItemsResponse<TitleCard> = try await get(path, policy: policy)
+        return res.items
+    }
+
     public func animeList(_ id: String, _ policy: CachePolicy = .fresh) async throws -> [TitleCard] {
         let res: ItemsResponse<TitleCard> = try await get("/api/anime/list/\(id)", policy: policy)
         return res.items
@@ -295,6 +338,21 @@ public final class StrataClient: Sendable {
     public func calendar(_ policy: CachePolicy = .fresh) async throws -> [CalendarEpisode] {
         let res: ItemsResponse<CalendarEpisode> = try await get("/api/calendar", policy: policy)
         return res.items
+    }
+
+    /// The calendar as the server words it (episodes and film releases). Older servers send
+    /// episodes only: those are turned into entries the way the app used to word them.
+    public func calendarEntries(_ policy: CachePolicy = .fresh) async throws -> [CalendarEntry] {
+        let res: CalendarResponse = try await get("/api/calendar", policy: policy)
+        if let entries = res.entries { return entries }
+        return res.items.map { e in
+            let label = [e.code, e.name].compactMap { $0 }.joined(separator: " · ")
+            return CalendarEntry(
+                id: e.id, kind: "episode", ref: e.ref, title: e.title, posterUrl: e.posterUrl, backdropUrl: e.backdropUrl, label: label,
+                date: e.airDate, airsAt: e.airsAt, ready: e.available, play: e.season.map { .init(season: $0, episode: e.episode) },
+                alert: .init(title: e.title, body: e.hasTime ? String(localized: "\(label) is out now.", bundle: .module) : String(localized: "\(label) airs today.", bundle: .module))
+            )
+        }
     }
 
     public func person(_ id: Int, _ policy: CachePolicy = .fresh) async throws -> PersonDetail {
@@ -348,10 +406,14 @@ public final class StrataClient: Sendable {
     /// What the server can play a title from. `discover` asks it to look further than its
     /// library where it's set up to (takes a few seconds); the list is whatever it returns.
     public func sources(_ target: PlaybackTarget, discover: Bool = false) async throws -> [Candidate] {
+        try await sourceList(target, discover: discover).items
+    }
+
+    /// The sources with the filters the server offers for them (Choose Source).
+    public func sourceList(_ target: PlaybackTarget, discover: Bool = false) async throws -> SourceList {
         var query = target.queryItems
         if discover { query.append(URLQueryItem(name: "discover", value: "1")) }
-        let res: ItemsResponse<Candidate> = try await get("/api/sources", query: query, cached: false)
-        return res.items
+        return try await get("/api/sources", query: query, cached: false)
     }
 
     // MARK: - Playback
@@ -471,6 +533,12 @@ public final class StrataClient: Sendable {
         await cache.remove(["/api/calendar"] + Self.titlePaths(ref))
     }
 
+    /// "Remind me" when a title comes out, or not: the calendar lists it up to a year ahead.
+    public func setReminder(_ ref: TitleRef, _ on: Bool) async throws {
+        let _: OKResponse = try await send("PUT", "/api/reminders", body: ReminderBody(ref: ref, on: on))
+        await cache.remove(["/api/calendar"] + Self.titlePaths(ref))
+    }
+
     /// Fetches a WebVTT track. The server extracts embedded tracks on demand and answers
     /// 202 while that runs; this retries with backoff (honouring Retry-After) until the
     /// text arrives, `maxWait` passes, or the task is cancelled.
@@ -521,12 +589,20 @@ public final class StrataClient: Sendable {
             return try decode(T.self, from: hit.body)
         }
         if policy == .cachedOnly { throw StrataError(kind: .notCached, message: String(localized: "Not saved on this device yet.", bundle: .module)) }
+        // The kept copy's tag lets the server answer "unchanged" (304) without the body.
+        let kept = await cache.entry(key)
         // Screens appearing together often ask for the same thing: share one request.
         let task = await cache.shared(key) {
-            let (data, response) = try await self.performWithResponse(req)
-            return (data, ResponseCache.maxAge(response))
+            var conditional = req
+            if let tag = kept?.etag { conditional.setValue(tag, forHTTPHeaderField: "If-None-Match") }
+            let (data, response) = try await self.rawData(conditional)
+            if response.statusCode == 304, let kept {
+                return ResponseCache.Fetched(body: kept.body, maxAge: ResponseCache.maxAge(response), etag: kept.etag)
+            }
+            guard (200..<300).contains(response.statusCode) else { throw self.httpError(response.statusCode, data) }
+            return ResponseCache.Fetched(body: data, maxAge: ResponseCache.maxAge(response), etag: response.value(forHTTPHeaderField: "ETag"))
         }
-        let result: (Data, TimeInterval?)
+        let result: ResponseCache.Fetched
         do {
             result = try await task.value
         } catch {
@@ -537,7 +613,7 @@ public final class StrataClient: Sendable {
             throw error
         }
         await cache.finished(key, task, result: result)
-        return try decode(T.self, from: result.0)
+        return try decode(T.self, from: result.body)
     }
 
     private func send<T: Decodable>(_ method: String, _ path: String) async throws -> T {
@@ -655,6 +731,12 @@ private struct Credentials: Encodable { var username: String; var password: Stri
 private struct EmailCredentials: Encodable { var email: String; var password: String }
 private struct SetupBody: Encodable { var username: String; var password: String; var householdName: String?; var setupCode: String? }
 private struct SetActiveBody: Encodable { var organizationId: String }
+private struct SignUpBody: Encodable { var email: String; var username: String; var name: String; var password: String; var invitationId: String }
+private struct AcceptInvitationBody: Encodable { var invitationId: String }
+private struct AcceptInvitationResponse: Decodable {
+    struct Accepted: Decodable { var organizationId: String? }
+    var invitation: Accepted?
+}
 private struct ChangePasswordBody: Encodable { var currentPassword: String; var newPassword: String; var revokeOtherSessions: Bool }
 private struct JoinBody: Encodable { var userId: String? }
 private struct AvatarsResponse: Decodable { var groups: [AvatarGroup] }
@@ -678,6 +760,11 @@ private struct WatchlistBody: Encodable {
     var type: TitleType?
     var tmdbId: Int?
     var ref: TitleRef?
+    var on: Bool
+}
+
+private struct ReminderBody: Encodable {
+    var ref: TitleRef
     var on: Bool
 }
 
@@ -762,14 +849,23 @@ actor ResponseCache {
         var storedAt: Date
         var maxAge: TimeInterval
         var body: Data
+        /// The server's ETag for it, to ask "changed?" next time (absent from older copies).
+        var etag: String?
         var isFresh: Bool { Date().timeIntervalSince(storedAt) < maxAge }
+    }
+
+    /// An answer as fetched: its body, how long it may be kept, and its tag.
+    struct Fetched: Sendable {
+        var body: Data
+        var maxAge: TimeInterval?
+        var etag: String?
     }
 
     nonisolated let ttl: TimeInterval
     private let directory: URL?
     nonisolated var isPersistent: Bool { directory != nil }
     private var entries: [String: Entry] = [:]
-    private var running: [String: Task<(Data, TimeInterval?), Error>] = [:]
+    private var running: [String: Task<Fetched, Error>] = [:]
     private var pruned = false
     private let limit = 64
     /// Disk entries older than this are past any use, even as a placeholder.
@@ -804,10 +900,10 @@ actor ResponseCache {
         return e
     }
 
-    func set(_ key: String, _ data: Data, maxAge: TimeInterval?) {
+    func set(_ key: String, _ data: Data, maxAge: TimeInterval?, etag: String? = nil) {
         let maxAge = maxAge ?? ttl
         guard maxAge >= 0 else { return remove(key) }
-        let e = Entry(storedAt: Date(), maxAge: maxAge, body: data)
+        let e = Entry(storedAt: Date(), maxAge: maxAge, body: data, etag: etag)
         remember(key, e)
         guard let directory, let file = file(for: key) else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -837,7 +933,7 @@ actor ResponseCache {
     }
 
     /// The request already on its way for `key`, or a new one.
-    func shared(_ key: String, _ work: @escaping @Sendable () async throws -> (Data, TimeInterval?)) -> Task<(Data, TimeInterval?), Error> {
+    func shared(_ key: String, _ work: @escaping @Sendable () async throws -> Fetched) -> Task<Fetched, Error> {
         if let task = running[key] { return task }
         let task = Task { try await work() }
         running[key] = task
@@ -846,10 +942,10 @@ actor ResponseCache {
 
     /// Forgets the request (if it's still the current one: a clear or a change since it
     /// started means its answer may be out of date) and stores its answer.
-    func finished(_ key: String, _ task: Task<(Data, TimeInterval?), Error>, result: (Data, TimeInterval?)?) {
+    func finished(_ key: String, _ task: Task<Fetched, Error>, result: Fetched?) {
         guard running[key] == task else { return }
         running[key] = nil
-        if let result { set(key, result.0, maxAge: result.1) }
+        if let result { set(key, result.body, maxAge: result.maxAge, etag: result.etag) }
     }
 
     private func remove(_ key: String) {

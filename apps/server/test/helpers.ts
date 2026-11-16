@@ -1,3 +1,4 @@
+import { newSetupCode } from "../src/setupCode";
 import type { SecretKey } from "../src/settings";
 import { mkdirSync, mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +15,35 @@ export const fakeTmdb: typeof fetch = (async (input: string | URL | Request) => 
   const json = (data: unknown) => new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
   const q = url.searchParams.get("query")?.toLowerCase() ?? "";
 
+  // A subtitle add-on (OpenSubtitles-like), for the play tests.
+  if (url.host === "subs.test") {
+    if (path === "/manifest.json") return json({ id: "subs.test", name: "Subs Test", resources: ["subtitles"], types: ["movie", "series"], idPrefixes: ["tt"] });
+    if (path.startsWith("/subtitles/movie/tt1254207")) return json({ subtitles: [{ id: "1", url: "https://subs.test/files/fr.srt", lang: "fre" }, { id: "2", url: "https://subs.test/files/de.srt", lang: "ger" }] });
+    if (path === "/files/fr.srt") return new Response("1\n00:00:01,000 --> 00:00:02,500\nBonjour de Strata\n");
+  }
+  // A catalog add-on (AIO Metadata-like): a trending row of films by IMDb, TMDB and unknown ids.
+  if (url.host === "catalog.test") {
+    if (path === "/manifest.json")
+      return json({
+        id: "catalog.test", name: "Catalog Test", resources: ["catalog", "meta"], types: ["movie", "series"],
+        catalogs: [
+          { type: "movie", id: "trending", name: "Trending Films" },
+          { type: "series", id: "popular", name: "Popular Shows" },
+          { type: "movie", id: "search", name: "Search", extra: [{ name: "search", isRequired: true }] },
+        ],
+      });
+    if (path === "/catalog/movie/trending.json")
+      return json({ metas: [
+        { id: "tt1254207", type: "movie", name: "Big Buck Bunny (add-on)", poster: "https://img.test/bbb.jpg", releaseInfo: "2008" },
+        { id: "tmdb:10378", type: "movie", name: "Same film again" },
+        { id: "xyz:1", type: "movie", name: "Nobody knows this id" },
+      ] });
+    if (path === "/catalog/series/popular.json") return json({ metas: [{ id: "tt9000001", type: "series", name: "Test Show" }] });
+  }
+  if (url.host === "many.test" && path === "/manifest.json")
+    return json({ id: "many.test", name: "Many", resources: ["catalog"], types: ["movie"], catalogs: Array.from({ length: 14 }, (_, i) => ({ type: "movie", id: `c${i}`, name: `List ${i}` })) });
+  if (path === "/find/tt1254207") return json({ movie_results: [{ id: 10378, title: "Big Buck Bunny" }], tv_results: [] });
+  if (path === "/find/tt9000001") return json({ movie_results: [], tv_results: [{ id: 9001, name: "Test Show" }] });
   if (path === "/configuration") return json({ images: {} });
   if (path === "/search/movie") {
     const results = q.includes("big buck") ? [{ id: 10378, title: "Big Buck Bunny", release_date: "2008-05-30", poster_path: "/bbb.jpg" }] : [];
@@ -22,6 +52,10 @@ export const fakeTmdb: typeof fetch = (async (input: string | URL | Request) => 
   if (path === "/search/tv") {
     const results = q.includes("test show") ? [{ id: 9001, name: "Test Show", first_air_date: "2020-01-01", poster_path: "/ts.jpg" }] : [];
     return json({ page: 1, results, total_pages: 1, total_results: results.length });
+  }
+  if (path === "/movie/990001") {
+    // A film still to come out: in cinemas, then to stream, years from now.
+    return json({ id: 990001, title: "Future Film", release_date: "2099-03-01", genres: [], poster_path: "/ff.jpg", credits: { cast: [], crew: [] }, recommendations: { page: 1, results: [], total_pages: 1, total_results: 0 }, videos: { results: [] }, release_dates: { results: [{ iso_3166_1: "US", release_dates: [{ type: 3, certification: "", release_date: "2099-03-01T00:00:00.000Z" }, { type: 4, certification: "", release_date: "2099-05-01T00:00:00.000Z" }] }] } });
   }
   if (path === "/movie/10378") {
     return json({ id: 10378, imdb_id: "tt1254207", title: "Big Buck Bunny", release_date: "2008-05-30", runtime: 10, genres: [{ id: 16, name: "Animation" }], poster_path: "/bbb.jpg", credits: { cast: [], crew: [] }, recommendations: { page: 1, results: [], total_pages: 1, total_results: 0 }, videos: { results: [
@@ -125,6 +159,8 @@ export async function startTestServer(
       bodyInit = JSON.stringify(init.json);
     }
     const env = init.ip ? { requestIP: () => ({ address: init.ip! }) } : {};
+    // A client on the server's own machine addresses it as localhost (unless a test says otherwise).
+    if (init.ip && ["127.0.0.1", "::1"].includes(init.ip) && !headers.has("host")) headers.set("host", "localhost:8420");
     return app.fetch(new Request(`http://test${path}`, { ...init, headers, body: bodyInit }), env);
   };
   const household = async () => services.households.get((await services.householdIds())[0]!);
@@ -179,7 +215,7 @@ export async function makeFixtures(): Promise<string> {
 
 /** Runs first-run setup (as the server's own machine): the admin's token and their household. */
 export async function setUp(server: TestServer, username = "admin", password = "test-password") {
-  const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username, password } });
+  const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { setupCode: await newSetupCode(server.services.db), username, password } });
   const { token } = (await res.json()) as { token: string };
   return { token, household: await server.household() };
 }

@@ -1,6 +1,6 @@
 import { QueryClient, useMutation, type MutationFunction } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ApiError, errorMessage } from "./api";
+import { ApiError, errorMessage, isUnreachable } from "./api";
 import type { LibraryFilters } from "./types";
 
 /**
@@ -14,8 +14,12 @@ export const queryClient = new QueryClient({
       retry: (count, err) => {
         // Auth and "not found" answers won't change on retry.
         if (err instanceof ApiError && [400, 401, 403, 404, 409, 429].includes(err.status)) return false;
+        // No answer at all: the server is restarting (an update, a settings change), which
+        // takes longer than a couple of quick tries. Keep at it for about half a minute.
+        if (isUnreachable(err)) return count < 6;
         return count < 2;
       },
+      retryDelay: (count) => Math.min(1_000 * 2 ** count, 8_000),
       refetchOnWindowFocus: true,
     },
   },
@@ -28,6 +32,8 @@ export const queryKeys = {
   status: ["admin", "status"] as const,
   settings: ["admin", "settings"] as const,
   addons: ["admin", "addons"] as const,
+  /** Home, Movies, Shows and Anime: their rows, in order. */
+  pages: ["admin", "pages"] as const,
   /** Better Auth: the active household with members and invitations. */
   household: ["auth", "household"] as const,
   /** Households the account belongs to. */

@@ -162,6 +162,7 @@ export const DAY = 24 * HOUR;
 export function cacheFor(maxAge: number): MiddlewareHandler {
   return async (c, next) => {
     await next();
-    if (c.res.status === 200) c.header("Cache-Control", `private, max-age=${maxAge}, stale-while-revalidate=${7 * DAY}`);
+    // A route that said otherwise (an answer that mustn't be kept) has the last word.
+    if (c.res.status === 200 && !c.res.headers.has("Cache-Control")) c.header("Cache-Control", `private, max-age=${maxAge}, stale-while-revalidate=${7 * DAY}`);
   };
 }

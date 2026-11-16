@@ -699,7 +699,10 @@ public final class PlayerEngine {
         }
 
         if newTitle {
-            autoSelectForcedSubtitles()
+            // The server decides which track starts on; the player just turns it on.
+            if let id = res.selectedSubtitleId, let track = subtitleTracks.first(where: { $0.id == id }) {
+                Task { await selectSubtitle(track) }
+            }
         } else if let keptSubtitle, subtitleTracks.contains(where: { $0.id == keptSubtitle }) {
             // Cues are media time and the file is the same; keep them, just track the new URL.
             activeSubtitleId = keptSubtitle
@@ -991,15 +994,6 @@ public final class PlayerEngine {
         }
         subtitleTask = task
         await task.value
-    }
-
-    /// Forced subtitles in the audio's language turn on by themselves (foreign-dialogue tracks).
-    private func autoSelectForcedSubtitles() {
-        let audioLang = LanguageName.normalized(audioTracks.first { $0.index == activeAudioIndex }?.language)
-        guard let forced = subtitleTracks.first(where: { t in
-            t.forced && t.isShowable && (audioLang == nil || LanguageName.normalized(t.language) == audioLang)
-        }) else { return }
-        Task { await selectSubtitle(forced) }
     }
 
     // MARK: - Device mode

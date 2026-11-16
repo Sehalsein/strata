@@ -115,7 +115,7 @@ struct BrowseView: View {
 
     /// Shows has a spotlight, from the server's Shows page: its shape while that loads,
     /// rather than the page title the spotlight then replaces.
-    private var loadingSpotlight: Bool { type == .show && genre == nil && page == nil && lists.isEmpty && error == nil }
+    private var loadingSpotlight: Bool { genre == nil && page == nil && lists.isEmpty && error == nil }
 
     @ViewBuilder private var allContent: some View {
                 if let page {
@@ -168,8 +168,10 @@ struct BrowseView: View {
     private func load(force: Bool = false) async {
         // Try Again shows the skeleton again while it loads.
         if lists.isEmpty { error = nil }
-        // Older servers have no Shows page: they get the lists below.
-        if type == .show, let shelves = try? await services.client?.shows(force ? .reload : .fresh), !shelves.isEmpty {
+        // The server lays out the page (its spotlight, lists, picks for this person, add-on
+        // rows). Older servers have no such page: they get the lists below.
+        let policy: CachePolicy = force ? .reload : .fresh
+        if let shelves = try? await (type == .show ? services.client?.shows(policy) : services.client?.movies(policy)), !shelves.isEmpty {
             page = shelves
             return
         }

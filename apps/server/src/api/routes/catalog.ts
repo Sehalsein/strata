@@ -9,6 +9,29 @@ import { NeedsProbeError } from "../../playback/service";
 import { mediaInfoSchema } from "../../media/probe";
 import { parseRef, tmdbRef, type TitleRef, type TitleTarget } from "../../catalog/ref";
 import { legacyCards, type Shelf } from "../../catalog/service";
+import { logger } from "../../log";
+import { collapseDuplicates, withFilters } from "../../sources/sourceFilters";
+import { PAGE_IDS, type PageId } from "../../catalog/pageLayouts";
+
+/** "fr" → "French", in the household's language. */
+function languageNamer(language: string): (code: string) => string {
+  let names: Intl.DisplayNames | null = null;
+  try {
+    names = new Intl.DisplayNames([language, "en"], { type: "language" });
+  } catch {
+    names = null;
+  }
+  return (code) => {
+    try {
+      const n = names?.of(code);
+      return n ? n.charAt(0).toUpperCase() + n.slice(1) : code;
+    } catch {
+      return code;
+    }
+  };
+}
+
+const log = logger("catalog-routes");
 
 /** A title by its ref ("tmdb:show:1399"), for path and query params; 400 when it isn't one. */
 function refParam(text: string | undefined): TitleRef {
@@ -64,8 +87,19 @@ function forApp<T extends { type: string; tmdbId?: number }>(c: Context<Env>, ca
   return c.req.header("X-Strata-Refs") === "1" ? cards : legacyCards(cards);
 }
 
-function shelvesForApp(c: Context<Env>, shelves: Shelf[]): Shelf[] {
-  return shelves.map((shelf) => ({ ...shelf, items: forApp(c, shelf.items) })).filter((shelf) => shelf.items.length > 0);
+function shelvesForApp(c: Context<Env>, shelves: Shelf[], page?: PageId): Shelf[] {
+  return shelves
+    .map((shelf) => ({ ...shelf, items: forApp(c, shelf.items), ...(page ? seeAllOf(page, shelf) : {}) }))
+    .filter((shelf) => shelf.items.length > 0);
+}
+
+/**
+ * Where a rail's "See all" goes: its row in full, from the server. Not for the hero, the
+ * continue rows, My List (the apps have its own page) or the Anime lists (they have theirs).
+ */
+function seeAllOf(page: PageId, shelf: Shelf): { seeAll?: string } {
+  if (shelf.kind !== "titles" || shelf.style === "hero" || shelf.more || shelf.id === "watchlist") return {};
+  return { seeAll: `/api/rows/${page}/${encodeURIComponent(shelf.id)}` };
 }
 
 /** What play and download both take, besides the title. */
@@ -92,17 +126,24 @@ const viewer = (c: Context<Env>) => c.var.household.viewer(userOf(c));
 // How long the apps keep each answer (see cacheFor). Catalog lists and title pages barely
 // change; the calendar follows the person's list, which the apps drop themselves when they
 // change it. Home's own rails (Continue Watching, Next Up, My List) aren't kept at all.
-const TTL = { catalog: DAY, title: DAY, calendar: 6 * HOUR, search: HOUR } as const;
+// Pages follow the household's layout (and Movies, Shows and See all carry the person's own
+// rows), so they're kept only briefly: a change in Pages shows up within minutes.
+const TTL = { catalog: DAY, page: 10 * 60, title: DAY, calendar: 6 * HOUR, search: HOUR } as const;
 
 export const catalogRoutes = new Hono<Env>()
   .use(requireAuth, requireHousehold)
 
   // Both parts at once, for apps that don't ask for them separately.
-  .get("/home", async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).home()) }))
-  .get("/home/catalog", cacheFor(TTL.catalog), async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).homeCatalog()) }))
+  .get("/home", async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).home(), "home") }))
+  .get("/home/catalog", cacheFor(TTL.page), async (c) => {
+    const shelves = shelvesForApp(c, await viewer(c).homeCatalog(), "home");
+    // An empty Home isn't kept: whatever made it empty, the next look should ask again.
+    if (!shelves.length) c.header("Cache-Control", "no-store");
+    return c.json({ shelves });
+  })
   .get("/home/profile", async (c) => {
     c.header("Cache-Control", "no-store");
-    return c.json({ shelves: shelvesForApp(c, await viewer(c).homeProfile()) });
+    return c.json({ shelves: shelvesForApp(c, await viewer(c).homeProfile(), "home") });
   })
 
   .get("/genres/:type", cacheFor(TTL.catalog), async (c) => {
@@ -116,15 +157,29 @@ export const catalogRoutes = new Hono<Env>()
   })
 
   // Episodes of the shows on this profile's list: the last week and the next month.
-  .get("/calendar", cacheFor(TTL.calendar), async (c) => c.json({ items: await viewer(c).calendar() }))
+  // `items`: episodes, as older apps read them; `entries`: everything, worded for the apps (CalendarEntry).
+  .get("/calendar", cacheFor(TTL.calendar), async (c) => {
+    const { episodes, entries } = await viewer(c).calendar();
+    return c.json({ items: episodes, entries });
+  })
 
-  .get("/shows", cacheFor(TTL.catalog), async (c) => c.json({ shelves: await viewer(c).showsPage() }))
+  .get("/shows", cacheFor(TTL.page), async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).showsPage(), "shows") }))
+  .get("/movies", cacheFor(TTL.page), async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).moviesPage(), "movies") }))
+
+  // A row of a page in full, for its rail's "See all" (the rail shows only so many).
+  .get("/rows/:page/:row", cacheFor(TTL.page), async (c) => {
+    const page = z.enum(PAGE_IDS).parse(c.req.param("page"));
+    // Hono has already decoded the path parameter: decoding it again would break ids with "%".
+    const shelf = await viewer(c).rowList(page, c.req.param("row").slice(0, 300));
+    if (!shelf) throw new HTTPException(404, { message: "That row isn't on this page any more." });
+    return c.json({ title: shelf.title, items: forApp(c, shelf.items) });
+  })
   .get("/anime/categories", cacheFor(TTL.catalog), (c) => c.json({ items: viewer(c).animeCategories() }))
 
-  .get("/anime", cacheFor(TTL.catalog), async (c) => {
+  .get("/anime", cacheFor(TTL.page), async (c) => {
     const category = c.req.query("category") || undefined;
     if (category && !viewer(c).animeCategories().some((x) => x.id === category)) throw new HTTPException(400, { message: "Unknown anime category" });
-    return c.json({ shelves: shelvesForApp(c, await viewer(c).animePage(category)) });
+    return c.json({ shelves: shelvesForApp(c, await viewer(c).animePage(category), category ? undefined : "anime") });
   })
 
   // One of the Anime tab's lists in full, for its rail's "›".
@@ -173,11 +228,14 @@ export const catalogRoutes = new Hono<Env>()
     const episode = optionalInt(c.req.query("episode"));
     if (title.mediaType === "episode" && (season === undefined || episode === undefined)) throw new HTTPException(400, { message: "season and episode are required for episodes" });
     const target: TitleTarget = { ...title, season, episode };
-    const items = await viewer(c).sources(target);
+    let items = await viewer(c).sources(target);
     if (c.req.query("discover") === "1") {
       items.push(...(await viewer(c).discover(target)));
+      items = collapseDuplicates(items);
     }
-    return c.json({ items });
+    // The filters Choose Source offers, worked out here: the apps draw them as they come.
+    const names = languageNamer(c.var.household.settings().language);
+    return c.json(withFilters(items, names));
   })
 
   .post("/play", async (c) => {
@@ -196,6 +254,21 @@ export const catalogRoutes = new Hono<Env>()
     const id = intParam(c, "id");
     const url = await viewer(c).fileLink(id);
     return c.json({ url: url ?? `/api/files/${id}/content` });
+  })
+
+  // A subtitle from one of the household's subtitle add-ons, as WebVTT. The token (from a
+  // play response) is sealed for this household and names the add-on and its file.
+  .get("/subtitles/:file{[A-Za-z0-9_-]{1,4096}\\.vtt}", async (c) => {
+    const token = c.req.param("file").replace(/\.vtt$/, "");
+    let vtt: string | null;
+    try {
+      vtt = await c.var.household.addonSubtitleVtt(token);
+    } catch (err) {
+      log.warn("Add-on subtitle download failed", err);
+      throw new HTTPException(502, { message: "Couldn't download that subtitle. Try another one." });
+    }
+    if (vtt === null) throw new HTTPException(404, { message: "That subtitle isn't available any more." });
+    return c.body(vtt, 200, { "Content-Type": "text/vtt; charset=utf-8", "Cache-Control": "private, max-age=21600" });
   })
 
   // A file on this server's disk, for downloading (TorBox files download from TorBox).
@@ -285,5 +358,15 @@ export const catalogRoutes = new Hono<Env>()
     // Nothing above the profile's content limit goes on its list (taking it off is fine).
     await viewer(c).assertMayList(ref, input.on);
     await c.var.services.progress.setWatchlist(userOf(c), ref, input.on);
+    return c.json({ ok: true });
+  })
+
+  // "Remind me" when a title comes out: the calendar then lists it up to a year ahead, and
+  // the apps notify on the day.
+  .put("/reminders", async (c) => {
+    const input = await body(c, z.object({ ref: z.string(), on: z.boolean() }));
+    const ref = toTitle(input);
+    await viewer(c).assertMayList(ref, input.on);
+    await c.var.services.progress.setReminder(userOf(c), ref, input.on);
     return c.json({ ok: true });
   });

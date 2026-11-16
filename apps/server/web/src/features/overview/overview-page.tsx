@@ -96,7 +96,7 @@ function AdminOverview() {
             <AlertDescription>
               <p>This household's catalog and file matching are off until it has a TMDB key.</p>
               <Button size="sm" variant="outline" asChild className="mt-1">
-                <Link href="/settings#connections">Add key</Link>
+                <Link href="/settings/connections">Add key</Link>
               </Button>
             </AlertDescription>
           </Alert>

@@ -283,4 +283,14 @@ export const migrations: string[] = [
   );
   CREATE INDEX play_reports_recent ON play_reports(organization_id, created_at);
   `,
+  /* 8: titles someone asked to be reminded of when they come out */ `
+  CREATE TABLE reminders (
+    user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+    source TEXT NOT NULL DEFAULT 'tmdb',
+    type TEXT NOT NULL,
+    title_id INTEGER NOT NULL,
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY (user_id, source, type, title_id)
+  );
+  `,
 ];

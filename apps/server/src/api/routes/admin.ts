@@ -8,7 +8,8 @@ import { recentLogs } from "../../log";
 import { dashboardUrls } from "../../platform/network";
 import { householdSettingsSchema, SECRET_KEYS, serverSettingsSchema, settingsSchema, type SecretKey } from "../../settings";
 import { toCandidate } from "../../sources/resolver";
-import { AddonError, addonBase, addonOrigin, type StreamAddon } from "../../sources/addons";
+import { AddonError, addonBase, addonOrigin, catalogKey, isBuiltIn, type StreamAddon } from "../../sources/addons";
+import { MAX_ADDON_ROWS_PER_PAGE, PAGE_IDS, pageLayoutSchema } from "../../catalog/pageLayouts";
 import { imageUrl, yearOf } from "../../catalog/tmdb";
 import { formatRef, parseRef, targetRef, tmdbRef } from "../../catalog/ref";
 import { API_VERSION, VERSION } from "../../version";
@@ -154,14 +155,30 @@ export const adminRoutes = new Hono<Env>()
     return c.json({ ok: true });
   })
 
-  // The household's add-ons, without their URLs: those often hold a password or a key.
-  .get("/addons", (c) => c.json({ items: c.var.household.addons().map(addonDto) }))
+  // Home, Movies, Shows and Anime as the household lays them out: each page's rows, in order, on or off.
+  .get("/pages", (c) => c.json({ pages: c.var.household.pages(), maxAddonRows: MAX_ADDON_ROWS_PER_PAGE }))
 
-  // Adds an add-on by its manifest URL, once it's answered with a manifest that finds streams.
+  // Saves one page's layout: every row it should list, in order, each on or off.
+  .put("/pages/:page", async (c) => {
+    const page = z.enum(PAGE_IDS).parse(c.req.param("page"));
+    const { rows } = await body(c, z.object({ rows: pageLayoutSchema }));
+    try {
+      await c.var.household.setPageLayout(page, rows);
+    } catch (err) {
+      if (err instanceof AddonError) throw new HTTPException(400, { message: err.message });
+      throw err;
+    }
+    return c.json({ pages: c.var.household.pages() });
+  })
+
+  // The household's add-ons, without their URLs: those often hold a password or a key.
+  .get("/addons", (c) => c.json({ items: c.var.household.addons().map((a) => addonDto(a, c.var.household)) }))
+
+  // Adds an add-on by its manifest URL, once it's answered with a manifest that finds streams or subtitles.
   .post("/addons", async (c) => {
     const { url } = await body(c, z.object({ url: z.string().trim().min(1).max(2048) }));
     try {
-      return c.json(addonDto(await c.var.household.addAddon(url, permissions(c).administerServer)), 201);
+      return c.json(addonDto(await c.var.household.addAddon(url, permissions(c).administerServer), c.var.household), 201);
     } catch (err) {
       if (err instanceof AddonError) throw new HTTPException(400, { message: err.message });
       throw err;
@@ -171,12 +188,21 @@ export const adminRoutes = new Hono<Env>()
   // Reads every manifest again; says which add-ons didn't answer.
   .post("/addons/refresh", async (c) => {
     const failed = await c.var.household.refreshAddons();
-    return c.json({ items: c.var.household.addons().map(addonDto), failed });
+    return c.json({ items: c.var.household.addons().map((a) => addonDto(a, c.var.household)), failed });
   })
 
-  // Turns an add-on on or off, moves it, or points it at another manifest URL (checked first).
+  // Turns an add-on on or off, moves it, picks its Home rows, or points it at another manifest URL (checked first).
   .patch("/addons/:id", async (c) => {
-    const { url, ...patch } = await body(c, z.object({ enabled: z.boolean().optional(), index: z.number().int().min(0).optional(), url: z.string().trim().min(1).max(2048).optional() }));
+    const { url, ...patch } = await body(
+      c,
+      z.object({
+        enabled: z.boolean().optional(),
+        index: z.number().int().min(0).optional(),
+        url: z.string().trim().min(1).max(2048).optional(),
+        // Which of its catalogs are rows on Home, by key ("movie/tmdb.trending").
+        homeCatalogs: z.array(z.string().max(300)).max(100).optional(),
+      }),
+    );
     const h = c.var.household;
     let id = c.req.param("id");
     if (url !== undefined) {
@@ -189,15 +215,20 @@ export const adminRoutes = new Hono<Env>()
         throw err;
       }
     }
-    if (!(await h.updateAddon(id, patch))) throw new HTTPException(404, { message: "No such add-on" });
-    return c.json({ items: h.addons().map(addonDto) });
+    try {
+      if (!(await h.updateAddon(id, patch))) throw new HTTPException(404, { message: "No such add-on" });
+    } catch (err) {
+      if (err instanceof AddonError) throw new HTTPException(400, { message: err.message });
+      throw err;
+    }
+    return c.json({ items: h.addons().map((a) => addonDto(a, c.var.household)) });
   })
 
   // The add-on's own configure page. A redirect, so its URL (and the key in it) never sits
   // in the dashboard's data.
   .get("/addons/:id/configure", (c) => {
     const addon = c.var.household.addons().find((a) => a.id === c.req.param("id"));
-    if (!addon) throw new HTTPException(404, { message: "No such add-on" });
+    if (!addon || !addon.configurable || isBuiltIn(addon)) throw new HTTPException(404, { message: "No such add-on" });
     const target = new URL(`${addonBase(addon.url)}/configure`);
     if (!/^https?:$/.test(target.protocol) || target.username || target.password) throw new HTTPException(400, { message: "That add-on's address can't be opened" });
     // The path may hold the add-on's password: don't pass this page on as the referrer either.
@@ -212,7 +243,14 @@ export const adminRoutes = new Hono<Env>()
   })
 
   .delete("/addons/:id", async (c) => {
-    if (!(await c.var.household.removeAddon(c.req.param("id")))) throw new HTTPException(404, { message: "No such add-on" });
+    let removed: boolean;
+    try {
+      removed = await c.var.household.removeAddon(c.req.param("id"));
+    } catch (err) {
+      if (err instanceof AddonError) throw new HTTPException(400, { message: err.message });
+      throw err;
+    }
+    if (!removed) throw new HTTPException(404, { message: "No such add-on" });
     return c.json({ ok: true });
   })
 
@@ -239,7 +277,7 @@ export const adminRoutes = new Hono<Env>()
 
   .get("/files", async (c) => {
     const status = z.enum(["pending", "matched", "unmatched", "manual", "ignored"]).optional().parse(c.req.query("status") || undefined);
-    const provider = z.enum(["local", "torbox"]).optional().parse(c.req.query("provider") || undefined);
+    const provider = z.enum(["local", "torbox", "link"]).optional().parse(c.req.query("provider") || undefined);
     const limit = Math.min(optionalInt(c.req.query("limit")) ?? 100, 500);
     const offset = optionalInt(c.req.query("offset")) ?? 0;
     const filters = z.object({
@@ -457,6 +495,25 @@ async function sessionDtoFor(services: Services, h: Household) {
 }
 
 /** What the dashboard sees of an add-on: never its URL's path, where its secrets are. */
-function addonDto(a: StreamAddon) {
-  return { id: a.id, name: a.name, host: addonOrigin(a.url), enabled: a.enabled, kind: a.kind, configurable: a.configurable, anime: !a.idPrefixes || a.idPrefixes.some((p) => p.startsWith("kitsu")), isDefault: a.id === "default" };
+function addonDto(a: StreamAddon, household: { addonHealth: { view(id: string): unknown } }) {
+  const streams = a.resources.includes("stream");
+  const builtIn = isBuiltIn(a);
+  return {
+    id: a.id,
+    name: a.name,
+    host: builtIn ? "Built in" : addonOrigin(a.url),
+    /** What a built-in add-on is made of, in words. */
+    description: builtIn ? "Torrentio, TorBox's own search and its cache check. Needs only a TorBox key." : undefined,
+    builtIn,
+    enabled: a.enabled,
+    kind: a.kind,
+    configurable: a.configurable,
+    resources: a.resources,
+    // Its catalogs, as the dashboard lists them: name, movies or shows, and whether Home shows it.
+    catalogs: a.catalogs.map((cat) => ({ key: catalogKey(cat), name: cat.name, type: cat.type === "movie" ? "movie" : "show", home: cat.home })),
+    anime: streams && (!a.idPrefixes || a.idPrefixes.some((p) => p.startsWith("kitsu"))),
+    isDefault: builtIn,
+    // How it's doing, as Strata last found it (see AddonHealth).
+    health: household.addonHealth.view(a.id),
+  };
 }

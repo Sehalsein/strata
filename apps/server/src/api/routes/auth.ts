@@ -3,18 +3,20 @@ import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { account, continueHidden, member, organization, passkey, progress, session, user, watchlist } from "../../db/schema";
+import { account, continueHidden, invitation, member, organization, passkey, progress, reminders, session, user, watchlist } from "../../db/schema";
 import { emailConfigured } from "../../email";
 import { API_VERSION, VERSION } from "../../version";
 import { body, permissions, requireAuth, requireHousehold, requireHouseholdAdmin, type Env } from "../context";
 import { CONTENT_LIMITS } from "../../catalog/contentRating";
 import { clientAddress, isLocalRequest, isLoopbackRequest } from "../localNetwork";
-import { checkSetupCode, clearSetupCode } from "../../setupCode";
+import { checkSetupCode, clearSetupCode, newSetupCode } from "../../setupCode";
 import { retryMessage, SETUP_PER_ADDRESS, STARTS_PER_ADDRESS } from "../../throttle";
 import { publicCapabilities } from "../../profile";
 import { launchSecret } from "../../platform/launcher";
+import { sameSecret } from "../../secrets";
 import { dashboardUrls } from "../../platform/network";
 import { describeDevice } from "../deviceInfo";
+import { roleRank } from "../../auth/permissions";
 import { assertMayManage, SIGN_IN_CODE_HEADER, SIGN_IN_CODE_SECONDS, signInCodeSecret, signInMethods, takeIssuedCode } from "../../auth/betterAuth";
 
 /**
@@ -96,6 +98,7 @@ async function exportFor(c: Context<Env>, id: string): Promise<Response> {
   const savedPasskeys = await db.select({ name: passkey.name, createdAt: passkey.createdAt }).from(passkey).where(eq(passkey.userId, id));
   const watchProgress = await db.select().from(progress).where(eq(progress.userId, id));
   const myList = await db.select().from(watchlist).where(eq(watchlist.userId, id));
+  const releaseReminders = await db.select().from(reminders).where(eq(reminders.userId, id));
   const hiddenFromContinueWatching = await db.select().from(continueHidden).where(eq(continueHidden.userId, id));
   const strip = <T extends { userId?: unknown }>(rows: T[]) => rows.map(({ userId: _, ...r }) => r);
   const file = {
@@ -108,6 +111,7 @@ async function exportFor(c: Context<Env>, id: string): Promise<Response> {
     passkeys: savedPasskeys,
     watchProgress: strip(watchProgress),
     myList: strip(myList),
+    reminders: strip(releaseReminders),
     hiddenFromContinueWatching: strip(hiddenFromContinueWatching),
   };
   return new Response(JSON.stringify(file, null, 2), {
@@ -133,7 +137,8 @@ export const authRoutes = new Hono<Env>()
       /** Home servers make their admin first; the cloud has no setup (anyone signs up). */
       setupRequired: s.profile.firstRunSetup && !(await s.hasAccounts()),
       /** Setup asks for the code from the server's log (not from the server's own machine). */
-      setupCodeRequired: !isLoopbackRequest(c),
+      // Always: even from this machine, which a reverse proxy on it would make everyone.
+      setupCodeRequired: true,
       /** True when this client may join without a password (see /join). */
       localJoin: await canJoinLocally(c),
       /** Ways in besides a password that this server is set up for (the sign-in page's buttons). */
@@ -154,8 +159,25 @@ export const authRoutes = new Hono<Env>()
     return c.json({ proof: sign(`${challenge}|${port}`), version: VERSION, versionProof: sign(`${challenge}|${port}|${VERSION}`) });
   })
 
+  // Strata.app opens the dashboard for first-run setup with the code already in it: it
+  // asks here, with the secret it gave the server it started, from this Mac.
+  .post("/launcher/setup-code", async (c) => {
+    const s = c.var.services;
+    const secret = launchSecret();
+    // The app proves it has the secret without sending it: an HMAC of its fresh challenge.
+    const challenge = c.req.header("x-strata-challenge") ?? "";
+    const port = new URL(c.req.url).port || "80";
+    const expected = secret ? createHmac("sha256", secret).update(`setup-code|${challenge}|${port}`).digest("hex") : "";
+    if (!secret || !isLoopbackRequest(c) || !/^[0-9a-f]{32,128}$/.test(challenge) || !sameSecret(c.req.header("x-strata-proof") ?? "", expected)) {
+      throw new HTTPException(404, { message: "Not found" });
+    }
+    if (!s.profile.firstRunSetup || (await s.hasAccounts())) throw new HTTPException(409, { message: "Setup already completed" });
+    return c.json({ code: await newSetupCode(s.db) });
+  })
+
   // First run: the server admin's account and their household. Needs the code the
-  // server prints in its log, unless asked from the server's own machine.
+  // server prints in its log (or hands Strata.app), from anywhere: a reverse proxy on this
+  // machine would make everyone's requests come from it.
   .post("/setup/admin", async (c) => {
     if (!c.var.services.profile.firstRunSetup) throw new HTTPException(404, { message: "Not found" });
     const s = c.var.services;
@@ -170,7 +192,7 @@ export const authRoutes = new Hono<Env>()
       }),
     );
     if (await s.hasAccounts()) throw new HTTPException(409, { message: "Setup already completed" });
-    if (!isLoopbackRequest(c)) {
+    {
       const key = `setup:${clientAddress(c)}`;
       const wait = await s.throttle.retryAfter(key);
       if (wait) throw new HTTPException(429, { message: retryMessage(wait) });
@@ -234,6 +256,44 @@ export const authRoutes = new Hono<Env>()
   })
 
   // What the privacy page shows about this server: who runs it and what's switched on.
+  // An invitation, as whoever holds its link sees it: who it's for and which household.
+  // Public, like the link itself (its id is what lets someone sign up into it), so the
+  // apps can show "You're invited" before there's an account. Also its links for the
+  // dashboard's QR code, at an address a phone can reach.
+  .get("/invitations/:id", async (c) => {
+    const id = c.req.param("id");
+    const [row] = await c.var.services.db
+      .select({ email: invitation.email, role: invitation.role, status: invitation.status, expiresAt: invitation.expiresAt, household: organization.name })
+      .from(invitation)
+      .innerJoin(organization, eq(organization.id, invitation.organizationId))
+      .where(eq(invitation.id, id));
+    if (!row || row.status !== "pending" || row.expiresAt.getTime() <= Date.now()) {
+      throw new HTTPException(404, { message: "This invitation has expired, was canceled or was already used. Ask for a new one." });
+    }
+    // Whether the email already has an account here (say, in another household): the apps
+    // then ask only for its password. Not where anyone can sign up (the cloud): there anyone
+    // can make an invitation, so this would tell them which emails have accounts. The apps
+    // find out there when signing up meets an account that's already there.
+    const [existing] = c.var.services.profile.openSignUp
+      ? []
+      : await c.var.services.db.select({ id: user.id }).from(user).where(eq(user.email, row.email.toLowerCase()));
+    const server = addressForDevices(c);
+    c.header("cache-control", "no-store");
+    return c.json({
+      email: row.email,
+      ...(c.var.services.profile.openSignUp ? {} : { hasAccount: !!existing }),
+      role: row.role ?? "member",
+      household: row.household,
+      serverName: c.var.services.settings.get().serverName,
+      expiresAt: row.expiresAt.toISOString(),
+      server,
+      /** What the QR code holds: the Strata apps (and the iPhone's camera) open it. */
+      link: `strata://invite?${new URLSearchParams({ server, id })}`,
+      /** The same as a web page, for passing on as text: it hands over to the app. */
+      page: `${server}/invite/${encodeURIComponent(id)}`,
+    });
+  })
+
   .get("/privacy", async (c) => {
     const s = c.var.services;
     const { google, passkeys } = signInMethods();
@@ -300,9 +360,13 @@ export const authRoutes = new Hono<Env>()
       });
     }
     // Better Auth wipes the password of an account whose email isn't marked confirmed when
-    // a magic link signs it in. Strata never sends mail (people join by invitation link),
-    // so its accounts count as confirmed.
-    if (!row.emailVerified) await s.db.update(user).set({ emailVerified: true }).where(eq(user.id, row.userId));
+    // a magic link signs it in. A home server never sends mail (people join by invitation
+    // link), so its accounts count as confirmed. Not the cloud's: there an unconfirmed
+    // address is one nobody has proven they own.
+    if (!row.emailVerified) {
+      if (s.profile.openSignUp) throw new HTTPException(409, { message: `${row.name} hasn't confirmed their email yet, so they can't sign in with a code.` });
+      await s.db.update(user).set({ emailVerified: true }).where(eq(user.id, row.userId));
+    }
     const captureId = crypto.randomUUID();
     // As a request to this server (Better Auth takes its address from it), marked as ours.
     const origin = new URL(c.req.url).origin;
@@ -340,7 +404,24 @@ export const authRoutes = new Hono<Env>()
     }
     if (input.contentLimit !== undefined) patch.contentLimit = input.contentLimit;
     const db = c.var.services.db;
+    const s = c.var.services;
     const where = and(eq(member.id, c.req.param("memberId")), eq(member.organizationId, c.var.household.organizationId));
+    // Someone else's settings: only from above them in the household (or as the server's
+    // admin), so an admin can't put the owner on a kids' limit. Their name is their
+    // account's, everywhere: the same rule as resetting their password.
+    const [target] = await db.select({ userId: member.userId, role: member.role }).from(member).where(where);
+    if (!target) throw new HTTPException(404, { message: "No such member" });
+    const me = c.var.session;
+    if (target.userId !== me.user.id) {
+      if (!me.user.isServerAdmin && roleRank(target.role) >= roleRank(me.role ?? "")) {
+        throw new HTTPException(403, { message: "Only someone above them in the household can change their settings." });
+      }
+      if (input.name !== undefined) {
+        await assertMayManage(s.db, s.profile, (headers) => s.auth.api.getSession({ headers }), c.req.raw.headers, target.userId).catch((err: unknown) => {
+          throw new HTTPException(403, { message: err instanceof Error ? err.message : "You can't rename them." });
+        });
+      }
+    }
     const columns = { id: member.id, userId: member.userId, contentLimit: member.contentLimit, isKids: member.isKids };
     const [row] = Object.keys(patch).length ? await db.update(member).set(patch).where(where).returning(columns) : await db.select(columns).from(member).where(where);
     if (!row) throw new HTTPException(404, { message: "No such member" });

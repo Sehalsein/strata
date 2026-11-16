@@ -1,3 +1,4 @@
+import { newSetupCode } from "../src/setupCode";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { makeFixtures, noFfmpeg, startTestServer, type TestServer } from "./helpers";
@@ -40,10 +41,21 @@ describe("setup and auth", () => {
   });
 
   test("first admin is created once, with their household", async () => {
-    const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "sehal", password: "correct-horse" } });
+    // Setup always needs the code from the server's log, even from this machine: a reverse
+    // proxy on it (or a web page rebinding its domain to 127.0.0.1) would come from here too.
+    const setupFrom = (headers: Record<string, string>) =>
+      server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", headers, json: { username: "evil", password: "evil-password" } });
+    expect((await json(await server.request("/api/info", { ip: "127.0.0.1" }))).setupCodeRequired).toBe(true);
+    expect((await setupFrom({})).status).toBe(403);
+    expect((await setupFrom({ Host: "rebind.evil.example:8420" })).status).toBe(403);
+    expect((await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { setupCode: "AAAA-BBBB-CCCC", username: "evil", password: "evil-password" } })).status).toBe(403);
+    // Strata.app gets one with the secret it gave the server; nobody else can ask.
+    expect((await server.request("/api/launcher/setup-code", { method: "POST", ip: "127.0.0.1" })).status).toBe(404);
+    const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", headers: { Origin: "http://localhost:8420" }, json: { setupCode: await newSetupCode(server.services.db), username: "sehal", password: "correct-horse" } });
     expect(res.status).toBe(200);
     token = (await json(res)).token;
-    const again = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "other", password: "another-pass" } });
+    const again = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { setupCode: await newSetupCode(server.services.db), username: "other", password: "another-pass" } });
+
     expect(again.status).toBe(409);
   });
 
@@ -57,6 +69,19 @@ describe("setup and auth", () => {
     expect(me.household).toMatchObject({ name: "sehal's home", role: "owner" });
   });
 
+  test("Apple's app-site-association file lists the apps only when they're set", async () => {
+    expect((await server.request("/.well-known/apple-app-site-association")).status).toBe(404);
+    process.env.STRATA_APPLE_APP_IDS = "ABCDE12345.com.sehalsein.strata";
+    try {
+      const res = await server.request("/.well-known/apple-app-site-association");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("application/json");
+      expect(await res.json()).toEqual({ webcredentials: { apps: ["ABCDE12345.com.sehalsein.strata"] } });
+    } finally {
+      delete process.env.STRATA_APPLE_APP_IDS;
+    }
+  });
+
   test("people join a household by invitation only", async () => {
     // Nobody signs up without an invitation.
     const signUp = (email: string, username: string, invitationId?: string) =>
@@ -64,6 +89,13 @@ describe("setup and auth", () => {
     expect((await signUp("bob@example.com", "bob")).status).toBe(403);
     const invited = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "bob@example.com", role: "member" } }));
     expect(invited.id).toBeTruthy();
+    // Whoever holds the link can see who it's for (the apps show it before there's an account).
+    const shown = await json(await server.request(`/api/invitations/${invited.id}`));
+    expect(shown).toMatchObject({ email: "bob@example.com", role: "member", household: "sehal's home", hasAccount: false });
+    expect(shown.link).toStartWith("strata://invite?");
+    expect(new URL(shown.link).searchParams.get("id")).toBe(invited.id);
+    expect(shown.page).toEndWith(`/invite/${invited.id}`);
+    expect((await server.request("/api/invitations/not-a-real-one")).status).toBe(404);
     // Knowing the email isn't enough: the invitation's id (from its link) is.
     expect((await signUp("bob@example.com", "bob")).status).toBe(403);
     expect((await signUp("bob@example.com", "bob", invited.id)).status).toBe(200);
@@ -71,6 +103,8 @@ describe("setup and auth", () => {
     expect((await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: bob, json: { invitationId: invited.id } })).status).toBe(200);
     const me = await json(await server.request("/api/me", { token: bob }));
     expect(me.household).toMatchObject({ role: "member" });
+    // Used, it's gone.
+    expect((await server.request(`/api/invitations/${invited.id}`)).status).toBe(404);
     // Members watch; they don't run the household.
     expect((await server.request("/api/home", { token: bob })).status).toBe(200);
     expect((await server.request("/api/admin/settings", { token: bob })).status).toBe(403);
@@ -225,18 +259,32 @@ describe("setup and auth", () => {
     expect((await signIn("eve", "eves-password")).status).toBe(401);
   });
 
+  test("remind me: offered for titles still to come out, saved per person, and off again", async () => {
+    const page = async () => json(await server.request("/api/titles/movie/990001", { token }));
+    // Out long ago: nothing to remind of.
+    expect((await json(await server.request("/api/titles/movie/10378", { token }))).remind).toBeNull();
+    expect((await page()).remind).toEqual({ on: false, date: "2099-03-01", airsAt: null, label: "In cinemas" });
+    expect((await server.request("/api/reminders", { method: "PUT", token, json: { ref: "tmdb:movie:990001", on: true } })).status).toBe(200);
+    expect((await page()).remind.on).toBe(true);
+    expect((await server.request("/api/reminders", { method: "PUT", token, json: { ref: "tmdb:movie:990001", on: false } })).status).toBe(200);
+    expect((await page()).remind.on).toBe(false);
+    expect((await server.request("/api/reminders", { method: "PUT", token, json: { on: true } })).status).toBe(400);
+  });
+
   test("people can download everything kept about them, and delete their account", async () => {
     const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "dora@example.com", role: "member" } }));
     await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "dora@example.com", password: "doras-password", name: "dora", username: "dora", invitationId: invite.id } });
     const dora = (await signIn("dora", "doras-password")).token!;
     await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: dora, json: { invitationId: invite.id } });
     await server.request("/api/watchlist", { method: "PUT", token: dora, json: { type: "movie", tmdbId: 10378, on: true } });
+    await server.request("/api/reminders", { method: "PUT", token: dora, json: { ref: "tmdb:movie:990001", on: true } });
 
     const exported = await server.request("/api/me/export", { token: dora });
     expect(exported.headers.get("content-disposition")).toContain("strata-dora-data.json");
     const file = (await exported.json()) as any;
     expect(file.account).toMatchObject({ username: "dora", email: "dora@example.com" });
     expect(file.myList).toEqual([expect.objectContaining({ source: "tmdb", titleId: 10378 })]);
+    expect(file.reminders).toEqual([expect.objectContaining({ source: "tmdb", type: "movie", titleId: 990001 })]);
     expect((await json(await server.request("/api/watchlist", { token: dora }))).items).toEqual([expect.objectContaining({ type: "movie", tmdbId: 10378 })]);
     expect(file.devices.length).toBeGreaterThan(0);
     expect(JSON.stringify(file)).not.toContain(dora);
@@ -275,6 +323,8 @@ describe("setup and auth", () => {
     const owner = full.members.find((m: any) => m.role.includes("owner"));
     // Carol owns the neighbours' household and joins this one too.
     const invite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "carol@example.com", role: "member" } }));
+    // Carol has an account here already: the apps ask only for her password.
+    expect((await json(await server.request(`/api/invitations/${invite.id}`))).hasAccount).toBe(true);
     const carol = (await signIn("carol", "carols-password")).token!;
     expect((await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: carol, json: { invitationId: invite.id } })).status).toBe(200);
     const carolId = (await json(await server.request("/api/me", { token: carol }))).user.id;
@@ -357,6 +407,10 @@ describe("setup and auth", () => {
     expect(await info({ ip: "192.168.2.40" })).toBe(true);
     expect(await info({ ip: "::ffff:10.0.0.7" })).toBe(true);
     expect(await info({ ip: "203.0.113.9" })).toBe(false);
+    // Nor this machine itself: a reverse proxy on it makes everyone come from here, even
+    // one that adds no forwarding header.
+    expect(await info({ ip: "127.0.0.1", headers: { Host: "192.168.2.10:8420" } })).toBe(false);
+    expect(await info({ ip: "::1", headers: { Host: "192.168.2.10:8420" } })).toBe(false);
     expect(await info({})).toBe(false);
     // Behind a proxy every client looks local, so proxied requests never qualify.
     expect(await info({ ip: "127.0.0.1", headers: { "X-Forwarded-For": "203.0.113.9" } })).toBe(false);
@@ -474,8 +528,20 @@ describe("library", () => {
   test("catalog answers say how long the apps may keep them; errors and the rest don't", async () => {
     const cacheControl = async (path: string) => (await server.request(path, { token })).headers.get("cache-control");
     expect(await cacheControl("/api/genres/movie")).toBe("private, max-age=86400, stale-while-revalidate=604800");
-    expect(await cacheControl("/api/home/catalog")).toBe("private, max-age=86400, stale-while-revalidate=604800");
+    // Pages follow the household's layout: kept only briefly.
+    expect(await cacheControl("/api/home/catalog")).toBe("private, max-age=600, stale-while-revalidate=604800");
     expect(await cacheControl("/api/home/profile")).toBe("no-store");
+    // Kept answers carry an ETag; asking again with it, an unchanged one is a bodiless 304
+    // that renews how long it may be kept. Answers that mustn't be kept have none.
+    const first = await server.request("/api/genres/movie", { token });
+    const tag = first.headers.get("etag")!;
+    expect(tag).toMatch(/^W\/"[0-9a-f]{24}"$/);
+    const again = await server.request("/api/genres/movie", { token, headers: { "If-None-Match": tag } });
+    expect(again.status).toBe(304);
+    expect(await again.text()).toBe("");
+    expect(again.headers.get("cache-control")).toContain("max-age=86400");
+    expect((await server.request("/api/genres/movie", { token, headers: { "If-None-Match": 'W/"stale"' } })).status).toBe(200);
+    expect((await server.request("/api/home/profile", { token })).headers.get("etag")).toBeNull();
     expect(await cacheControl("/api/home")).toBeNull();
     expect(await cacheControl("/api/genres/nope")).toBeNull();
     expect(await cacheControl("/api/me")).toBeNull();
@@ -585,6 +651,117 @@ describe("playback", () => {
     server.services.sessions.stop(play.sessionId);
   }, 30_000);
 
+  test("catalog add-ons: rows on any page, once laid out in Pages, as ordinary titles", async () => {
+    const added = await json(await server.request("/api/admin/addons", { method: "POST", token, json: { url: "https://catalog.test/manifest.json" } }));
+    const movieRow = `addon:${added.id}:movie/trending`;
+    const showRow = `addon:${added.id}:series/popular`;
+    try {
+      // Catalogs that need a search filled in aren't offered.
+      expect(added.resources).toEqual(["catalog"]);
+      expect(added.catalogs.map((c: any) => [c.key, c.type])).toEqual([
+        ["movie/trending", "movie"],
+        ["series/popular", "show"],
+      ]);
+      // Pages list every page's rows; add-on rows start off, so Home is Strata's and each person's own.
+      const pages = (await json(await server.request("/api/admin/pages", { token }))).pages;
+      expect(pages.map((p: any) => p.id)).toEqual(["home", "movies", "shows", "anime"]);
+      for (const p of pages) expect(p.rows.filter((r: any) => r.source === "addon").every((r: any) => !r.on)).toBe(true);
+      expect(pages[0].rows.find((r: any) => r.id === movieRow)).toMatchObject({ source: "addon", addon: "Catalog Test", on: false });
+      let ids = (await json(await server.request("/api/home/catalog", { token }))).shelves.map((s: any) => s.id);
+      expect(ids).not.toContain(movieRow);
+
+      // Laid out: on, renamed, cut to a count, in the household's order; a row turned off goes.
+      const layout = [
+        { id: movieRow, on: true, name: "Film night", count: 1 },
+        { id: "trendingMovies", on: false },
+        { id: showRow, on: true },
+      ];
+      expect((await server.request("/api/admin/pages/home", { method: "PUT", token, json: { rows: layout } })).status).toBe(200);
+      const shelves = (await json(await server.request("/api/home/catalog", { token }))).shelves;
+      ids = shelves.map((s: any) => s.id);
+      expect(ids).not.toContain("trendingMovies");
+      expect(ids.indexOf(movieRow)).toBeLessThan(ids.indexOf(showRow));
+      const row = shelves.find((s: any) => s.id === movieRow);
+      // Matched to TMDB (by IMDb id), once even when listed twice; the unknown id is left out.
+      // The card is TMDB's (what a profile's limit judges); only the poster is the add-on's.
+      expect(row.title).toBe("Film night");
+      expect(row.items.map((i: any) => [i.ref, i.title, i.posterUrl])).toEqual([["tmdb:movie:10378", "Big Buck Bunny", "https://img.test/bbb.jpg"]]);
+      expect(row.items[0]).not.toHaveProperty("addonPosterUrl");
+      expect(shelves.find((s: any) => s.id === showRow).items[0].ref).toBe("tmdb:show:9001");
+      // Every rail links to its full list, which isn't cut to the rail's count.
+      expect(row.seeAll).toBe(`/api/rows/home/${encodeURIComponent(movieRow)}`);
+      const full = await json(await server.request(row.seeAll, { token }));
+      expect(full).toMatchObject({ title: "Film night" });
+      expect(full.items.length).toBeGreaterThanOrEqual(row.items.length);
+      expect((await server.request(`/api/rows/home/${encodeURIComponent("nope")}`, { token })).status).toBe(404);
+      // The pages API says what was saved.
+      const home = (await json(await server.request("/api/admin/pages", { token }))).pages[0];
+      expect(home.rows.slice(0, 3).map((r: any) => [r.id, r.on, r.name ?? null, r.count ?? null])).toEqual([
+        [movieRow, true, "Film night", 1],
+        ["trendingMovies", false, null, null],
+        [showRow, true, null, null],
+      ]);
+      expect((await server.request("/api/admin/pages/home", { method: "PUT", token, json: { rows: [{ id: "nope", on: true }] } })).status).toBe(400);
+      // A row listed twice is refused; Movies offers movie catalogs and Shows series ones.
+      expect((await server.request("/api/admin/pages/home", { method: "PUT", token, json: { rows: [{ id: "forYou", on: true }, { id: "forYou", on: false }] } })).status).toBe(400);
+      const [, moviesPage, showsPage] = (await json(await server.request("/api/admin/pages", { token }))).pages;
+      expect(moviesPage.rows.map((r: any) => r.id)).toContain(movieRow);
+      expect(moviesPage.rows.map((r: any) => r.id)).not.toContain(showRow);
+      expect(showsPage.rows.map((r: any) => r.id)).toContain(showRow);
+      expect(showsPage.rows.map((r: any) => r.id)).not.toContain(movieRow);
+      expect((await server.request("/api/admin/pages/elsewhere", { method: "PUT", token, json: { rows: [] } })).status).toBe(400);
+
+      // A page shows 12 add-on rows at most.
+      const many = await json(await server.request("/api/admin/addons", { method: "POST", token, json: { url: "https://many.test/manifest.json" } }));
+      try {
+        const rows = many.catalogs.map((c: any) => ({ id: `addon:${many.id}:${c.key}`, on: true }));
+        const tooMany = await server.request("/api/admin/pages/movies", { method: "PUT", token, json: { rows } });
+        expect(tooMany.status).toBe(400);
+        expect((await json(tooMany)).error).toContain("up to 12");
+        expect((await server.request("/api/admin/pages/movies", { method: "PUT", token, json: { rows: rows.slice(0, 10) } })).status).toBe(200);
+      } finally {
+        await server.request(`/api/admin/addons/${many.id}`, { method: "DELETE", token });
+        await server.request("/api/admin/pages/movies", { method: "PUT", token, json: { rows: [] } });
+      }
+    } finally {
+      await server.request("/api/admin/pages/home", { method: "PUT", token, json: { rows: [] } });
+      await server.request(`/api/admin/addons/${added.id}`, { method: "DELETE", token });
+    }
+  });
+
+  test.skipIf(noFfmpeg)("subtitle add-ons: the server names, picks and serves their subtitles", async () => {
+    const added = await json(await server.request("/api/admin/addons", { method: "POST", token, json: { url: "https://subs.test/manifest.json" } }));
+    expect(added).toMatchObject({ name: "Subs Test", resources: ["subtitles"] });
+    await server.request("/api/admin/settings", { method: "PATCH", token, json: { subtitleLanguages: ["fr"], autoSubtitles: "foreign" } });
+    try {
+      const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, startMs: 0 } }));
+      const online = play.subtitleTracks.filter((t: any) => t.id.startsWith("a"));
+      // Only French was asked for, and it comes after the file's own tracks.
+      expect(online.map((t: any) => [t.id, t.language, t.label])).toEqual([["a0", "fr", "French · Subs Test"]]);
+      expect(play.subtitleTracks.map((t: any) => t.label)).toEqual(["English", "English (Forced) · External", "French · Subs Test"]);
+      // The file's forced lines win over the add-on's (its audio has no language, so they match it).
+      expect(play.selectedSubtitleId).toBe("x0");
+      const vtt = await server.request(online[0].url, { token });
+      expect(vtt.status).toBe(200);
+      expect(vtt.headers.get("content-type")).toContain("text/vtt");
+      expect(await vtt.text()).toBe("WEBVTT\n\n00:00:01.000 --> 00:00:02.500\nBonjour de Strata\n");
+      // The link doesn't show the add-on's file address, a made-up one isn't this server's,
+      // and without signing in there's nothing at all.
+      expect(online[0].url).not.toContain("subs.test");
+      expect(Buffer.from(online[0].url.replace("/api/subtitles/", "").replace(".vtt", ""), "base64url").toString()).not.toContain("subs.test");
+      const forged = Buffer.from(JSON.stringify({ a: added.id, u: "https://subs.test/files/de.srt" })).toString("base64url");
+      expect((await server.request(`/api/subtitles/${forged}.vtt`, { token })).status).toBe(404);
+      expect((await server.request(online[0].url)).status).toBe(401);
+      // An add-on that's off serves nothing.
+      await server.request(`/api/admin/addons/${added.id}`, { method: "PATCH", token, json: { enabled: false } });
+      expect((await server.request(online[0].url, { token })).status).toBe(404);
+      server.services.sessions.stop(play.sessionId);
+    } finally {
+      await server.request(`/api/admin/addons/${added.id}`, { method: "DELETE", token });
+      await server.request("/api/admin/settings", { method: "PATCH", token, json: { subtitleLanguages: [], autoSubtitles: "forced" } });
+    }
+  }, 30_000);
+
   test.skipIf(noFfmpeg)("DTS audio is transcoded", async () => {
     const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "episode", tmdbId: 9001, season: 1, episode: 2 } }));
     expect(play.mode).toBe("remux");
@@ -602,5 +779,32 @@ describe("playback", () => {
     expect(cont.items[0]).toMatchObject({ type: "movie", tmdbId: 10378, positionMs: 90_000 });
     const next = shelves.find((s: any) => s.id === "nextUp");
     expect(next.items[0]).toMatchObject({ type: "show", tmdbId: 9001, episode: { season: 1, episode: 2 } });
+  });
+
+  test("guessing one account's password from many addresses locks that account for a while", async () => {
+    const invited = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "lock@example.com", role: "member" } }));
+    await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "lock@example.com", password: "locks-password", name: "lock", username: "lock", invitationId: invited.id } });
+    const attempt = (password: string, i: number) =>
+      server.request("/api/auth/sign-in/username", { method: "POST", ip: `198.51.100.${i % 250}`, json: { username: "lock", password } });
+    for (let i = 0; i < 50; i++) expect((await attempt("wrong-guess", i)).status).toBe(401);
+    // Even the right password, from somewhere new, waits now; other accounts don't.
+    const locked = await attempt("locks-password", 251);
+    expect(locked.status).toBe(429);
+    expect((await server.request("/api/auth/sign-in/username", { method: "POST", ip: "203.0.113.77", json: { username: "sehal", password: "correct-horse" } })).status).toBe(200);
+  }, 60_000);
+
+  test("a household's admin manages the people below them, not the owner", async () => {
+    const invited = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "deputy@example.com", role: "admin" } }));
+    await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "deputy@example.com", password: "deputy-password", name: "deputy", username: "deputy", invitationId: invited.id } });
+    const deputy = (await server.request("/api/auth/sign-in/username", { method: "POST", ip: "203.0.113.80", json: { username: "deputy", password: "deputy-password" } })).headers.get("set-auth-token")!;
+    expect((await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: deputy, json: { invitationId: invited.id } })).status).toBe(200);
+    const full = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const owner = full.members.find((m: any) => m.role.includes("owner"));
+    const member = full.members.find((m: any) => m.user.email === "bob@example.com");
+    const change = (id: string, patch: object) => server.request(`/api/household/members/${id}`, { method: "PATCH", token: deputy, json: patch });
+    expect((await change(owner.id, { isKids: true })).status).toBe(403);
+    expect((await change(owner.id, { name: "Not the owner" })).status).toBe(403);
+    expect((await change(member.id, { contentLimit: "teen" })).status).toBe(200);
+    expect((await change(member.id, { contentLimit: "none" })).status).toBe(200);
   });
 });

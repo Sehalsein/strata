@@ -1,11 +1,23 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { LoaderCircle, Plus, RefreshCw } from "lucide-react";
+import { ExternalLink, GripVertical, LoaderCircle, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
 import type { StreamAddon } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { relativeTime } from "@/lib/format";
+import { Link } from "@/lib/router";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorAlert } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -17,17 +29,24 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 
 const setItems = (items: StreamAddon[]) => queryClient.setQueryData(queryKeys.addons, { items });
-const reload = () => queryClient.invalidateQueries({ queryKey: queryKeys.addons });
+const reload = () => {
+  // Pages lists every add-on catalog, so it changes with them.
+  void queryClient.invalidateQueries({ queryKey: queryKeys.pages });
+  return queryClient.invalidateQueries({ queryKey: queryKeys.addons });
+};
 
 /**
  * The household's add-ons: Torrentio, AIOStreams, Comet or any other that finds streams,
- * each added by its manifest URL, as in Stremio. Discovery asks every one that's on.
+ * OpenSubtitles or any other that finds subtitles, and AIO Metadata or any other with
+ * catalogs (rows on the apps' pages, laid out under Pages), each added by its manifest URL, as in Stremio.
  * Changes save straight away; their URLs stay on the server (they often hold a key), so
  * rows show the host and Configure goes through a server redirect.
  */
 export function AddonsSection() {
-  const addons = useQuery({ queryKey: queryKeys.addons, queryFn: api.addons });
+  // Polled, so each add-on's status light stays current while the page is open.
+  const addons = useQuery({ queryKey: queryKeys.addons, queryFn: api.addons, refetchInterval: 30_000 });
   const items = addons.data?.items ?? [];
+  const removable = items.filter((a) => !a.builtIn);
   const [adding, setAdding] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -43,6 +62,22 @@ export function AddonsSection() {
       toast.error(errorMessage(err));
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  // Drag (or keyboard: Space, arrows, Space) to change the order; it moves at once and saves.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
+  const reorder = async ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const from = items.findIndex((a) => a.id === active.id);
+    const to = items.findIndex((a) => a.id === over.id);
+    if (from < 0 || to < 0) return;
+    setItems(arrayMove(items, from, to));
+    try {
+      setItems((await api.updateAddon(String(active.id), { index: to })).items);
+    } catch (err) {
+      toast.error(errorMessage(err));
+      void reload();
     }
   };
 
@@ -68,7 +103,7 @@ export function AddonsSection() {
           <Button variant="outline" onClick={refresh} disabled={refreshing || !items.length}>
             <RefreshCw className={cn(refreshing && "animate-spin")} /> Refresh
           </Button>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setConfirmClear(true)} disabled={!items.length}>
+          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setConfirmClear(true)} disabled={!removable.length}>
             Delete all
           </Button>
           <Button onClick={() => setAdding(true)}>
@@ -77,7 +112,7 @@ export function AddonsSection() {
         </div>
       </div>
 
-      <Card className="gap-0 divide-y overflow-hidden py-0">
+      <Card className="gap-0 overflow-hidden py-0">
         {addons.isPending ? (
           <div className="flex flex-col gap-3 p-5">
             <Skeleton className="h-10 w-full" />
@@ -89,27 +124,34 @@ export function AddonsSection() {
           </div>
         ) : items.length === 0 ? (
           <div className="flex flex-col items-start gap-3 px-5 py-8">
-            <p className="text-muted-foreground text-sm">No add-ons, so only TorBox's own search finds releases (if it's on under Discovery).</p>
+            <p className="text-muted-foreground text-sm">No add-ons, so only TorBox's own search finds releases (if it's on under Discovery), and subtitles come only from the files.</p>
             <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
               <Plus /> Add add-on
             </Button>
           </div>
         ) : (
-          items.map((a, i) => <AddonRow key={a.id} addon={a} index={i} count={items.length} />)
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorder}>
+            <SortableContext items={items.map((a) => a.id)} strategy={verticalListSortingStrategy}>
+              <ul className="divide-y" aria-label="Add-ons, in the order Strata asks them">
+                {items.map((a) => (
+                  <AddonRow key={a.id} addon={a} />
+                ))}
+              </ul>
+            </SortableContext>
+          </DndContext>
         )}
       </Card>
 
       <p className="text-muted-foreground px-1 text-xs">
-        Paste an add-on's manifest URL, the same one you'd install in Stremio. Every add-on that's on is asked for releases, top to bottom. Strata adds what it finds to your TorBox
-        itself, so an add-on has to say which torrent each result is: most do (Torrentio, Comet, MediaFusion, Jackettio). AIOStreams is asked through its search API, with the uuid
-        and password in its URL.
+        Add one with its manifest URL, the same one you'd install in Stremio. Drag to change the order: higher add-ons come first when sources tie. Subtitle add-ons are asked in
+        the languages set under General; catalog add-ons offer rows for the apps' pages, which start off: turn on the ones you want under Pages.
       </p>
 
       <UrlDialog
         open={adding}
         onOpenChange={setAdding}
         title="Add an add-on"
-        description="Paste its manifest URL. Strata reads the manifest first to check it finds movie or show streams."
+        description="Paste its manifest URL. Strata reads the manifest first to check it has streams, subtitles or catalogs of movies or shows."
         submitLabel="Add"
         onSubmit={async (url) => {
           const added = await api.addAddon(url);
@@ -121,7 +163,7 @@ export function AddonsSection() {
         open={confirmClear}
         onOpenChange={setConfirmClear}
         title="Delete every add-on?"
-        description="Strata stops searching all of them. You can add them again with their manifest URLs."
+        description="Strata stops asking all of them (its own built-in entry stays). You can add them again with their manifest URLs."
         confirmLabel="Delete all"
         onConfirm={clear}
       />
@@ -129,19 +171,20 @@ export function AddonsSection() {
   );
 }
 
-function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: number; count: number }) {
-  const [busy, setBusy] = useState(false);
+function AddonRow({ addon: a }: { addon: StreamAddon }) {
   const [editing, setEditing] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: a.id });
 
-  const update = async (patch: { enabled?: boolean; index?: number }) => {
-    setBusy(true);
+  /** Saves a change; the switch and menus show it at once, and it's undone if the server says no. */
+  const update = async (patch: { enabled?: boolean }, optimistic: Partial<StreamAddon>) => {
+    const before = queryClient.getQueryData<{ items: StreamAddon[] }>(queryKeys.addons)?.items;
+    if (before) setItems(before.map((x) => (x.id === a.id ? { ...x, ...optimistic } : x)));
     try {
       setItems((await api.updateAddon(a.id, patch)).items);
     } catch (err) {
+      if (before) setItems(before);
       toast.error(errorMessage(err));
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -156,47 +199,94 @@ function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: numbe
     }
   };
 
+  const hasMenu = a.configurable || !a.builtIn;
+
   return (
-    <div className="flex flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:gap-4">
-      <div className="flex min-w-0 flex-1 items-start gap-3">
-        <span className={cn("mt-2 size-2 shrink-0 rounded-full", a.enabled ? "bg-emerald-500" : "bg-muted-foreground/40")} aria-hidden />
-        <div className="min-w-0 space-y-0.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={cn("font-medium", !a.enabled && "text-muted-foreground")}>{a.name}</span>
-            {a.isDefault && <Badge variant="secondary">Default</Badge>}
-            {a.anime && <Badge variant="outline">Anime</Badge>}
-            {!a.enabled && <Badge variant="outline">Off</Badge>}
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn("bg-card relative flex items-center gap-2 py-3 pr-3 pl-1.5 sm:gap-3 sm:pr-4", isDragging && "z-10 shadow-lg ring-1 ring-border")}
+    >
+      <button
+        ref={setActivatorNodeRef}
+        type="button"
+        className="text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-ring flex size-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md outline-none focus-visible:ring-2 active:cursor-grabbing"
+        aria-label={`Move ${a.name}`}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="size-4" />
+      </button>
+
+      <div className={cn("flex min-w-0 flex-1 items-center gap-3 transition-opacity", !a.enabled && "opacity-55")}>
+        <span className={cn("size-2 shrink-0 rounded-full", healthDot(a))} aria-hidden />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate font-medium">{a.name}</span>
+            {a.builtIn && <Badge variant="secondary">Built in</Badge>}
           </div>
-          <p className="text-muted-foreground truncate text-sm">{a.host}</p>
+          <p className="text-muted-foreground truncate text-xs">{a.description ?? a.host}</p>
+          {a.enabled ? <HealthLine health={a.health} /> : <p className="text-muted-foreground text-xs">Off: Strata doesn't ask it.</p>}
+          {a.catalogs.length > 0 && (
+            <p className="text-muted-foreground text-xs">
+              Turn its rows on and order them in{" "}
+              <Link href="/settings/pages" className="text-foreground underline underline-offset-4">
+                Pages
+              </Link>
+              .
+            </p>
+          )}
+        </div>
+        <div className="hidden shrink-0 flex-wrap justify-end gap-1 md:flex md:max-w-56">
+          {a.resources.includes("stream") && <Badge variant="outline">Streams</Badge>}
+          {a.resources.includes("subtitles") && <Badge variant="outline">Subtitles</Badge>}
+          {a.resources.includes("catalog") && <Badge variant="outline">Catalogs</Badge>}
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2 pl-5 lg:pl-0">
-        {a.configurable && (
-          <Button variant="outline" size="sm" asChild>
-            <a href={api.addonConfigureUrl(a.id)} target="_blank" rel="noreferrer">
-              Configure
-            </a>
-          </Button>
-        )}
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => setEditing(true)}>
-          Edit
-        </Button>
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => setConfirmRemove(true)}>
-          Delete
-        </Button>
-        <Button variant="outline" size="sm" disabled={busy || index === 0} onClick={() => update({ index: index - 1 })} aria-label={`Move ${a.name} up`}>
-          Up
-        </Button>
-        <Button variant="outline" size="sm" disabled={busy || index === count - 1} onClick={() => update({ index: index + 1 })} aria-label={`Move ${a.name} down`}>
-          Down
-        </Button>
-        <Switch className="ml-1" checked={a.enabled} disabled={busy} onCheckedChange={(v) => update({ enabled: v })} aria-label={`Use ${a.name}`} />
-      </div>
+
+      <Switch
+        checked={a.enabled}
+        onCheckedChange={(v) => update({ enabled: v }, { enabled: v })}
+        aria-label={`${a.name}: ${a.enabled ? "on" : "off"}`}
+        title={a.enabled ? `Turn ${a.name} off` : `Turn ${a.name} on`}
+      />
+
+      {hasMenu ? (
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label={`More for ${a.name}`}>
+              <MoreHorizontal />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            {a.configurable && (
+              <DropdownMenuItem asChild>
+                <a href={api.addonConfigureUrl(a.id)} target="_blank" rel="noreferrer">
+                  <ExternalLink /> Configure
+                </a>
+              </DropdownMenuItem>
+            )}
+            {!a.builtIn && (
+              <>
+                <DropdownMenuItem onSelect={() => setEditing(true)}>
+                  <Pencil /> Change address…
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onSelect={() => setConfirmRemove(true)}>
+                  <Trash2 /> Delete…
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        <span className="size-8 shrink-0" aria-hidden />
+      )}
 
       <UrlDialog
         open={editing}
         onOpenChange={setEditing}
-        title={`Edit ${a.name}`}
+        title={`Change ${a.name}'s address`}
         description="Paste its new manifest URL, after changing its settings, say. It keeps its place in the list and its switch."
         submitLabel="Save"
         onSubmit={async (url) => {
@@ -208,11 +298,34 @@ function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: numbe
         open={confirmRemove}
         onOpenChange={setConfirmRemove}
         title={`Delete ${a.name}?`}
-        description="Strata stops searching it. You can add it again with its manifest URL."
+        description="Strata stops asking it. You can add it again with its manifest URL."
         confirmLabel="Delete"
         onConfirm={remove}
       />
-    </div>
+    </li>
+  );
+}
+
+/** The status light: green answering, amber paused, red failing, grey not asked yet or off. */
+function healthDot(a: StreamAddon) {
+  if (!a.enabled) return "bg-muted-foreground/40";
+  return { ok: "bg-emerald-500", failing: "bg-red-500", paused: "bg-amber-500", unknown: "bg-muted-foreground/40" }[a.health.state];
+}
+
+/** How the add-on is doing, in a line: when it last answered, or what went wrong. */
+function HealthLine({ health: h }: { health: StreamAddon["health"] }) {
+  if (h.state === "unknown") return <p className="text-muted-foreground text-xs">Not asked since the server started.</p>;
+  if (h.state === "ok")
+    return (
+      <p className="text-muted-foreground text-xs">
+        Answered {relativeTime(h.at)}
+        {h.latencyMs !== undefined && ` in ${h.latencyMs < 1000 ? `${h.latencyMs} ms` : `${(h.latencyMs / 1000).toFixed(1)} s`}`}
+      </p>
+    );
+  return (
+    <p className={cn("text-xs", h.state === "failing" ? "text-destructive" : "text-amber-700 dark:text-amber-400")}>
+      {h.state === "paused" ? "Paused" : "Failing"}: {h.message ?? "it didn't answer."} {h.state === "paused" ? `Strata asks again ${relativeTime(h.pausedUntil)}.` : `(${relativeTime(h.at)})`}
+    </p>
   );
 }
 

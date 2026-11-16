@@ -26,7 +26,7 @@ function service() {
   const library = { organizationId: "h1", filesFor: async () => files, get: async (id: number) => files.find((f) => f.id === id) ?? null };
   const torbox = { requestLink: async (_k: string, item: number) => `https://cdn.torbox.test/${item}` };
   const discovery = { available: false };
-  return new PlaybackService(library as never, {} as never, {} as never, () => settingsSchema.parse({ sourcePriority: ["torbox", "local"] }), () => null, () => torbox as never, discovery as never, async () => null);
+  return new PlaybackService(library as never, {} as never, {} as never, () => settingsSchema.parse({}), () => null, () => torbox as never, discovery as never, async () => null);
 }
 
 const caps = capsSchema.parse({ deviceRemux: true });
@@ -61,8 +61,8 @@ describe("downloads", () => {
 });
 
 describe("preferMaxHeight (the app on cellular data)", () => {
-  test("picks the best source no taller than the limit", async () => {
-    expect((await service().prepareDownload({ ...movie, preferMaxHeight: 1080 })).fileId).toBe(2);
+  test("picks the best source no taller than the limit (this server's copy before TorBox's)", async () => {
+    expect((await service().prepareDownload({ ...movie, preferMaxHeight: 1080 })).fileId).toBe(3);
   });
 
   test("falls back to the best source when none fits", async () => {
@@ -84,7 +84,7 @@ describe("playing with nothing in the library", () => {
       cachedReleases: async () => [release("a"), release("b"), release("c"), release("d")],
       acquire: async (_target: unknown, hash: string) => (tried.push(hash[0]!), acquire(hash[0]!)),
     };
-    const playback = new PlaybackService(library as never, {} as never, {} as never, () => settingsSchema.parse({ sourcePriority: ["torbox", "local"] }), () => null, () => ({ requestLink: async () => "https://cdn.torbox.test/2" }) as never, discovery as never, async () => null);
+    const playback = new PlaybackService(library as never, {} as never, {} as never, () => settingsSchema.parse({}), () => null, () => ({ requestLink: async () => "https://cdn.torbox.test/2" }) as never, discovery as never, async () => null);
     return { playback, tried };
   };
 

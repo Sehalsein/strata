@@ -2,11 +2,12 @@ import SwiftUI
 import StrataKit
 import StrataDesign
 
-/// Episodes of the shows on My List, day by day: the last week and the next month,
-/// opening at today. On iPhone and iPad it also turns on notifications for new episodes.
+/// What's coming, day by day, as the server lists it: episodes of the shows you follow and
+/// releases of the films on My List, the last week and the next month, opening at today.
+/// On iPhone and iPad it also turns on notifications for them.
 struct CalendarView: View {
     @Environment(AppServices.self) private var services
-    @State private var episodes: Loadable<[CalendarEpisode]> = .loading
+    @State private var episodes: Loadable<[CalendarEntry]> = .loading
     @State private var alertsOn = EpisodeAlerts.isEnabled
     @State private var alertsDenied = false
 
@@ -38,7 +39,7 @@ struct CalendarView: View {
                     Button { Task { await toggleAlerts() } } label: {
                         Label(alertsOn ? String(localized: "Notifications On", bundle: .module) : String(localized: "Notify Me", bundle: .module), systemImage: alertsOn ? "bell.fill" : "bell")
                     }
-                    .accessibilityHint(Text("Notifies you when episodes of shows on My List air", bundle: .module))
+                    .accessibilityHint(Text("Notifies you when new episodes and films come out, and when they're ready to play", bundle: .module))
                 }
             }
             ProfileToolbarItems()
@@ -47,7 +48,7 @@ struct CalendarView: View {
         .alert(String(localized: "Notifications are off for Strata", bundle: .module), isPresented: $alertsDenied) {
             Button(String(localized: "OK", bundle: .module), role: .cancel) {}
         } message: {
-            Text("Turn them on in Settings › Notifications › Strata to hear when new episodes air.", bundle: .module)
+            Text("Turn them on in Settings › Notifications › Strata to hear when new episodes and films come out.", bundle: .module)
         }
         #endif
         .task { await load() }
@@ -67,7 +68,7 @@ struct CalendarView: View {
             .frame(minHeight: 400)
         case .loaded(let list) where list.isEmpty:
             MessageView(systemImage: "calendar", title: String(localized: "Nothing on the calendar", bundle: .module),
-                        message: String(localized: "Add shows and anime to My List to see when new episodes air.", bundle: .module))
+                        message: String(localized: "Add shows and films to My List, or start watching a show, to see when new episodes and releases come out.", bundle: .module))
                 .frame(minHeight: 400)
         case .loaded:
             ForEach(days, id: \.day) { day in
@@ -80,7 +81,7 @@ struct CalendarView: View {
                     VStack(spacing: Metrics.space5) {
                         ForEach(day.episodes) { episode in
                             NavigationLink(value: Route.title(episode.ref)) {
-                                CalendarRow(episode: episode).frame(maxWidth: .infinity, alignment: .leading)
+                                CalendarRow(entry: episode).frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .buttonStyle(.card)
                         }
@@ -89,7 +90,7 @@ struct CalendarView: View {
                     VStack(spacing: 0) {
                         ForEach(day.episodes) { episode in
                             // A full-width row lifts like an episode row, not like a poster.
-                            NavigationLink(value: Route.title(episode.ref)) { CalendarRow(episode: episode) }
+                            NavigationLink(value: Route.title(episode.ref)) { CalendarRow(entry: episode) }
                                 .buttonStyle(FocusLiftStyle())
                             if episode.id != day.episodes.last?.id { Divider().overlay(Theme.hairline) }
                         }
@@ -113,13 +114,13 @@ struct CalendarView: View {
 
     private struct Day {
         let day: Date
-        let episodes: [CalendarEpisode]
+        let episodes: [CalendarEntry]
     }
 
     /// Episodes by the day they air here, in order.
     private var days: [Day] {
-        let all = (episodes.value ?? []).sorted { $0.date < $1.date }
-        let grouped = Dictionary(grouping: all) { Calendar.current.startOfDay(for: $0.date) }
+        let all = (episodes.value ?? []).sorted { $0.when < $1.when }
+        let grouped = Dictionary(grouping: all) { Calendar.current.startOfDay(for: $0.when) }
         return grouped.keys.sorted().map { Day(day: $0, episodes: grouped[$0]!) }
     }
 
@@ -133,7 +134,7 @@ struct CalendarView: View {
     }
 
     private func load(force: Bool = false) async {
-        await services.loadCached(force: force, { try await $0.calendar($1) }) { episodes = $0 }
+        await services.loadCached(force: force, { try await $0.calendarEntries($1) }) { episodes = $0 }
         if case .loaded(let list) = episodes { await EpisodeAlerts.schedule(list) }
     }
 
@@ -162,9 +163,10 @@ private struct DayHeadingStyle: ViewModifier {
     }
 }
 
-/// An episode on the calendar: the show's poster, its name, the episode and when it airs.
+/// Something on the calendar: the poster, the title, the server's words for it, whether it
+/// plays now, and the time when known.
 private struct CalendarRow: View {
-    let episode: CalendarEpisode
+    let entry: CalendarEntry
 
     #if os(tvOS)
     private let thumbWidth: CGFloat = 96
@@ -178,24 +180,23 @@ private struct CalendarRow: View {
 
     var body: some View {
         HStack(spacing: gap) {
-            ArtworkImage(url: episode.posterUrl, aspectRatio: 2 / 3, seed: episode.ref.description)
+            ArtworkImage(url: entry.posterUrl, aspectRatio: 2 / 3, seed: entry.ref.description)
                 .frame(width: thumbWidth)
                 #if os(tvOS)
                 // The row lifts as a whole; the poster's own focus lift would pull it to the edge.
                 .hoverEffectDisabled()
                 #endif
             VStack(alignment: .leading, spacing: 3) {
-                Text(episode.title).font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(1)
-                Text([episode.code, episode.name].compactMap { $0 }.joined(separator: " · "))
-                    .font(.stCallout).foregroundStyle(Theme.ink2).lineLimit(1)
-                if episode.available {
-                    Label(String(localized: "In your library", bundle: .module), systemImage: "checkmark.circle.fill")
+                Text(entry.title).font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(1)
+                Text(entry.label).font(.stCallout).foregroundStyle(Theme.ink2).lineLimit(1)
+                if entry.ready {
+                    Label(String(localized: "Ready to play", bundle: .module), systemImage: "play.circle.fill")
                         .font(.stFootnote).foregroundStyle(Theme.accentText)
                 }
             }
             Spacer(minLength: Metrics.space2)
-            if episode.hasTime {
-                Text(episode.date.formatted(date: .omitted, time: .shortened))
+            if entry.hasTime {
+                Text(entry.when.formatted(date: .omitted, time: .shortened))
                     .font(.stCallout.monospacedDigit()).foregroundStyle(Theme.ink3)
             }
         }

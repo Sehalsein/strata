@@ -278,6 +278,19 @@ public struct HeroBillboard<Actions: View>: View {
     }
 
     private var actionRow: some View {
+        #if os(tvOS)
+        actionButtons
+        #else
+        // On a phone the buttons may not all fit: they scroll sideways rather than widen the page.
+        ViewThatFits(in: .horizontal) {
+            actionButtons
+            ScrollView(.horizontal, showsIndicators: false) { actionButtons }
+                .scrollClipDisabled()
+        }
+        #endif
+    }
+
+    private var actionButtons: some View {
         // The featured hero spaces its buttons out like the TV app's.
         GlassEffectContainer(spacing: Metrics.space2) {
             HStack(spacing: usesFeaturedLayout ? Metrics.space6 : Metrics.space3) { actions() }

@@ -18,12 +18,12 @@ final class TitleRefTests: XCTestCase {
         }
     }
 
-    func testUnknownSourceIsKeptButUnsupported() throws {
+    /// The app doesn't judge sources: a new one the server sends is kept and sent back as it came.
+    func testUnknownSourceIsKeptAsSent() throws {
         let ref = try XCTUnwrap(TitleRef(string: "imdb:movie:1"))
         XCTAssertEqual(ref.source.rawValue, "imdb")
-        XCTAssertFalse(ref.isSupported)
-        XCTAssertTrue(TitleRef.tmdb(.movie, 1).isSupported)
-        XCTAssertTrue(TitleRef(source: .anilist, type: .movie, id: 1).isSupported)
+        XCTAssertEqual(ref.description, "imdb:movie:1")
+        XCTAssertNil(ref.tmdbId)
     }
 
     func testCodableAsOneString() throws {
@@ -63,7 +63,8 @@ final class TitleRefTests: XCTestCase {
         XCTAssertEqual(card.playbackTarget, .episode(show: TitleRef(source: .anilist, type: .show, id: 5), season: 1, episode: 3))
     }
 
-    func testListsDropTitlesThisAppCantUse() throws {
+    /// Broken items are dropped; a title from any source is kept (the server decides what's a title).
+    func testListsDropOnlyWhatIsntATitle() throws {
         let json = """
         {"items":[
           {"ref":"imdb:movie:1","type":"movie","title":"Unknown source","available":[]},
@@ -75,14 +76,14 @@ final class TitleRefTests: XCTestCase {
           {"ref":"anilist:movie:21519","type":"movie","title":"Also kept","available":[]}
         ]}
         """
-        XCTAssertEqual(try cards(json).map(\.title), ["Kept", "Also kept"])
+        XCTAssertEqual(try cards(json).map(\.title), ["Unknown source", "Kept", "Also kept"])
 
         let shelves = try JSONDecoder().decode(ShelvesResponse.self, from: Data("""
         {"shelves":[{"id":"a","title":"A","kind":"titles","items":[
           {"ref":"imdb:movie:1","type":"movie","title":"Gone","available":[]},
           {"ref":"anilist:show:2","type":"show","title":"Here","available":[]}]}]}
         """.utf8)).shelves
-        XCTAssertEqual(shelves.first?.items.map(\.title), ["Here"])
+        XCTAssertEqual(shelves.first?.items.map(\.title), ["Gone", "Here"])
     }
 
     func testCalendarByRef() throws {
@@ -94,7 +95,7 @@ final class TitleRefTests: XCTestCase {
         ]}
         """
         let items = try JSONDecoder().decode(ItemsResponse<CalendarEpisode>.self, from: Data(json.utf8)).items
-        XCTAssertEqual(items.map(\.ref), [TitleRef(source: .anilist, type: .show, id: 154_587), .tmdb(.show, 2)])
+        XCTAssertEqual(items.map(\.ref), [TitleRef(source: .anilist, type: .show, id: 154_587), .tmdb(.show, 2), TitleRef(source: .init(rawValue: "imdb"), type: .show, id: 3)])
         XCTAssertNil(items[0].tmdbId)
         XCTAssertEqual(items[0].id, "anilist:show:154587-x-32-2026-11-07")
     }
@@ -108,7 +109,7 @@ final class TitleRefTests: XCTestCase {
         let detail = try JSONDecoder().decode(ShowDetail.self, from: JSONSerialization.data(withJSONObject: show))
         XCTAssertEqual(detail.ref, TitleRef(source: .anilist, type: .show, id: 154_587))
         XCTAssertNil(detail.tmdbId)
-        XCTAssertEqual(detail.related.map(\.title), ["Season 2"])
+        XCTAssertEqual(detail.related.map(\.title), ["Season 2", "Unknown"])
         XCTAssertEqual(detail.upNextTarget?.title, detail.ref)
 
         let old = try Fixture.decode(ShowDetail.self, "show")

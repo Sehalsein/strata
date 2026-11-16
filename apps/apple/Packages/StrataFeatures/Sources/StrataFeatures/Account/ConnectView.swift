@@ -31,6 +31,7 @@ struct ConnectView: View {
     /// The camera (or a pasted link): a member's sign-in code or a server's address.
     @State private var scanning = false
     @State private var scannedSignIn: SignInCodeRequest?
+    @State private var scannedInvite: InviteRequest?
     /// Servers appear a moment after the screen; on tvOS focus moves to the first one
     /// (otherwise it sits on "Enter Address", the only button at first).
     @FocusState private var focusedServer: String?
@@ -99,6 +100,9 @@ struct ConnectView: View {
         }
         .sheet(item: $scannedSignIn) { request in
             SignInCodeView(request: request, onSignedIn: signedIn)
+        }
+        .sheet(item: $scannedInvite) { request in
+            InviteView(request: request, onJoined: signedIn)
         }
         #endif
         .onAppear { services.browser.start() }
@@ -431,7 +435,7 @@ struct ConnectView: View {
                     .background(Theme.apricot, in: RoundedRectangle(cornerRadius: Metrics.radiusSM, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Scan QR Code", bundle: .module).font(.stHeadline).foregroundStyle(Theme.ink)
-                    Text("Sign-in code or server address", bundle: .module)
+                    Text("Sign-in code, invitation or server address", bundle: .module)
                         .font(.stFootnote).foregroundStyle(Theme.ink3)
                 }
                 Spacer(minLength: Metrics.space2)
@@ -452,15 +456,20 @@ struct ConnectView: View {
                 try? await Task.sleep(for: .milliseconds(450))
                 scannedSignIn = request
             }
+        case .invite(let request):
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(450))
+                scannedInvite = request
+            }
         case .server(let address):
             self.address = address
             Task { await probe(address) }
         case .tvLink:
-            error = String(localized: "That's a TV's code. To sign a TV in, open Settings › Link a TV.", bundle: .module)
+            error = String(localized: "That's a TV's code. Sign in on this phone first, then open Settings › Sign In on a TV.", bundle: .module)
         case .tvPhoneLink:
             error = String(localized: "That's a TV's code. Sign in on this phone first, then scan it again to sign the TV in.", bundle: .module)
         case .unknown:
-            error = String(localized: "That QR code isn't from Strata. Scan a sign-in code from Members, or the server's address.", bundle: .module)
+            error = String(localized: "That QR code isn't from Strata. Scan a sign-in code or an invitation from Members, or the server's address.", bundle: .module)
         }
     }
     #endif
@@ -599,6 +608,7 @@ struct SignInView: View {
         }
         #endif
     }
+
 
     private var fields: some View {
         VStack(spacing: Metrics.space3) {

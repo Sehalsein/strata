@@ -1,6 +1,6 @@
 // The cloud server on Cloudflare Workers. Built by wrangler (deploy/cloudflare/), which
 // resolves `#runtime` to src/runtime/workers.ts. The dashboard is served as static
-// assets by Cloudflare; only /api/* reaches this Worker.
+// assets by Cloudflare; only /api/* (and Apple's app-site-association file) reaches this Worker.
 //
 // Each request (and cron run) gets its own database connection, straight to Neon (see
 // runtime/workers.ts). The services are built once per Worker instance, on its first
@@ -40,6 +40,8 @@ interface Env {
   STRATA_SITE_URL?: string;
   /** The domain passkeys belong to, when the server is on a subdomain of it. */
   STRATA_PASSKEY_RP_ID?: string;
+  /** "<team id>.com.sehalsein.strata": the iOS app may save passwords for this address. */
+  STRATA_APPLE_APP_IDS?: string;
   /** "Sign in with Google" shows only with both. */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;

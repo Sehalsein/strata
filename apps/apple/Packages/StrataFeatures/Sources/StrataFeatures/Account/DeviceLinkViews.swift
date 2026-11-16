@@ -67,7 +67,7 @@ struct TVCodeSignInView: View {
                 }
                 if let code {
                     VStack(alignment: .leading, spacing: Metrics.space4) {
-                        Text("Or enter this code in Strata on your phone, in Settings › Link a TV", bundle: .module)
+                        Text("Or type this code in Strata on your phone: Settings › Sign In on a TV", bundle: .module)
                             .font(.stCallout).foregroundStyle(Theme.ink3)
                             .fixedSize(horizontal: false, vertical: true)
                         CodeTiles(code.displayCode, size: .large)
@@ -337,13 +337,17 @@ struct CodeTiles: View {
 }
 
 /// Phone side: confirms and approves a TV's sign-in code, from the TV's QR code opened in
-/// the app (`request` set) or typed in from Settings (`request` nil). The TV is signed in
+/// the app (`request` set), or from Settings (`request` nil), where the code is scanned
+/// from the TV's screen or typed in. The TV is signed in
 /// as the account approving it, in its current household, and can only watch.
 struct ApproveDeviceView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
     var request: LinkRequest?
 
+    /// The TV's QR code, scanned from here.
+    @State private var scanned: LinkRequest?
+    @State private var scanning = false
     @State private var typedCode = ""
     @State private var looked: DeviceCodeStatus?
     @State private var phase: Phase = .idle
@@ -356,14 +360,16 @@ struct ApproveDeviceView: View {
     /// signed in to (a QR code could name any address).
     private var signIn: SavedSignIn? {
         let store = services.store
-        guard let named = request?.server else { return store.active }
+        guard let named = link?.server else { return store.active }
         guard let server = store.savedServer(matching: named) else { return nil }
         if let active = store.active, active.serverID == server.id { return active }
         return store.signIns(onServer: server.id).first
     }
     private var server: SavedServer? { signIn.flatMap { services.store.server(for: $0) } }
     private var client: StrataClient? { signIn.flatMap { services.store.client(forSignIn: $0.id) } }
-    private var code: String { DeviceCode.normalize(request?.code ?? typedCode) }
+    /// The code to approve: opened from a link, scanned here, or typed.
+    private var link: LinkRequest? { request ?? scanned }
+    private var code: String { DeviceCode.normalize(link?.code ?? typedCode) }
 
     var body: some View {
         NavigationStack {
@@ -379,7 +385,7 @@ struct ApproveDeviceView: View {
             }
             .scrollBounceBehavior(.basedOnSize)
             .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle(Text("Link a TV", bundle: .module))
+            .navigationTitle(Text("Sign In on a TV", bundle: .module))
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -392,6 +398,16 @@ struct ApproveDeviceView: View {
         .presentationDetents([.large])
         #if os(iOS)
         .sensoryFeedback(.success, trigger: phase == .done)
+        .sheet(isPresented: $scanning) {
+            QRScannerSheet { text in
+                guard let found = Self.tvCode(in: text) else {
+                    error = String(localized: "That isn't a TV's code. Scan the QR code your Apple TV shows when it asks you to sign in.", bundle: .module)
+                    return
+                }
+                scanned = found
+                Task { await lookUp() }
+            }
+        }
         #endif
         .task { if request != nil { await lookUp() } }
     }
@@ -444,13 +460,20 @@ struct ApproveDeviceView: View {
                     .disabled(phase == .approving)
             }
             .padding(.top, Metrics.space2)
-        } else if request != nil {
+        } else if link != nil {
             LinkHero(systemImage: "tv", tint: Theme.apricot, title: String(localized: "Checking the code…", bundle: .module), message: nil)
             if error == nil { ProgressView() }
             errorLabel
         } else {
-            LinkHero(systemImage: "tv", tint: Theme.apricot, title: String(localized: "Enter your TV's code", bundle: .module),
-                     message: String(localized: "It will be signed in to \(server?.name ?? String(localized: "this server", bundle: .module)) as \(signIn?.name ?? "you").", bundle: .module))
+            LinkHero(systemImage: "tv", tint: Theme.apricot, title: String(localized: "Sign in your TV", bundle: .module),
+                     message: String(localized: "Scan the QR code on your TV, or type the code under it. It will be signed in to \(server?.name ?? String(localized: "this server", bundle: .module)) as \(signIn?.name ?? "you").", bundle: .module))
+            #if os(iOS)
+            PrimaryButton(String(localized: "Scan the TV's QR Code", bundle: .module)) {
+                error = nil
+                scanning = true
+            }
+            Text("or type the code", bundle: .module).font(.stFootnote).foregroundStyle(Theme.ink3)
+            #endif
             TextField("K7QF-2MXD" as String, text: $typedCode)
                 .font(.system(.title2, design: .monospaced).weight(.semibold))
                 .multilineTextAlignment(.center)
@@ -464,6 +487,24 @@ struct ApproveDeviceView: View {
             errorLabel
             PrimaryButton(String(localized: "Continue", bundle: .module), isLoading: phase == .looking) { Task { await lookUp() } }
                 .disabled(code.count < 8 || phase == .looking)
+        }
+    }
+
+    /// A TV's sign-in QR code: the server's own `https://<server>/link?user_code=…` page,
+    /// or `strata://link?user_code=…&server=…`.
+    static func tvCode(in text: String) -> LinkRequest? {
+        guard let url = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines)), let scheme = url.scheme?.lowercased() else { return nil }
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
+        switch scheme {
+        case "http", "https":
+            guard url.path == "/link", let code = value("user_code"), !code.isEmpty else { return nil }
+            return LinkRequest(code: code, server: url.absoluteString)
+        case "strata" where url.host == "link":
+            guard let code = value("user_code") ?? value("code"), !code.isEmpty else { return nil }
+            return LinkRequest(code: code, server: value("server"))
+        default:
+            return nil
         }
     }
 
@@ -492,7 +533,11 @@ struct ApproveDeviceView: View {
         guard let client, !code.isEmpty else { return }
         phase = .looking
         error = nil
-        defer { if phase == .looking { phase = .idle } }
+        defer {
+            if phase == .looking { phase = .idle }
+            // A scanned code that didn't work: back to scanning or typing, with the reason.
+            if looked == nil, error != nil { scanned = nil }
+        }
         do {
             let status = try await client.deviceCodeStatus(userCode: code)
             if status.isPending {
@@ -571,7 +616,7 @@ struct PhoneLinkTVView: View {
                 .frame(maxWidth: 480)
                 .frame(maxWidth: .infinity)
                 .background(Theme.bg.ignoresSafeArea())
-                .navigationTitle(Text("Link a TV", bundle: .module))
+                .navigationTitle(Text("Sign In on a TV", bundle: .module))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }

@@ -5,6 +5,7 @@ import Network
 /// more an hour). Applies when the app chooses the source, not when you pick one.
 public enum CellularQuality: Int, CaseIterable, Identifiable, Sendable {
     case best = 0
+    case uhd2160 = 2160
     case hd1080 = 1080
     case hd720 = 720
 
@@ -13,6 +14,7 @@ public enum CellularQuality: Int, CaseIterable, Identifiable, Sendable {
     public var label: String {
         switch self {
         case .best: String(localized: "Best Available", bundle: .module)
+        case .uhd2160: String(localized: "Up to 4K", bundle: .module)
         case .hd1080: String(localized: "Up to 1080p", bundle: .module)
         case .hd720: String(localized: "Up to 720p", bundle: .module)
         }

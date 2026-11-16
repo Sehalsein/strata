@@ -14,6 +14,7 @@ import { isAvatarImage } from "../avatars";
 import { sameSecret } from "../secrets";
 import type { DeploymentProfile } from "../profile";
 import { roleRank } from "./permissions";
+import { LOGIN_PER_USER, LOGIN_PER_USER_ADDRESS, Throttle } from "../throttle";
 import { runtime } from "#runtime";
 
 const DAY_S = 24 * 60 * 60;
@@ -225,6 +226,40 @@ export function createAuth(options: AuthOptions) {
   type PathRule = { before?: (ctx: HookContext) => Promise<void>; after?: (ctx: HookContext) => Promise<unknown> };
   const returnedOk = (ctx: HookContext) => !!ctx.context.returned && !(ctx.context.returned instanceof Error);
 
+  // Wrong passwords per account, on top of Better Auth's per-address limit: guessing spread
+  // over many addresses still locks the account for a while; one address guessing locks
+  // only itself out of it first. Counted per account whichever way it's named (username
+  // or email); a success clears them.
+  const throttle = new Throttle(db);
+  const loginKeys = async (ctx: HookContext): Promise<string[] | null> => {
+    const b = (ctx.body ?? {}) as { username?: unknown; email?: unknown };
+    const named = String(b.username ?? b.email ?? "").trim().toLowerCase();
+    if (!named) return null;
+    const column = b.username !== undefined ? schema.user.username : schema.user.email;
+    const [found] = await db.select({ id: schema.user.id }).from(schema.user).where(eq(column, named)).limit(1);
+    const who = found?.id ?? `name:${named}`;
+    const address = ctx.headers?.get(CLIENT_ADDRESS_HEADER) ?? "unknown";
+    return [`login-user:${who}`, `login-user-address:${who}:${address}`];
+  };
+  const passwordSignIn: PathRule = {
+    before: async (ctx) => {
+      const keys = await loginKeys(ctx);
+      if (!keys) return;
+      const wait = Math.max(...(await Promise.all(keys.map((k) => throttle.retryAfter(k)))));
+      if (wait) throw new APIError("TOO_MANY_REQUESTS", { message: `Too many wrong passwords for this account. Try again in ${Math.ceil(wait / 60_000)} minutes.` });
+    },
+    after: async (ctx) => {
+      const keys = await loginKeys(ctx);
+      if (!keys) return;
+      const returned = ctx.context.returned as { statusCode?: number } | undefined;
+      if (returnedOk(ctx)) await Promise.all(keys.map((k) => throttle.reset(k)));
+      else if (returned?.statusCode === 401) {
+        await throttle.fail(keys[0]!, LOGIN_PER_USER);
+        await throttle.fail(keys[1]!, LOGIN_PER_USER_ADDRESS);
+      }
+    },
+  };
+
   // An invitation's id lets whoever has it sign up into its role: only the household's
   // owner and admins see them.
   const invitationsForAdmins: PathRule = {
@@ -295,6 +330,8 @@ export function createAuth(options: AuthOptions) {
         if (!sameSecret(ctx.headers?.get(SIGN_IN_CODE_HEADER) ?? "", signInCodeSecret())) throw new APIError("NOT_FOUND", { message: "Not found" });
       },
     },
+    "/sign-in/username": passwordSignIn,
+    "/sign-in/email": passwordSignIn,
     "/request-password-reset": needsEmail,
     "/forget-password": needsEmail,
     "/admin/set-user-password": {
@@ -397,6 +434,18 @@ export function createAuth(options: AuthOptions) {
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         if (profile.readOnly && demoRefuses(ctx.path)) throw new APIError("FORBIDDEN", { message: "The demo can't be changed." });
+        // The admin plugin trusts the role saved on the account, which only follows the
+        // admin list (the cloud's STRATA_ADMIN_EMAILS) at sign-in: someone taken off it keeps
+        // the role until then. So its routes ask again here. The two it allows everyone
+        // (setting someone's password, removing them) have their own rule (mayManageTarget).
+        // (Asked of HTTP requests: the server's own calls, like setup making the first admin,
+        // have no request and are trusted.)
+        if (ctx.request && ctx.path.startsWith("/admin/") && ctx.path !== "/admin/set-user-password" && ctx.path !== "/admin/remove-user") {
+          const caller = ctx.headers ? await auth.api.getSession({ headers: ctx.headers }) : null;
+          if (!caller || !isSystemAdmin(profile, caller.user as { role?: string | null; email?: string | null; emailVerified?: boolean | null })) {
+            throw new APIError("FORBIDDEN", { message: "Only the server's admin can do that." });
+          }
+        }
         if (!viewerMayCall(ctx.path)) {
           const caller = ctx.headers ? await auth.api.getSession({ headers: ctx.headers }) : null;
           if ((caller?.session as { viewerOnly?: boolean | null } | undefined)?.viewerOnly) {
@@ -412,12 +461,14 @@ export function createAuth(options: AuthOptions) {
         create: {
           // Cloud: the server's admins are named by email (STRATA_ADMIN_EMAILS). A picture
           // from elsewhere (Google's) isn't kept: profile pictures are the server's own.
-          // Someone signing up from an invitation counts as confirmed: the household's admin
-          // sent the link to that address (the sign-up hook checked the invitation).
+          // On a home server someone signing up from an invitation counts as confirmed: only
+          // its admins invite, and they sent the link to that address (the sign-up hook checked
+          // the invitation). Not in the cloud: anyone there can invite any address (from their
+          // own household), so an invitation proves nothing about who owns it.
           before: async (user, ctx) => {
             const image = user.image != null && !isAvatarImage(user.image) ? null : user.image;
             // An invitation's link is passed on by hand, so it doesn't prove an admin's address.
-            const invited = ctx?.path === "/sign-up/email" && !!(ctx.body as { invitationId?: unknown } | undefined)?.invitationId && !(confirmEmail && isAdminEmail(profile, user.email));
+            const invited = !profile.openSignUp && ctx?.path === "/sign-up/email" && !!(ctx.body as { invitationId?: unknown } | undefined)?.invitationId;
             const emailVerified = invited || !!user.emailVerified;
             return { data: { ...user, image, ...(invited ? { emailVerified: true } : {}), ...(isSystemAdmin(profile, { email: user.email, emailVerified }) ? { role: "admin" } : {}) } };
           },
@@ -610,7 +661,9 @@ export function createAuth(options: AuthOptions) {
         // Invitations last a week; the dashboard shows their link (no mail is sent), and
         // its id is what proves the invitee (see the sign-up hook), not a verified email.
         invitationExpiresIn: 7 * DAY_S,
-        requireEmailVerificationOnInvitation: false,
+        // Where addresses are confirmed by mail (the cloud), only a confirmed one can take up
+        // an invitation: otherwise whoever registered someone's address first gets theirs.
+        requireEmailVerificationOnInvitation: confirmEmail,
         sendInvitationEmail: async () => {},
         // Households are made by the server admin (or setup); in the cloud, also one by each
         // new account (its own, see the sign-up `after` hook).

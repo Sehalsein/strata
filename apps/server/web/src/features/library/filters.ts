@@ -67,7 +67,7 @@ export function readUrlState(search: string): LibraryState {
     q: p.get("q")?.slice(0, 200) ?? "",
     searchIn: pick(p.get("searchIn"), ["all", "title", "filename"], "all"),
     status: pick(p.get("status"), ["all", "unmatched", "pending", "matched", "manual", "ignored"], "all"),
-    provider: pick(p.get("provider"), ["all", "local", "torbox"], "all"),
+    provider: pick(p.get("provider"), ["all", "local", "torbox", "link"], "all"),
     mediaType: pick(p.get("mediaType"), ["all", "movie", "episode"], "all"),
     accessed: pick(p.get("accessed"), ["all", "yes", "no"], "all"),
     sort: pick(p.get("sort"), SORTS.map((s) => s.value), "lastAccessed"),

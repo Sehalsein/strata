@@ -212,14 +212,14 @@ struct SettingsView: View {
                         }
                     }
                     Button { showLinkTV = true } label: {
-                        Label(String(localized: "Link a TV", bundle: .module), systemImage: "appletv")
+                        Label(String(localized: "Sign In on a TV", bundle: .module), systemImage: "appletv")
                     }
                     #endif
                 } header: {
                     Text("Account", bundle: .module)
                 } footer: {
                     #if os(iOS)
-                    Text("Sign in an Apple TV as \(active.name) by approving the code it shows.", bundle: .module)
+                    Text("Scan the QR code your Apple TV shows, or type its code, to sign it in as \(active.name).", bundle: .module)
                     #endif
                 }
             }

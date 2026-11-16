@@ -23,6 +23,8 @@ In Certificates, Identifiers & Profiles, register the explicit bundle IDs below 
 
 The two bundle IDs above are registered to the Apple Developer team used for Strata.
 
+The iOS app ID `com.sehalsein.strata` needs the **Associated Domains** capability: the app lists `webcredentials:app.strata.sehalsein.com` so the Passwords app saves and fills cloud passwords. Turn it on for the app ID, then regenerate `AppStore com.sehalsein.strata` (a profile made before it won't sign the build). The cloud server must also answer Apple's check: set `STRATA_APPLE_APP_IDS` to `<Team ID>.com.sehalsein.strata` in `deploy/cloudflare/wrangler.jsonc` `vars` (or as a Worker variable) and redeploy. `https://app.strata.sehalsein.com/.well-known/apple-app-site-association` should then list it.
+
 Create an Apple Distribution certificate and export the certificate together with its private key from Keychain Access as a password-protected `.p12` file.
 
 In App Store Connect:

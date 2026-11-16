@@ -1,5 +1,6 @@
+import { newSetupCode } from "../src/setupCode";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { addonStreams, AddonError, assertPublicHost, setResolverForTests, inspectAddon, isPublicAddress, languageCodes, languagesFromText, manifestUrl, type StreamAddon } from "../src/sources/addons";
+import { addonStreams, AddonError, assertAddonReady, assertPublicHost, setResolverForTests, inspectAddon, isPublicAddress, languageCodes, languagesFromText, manifestUrl, type StreamAddon } from "../src/sources/addons";
 import { rankReleases, type Release } from "../src/sources/discovery";
 import { parseFileName } from "../src/media/parse";
 import { fakeTmdb, startTestServer, type TestServer } from "./helpers";
@@ -8,7 +9,7 @@ const H = (c: string) => c.repeat(40);
 // Names in these tests resolve to a public address, except ones that say otherwise.
 setResolverForTests(async (host) => (host.startsWith("rebound.") ? ["10.0.0.7"] : host.startsWith("nowhere.") ? Promise.reject(new Error("ENOTFOUND")) : ["93.184.215.14"]));
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
-const addon = (over: Partial<StreamAddon> = {}): StreamAddon => ({ id: "x", url: "https://addon.example/cfg/manifest.json", name: "Addon", enabled: true, idPrefixes: null, kind: "stremio", configurable: false, allowPrivate: false, ...over });
+const addon = (over: Partial<StreamAddon> = {}): StreamAddon => ({ id: "x", url: "https://addon.example/cfg/manifest.json", name: "Addon", enabled: true, resources: ["stream"], idPrefixes: null, subtitleIdPrefixes: null, catalogs: [], kind: "stremio", configurable: false, allowPrivate: false, ...over });
 
 describe("add-on addresses", () => {
   test("pasted addresses become manifest URLs", () => {
@@ -28,9 +29,10 @@ describe("add-on addresses", () => {
       return m ? json(m) : new Response("nope", { status: 404 });
     }) as unknown as typeof fetch;
 
-    expect(await inspectAddon("https://t.example", fetchImpl)).toEqual({ url: "https://t.example/manifest.json", name: "Torrentio", idPrefixes: ["tt", "kitsu"], kind: "stremio", configurable: true, allowPrivate: false });
+    expect(await inspectAddon("https://t.example", fetchImpl)).toEqual({ url: "https://t.example/manifest.json", name: "Torrentio", resources: ["stream"], idPrefixes: ["tt", "kitsu"], subtitleIdPrefixes: null, catalogs: [], kind: "stremio", configurable: true, allowPrivate: false });
     expect(await inspectAddon("https://a.example/stremio/u-1/enc%3Apw/manifest.json", fetchImpl)).toMatchObject({ name: "AIOStreams", idPrefixes: ["tt"], kind: "aiostreams" });
-    await expect(inspectAddon("https://c.example/catalog/manifest.json", fetchImpl)).rejects.toThrow("doesn't find streams");
+    // It offers catalogs, but lists none Strata can show.
+    await expect(inspectAddon("https://c.example/catalog/manifest.json", fetchImpl)).rejects.toThrow("doesn't have movies or shows");
     await expect(inspectAddon("https://c.example/missing", fetchImpl)).rejects.toThrow("answered 404");
   });
 });
@@ -72,7 +74,7 @@ describe("add-on hosts", () => {
 });
 
 describe("add-on streams", () => {
-  test("hashes come from infoHash, AIOStreams' streamData, or a debrid link; others are dropped", async () => {
+  test("hashes come from infoHash, AIOStreams' streamData, or a debrid link; other streams are links", async () => {
     const fetchImpl = (async (input: string) => {
       expect(new URL(input).pathname).toBe("/cfg/stream/series/tt1:2:3.json");
       return json({
@@ -93,6 +95,12 @@ describe("add-on streams", () => {
             },
           },
           { name: "Web", title: "A plain link", url: "https://cdn.example/video.mp4" },
+          { name: "ElfHosted ⬇", title: "Show.S02E03.1080p.mkv", url: "https://comet.example/playback/OPAQUE", behaviorHints: { filename: "Show.S02E03.1080p.mkv", videoSize: 123 } },
+          { name: "Needs headers", title: "x", url: "https://proxy.example/x", behaviorHints: { proxyHeaders: { request: { Cookie: "a" } } } },
+          { name: "Comet", title: "ℹ Kindly configure this addon to access streams.", url: "https://comet.example/configure-me" },
+          { name: "Plain http", title: "y", url: "http://insecure.example/video.mp4" },
+          // Comet's torrent mode: no infoHash field, the hash in its group label.
+          { name: "[TORRENT] Comet 1080p", title: "Show.S02E03.1080p.BluRay\n💾 2 GB", fileIdx: 3, behaviorHints: { bingeGroup: `comet|torrent|${H("d")}`, filename: "Show.S02E03.1080p.BluRay.mkv" } },
         ],
       });
     }) as unknown as typeof fetch;
@@ -103,6 +111,11 @@ describe("add-on streams", () => {
       expect.objectContaining({ hash: H("b"), title: "Show.S02.2160p.WEB", fileName: "Show.S02E03.2160p.WEB.mkv", size: 9 * 1024 ** 3, seeders: 4, resolution: 2160, cached: true, languages: ["it"] }),
       // AIOStreams' streamData: its TorBox check and parsed details.
       expect.objectContaining({ hash: H("c"), title: "Show.S02.720p", fileName: "Show.S02E03.720p.mkv", size: 700, seeders: 5, resolution: 720, cached: false, languages: ["en", "ja"], hdr: "dv", videoCodec: "hevc" }),
+      // Links: played from where they point. Unmarked is taken as ready; ⬇ has to download first.
+      // Ones needing request headers, asking to be set up, or not https are left out.
+      expect.objectContaining({ hash: undefined, link: "https://cdn.example/video.mp4", cached: true }),
+      expect.objectContaining({ hash: undefined, link: "https://comet.example/playback/OPAQUE", fileName: "Show.S02E03.1080p.mkv", size: 123, cached: false }),
+      expect.objectContaining({ hash: H("d"), link: undefined, fileName: "Show.S02E03.1080p.BluRay.mkv" }),
     ]);
   });
 
@@ -161,13 +174,13 @@ describe("ranking", () => {
     expect(ranked.map((x) => x.title[0])).toEqual(["D", "E", "C", "B", "A"]);
   });
 
-  test("the add-ons' order, when the household picks it", () => {
+  test("the add-on order only breaks ties", () => {
     const ranked = rankReleases(
-      [r("A.2160p.REMUX", { addonOrder: 10_002 }), r("B.720p.WEB", { addonOrder: 1 }), r("C.1080p.WEB", { addonOrder: 0 }), r("D.2160p.WEB")],
-      { ...limits, releaseOrder: "addons" },
+      [r("A.1080p.WEB", { addonOrder: 10_002 }), r("B.720p.WEB", { addonOrder: 1 }), r("C.1080p.WEB", { addonOrder: 0 }), r("D.1080p.WEB")],
+      limits,
     );
-    // Top add-on's first result first; TorBox search's own (no add-on order) last.
-    expect(ranked.map((x) => x.title[0])).toEqual(["C", "B", "A", "D"]);
+    // Quality first; among the 1080p ones, the top add-on's first, TorBox search's own (no add-on order) last.
+    expect(ranked.map((x) => x.title[0])).toEqual(["C", "A", "D", "B"]);
   });
 });
 
@@ -178,18 +191,18 @@ describe("add-ons in the dashboard", () => {
   beforeAll(async () => {
     const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input instanceof Request ? input.url : input));
-      if (url.hostname === "comet.example") return json({ id: "comet", name: "Comet", resources: ["stream"], types: ["movie", "series"], idPrefixes: ["tt"] });
+      if (url.hostname === "comet.example") return json({ id: "comet", name: "Comet", resources: ["stream"], types: ["movie", "series"], idPrefixes: ["tt"], behaviorHints: { configurable: true } });
       return fakeTmdb(input, init);
     }) as typeof fetch;
     server = await startTestServer(fetchImpl, { ffmpeg: null });
-    token = ((await (await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "aa", password: "password1" } })).json()) as { token: string }).token;
+    token = ((await (await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { setupCode: await newSetupCode(server.services.db), username: "aa", password: "password1" } })).json()) as { token: string }).token;
   }, 60_000);
 
   afterAll(() => server.services.shutdown());
 
-  test("starts with the server's Torrentio; add, turn off, move and remove; URLs never come back", async () => {
-    const list = async () => ((await (await server.request("/api/admin/addons", { token })).json()) as { items: { id: string; name: string; host: string; enabled: boolean; isDefault: boolean }[] }).items;
-    expect(await list()).toEqual([expect.objectContaining({ id: "default", name: "Torrentio", host: "torrentio.strem.fun", enabled: true, isDefault: true })]);
+  test("starts with the built-in Strata entry; add, turn off, move and remove; URLs never come back", async () => {
+    const list = async () => ((await (await server.request("/api/admin/addons", { token })).json()) as { items: { id: string; name: string; host: string; enabled: boolean; isDefault: boolean; builtIn: boolean }[] }).items;
+    expect(await list()).toEqual([expect.objectContaining({ id: "strata", name: "Strata", host: "Built in", enabled: true, isDefault: true, builtIn: true })]);
 
     const added = await server.request("/api/admin/addons", { method: "POST", token, json: { url: "https://comet.example/SECRET-CONFIG/manifest.json" } });
     expect(added.status).toBe(201);
@@ -199,27 +212,63 @@ describe("add-ons in the dashboard", () => {
     const again = await server.request("/api/admin/addons", { method: "POST", token, json: { url: "https://comet.example/SECRET-CONFIG" } });
     expect(again.status).toBe(400);
 
-    await server.request(`/api/admin/addons/${comet.id}`, { method: "PATCH", token, json: { enabled: false, index: 0 } });
-    expect((await list()).map((a) => [a.name, a.enabled])).toEqual([["Comet", false], ["Torrentio", true]]);
+    // Strata moves and switches off like any other.
+    await server.request(`/api/admin/addons/${comet.id}`, { method: "PATCH", token, json: { index: 0 } });
+    await server.request("/api/admin/addons/strata", { method: "PATCH", token, json: { enabled: false } });
+    expect((await list()).map((a) => [a.name, a.enabled])).toEqual([["Comet", true], ["Strata", false]]);
 
-    // Configure redirects to the add-on's own page; the URL never comes back as data.
-    const configure = await server.request("/api/admin/addons/default/configure", { token, redirect: "manual" });
+    // Configure redirects to the add-on's own page; the URL never comes back as data. Strata has none.
+    const configure = await server.request(`/api/admin/addons/${comet.id}/configure`, { token, redirect: "manual" });
     expect(configure.status).toBe(302);
-    expect(configure.headers.get("Location")).toBe("https://torrentio.strem.fun/configure");
+    expect(configure.headers.get("Location")).toBe("https://comet.example/SECRET-CONFIG/configure");
     expect(configure.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect((await server.request("/api/admin/addons/strata/configure", { token, redirect: "manual" })).status).toBe(404);
 
-    // Edit points it elsewhere, in the same place and with the same switch.
+    // Edit points it elsewhere, in the same place and with the same switch; Strata has no address.
     const edited = await server.request(`/api/admin/addons/${comet.id}`, { method: "PATCH", token, json: { url: "https://comet.example/OTHER" } });
     expect(edited.status).toBe(200);
-    expect((await list()).map((a) => [a.name, a.enabled])).toEqual([["Comet", false], ["Torrentio", true]]);
-    expect((await server.request("/api/admin/addons/default", { method: "PATCH", token, json: { url: "https://nowhere.example" } })).status).toBe(400);
+    expect((await list()).map((a) => [a.name, a.enabled])).toEqual([["Comet", true], ["Strata", false]]);
+    expect((await server.request("/api/admin/addons/strata", { method: "PATCH", token, json: { url: "https://nowhere.example" } })).status).toBe(400);
 
     const refreshed = (await (await server.request("/api/admin/addons/refresh", { method: "POST", token })).json()) as { failed: string[] };
-    expect(refreshed.failed).toEqual(["Torrentio"]); // the test's fetch has no Torrentio
+    expect(refreshed.failed).toEqual([]);
 
+    // Strata can't be removed, and stays (as it was) when the rest are.
+    expect((await server.request("/api/admin/addons/strata", { method: "DELETE", token })).status).toBe(400);
     await server.request("/api/admin/addons", { method: "DELETE", token });
-    // An empty list stays empty: it doesn't fall back to Torrentio.
-    expect(await list()).toEqual([]);
+    expect((await list()).map((a) => [a.id, a.enabled])).toEqual([["strata", false]]);
     expect((await server.request("/api/admin/addons/nope", { method: "DELETE", token })).status).toBe(404);
+  });
+});
+
+describe("add-ons that aren't set up", () => {
+  const manifest = (over: Record<string, unknown> = {}) => ({ id: "x", name: "Thing", resources: ["stream"], types: ["movie"], ...over });
+
+  test("a manifest that says it needs configuring is refused, with what to do", async () => {
+    const fetchImpl = (async () => json(manifest({ resources: ["subtitles"], behaviorHints: { configurable: true, configurationRequired: true } }))) as unknown as typeof fetch;
+    await expect(inspectAddon("https://subs.example", fetchImpl)).rejects.toThrow("needs setting up first");
+  });
+
+  test("a stream add-on that turns requests away, or only asks to be configured, is refused", async () => {
+    const answers: Record<string, () => Response> = {
+      forbidden: () => new Response("no", { status: 403 }),
+      configure: () => json({ streams: [{ name: "Thing", title: "ℹ Kindly configure this addon to access streams.", url: "https://configure.example/x" }] }),
+      empty: () => json({ streams: [] }),
+      works: () => json({ streams: [{ name: "Thing", title: "Film 1080p", infoHash: H("a") }] }),
+      down: () => new Response("oops", { status: 500 }),
+    };
+    for (const [kind, expectRefused] of [["forbidden", true], ["configure", true], ["empty", false], ["works", false], ["down", false]] as const) {
+      const fetchImpl = (async () => answers[kind]!()) as unknown as typeof fetch;
+      const check = assertAddonReady({ ...addon(), name: "Thing" }, fetchImpl);
+      if (expectRefused) await expect(check).rejects.toThrow("Thing needs setting up first");
+      else await expect(check).resolves.toBeUndefined();
+    }
+  });
+
+  test("subtitle-only add-ons aren't asked for streams", async () => {
+    let called = false;
+    const fetchImpl = (async () => ((called = true), new Response("no", { status: 403 }))) as unknown as typeof fetch;
+    await assertAddonReady({ ...addon(), resources: ["subtitles"] }, fetchImpl);
+    expect(called).toBe(false);
   });
 });

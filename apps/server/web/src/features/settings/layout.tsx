@@ -3,19 +3,25 @@ import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
-/** A titled group of setting rows, divided by hairlines. */
+/**
+ * A titled group of setting rows. The title and description sit above the card as the
+ * group's heading, so they read apart from the settings in it; rows are divided by hairlines.
+ */
 export function SettingsSection({ title, description, action, children, className }: { title: string; description?: ReactNode; action?: ReactNode; children: ReactNode; className?: string }) {
+  const id = useId();
   return (
-    <Card className={cn("gap-0 py-0", className)}>
-      <div className="flex items-start justify-between gap-4 px-5 pt-5 pb-4">
-        <div className="space-y-1">
-          <h2 className="font-semibold">{title}</h2>
-          {description && <p className="text-muted-foreground text-sm">{description}</p>}
+    <section aria-labelledby={id} className={cn("flex flex-col gap-3", className)}>
+      <div className="flex items-end justify-between gap-4 px-1">
+        <div className="space-y-0.5">
+          <h3 id={id} className="text-base font-semibold tracking-tight">
+            {title}
+          </h3>
+          {description && <p className="text-muted-foreground text-sm [&_a]:underline [&_a]:underline-offset-4">{description}</p>}
         </div>
         {action}
       </div>
-      <div className="divide-y border-t">{children}</div>
-    </Card>
+      <Card className="gap-0 divide-y py-0">{children}</Card>
+    </section>
   );
 }
 

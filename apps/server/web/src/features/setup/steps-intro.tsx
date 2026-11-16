@@ -69,13 +69,22 @@ function Need({ icon: Icon, title, badge, children }: { icon: typeof Film; title
 
 const STRENGTH_COLORS = ["bg-muted", "bg-destructive", "bg-warn", "bg-ok", "bg-ok"];
 
+/** The setup code Strata.app put in the address (`#setup=XXXX-XXXX-XXXX`), once. */
+function handedSetupCode(): string {
+  const code = new URLSearchParams(window.location.hash.slice(1)).get("setup") ?? "";
+  if (code) history.replaceState(null, "", window.location.pathname + window.location.search);
+  return /^[A-Z0-9-]{12,14}$/i.test(code) ? code : "";
+}
+
 export function AccountStep({ info, onNext, onBack }: StepProps) {
   const [username, setUsername] = useState("admin");
   const [email, setEmail] = useState("");
   const [householdName, setHouseholdName] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [setupCode, setSetupCode] = useState("");
+  // Strata.app opens the dashboard with the setup code in the address's fragment (never
+  // sent to a server); it's taken from there and the address tidied.
+  const [setupCode, setSetupCode] = useState(handedSetupCode);
   // The server says when the code is needed; a rejection that mentions it reveals the field too.
   const [needsCode, setNeedsCode] = useState(info.setupCodeRequired === true);
   const [touched, setTouched] = useState(false);
