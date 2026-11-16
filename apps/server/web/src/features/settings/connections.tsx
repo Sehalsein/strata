@@ -237,7 +237,7 @@ function TorboxSync({ draft, set }: { draft: Settings; set: SetFn }) {
         label="Sync every"
         hint={draft.torboxSyncMinutes === 0 ? "Off: new TorBox items show up only when you add them here." : "Picks up what's new in your TorBox account."}
       >
-        <ChoiceSelect id="torbox-sync" className="sm:w-48" value={draft.torboxSyncMinutes} options={SYNC_INTERVALS} describe={minutesLabel} onChange={(v) => set("torboxSyncMinutes", v)} />
+        <ChoiceSelect id="torbox-sync" className="sm:w-full" value={draft.torboxSyncMinutes} options={SYNC_INTERVALS} describe={minutesLabel} onChange={(v) => set("torboxSyncMinutes", v)} />
       </SyncRow>
       <SyncRow
         id="torbox-cleanup"
@@ -248,7 +248,7 @@ function TorboxSync({ draft, set }: { draft: Settings; set: SetFn }) {
             : "Removes releases Strata added for you once nobody has played them this long. What you add yourself is never touched."
         }
       >
-        <ChoiceSelect id="torbox-cleanup" className="sm:w-48" value={draft.torboxCleanupDays} options={CLEANUP_DAYS} describe={(d) => `After ${d} days`} onChange={(v) => set("torboxCleanupDays", v)} />
+        <ChoiceSelect id="torbox-cleanup" className="sm:w-full" value={draft.torboxCleanupDays} options={CLEANUP_DAYS} describe={(d) => `After ${d} days`} onChange={(v) => set("torboxCleanupDays", v)} />
       </SyncRow>
     </div>
   );
@@ -265,7 +265,7 @@ function SyncRow({ id, label, hint, children }: { id: string; label: string; hin
           {hint}
         </p>
       </div>
-      <div className="w-36 shrink-0">{children}</div>
+      <div className="w-full sm:w-48 sm:shrink-0">{children}</div>
     </div>
   );
 }

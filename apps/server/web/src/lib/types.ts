@@ -201,14 +201,12 @@ export interface Settings {
   region: string;
   scanIntervalMinutes: number;
   torboxSyncMinutes: number;
-  sourcePriority: Provider[];
   maxResolution: number;
   hardwareAcceleration: boolean;
   maxTranscodes: number;
   discoveryEnabled: boolean;
   torrentioUrl: string;
   useTorboxSearch: boolean;
-  releaseOrder: "strata" | "addons";
   showUncached: boolean;
   maxReleaseSizeGb: number;
   /** ISO 639-1 codes, most wanted first; empty means the household's language. */

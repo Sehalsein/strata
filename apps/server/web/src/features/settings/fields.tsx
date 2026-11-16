@@ -43,7 +43,7 @@ export function ChoiceSelect<T extends string | number>({
   const all = options.some((o) => o.value === value) ? options : [...options, { value, label: describe?.(value) ?? String(value) }];
   return (
     <Select value={String(value)} onValueChange={(v) => onChange(all.find((o) => String(o.value) === v)!.value)}>
-      <SelectTrigger id={id} className={cn("w-full sm:w-64", className)}>
+      <SelectTrigger id={id} className={cn("w-full max-w-full sm:w-64", className)}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

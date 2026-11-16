@@ -550,14 +550,12 @@ export function relevant(r: Release, target: DiscoveryTarget): boolean {
 
 const SOURCE_RANK: Record<string, number> = { remux: 5, bluray: 4, web: 3, hdtv: 2, dvd: 1, cam: 0 };
 
-type RankSettings = Pick<Settings, "maxResolution" | "maxReleaseSizeGb"> & Partial<Pick<Settings, "releaseOrder" | "language">>;
+type RankSettings = Pick<Settings, "maxResolution" | "maxReleaseSizeGb"> & Partial<Pick<Settings, "language">>;
 
 /**
- * Releases best first. Always: cached ones (they play at once), then ones in the
- * household's language, then ones within its quality and size limits. After that either
- * Strata's own order (resolution, single episodes before packs, source, then the add-ons'
- * order and seeders) or, with `releaseOrder: "addons"`, the order the add-ons gave (for
- * add-ons like AIOStreams that are set up to sort the way someone likes).
+ * Releases best first: cached ones (they play at once), then ones in the household's
+ * language, then ones within its quality and size limits, then resolution, single episodes
+ * before packs and source; the household's add-on order, then seeders, break what's left.
  */
 export function rankReleases(releases: Release[], settings: RankSettings): Release[] {
   const maxBytes = settings.maxReleaseSizeGb * 1024 ** 3;
@@ -577,7 +575,9 @@ export function rankReleases(releases: Release[], settings: RankSettings): Relea
       Number(b.cached) - Number(a.cached) ||
       Number(speaks(b)) - Number(speaks(a)) ||
       Number(fits(b)) - Number(fits(a)) ||
-      (settings.releaseOrder === "addons" ? byAddons(a, b) || byStrata(a, b) : byStrata(a, b) || byAddons(a, b)) ||
+      byStrata(a, b) ||
+      // The household's add-on order breaks what's left of a tie.
+      byAddons(a, b) ||
       (b.seeders ?? 0) - (a.seeders ?? 0),
   );
 }

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Blocks, Cable, Compass, Globe, Library, LoaderCircle, Network, RefreshCw, Server } from "lucide-react";
+import { Blocks, Cable, Compass, Globe, Library, LoaderCircle, Network, RefreshCw, Server } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
-import type { Provider, ServerInfo, Settings, SettingsResponse } from "@/lib/types";
+import type { ServerInfo, Settings, SettingsResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ErrorAlert, Page, PageHeader, PageSkeleton } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -22,8 +22,6 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { UpdatesCard } from "./updates-card";
 import { useSession } from "@/app/session";
 import { Link, navigate, usePath } from "@/lib/router";
-
-const PROVIDER_LABEL: Record<Provider, string> = { local: "Local folders", torbox: "TorBox", link: "Add-on links" };
 
 type SectionId = "general" | "library" | "discovery" | "addons" | "connections" | "server" | "network" | "updates";
 interface Section {
@@ -183,23 +181,6 @@ export default function SettingsPage({ scope = "household" }: { scope?: "househo
               description="Playable releases for titles that aren't in the library yet. Cached releases come first, then ones in the household's language (from General), then ones within your limits."
             >
               <ToggleRow label="Find releases" description={<>Look for releases of titles that aren't in the library, with your <Link href="/settings/addons">add-ons</Link>.</>} checked={draft.discoveryEnabled} onChange={(v) => set("discoveryEnabled", v)} />
-              <SettingRow
-                label="Order releases by"
-                description={
-                  draft.releaseOrder === "addons"
-                    ? "The order your add-ons give, top add-on first: for ones set up to sort the way you like, like AIOStreams."
-                    : "Strata's own: resolution, single episodes before season packs, then source and seeders."
-                }
-              >
-                <ToggleGroup type="single" variant="outline" value={draft.releaseOrder} onValueChange={(v) => v && set("releaseOrder", v as Settings["releaseOrder"])} aria-label="Order releases by">
-                  <ToggleGroupItem value="strata" className="px-3">
-                    Strata
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="addons" className="px-3">
-                    Add-ons
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              </SettingRow>
               <ToggleRow label="Show uncached releases" description="Offer releases TorBox hasn't cached yet. They download before they can play." checked={draft.showUncached} onChange={(v) => set("showUncached", v)} />
               <SettingRow label="Largest automatic pick" htmlFor="max-size" description="Discovery won't pick a bigger release by itself. You can still choose one.">
                 <ChoiceSelect id="max-size" value={draft.maxReleaseSizeGb} options={RELEASE_SIZES} describe={(gb) => `Up to ${gb} GB`} onChange={(v) => set("maxReleaseSizeGb", v)} />
@@ -283,33 +264,8 @@ function SettingsNav({ sections, current, hrefOf }: { sections: Section[]; curre
 }
 
 function SourcesSection({ draft, set }: { draft: Settings; set: SetFn }) {
-  // Every provider must appear in the order list, even if an older config dropped one.
-  const priority: Provider[] = [...draft.sourcePriority, ...(["local", "torbox"] as Provider[]).filter((p) => !draft.sourcePriority.includes(p))];
-  const move = (i: number, dir: -1 | 1) => {
-    const next = [...priority];
-    const j = i + dir;
-    if (j < 0 || j >= next.length) return;
-    [next[i], next[j]] = [next[j]!, next[i]!];
-    set("sourcePriority", next);
-  };
   return (
-    <SettingsSection title="Sources & quality" description="Which copy plays when there's more than one.">
-      <SettingRow label="Source order" description="When a title is in both, the first source wins.">
-        <ol className="divide-y rounded-lg border sm:w-64" aria-label="Source order">
-          {priority.map((p, i) => (
-            <li key={p} className="flex items-center gap-2 py-1.5 pr-1.5 pl-3">
-              <span className="text-muted-foreground w-4 font-mono text-xs">{i + 1}</span>
-              <span className="flex-1 text-sm">{PROVIDER_LABEL[p]}</span>
-              <Button variant="ghost" size="icon-sm" disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Move ${PROVIDER_LABEL[p]} up`}>
-                <ArrowUp />
-              </Button>
-              <Button variant="ghost" size="icon-sm" disabled={i === priority.length - 1} onClick={() => move(i, 1)} aria-label={`Move ${PROVIDER_LABEL[p]} down`}>
-                <ArrowDown />
-              </Button>
-            </li>
-          ))}
-        </ol>
-      </SettingRow>
+    <SettingsSection title="Sources & quality" description="When a title has more than one copy, the sharpest within your limit plays. Copies on this server come before TorBox, then add-on links.">
       <SettingRow label="Highest quality" description="Sharper sources rank below ones within this.">
         <ToggleGroup type="single" variant="outline" value={String(draft.maxResolution)} onValueChange={(v) => v && set("maxResolution", Number(v))} aria-label="Highest quality">
           {[2160, 1080, 720].map((r) => (

@@ -65,16 +65,22 @@ describe("decide", () => {
 describe("rankCandidates", () => {
   const c = (over: Partial<Candidate>): Candidate => ({ id: "x", fileId: 1, provider: "local", name: "", size: 1, probed: false, availability: "ready", label: "", originLabel: "Library", ...over });
 
-  test("source priority, then resolution, then quality", () => {
+  test("resolution, then quality, then this server's disk before TorBox before add-on links", () => {
     const ranked = rankCandidates(
-      [c({ id: "tb4k", provider: "torbox", resolution: 2160 }), c({ id: "local1080", resolution: 1080 }), c({ id: "local4kweb", resolution: 2160, source: "web" }), c({ id: "local4kremux", resolution: 2160, source: "remux" })],
-      { sourcePriority: ["local", "torbox"], maxResolution: 2160 },
+      [
+        c({ id: "link4kweb", provider: "link", resolution: 2160, source: "web" }),
+        c({ id: "tb4kweb", provider: "torbox", resolution: 2160, source: "web" }),
+        c({ id: "local1080", resolution: 1080 }),
+        c({ id: "local4kweb", resolution: 2160, source: "web" }),
+        c({ id: "tb4kremux", provider: "torbox", resolution: 2160, source: "remux" }),
+      ],
+      { maxResolution: 2160 },
     );
-    expect(ranked.map((r) => r.id)).toEqual(["local4kremux", "local4kweb", "local1080", "tb4k"]);
+    expect(ranked.map((r) => r.id)).toEqual(["tb4kremux", "local4kweb", "tb4kweb", "link4kweb", "local1080"]);
   });
 
   test("max resolution demotes but doesn't drop", () => {
-    const ranked = rankCandidates([c({ id: "4k", resolution: 2160 }), c({ id: "hd", resolution: 1080 })], { sourcePriority: ["local"], maxResolution: 1080 });
+    const ranked = rankCandidates([c({ id: "4k", resolution: 2160 }), c({ id: "hd", resolution: 1080 })], { maxResolution: 1080 });
     expect(ranked.map((r) => r.id)).toEqual(["hd", "4k"]);
   });
 });

@@ -608,10 +608,16 @@ function linkCached(s: StremioStream): boolean {
   return true;
 }
 
-/** The stream's info-hash: given, or in a debrid link (Torrentio's /resolve/torbox/<key>/<hash>/…). */
+/**
+ * The stream's info-hash: given, in its group label (Comet's), or in a debrid link
+ * (Torrentio's /resolve/torbox/<key>/<hash>/…).
+ */
 function streamHash(s: StremioStream): string | null {
   const given = (s.infoHash ?? s.streamData?.torrent?.infoHash)?.toLowerCase();
   if (given && isInfoHash(given)) return given;
+  // In the stream's group label: Comet's torrent mode says "comet|torrent|<hash>".
+  const grouped = s.behaviorHints?.bingeGroup?.split("|").find((p) => /^[0-9a-f]{40}$/i.test(p));
+  if (grouped) return grouped.toLowerCase();
   if (!s.url) return null;
   let path: string;
   try {

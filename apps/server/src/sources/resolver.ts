@@ -84,18 +84,18 @@ export function heightToResolution(height: number, width: number): number {
   return 480;
 }
 
-export function rankCandidates(candidates: Candidate[], settings: Pick<Settings, "sourcePriority" | "maxResolution">): Candidate[] {
-  const priority = (p: FileProvider) => {
-    const i = (settings.sourcePriority as FileProvider[]).indexOf(p);
-    return i === -1 ? 99 : i;
-  };
+/** Where a copy plays from, when copies are otherwise alike: this server's disk, then TorBox, then an add-on's link. */
+const PROVIDER_RANK: Record<FileProvider, number> = { local: 0, torbox: 1, link: 2 };
+
+/** A title's library copies, best first: within the quality limit, then best quality, then where it plays from. */
+export function rankCandidates(candidates: Candidate[], settings: Pick<Settings, "maxResolution">): Candidate[] {
   const withinCap = (c: Candidate) => (c.resolution ?? 1080) <= settings.maxResolution;
   return [...candidates].sort(
     (a, b) =>
       Number(withinCap(b)) - Number(withinCap(a)) ||
-      priority(a.provider) - priority(b.provider) ||
       (b.resolution ?? 0) - (a.resolution ?? 0) ||
       (SOURCE_RANK[b.source ?? "dvd"] ?? 0) - (SOURCE_RANK[a.source ?? "dvd"] ?? 0) ||
+      PROVIDER_RANK[a.provider] - PROVIDER_RANK[b.provider] ||
       b.size - a.size,
   );
 }

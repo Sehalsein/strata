@@ -1,7 +1,21 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, LoaderCircle, Plus, RefreshCw } from "lucide-react";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ExternalLink, GripVertical, LoaderCircle, MoreHorizontal, Pencil, Plus, RefreshCw, Rows3, Trash2 } from "lucide-react";
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
@@ -51,6 +65,22 @@ export function AddonsSection() {
     }
   };
 
+  // Drag (or keyboard: Space, arrows, Space) to change the order; it moves at once and saves.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
+  const reorder = async ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const from = items.findIndex((a) => a.id === active.id);
+    const to = items.findIndex((a) => a.id === over.id);
+    if (from < 0 || to < 0) return;
+    setItems(arrayMove(items, from, to));
+    try {
+      setItems((await api.updateAddon(String(active.id), { index: to })).items);
+    } catch (err) {
+      toast.error(errorMessage(err));
+      void reload();
+    }
+  };
+
   const clear = async () => {
     try {
       await api.removeAllAddons();
@@ -82,7 +112,7 @@ export function AddonsSection() {
         </div>
       </div>
 
-      <Card className="gap-0 divide-y overflow-hidden py-0">
+      <Card className="gap-0 overflow-hidden py-0">
         {addons.isPending ? (
           <div className="flex flex-col gap-3 p-5">
             <Skeleton className="h-10 w-full" />
@@ -100,15 +130,21 @@ export function AddonsSection() {
             </Button>
           </div>
         ) : (
-          items.map((a, i) => <AddonRow key={a.id} addon={a} index={i} count={items.length} />)
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorder}>
+            <SortableContext items={items.map((a) => a.id)} strategy={verticalListSortingStrategy}>
+              <ul className="divide-y" aria-label="Add-ons, in the order Strata asks them">
+                {items.map((a) => (
+                  <AddonRow key={a.id} addon={a} />
+                ))}
+              </ul>
+            </SortableContext>
+          </DndContext>
         )}
       </Card>
 
       <p className="text-muted-foreground px-1 text-xs">
-        Paste an add-on's manifest URL, the same one you'd install in Stremio. Every add-on that's on is asked for releases, top to bottom. Strata adds what it finds to your TorBox
-        itself, so an add-on has to say which torrent each result is: most do (Torrentio, Comet, MediaFusion, Jackettio). AIOStreams is asked through its search API, with the uuid
-        and password in its URL. Subtitle add-ons, like OpenSubtitles v3, are asked as a title starts, in the languages set under General. Catalog add-ons, like
-        AIO Metadata, add rows to Home: pick them under Home rows.
+        Add one with its manifest URL, the same one you'd install in Stremio. Drag to change the order: higher add-ons come first when sources tie. Subtitle add-ons are asked in
+        the languages set under General; catalog add-ons add rows to Home (pick them in each one's menu).
       </p>
 
       <UrlDialog
@@ -135,19 +171,20 @@ export function AddonsSection() {
   );
 }
 
-function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: number; count: number }) {
-  const [busy, setBusy] = useState(false);
+function AddonRow({ addon: a }: { addon: StreamAddon }) {
   const [editing, setEditing] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: a.id });
 
-  const update = async (patch: { enabled?: boolean; index?: number; homeCatalogs?: string[] }) => {
-    setBusy(true);
+  /** Saves a change; the switch and menus show it at once, and it's undone if the server says no. */
+  const update = async (patch: { enabled?: boolean; homeCatalogs?: string[] }, optimistic: Partial<StreamAddon>) => {
+    const before = queryClient.getQueryData<{ items: StreamAddon[] }>(queryKeys.addons)?.items;
+    if (before) setItems(before.map((x) => (x.id === a.id ? { ...x, ...optimistic } : x)));
     try {
       setItems((await api.updateAddon(a.id, patch)).items);
     } catch (err) {
+      if (before) setItems(before);
       toast.error(errorMessage(err));
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -162,56 +199,109 @@ function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: numbe
     }
   };
 
+  const homeOn = a.catalogs.filter((c) => c.home).map((c) => c.key);
+  const setHome = (keys: string[]) => update({ homeCatalogs: keys }, { catalogs: a.catalogs.map((c) => ({ ...c, home: keys.includes(c.key) })) });
+  const hasMenu = a.catalogs.length > 0 || a.configurable || !a.builtIn;
+
   return (
-    <div className="flex flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:gap-4">
-      <div className="flex min-w-0 flex-1 items-start gap-3">
-        <span className={cn("mt-2 size-2 shrink-0 rounded-full", healthDot(a))} aria-hidden />
-        <div className="min-w-0 space-y-0.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={cn("font-medium", !a.enabled && "text-muted-foreground")}>{a.name}</span>
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn("bg-card relative flex items-center gap-2 py-3 pr-3 pl-1.5 sm:gap-3 sm:pr-4", isDragging && "z-10 shadow-lg ring-1 ring-border")}
+    >
+      <button
+        ref={setActivatorNodeRef}
+        type="button"
+        className="text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-ring flex size-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md outline-none focus-visible:ring-2 active:cursor-grabbing"
+        aria-label={`Move ${a.name}`}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="size-4" />
+      </button>
+
+      <div className={cn("flex min-w-0 flex-1 items-center gap-3 transition-opacity", !a.enabled && "opacity-55")}>
+        <span className={cn("size-2 shrink-0 rounded-full", healthDot(a))} aria-hidden />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate font-medium">{a.name}</span>
             {a.builtIn && <Badge variant="secondary">Built in</Badge>}
-            {a.resources.includes("stream") && <Badge variant="outline">Streams</Badge>}
-            {a.resources.includes("subtitles") && <Badge variant="outline">Subtitles</Badge>}
-            {a.resources.includes("catalog") && <Badge variant="outline">Catalogs</Badge>}
-            {a.anime && <Badge variant="outline">Anime</Badge>}
-            {!a.enabled && <Badge variant="outline">Off</Badge>}
           </div>
-          <p className="text-muted-foreground text-sm">{a.description ?? <span className="block truncate">{a.host}</span>}</p>
-          {a.enabled && <HealthLine health={a.health} />}
+          <p className="text-muted-foreground truncate text-xs">{a.description ?? a.host}</p>
+          {a.enabled ? <HealthLine health={a.health} /> : <p className="text-muted-foreground text-xs">Off: Strata doesn't ask it.</p>}
+        </div>
+        <div className="hidden shrink-0 flex-wrap justify-end gap-1 md:flex md:max-w-56">
+          {a.resources.includes("stream") && <Badge variant="outline">Streams</Badge>}
+          {a.resources.includes("subtitles") && <Badge variant="outline">Subtitles</Badge>}
+          {a.resources.includes("catalog") && <Badge variant="outline">Catalogs</Badge>}
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2 pl-5 lg:pl-0">
-        {a.catalogs.length > 0 && <HomeRowsMenu addon={a} busy={busy} onChange={(keys) => update({ homeCatalogs: keys })} />}
-        {a.configurable && (
-          <Button variant="outline" size="sm" asChild>
-            <a href={api.addonConfigureUrl(a.id)} target="_blank" rel="noreferrer">
-              Configure
-            </a>
-          </Button>
-        )}
-        {!a.builtIn && (
-          <>
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => setEditing(true)}>
-              Edit
+
+      <Switch
+        checked={a.enabled}
+        onCheckedChange={(v) => update({ enabled: v }, { enabled: v })}
+        aria-label={`${a.name}: ${a.enabled ? "on" : "off"}`}
+        title={a.enabled ? `Turn ${a.name} off` : `Turn ${a.name} on`}
+      />
+
+      {hasMenu ? (
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label={`More for ${a.name}`}>
+              <MoreHorizontal />
             </Button>
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => setConfirmRemove(true)}>
-              Delete
-            </Button>
-          </>
-        )}
-        <Button variant="outline" size="sm" disabled={busy || index === 0} onClick={() => update({ index: index - 1 })} aria-label={`Move ${a.name} up`}>
-          Up
-        </Button>
-        <Button variant="outline" size="sm" disabled={busy || index === count - 1} onClick={() => update({ index: index + 1 })} aria-label={`Move ${a.name} down`}>
-          Down
-        </Button>
-        <Switch className="ml-1" checked={a.enabled} disabled={busy} onCheckedChange={(v) => update({ enabled: v })} aria-label={`Use ${a.name}`} />
-      </div>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            {a.catalogs.length > 0 && (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <Rows3 /> Home rows{homeOn.length ? ` (${homeOn.length})` : ""}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="max-h-96 w-72">
+                  <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">Ticked catalogs show as rows on Home, after Strata's own.</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {a.catalogs.map((c) => (
+                    <DropdownMenuCheckboxItem
+                      key={c.key}
+                      checked={c.home}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={(v) => setHome(v ? [...homeOn, c.key] : homeOn.filter((k) => k !== c.key))}
+                    >
+                      <span className="truncate">{c.name}</span>
+                      <span className="text-muted-foreground ml-auto pl-3 text-xs">{c.type === "movie" ? "Movies" : "Shows"}</span>
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            )}
+            {a.configurable && (
+              <DropdownMenuItem asChild>
+                <a href={api.addonConfigureUrl(a.id)} target="_blank" rel="noreferrer">
+                  <ExternalLink /> Configure
+                </a>
+              </DropdownMenuItem>
+            )}
+            {!a.builtIn && (
+              <>
+                <DropdownMenuItem onSelect={() => setEditing(true)}>
+                  <Pencil /> Change address…
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onSelect={() => setConfirmRemove(true)}>
+                  <Trash2 /> Delete…
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        <span className="size-8 shrink-0" aria-hidden />
+      )}
 
       <UrlDialog
         open={editing}
         onOpenChange={setEditing}
-        title={`Edit ${a.name}`}
+        title={`Change ${a.name}'s address`}
         description="Paste its new manifest URL, after changing its settings, say. It keeps its place in the list and its switch."
         submitLabel="Save"
         onSubmit={async (url) => {
@@ -227,7 +317,7 @@ function AddonRow({ addon: a, index, count }: { addon: StreamAddon; index: numbe
         confirmLabel="Delete"
         onConfirm={remove}
       />
-    </div>
+    </li>
   );
 }
 
@@ -251,35 +341,6 @@ function HealthLine({ health: h }: { health: StreamAddon["health"] }) {
     <p className={cn("text-xs", h.state === "failing" ? "text-destructive" : "text-amber-700 dark:text-amber-400")}>
       {h.state === "paused" ? "Paused" : "Failing"}: {h.message ?? "it didn't answer."} {h.state === "paused" ? `Strata asks again ${relativeTime(h.pausedUntil)}.` : `(${relativeTime(h.at)})`}
     </p>
-  );
-}
-
-/** Which of an add-on's catalogs are rows on Home: ticked in a menu, saved as they change. */
-function HomeRowsMenu({ addon: a, busy, onChange }: { addon: StreamAddon; busy: boolean; onChange: (keys: string[]) => void }) {
-  const on = a.catalogs.filter((c) => c.home).map((c) => c.key);
-  return (
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" disabled={busy}>
-          Home rows{on.length ? ` (${on.length})` : ""} <ChevronDown className="text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="max-h-96 w-72">
-        <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">Ticked catalogs show as rows on Home, after Strata's own.</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {a.catalogs.map((c) => (
-          <DropdownMenuCheckboxItem
-            key={c.key}
-            checked={c.home}
-            onSelect={(e) => e.preventDefault()}
-            onCheckedChange={(v) => onChange(v ? [...on, c.key] : on.filter((k) => k !== c.key))}
-          >
-            <span className="truncate">{c.name}</span>
-            <span className="text-muted-foreground ml-auto pl-3 text-xs">{c.type === "movie" ? "Movies" : "Shows"}</span>
-          </DropdownMenuCheckboxItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 

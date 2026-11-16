@@ -99,6 +99,8 @@ describe("add-on streams", () => {
           { name: "Needs headers", title: "x", url: "https://proxy.example/x", behaviorHints: { proxyHeaders: { request: { Cookie: "a" } } } },
           { name: "Comet", title: "ℹ Kindly configure this addon to access streams.", url: "https://comet.example/configure-me" },
           { name: "Plain http", title: "y", url: "http://insecure.example/video.mp4" },
+          // Comet's torrent mode: no infoHash field, the hash in its group label.
+          { name: "[TORRENT] Comet 1080p", title: "Show.S02E03.1080p.BluRay\n💾 2 GB", fileIdx: 3, behaviorHints: { bingeGroup: `comet|torrent|${H("d")}`, filename: "Show.S02E03.1080p.BluRay.mkv" } },
         ],
       });
     }) as unknown as typeof fetch;
@@ -113,6 +115,7 @@ describe("add-on streams", () => {
       // Ones needing request headers, asking to be set up, or not https are left out.
       expect.objectContaining({ hash: undefined, link: "https://cdn.example/video.mp4", cached: true }),
       expect.objectContaining({ hash: undefined, link: "https://comet.example/playback/OPAQUE", fileName: "Show.S02E03.1080p.mkv", size: 123, cached: false }),
+      expect.objectContaining({ hash: H("d"), link: undefined, fileName: "Show.S02E03.1080p.BluRay.mkv" }),
     ]);
   });
 
@@ -171,13 +174,13 @@ describe("ranking", () => {
     expect(ranked.map((x) => x.title[0])).toEqual(["D", "E", "C", "B", "A"]);
   });
 
-  test("the add-ons' order, when the household picks it", () => {
+  test("the add-on order only breaks ties", () => {
     const ranked = rankReleases(
-      [r("A.2160p.REMUX", { addonOrder: 10_002 }), r("B.720p.WEB", { addonOrder: 1 }), r("C.1080p.WEB", { addonOrder: 0 }), r("D.2160p.WEB")],
-      { ...limits, releaseOrder: "addons" },
+      [r("A.1080p.WEB", { addonOrder: 10_002 }), r("B.720p.WEB", { addonOrder: 1 }), r("C.1080p.WEB", { addonOrder: 0 }), r("D.1080p.WEB")],
+      limits,
     );
-    // Top add-on's first result first; TorBox search's own (no add-on order) last.
-    expect(ranked.map((x) => x.title[0])).toEqual(["C", "B", "A", "D"]);
+    // Quality first; among the 1080p ones, the top add-on's first, TorBox search's own (no add-on order) last.
+    expect(ranked.map((x) => x.title[0])).toEqual(["C", "A", "D", "B"]);
   });
 });
 
