@@ -121,7 +121,11 @@ function stripMarkup(text: string): { text: string; drawing: boolean } {
   return { text: parts.join(""), drawing };
 }
 
-/** Plain lines: no ASS overrides ({\an8}), HTML-ish tags or entities, no blank lines. */
+/**
+ * Plain lines: no ASS overrides ({\an8}), HTML-ish tags or entities, no blank lines (a
+ * blank line would end the cue). What's left is escaped as WebVTT wants: a literal "<", ">"
+ * or "&" in cue text would start a tag or an entity, and "-->" would read as a timing line.
+ */
 function clean(text: string): string {
   return stripMarkup(text)
     .text.replace(/&nbsp;/g, " ")
@@ -131,9 +135,13 @@ function clean(text: string): string {
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean)
-    // "-->" would read as a timing line; a blank line would end the cue.
-    .map((l) => l.replace(/-->/g, "->"))
+    .map(escapeCueText)
     .join("\n");
+}
+
+/** Text as WebVTT cue text: "&", "<" and ">" as entities (so "-->" can't appear either). */
+function escapeCueText(line: string): string {
+  return line.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"));
 }
 
 function stamp(total: number): string {

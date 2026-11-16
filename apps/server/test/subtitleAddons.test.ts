@@ -46,6 +46,8 @@ describe("WebVTT from add-on files", () => {
   });
 
   test("files that aren't UTF-8 are read as Windows-1252", () => {
+    // What's left is escaped as cue text: no stray tags, entities or timing arrows.
+    expect(toWebVtt(enc("1\n00:00:01,000 --> 00:00:02,000\nTom &amp; Jerry: 3 &lt; 5 --> go\n"))).toBe("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nTom &amp; Jerry: 3 &lt; 5 --&gt; go\n");
     const bytes = new Uint8Array([...enc("1\n00:00:01,000 --> 00:00:02,000\nCaf"), 0xe9, 0x0a]);
     expect(toWebVtt(bytes)).toContain("Café");
   });

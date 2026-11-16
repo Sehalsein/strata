@@ -451,6 +451,26 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(StubProtocol.recorded.count, 4)
     }
 
+    func testStaleAnswerIsRevalidatedWithItsETagAndA304KeepsIt() async throws {
+        StubProtocol.reset { req in
+            if req.value(forHTTPHeaderField: "If-None-Match") == "W/\"v1\"" {
+                return StubProtocol.Reply(status: 304, body: Data(), headers: ["Cache-Control": "private, max-age=0", "ETag": "W/\"v1\""])
+            }
+            var reply = StubProtocol.Reply.fixture("home")
+            reply.headers["Cache-Control"] = "private, max-age=0"
+            reply.headers["ETag"] = "W/\"v1\""
+            return reply
+        }
+        let c = client(ttl: 60)
+        let first = try await c.homeCatalog()
+        // Stale at once: asked again with the tag, answered 304, and the kept copy is what comes back.
+        let second = try await c.homeCatalog()
+        XCTAssertEqual(first.map(\.id), second.map(\.id))
+        XCTAssertFalse(second.isEmpty)
+        XCTAssertNil(StubProtocol.recorded[0].value(forHTTPHeaderField: "If-None-Match"))
+        XCTAssertEqual(StubProtocol.recorded[1].value(forHTTPHeaderField: "If-None-Match"), "W/\"v1\"")
+    }
+
     func testPersistentCacheSurvivesANewClientAndTitlesDropTheirSeasons() async throws {
         StubProtocol.reset { req in
             if req.url?.path == "/api/progress" { return .json(200, ["positionMs": 1, "durationMs": 2, "completed": false]) }

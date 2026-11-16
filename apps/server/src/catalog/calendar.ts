@@ -1,3 +1,5 @@
+import { runtime } from "#runtime";
+import { timed } from "../api/timing";
 import type { Library } from "../library";
 import type { ProgressStore } from "../progress";
 import type { Anilist } from "./anime/anilist";
@@ -43,6 +45,8 @@ const FOLLOW_WATCHING_DAYS = 90;
 /** Recently out titles that are checked for being ready to play (each check may search for releases). */
 const READY_CHECKS = 8;
 const READY_RECENT_DAYS = 14;
+/** How long the calendar waits on those checks before answering without the slow ones. */
+const READY_WAIT_MS = 800;
 
 /**
  * Something on a person's calendar, ready for the apps to show and notify as it is: an
@@ -151,7 +155,11 @@ export class CalendarService {
       candidates.map(async (e) => {
         const ref = parseRef(e.ref);
         if (!ref) return;
-        e.ready = await this.readyElsewhere({ ref, season: e.play?.season, episode: e.play?.episode }).catch(() => false);
+        const check = timed("ready-check", () => this.readyElsewhere({ ref, season: e.play?.season, episode: e.play?.episode })).catch(() => false);
+        // A release search can take seconds: the calendar doesn't wait for a slow one. It
+        // carries on in the background, so the next look has its answer from the cache.
+        runtime.background(check);
+        e.ready = await Promise.race([check, new Promise<boolean>((done) => setTimeout(() => done(false), READY_WAIT_MS))]);
       }),
     );
     for (const e of out) {

@@ -1,3 +1,4 @@
+import { timed } from "../api/timing";
 import { logger } from "../log";
 import { CachedMissing, type ApiCache } from "./apiCache";
 import { globalFetch } from "../net";
@@ -239,7 +240,7 @@ export class Tmdb {
         // A title TMDB doesn't have (a stale anime mapping, say) is remembered for a day
         // rather than asked about on every page view.
         { ttl, maxStale: Infinity, missingTtl: DAY, missing: (err) => err instanceof TmdbError && err.status === 404, backoff: REFRESH_BACKOFF_MS },
-        () => this.fetch<T>(path, query, key),
+        () => timed("tmdb", () => this.fetch<T>(path, query, key)),
       );
     } catch (err) {
       if (err instanceof CachedMissing) throw new TmdbError("That title isn't in the catalog.", 404);

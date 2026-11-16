@@ -1,3 +1,4 @@
+import { timed } from "../api/timing";
 import { z } from "zod";
 import { isVideoFile, type ParsedName } from "../media/parse";
 import { globalFetch } from "../net";
@@ -367,7 +368,7 @@ export interface AddonMeta {
 /** The titles in one of an add-on's catalogs, first page. */
 export async function addonCatalogItems(addon: StreamAddon, catalog: Pick<AddonCatalog, "type" | "id">, fetchImpl: typeof fetch = globalFetch): Promise<AddonMeta[]> {
   // Catalogs are public lists, often served from elsewhere (Cinemeta redirects to its own catalog host).
-  const res = await fetchFollowing(`${addonBase(addon.url)}/catalog/${catalog.type}/${encodeURIComponent(catalog.id)}.json`, addon, fetchImpl, { headers: { Accept: "application/json" } });
+  const res = await timed("addon", () => fetchFollowing(`${addonBase(addon.url)}/catalog/${catalog.type}/${encodeURIComponent(catalog.id)}.json`, addon, fetchImpl, { headers: { Accept: "application/json" } }));
   if (!res.ok) throw new Error(`${addon.name} ${res.status}`);
   const body = (await readJson(res)) as { metas?: Record<string, unknown>[] } | null;
   const text = (v: unknown, max = 2048) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined);

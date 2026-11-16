@@ -589,12 +589,20 @@ public final class StrataClient: Sendable {
             return try decode(T.self, from: hit.body)
         }
         if policy == .cachedOnly { throw StrataError(kind: .notCached, message: String(localized: "Not saved on this device yet.", bundle: .module)) }
+        // The kept copy's tag lets the server answer "unchanged" (304) without the body.
+        let kept = await cache.entry(key)
         // Screens appearing together often ask for the same thing: share one request.
         let task = await cache.shared(key) {
-            let (data, response) = try await self.performWithResponse(req)
-            return (data, ResponseCache.maxAge(response))
+            var conditional = req
+            if let tag = kept?.etag { conditional.setValue(tag, forHTTPHeaderField: "If-None-Match") }
+            let (data, response) = try await self.rawData(conditional)
+            if response.statusCode == 304, let kept {
+                return ResponseCache.Fetched(body: kept.body, maxAge: ResponseCache.maxAge(response), etag: kept.etag)
+            }
+            guard (200..<300).contains(response.statusCode) else { throw self.httpError(response.statusCode, data) }
+            return ResponseCache.Fetched(body: data, maxAge: ResponseCache.maxAge(response), etag: response.value(forHTTPHeaderField: "ETag"))
         }
-        let result: (Data, TimeInterval?)
+        let result: ResponseCache.Fetched
         do {
             result = try await task.value
         } catch {
@@ -605,7 +613,7 @@ public final class StrataClient: Sendable {
             throw error
         }
         await cache.finished(key, task, result: result)
-        return try decode(T.self, from: result.0)
+        return try decode(T.self, from: result.body)
     }
 
     private func send<T: Decodable>(_ method: String, _ path: String) async throws -> T {
@@ -841,14 +849,23 @@ actor ResponseCache {
         var storedAt: Date
         var maxAge: TimeInterval
         var body: Data
+        /// The server's ETag for it, to ask "changed?" next time (absent from older copies).
+        var etag: String?
         var isFresh: Bool { Date().timeIntervalSince(storedAt) < maxAge }
+    }
+
+    /// An answer as fetched: its body, how long it may be kept, and its tag.
+    struct Fetched: Sendable {
+        var body: Data
+        var maxAge: TimeInterval?
+        var etag: String?
     }
 
     nonisolated let ttl: TimeInterval
     private let directory: URL?
     nonisolated var isPersistent: Bool { directory != nil }
     private var entries: [String: Entry] = [:]
-    private var running: [String: Task<(Data, TimeInterval?), Error>] = [:]
+    private var running: [String: Task<Fetched, Error>] = [:]
     private var pruned = false
     private let limit = 64
     /// Disk entries older than this are past any use, even as a placeholder.
@@ -883,10 +900,10 @@ actor ResponseCache {
         return e
     }
 
-    func set(_ key: String, _ data: Data, maxAge: TimeInterval?) {
+    func set(_ key: String, _ data: Data, maxAge: TimeInterval?, etag: String? = nil) {
         let maxAge = maxAge ?? ttl
         guard maxAge >= 0 else { return remove(key) }
-        let e = Entry(storedAt: Date(), maxAge: maxAge, body: data)
+        let e = Entry(storedAt: Date(), maxAge: maxAge, body: data, etag: etag)
         remember(key, e)
         guard let directory, let file = file(for: key) else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -916,7 +933,7 @@ actor ResponseCache {
     }
 
     /// The request already on its way for `key`, or a new one.
-    func shared(_ key: String, _ work: @escaping @Sendable () async throws -> (Data, TimeInterval?)) -> Task<(Data, TimeInterval?), Error> {
+    func shared(_ key: String, _ work: @escaping @Sendable () async throws -> Fetched) -> Task<Fetched, Error> {
         if let task = running[key] { return task }
         let task = Task { try await work() }
         running[key] = task
@@ -925,10 +942,10 @@ actor ResponseCache {
 
     /// Forgets the request (if it's still the current one: a clear or a change since it
     /// started means its answer may be out of date) and stores its answer.
-    func finished(_ key: String, _ task: Task<(Data, TimeInterval?), Error>, result: (Data, TimeInterval?)?) {
+    func finished(_ key: String, _ task: Task<Fetched, Error>, result: Fetched?) {
         guard running[key] == task else { return }
         running[key] = nil
-        if let result { set(key, result.0, maxAge: result.1) }
+        if let result { set(key, result.body, maxAge: result.maxAge, etag: result.etag) }
     }
 
     private func remove(_ key: String) {

@@ -531,6 +531,17 @@ describe("library", () => {
     // Pages follow the household's layout: kept only briefly.
     expect(await cacheControl("/api/home/catalog")).toBe("private, max-age=600, stale-while-revalidate=604800");
     expect(await cacheControl("/api/home/profile")).toBe("no-store");
+    // Kept answers carry an ETag; asking again with it, an unchanged one is a bodiless 304
+    // that renews how long it may be kept. Answers that mustn't be kept have none.
+    const first = await server.request("/api/genres/movie", { token });
+    const tag = first.headers.get("etag")!;
+    expect(tag).toMatch(/^W\/"[0-9a-f]{24}"$/);
+    const again = await server.request("/api/genres/movie", { token, headers: { "If-None-Match": tag } });
+    expect(again.status).toBe(304);
+    expect(await again.text()).toBe("");
+    expect(again.headers.get("cache-control")).toContain("max-age=86400");
+    expect((await server.request("/api/genres/movie", { token, headers: { "If-None-Match": 'W/"stale"' } })).status).toBe(200);
+    expect((await server.request("/api/home/profile", { token })).headers.get("etag")).toBeNull();
     expect(await cacheControl("/api/home")).toBeNull();
     expect(await cacheControl("/api/genres/nope")).toBeNull();
     expect(await cacheControl("/api/me")).toBeNull();

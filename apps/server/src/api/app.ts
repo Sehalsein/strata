@@ -1,3 +1,5 @@
+import { etagJson } from "./etag";
+import { requestTiming } from "./timing";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
@@ -33,7 +35,10 @@ export function createApp(services: Services) {
     await next();
   });
 
+  app.use("/api/*", requestTiming());
   app.use("/api/*", gzipJson());
+  // After gzip (so it sees the plain JSON): unchanged answers go back as 304s.
+  app.use("/api/*", etagJson());
   // Nothing the apps or dashboard send is near this; a bigger body is refused before it's read.
   app.use("/api/*", bodyLimit({ maxSize: 1024 * 1024, onError: (c) => c.json({ error: "Request too large" }, 413) }));
 

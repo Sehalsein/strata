@@ -756,6 +756,7 @@ export class CatalogService {
     if (ref.type === "movie") {
       const target = { source: "anilist" as const, mediaType: "movie" as const, titleId: ref.id };
       const sources = await findCandidates(this.library, this.settings(), target);
+      const mine = await this.mine(userId, ref, target);
       return {
         type: "movie" as const,
         ...common,
@@ -765,14 +766,15 @@ export class CatalogService {
         collection: null,
         available: [...new Set(sources.map((s) => s.provider))],
         sources,
-        progress: progressDto(await this.progress.get(userId, target)),
-        inWatchlist: await this.progress.inWatchlist(userId, ref),
-        remind: remindOf(anilistUpcoming(media, "movie", Date.now()), await this.progress.isReminded(userId, ref)),
+        progress: progressDto(mine.progress),
+        inWatchlist: mine.listed,
+        remind: remindOf(anilistUpcoming(media, "movie", Date.now()), mine.reminded),
       };
     }
     const [files, watched] = await Promise.all([this.library.filesFor(ref), this.progress.forShow(userId, ref)]);
     const aired = airedEpisodes(media);
     const episodeCount = Math.min(MAX_ANILIST_EPISODES, media.episodes ?? aired);
+    const mine = await this.mine(userId, ref);
     return {
       type: "show" as const,
       ...common,
@@ -795,8 +797,8 @@ export class CatalogService {
       available: [...new Set(files.map((f) => f.provider))],
       /** Where the Play button should go: an in-progress episode, else the next unwatched one. */
       upNext: anilistUpNext(files, watched, aired, episodeCount),
-      inWatchlist: await this.progress.inWatchlist(userId, ref),
-      remind: remindOf(anilistUpcoming(media, "show", Date.now()), await this.progress.isReminded(userId, ref)),
+      inWatchlist: mine.listed,
+      remind: remindOf(anilistUpcoming(media, "show", Date.now()), mine.reminded),
     };
   }
 
@@ -1132,6 +1134,16 @@ export class CatalogService {
     return page.results.flatMap((r) => (r.media_type === "movie" ? movieCards.filter((c) => c.tmdbId === r.id) : r.media_type === "tv" ? showCards.filter((c) => c.tmdbId === r.id) : []));
   }
 
+  /** This person's own state for a title page, looked up together: on My List, reminded, and (for a film) how far in. */
+  private async mine(userId: string, ref: TitleRef, target?: Parameters<ProgressStore["get"]>[1]) {
+    const [listed, reminded, progress] = await Promise.all([
+      this.progress.inWatchlist(userId, ref),
+      this.progress.isReminded(userId, ref),
+      target ? this.progress.get(userId, target) : Promise.resolve(undefined),
+    ]);
+    return { listed, reminded, progress };
+  }
+
   async movie(userId: string, id: number) {
     const m = await this.tmdb.movie(id);
     const imdbId = m.imdb_id ?? m.external_ids?.imdb_id ?? null;
@@ -1141,6 +1153,7 @@ export class CatalogService {
     const region = this.settings().region;
     const certification =
       m.release_dates?.results.find((r) => r.iso_3166_1 === region)?.release_dates.find((d) => d.certification)?.certification ?? null;
+    const mine = await this.mine(userId, ref, { source: "tmdb", mediaType: "movie", titleId: id });
     return {
       type: "movie" as const,
       ref: formatRef(ref),
@@ -1169,10 +1182,10 @@ export class CatalogService {
       recommendations: await this.cards(m.recommendations?.results ?? [], "movie"),
       available: [...new Set(sources.map((s) => s.provider))],
       sources,
-      progress: progressDto(await this.progress.get(userId, { source: "tmdb", mediaType: "movie", titleId: id })),
-      inWatchlist: await this.progress.inWatchlist(userId, ref),
+      progress: progressDto(mine.progress),
+      inWatchlist: mine.listed,
       /** "Remind me" when it comes out: only for a film with a release still to come. */
-      remind: remindOf(movieUpcoming(m, region, today()), await this.progress.isReminded(userId, ref)),
+      remind: remindOf(movieUpcoming(m, region, today()), mine.reminded),
       anime,
     };
   }
@@ -1185,6 +1198,7 @@ export class CatalogService {
     const region = this.settings().region;
     const imdbId = s.external_ids?.imdb_id ?? null;
     const [anime, ratings, upNext] = await Promise.all([this.animeInfo("show", id).catch(() => null), this.ratings(imdbId), this.showUpNext(s, watched)]);
+    const mine = await this.mine(userId, ref);
     return {
       type: "show" as const,
       ref: formatRef(ref),
@@ -1221,9 +1235,9 @@ export class CatalogService {
       available: [...new Set(available.map((f) => f.provider))],
       /** Where the Play button should go: an in-progress episode, else the next unwatched one. */
       upNext,
-      inWatchlist: await this.progress.inWatchlist(userId, ref),
-      /** "Remind me" of its next episode or premiere, when one is dated. */
-      remind: remindOf(showUpcoming(s, today()), await this.progress.isReminded(userId, ref)),
+      inWatchlist: mine.listed,
+      /** "Remind me" of its next premiere, when one is dated. */
+      remind: remindOf(showUpcoming(s, today()), mine.reminded),
       anime,
     };
   }

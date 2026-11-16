@@ -117,7 +117,7 @@ describe("calendar entries (ItsOut-style)", () => {
       ],
     },
   };
-  const make = (opts: { inLibrary?: string[]; readyElsewhere?: string[]; reminders?: { source: string; type: string; titleId: number }[] } = {}) => {
+  const make = (opts: { inLibrary?: string[]; readyElsewhere?: string[]; reminders?: { source: string; type: string; titleId: number }[]; slowMs?: number } = {}) => {
     const ids = new AnimeIds(fileAnimeIdStore("/nonexistent"));
     ids.ready = async () => {};
     const anilist = { airing: async () => [] } as unknown as Anilist;
@@ -132,7 +132,10 @@ describe("calendar entries (ItsOut-style)", () => {
       watchlist: () => [{ source: "tmdb", type: "movie", titleId: 50 }],
     } as never;
     const t = { ...tmdb, movie: async (id: number) => (id === 50 ? film : Promise.reject(new Error("404"))) } as unknown as Tmdb;
-    return new CalendarService(t, library, progress, { ids, anilist }, async () => true, () => "GB", async ({ ref, season, episode }) => (opts.readyElsewhere ?? []).includes(`${ref.id}:${season ?? ""}:${episode ?? ""}`));
+    return new CalendarService(t, library, progress, { ids, anilist }, async () => true, () => "GB", async ({ ref, season, episode }) => {
+      if (opts.slowMs) await Bun.sleep(opts.slowMs);
+      return (opts.readyElsewhere ?? []).includes(`${ref.id}:${season ?? ""}:${episode ?? ""}`);
+    });
   };
 
   test("shows being watched are followed; films on the list come in with their releases in the household's region", async () => {
@@ -167,5 +170,12 @@ describe("calendar entries (ItsOut-style)", () => {
     expect(entries.find((e) => e.title === "Returning Show")!.alert).toEqual({ title: "Returning Show", body: "Returning Show season 2 premieres today." });
     // Not reminded: the calendar keeps to its month.
     expect((await make().entries("u1", NOW)).entries.some((e) => e.date > "2026-12-01")).toBe(false);
+  });
+
+  test("a slow ready check doesn't hold the calendar up: it answers without it", async () => {
+    const started = performance.now();
+    const { entries } = await make({ readyElsewhere: ["1:2:2"], slowMs: 3000 }).entries("u1", NOW);
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(entries.find((e) => e.label.startsWith("S2 E2"))!.ready).toBe(false);
   });
 });
