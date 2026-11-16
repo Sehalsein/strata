@@ -73,6 +73,10 @@ public struct RootView: View {
             SignInCodeView(request: request)
         }
         #if os(iOS)
+        // A password-reset email's link: choose a new password, then sign in with it.
+        .sheet(item: Binding(get: { services.coordinator.pendingReset }, set: { services.coordinator.pendingReset = $0 })) { request in
+            ResetPasswordView(request: request)
+        }
         // A TV's sign-in link was opened: confirm and approve it.
         .sheet(item: Binding(get: { services.store.signIns.isEmpty ? nil : services.coordinator.pendingLink },
                              set: { services.coordinator.pendingLink = $0 })) { request in

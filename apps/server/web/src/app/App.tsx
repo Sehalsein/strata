@@ -102,6 +102,7 @@ export function App() {
   } else if (path === "/reset-password") {
     screen = (
       <ResetPasswordPage
+        serverName={info.data.serverName}
         onDone={async () => {
           await authChanged();
           toSignIn();

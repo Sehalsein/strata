@@ -31,6 +31,7 @@ struct ConnectView: View {
     /// The camera (or a pasted link): a member's sign-in code or a server's address.
     @State private var scanning = false
     @State private var scannedSignIn: SignInCodeRequest?
+    @State private var scannedReset: ResetPasswordRequest?
     /// Servers appear a moment after the screen; on tvOS focus moves to the first one
     /// (otherwise it sits on "Enter Address", the only button at first).
     @FocusState private var focusedServer: String?
@@ -99,6 +100,9 @@ struct ConnectView: View {
         }
         .sheet(item: $scannedSignIn) { request in
             SignInCodeView(request: request, onSignedIn: signedIn)
+        }
+        .sheet(item: $scannedReset) { request in
+            ResetPasswordView(request: request, onSignedIn: signedIn)
         }
         #endif
         .onAppear { services.browser.start() }
@@ -452,6 +456,11 @@ struct ConnectView: View {
                 try? await Task.sleep(for: .milliseconds(450))
                 scannedSignIn = request
             }
+        case .resetPassword(let request):
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(450))
+                scannedReset = request
+            }
         case .server(let address):
             self.address = address
             Task { await probe(address) }
@@ -520,12 +529,12 @@ struct ConnectView: View {
 /// Username (or email) and password.
 struct SignInView: View {
     @Environment(AppServices.self) private var services
-    @Environment(\.openURL) private var openURL
     let target: ServerTarget
     let onSignedIn: () -> Void
 
     @State private var login = ""
     @State private var password = ""
+    @State private var forgotPassword = false
     @FocusState private var field: Field?
     enum Field { case login, password }
 
@@ -577,9 +586,9 @@ struct SignInView: View {
                 }
                 .disabled(login.isEmpty || password.isEmpty || services.store.isAuthenticating)
                 #if os(iOS)
-                // The server emails a reset link; its page asks for the address.
+                // The server emails a link that opens the app to choose a new password.
                 if target.info.signIn?.passwordReset == true {
-                    Button(String(localized: "Forgot password?", bundle: .module)) { openURL(target.url.appending(path: "forgot-password")) }
+                    Button(String(localized: "Forgot password?", bundle: .module)) { forgotPassword = true }
                         .font(.stFootnote)
                         .buttonStyle(.plain)
                         .foregroundStyle(Theme.accentText)
@@ -597,6 +606,11 @@ struct SignInView: View {
             services.store.lastError = nil
             field = .login
         }
+        #if os(iOS)
+        .sheet(isPresented: $forgotPassword) {
+            ForgotPasswordView(target: target, email: login.contains("@") ? login : "")
+        }
+        #endif
         #endif
     }
 
