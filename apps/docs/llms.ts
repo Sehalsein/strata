@@ -38,7 +38,7 @@ export function llmsIndex(sections: Sections, site: string): string {
 
 export function llmsFull(sections: Sections, site: string): string {
   const parts = sections.flatMap((s) => s.articles.map((a) => articleFile(a, site)));
-  return `# Strata Docs\n\nEvery guide, in reading order.\n\n---\n\n${parts.map((p) => p.replace(/^# /, "# ")).join("\n---\n\n")}`;
+  return `# Strata Docs\n\nEvery guide, in reading order.\n\n---\n\n${parts.join("\n---\n\n")}`;
 }
 
 /** Every file to write, keyed by path under the site root. */

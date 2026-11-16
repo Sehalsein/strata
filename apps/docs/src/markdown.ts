@@ -45,7 +45,7 @@ function inlineNode(node: Node, o: Options): string {
 }
 
 function table(el: El, o: Options): string {
-  const rows = [...el.querySelectorAll("tr")].map((r) => [...r.querySelectorAll("th, td")].map((c) => inline(c, o).trim().replace(/\|/g, "\\|")));
+  const rows = [...el.querySelectorAll("tr")].map((r) => [...r.querySelectorAll("th, td")].map((c) => inline(c, o).trim().replace(/\\/g, "\\\\").replace(/\|/g, "\\|")));
   if (!rows.length) return "";
   const width = Math.max(...rows.map((r) => r.length));
   const line = (r: string[]) => `| ${Array.from({ length: width }, (_, i) => r[i] ?? "").join(" | ")} |`;
