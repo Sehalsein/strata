@@ -77,6 +77,12 @@ public enum TVLink {
         return Data(mac).map { String(format: "%02x", $0) }.joined()
     }
 
+    /// What an answer's proof covers: the challenge, and which it carries (a code or an error)
+    /// with its text.
+    static func answerParts(_ challenge: String, code: String?, error: String?) -> [String] {
+        ["answer", challenge, code != nil ? "code" : "error", code ?? error ?? ""]
+    }
+
     /// Compares two proofs in constant time.
     static func same(_ a: String, _ b: String) -> Bool {
         let x = Array(a.utf8), y = Array(b.utf8)
@@ -171,7 +177,7 @@ public final class TVLinkHost {
         }
         guard TVLink.same(offer.proof, TVLink.proof(key, ["offer", offer.challenge] + offer.addresses)) else { return TVLink.Answer(wrongKey: true) }
         let signed = { (code: String?, error: String?) in
-            TVLink.Answer(userCode: code, error: error, proof: TVLink.proof(self.key, ["answer", offer.challenge, code ?? error ?? ""]))
+            TVLink.Answer(userCode: code, error: error, proof: TVLink.proof(self.key, TVLink.answerParts(offer.challenge, code: code, error: error)))
         }
         guard !busy, let onOffer else { return signed(nil, String(localized: "This TV is already signing in.", bundle: .module)) }
         busy = true
@@ -263,8 +269,9 @@ public enum TVLinkClient {
                 guard let self, let data, let answer = try? JSONDecoder().decode(TVLink.Answer.self, from: data) else { return }
                 // Only the TV that showed the code can sign its answer; anything else that
                 // answers (a device pretending to be a TV) is ignored.
-                guard answer.wrongKey != true, let proof = answer.proof,
-                      TVLink.same(proof, TVLink.proof(self.key, ["answer", self.offer.challenge, answer.userCode ?? answer.error ?? ""])) else { return }
+                guard answer.wrongKey != true, let proof = answer.proof, (answer.userCode == nil) != (answer.error == nil),
+                      TVLink.same(proof, TVLink.proof(self.key, TVLink.answerParts(self.offer.challenge, code: answer.userCode, error: answer.error))),
+                      answer.userCode.map({ $0.range(of: "^[A-Z0-9-]{4,16}$", options: .regularExpression) != nil }) ?? true else { return }
                 if let code = answer.userCode {
                     self.finish(.success(code))
                 } else if answer.wrongKey != true, let error = answer.error {

@@ -247,6 +247,12 @@ public final class StrataClient: Sendable {
     public func homeCatalog(_ policy: CachePolicy = .fresh) async throws -> [Shelf] {
         do {
             let res: ShelvesResponse = try await get("/api/home/catalog", policy: policy)
+            // A kept empty Home (from before the server had its TMDB key, say) isn't one to
+            // trust: ask again. Servers now don't let an empty one be kept.
+            if res.shelves.isEmpty, policy == .fresh {
+                let again: ShelvesResponse = try await get("/api/home/catalog", policy: .reload)
+                return again.shelves
+            }
             return res.shelves
         } catch let error as StrataError where error.isUnsupportedHere {
             return try await home()

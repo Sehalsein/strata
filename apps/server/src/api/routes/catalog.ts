@@ -99,7 +99,12 @@ export const catalogRoutes = new Hono<Env>()
 
   // Both parts at once, for apps that don't ask for them separately.
   .get("/home", async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).home()) }))
-  .get("/home/catalog", cacheFor(TTL.catalog), async (c) => c.json({ shelves: shelvesForApp(c, await viewer(c).homeCatalog()) }))
+  .get("/home/catalog", cacheFor(TTL.catalog), async (c) => {
+    const shelves = shelvesForApp(c, await viewer(c).homeCatalog());
+    // An empty Home isn't kept: whatever made it empty, the next look should ask again.
+    if (!shelves.length) c.header("Cache-Control", "no-store");
+    return c.json({ shelves });
+  })
   .get("/home/profile", async (c) => {
     c.header("Cache-Control", "no-store");
     return c.json({ shelves: shelvesForApp(c, await viewer(c).homeProfile()) });

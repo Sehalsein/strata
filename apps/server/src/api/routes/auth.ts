@@ -162,7 +162,13 @@ export const authRoutes = new Hono<Env>()
   .post("/launcher/setup-code", async (c) => {
     const s = c.var.services;
     const secret = launchSecret();
-    if (!secret || !isLoopbackRequest(c) || !sameSecret(c.req.header("x-strata-launch-secret") ?? "", secret)) throw new HTTPException(404, { message: "Not found" });
+    // The app proves it has the secret without sending it: an HMAC of its fresh challenge.
+    const challenge = c.req.header("x-strata-challenge") ?? "";
+    const port = new URL(c.req.url).port || "80";
+    const expected = secret ? createHmac("sha256", secret).update(`setup-code|${challenge}|${port}`).digest("hex") : "";
+    if (!secret || !isLoopbackRequest(c) || !/^[0-9a-f]{32,128}$/.test(challenge) || !sameSecret(c.req.header("x-strata-proof") ?? "", expected)) {
+      throw new HTTPException(404, { message: "Not found" });
+    }
     if (!s.profile.firstRunSetup || (await s.hasAccounts())) throw new HTTPException(409, { message: "Setup already completed" });
     return c.json({ code: await newSetupCode(s.db) });
   })

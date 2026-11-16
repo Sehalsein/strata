@@ -291,7 +291,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var request = URLRequest(url: dashboardURL.appendingPathComponent("api/launcher/setup-code"))
         request.httpMethod = "POST"
         request.timeoutInterval = 2
-        request.setValue(launchSecret, forHTTPHeaderField: "X-Strata-Launch-Secret")
+        // Proves this app has the secret without sending it: an HMAC of a fresh challenge.
+        let challenge = (0..<32).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
+        let proof = HMAC<SHA256>.authenticationCode(for: Data("setup-code|\(challenge)|\(port)".utf8), using: SymmetricKey(data: Data(launchSecret.utf8)))
+        request.setValue(challenge, forHTTPHeaderField: "X-Strata-Challenge")
+        request.setValue(Data(proof).map { String(format: "%02x", $0) }.joined(), forHTTPHeaderField: "X-Strata-Proof")
         guard let (body, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let reply = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
