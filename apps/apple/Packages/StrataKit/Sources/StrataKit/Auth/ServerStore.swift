@@ -432,10 +432,33 @@ public final class ServerStore {
     private func adopt(token: String, url: URL, info: ServerInfo) async throws {
         let me = try await StrataClient(baseURL: url, token: token, session: session, cacheTTL: 0).me()
 
+        // A server says who it is (its id) itself, so any server can claim to be one this
+        // device knows. Before a new address joins a known server (where every sign-in on it
+        // would then send its token), the new sign-in must work at an address already known
+        // for it: a server pretending to be it can't make the real one accept its token.
+        // Nothing of this device's is sent to the new address meanwhile.
+        if let known = server(id: info.id), !known.addresses.contains(url) {
+            var confirmed = false
+            for address in known.addresses {
+                let there = try? await StrataClient(baseURL: address, token: token, session: session, cacheTTL: 0).me()
+                if there?.user.id == me.user.id { confirmed = true; break }
+            }
+            guard confirmed else {
+                let knownAt = known.addresses.first.map(ServerAddress.display) ?? ""
+                throw StrataError(kind: .invalidInput, message: String(localized: "\(ServerAddress.display(url)) says it's \(known.name), which this device knows at \(knownAt), but \(known.name) there didn't confirm it, so nothing was signed in. If \(known.name) has moved, remove it from this device first (press and hold it in Settings), then sign in again.", bundle: .module))
+            }
+        }
+
         var server = server(id: info.id) ?? SavedServer(id: info.id, name: info.serverName, addresses: [])
         server.name = server.customName ?? info.serverName
         server.version = info.version
-        server.addresses = [url] + server.addresses.filter { $0 != url }
+        // As with addresses added by hand: a server reached over HTTPS doesn't switch to a
+        // plain-HTTP address on the internet (it's kept, after the others).
+        if url.scheme == "http", !ServerAddress.isLocal(url), server.addresses.contains(where: { $0.scheme == "https" }) {
+            server.addresses = server.addresses.filter { $0 != url } + [url]
+        } else {
+            server.addresses = [url] + server.addresses.filter { $0 != url }
+        }
         upsert(server)
         if hiddenServerIDs.contains(info.id) { showHiddenServers(info.id) }
 

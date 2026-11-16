@@ -33,12 +33,36 @@ export function isLocalHost(raw: string | undefined): boolean {
   return /\.(local|lan|home|internal|home\.arpa)$/.test(host);
 }
 
-/** Straight from this machine: a loopback peer address and no proxy headers. */
+/**
+ * Straight from this machine: a loopback peer address, no proxy headers, addressed to
+ * this machine by name (`localhost`, 127.0.0.1, [::1]) and, from a browser, from that same
+ * address. The peer address alone isn't enough: a web page whose domain is made to resolve
+ * to 127.0.0.1 (DNS rebinding) connects from loopback too, but keeps its own name in Host.
+ */
 export function isLoopbackRequest(c: Context<Env>): boolean {
   if (c.var.services.profile.behindProxy) return false;
   if (PROXY_HEADERS.some((h) => c.req.header(h) !== undefined)) return false;
+  const host = c.req.header("host") ?? new URL(c.req.url).host;
+  if (!isLoopbackHost(host)) return false;
+  const origin = c.req.header("origin");
+  if (origin !== undefined) {
+    let originHost: string | null = null;
+    try {
+      originHost = new URL(origin).host;
+    } catch {
+      return false;
+    }
+    if (originHost.toLowerCase() !== host.toLowerCase()) return false;
+  }
   const address = c.env?.requestIP?.(c.req.raw)?.address?.toLowerCase();
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+/** `localhost`, 127.0.0.1 or [::1], with or without a port. */
+export function isLoopbackHost(raw: string | undefined): boolean {
+  if (!raw) return false;
+  const host = raw.toLowerCase().replace(/:\d+$/, "").replace(/^\[(.*)\]$/, "$1");
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
 export function isLocalAddress(raw: string): boolean {

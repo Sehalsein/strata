@@ -40,10 +40,21 @@ describe("setup and auth", () => {
   });
 
   test("first admin is created once, with their household", async () => {
-    const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "sehal", password: "correct-horse" } });
+    // Only this machine skips the setup code, and a web page can't pass for it: not a domain
+    // made to resolve to 127.0.0.1 (DNS rebinding), nor a page on another origin.
+    const setupFrom = (headers: Record<string, string>) =>
+      server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", headers, json: { username: "evil", password: "evil-password" } });
+    const infoFrom = async (headers: Record<string, string>) => (await json(await server.request("/api/info", { ip: "127.0.0.1", headers }))).setupCodeRequired;
+    expect(await infoFrom({ Host: "rebind.evil.example:8420" })).toBe(true);
+    expect(await infoFrom({})).toBe(false);
+    expect((await setupFrom({ Host: "rebind.evil.example:8420" })).status).not.toBe(200);
+    expect((await setupFrom({ Host: "rebind.evil.example:8420", Origin: "http://rebind.evil.example:8420" })).status).not.toBe(200);
+    expect((await setupFrom({ Origin: "http://evil.example" })).status).not.toBe(200);
+    const res = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", headers: { Origin: "http://localhost:8420" }, json: { username: "sehal", password: "correct-horse" } });
     expect(res.status).toBe(200);
     token = (await json(res)).token;
     const again = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "other", password: "another-pass" } });
+
     expect(again.status).toBe(409);
   });
 
@@ -626,5 +637,32 @@ describe("playback", () => {
     expect(cont.items[0]).toMatchObject({ type: "movie", tmdbId: 10378, positionMs: 90_000 });
     const next = shelves.find((s: any) => s.id === "nextUp");
     expect(next.items[0]).toMatchObject({ type: "show", tmdbId: 9001, episode: { season: 1, episode: 2 } });
+  });
+
+  test("guessing one account's password from many addresses locks that account for a while", async () => {
+    const invited = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "lock@example.com", role: "member" } }));
+    await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "lock@example.com", password: "locks-password", name: "lock", username: "lock", invitationId: invited.id } });
+    const attempt = (password: string, i: number) =>
+      server.request("/api/auth/sign-in/username", { method: "POST", ip: `198.51.100.${i % 250}`, json: { username: "lock", password } });
+    for (let i = 0; i < 50; i++) expect((await attempt("wrong-guess", i)).status).toBe(401);
+    // Even the right password, from somewhere new, waits now; other accounts don't.
+    const locked = await attempt("locks-password", 251);
+    expect(locked.status).toBe(429);
+    expect((await server.request("/api/auth/sign-in/username", { method: "POST", ip: "203.0.113.77", json: { username: "sehal", password: "correct-horse" } })).status).toBe(200);
+  }, 60_000);
+
+  test("a household's admin manages the people below them, not the owner", async () => {
+    const invited = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "deputy@example.com", role: "admin" } }));
+    await server.request("/api/auth/sign-up/email", { method: "POST", json: { email: "deputy@example.com", password: "deputy-password", name: "deputy", username: "deputy", invitationId: invited.id } });
+    const deputy = (await server.request("/api/auth/sign-in/username", { method: "POST", ip: "203.0.113.80", json: { username: "deputy", password: "deputy-password" } })).headers.get("set-auth-token")!;
+    expect((await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: deputy, json: { invitationId: invited.id } })).status).toBe(200);
+    const full = await json(await server.request("/api/auth/organization/get-full-organization", { token }));
+    const owner = full.members.find((m: any) => m.role.includes("owner"));
+    const member = full.members.find((m: any) => m.user.email === "bob@example.com");
+    const change = (id: string, patch: object) => server.request(`/api/household/members/${id}`, { method: "PATCH", token: deputy, json: patch });
+    expect((await change(owner.id, { isKids: true })).status).toBe(403);
+    expect((await change(owner.id, { name: "Not the owner" })).status).toBe(403);
+    expect((await change(member.id, { contentLimit: "teen" })).status).toBe(200);
+    expect((await change(member.id, { contentLimit: "none" })).status).toBe(200);
   });
 });

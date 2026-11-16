@@ -125,6 +125,8 @@ export async function startTestServer(
       bodyInit = JSON.stringify(init.json);
     }
     const env = init.ip ? { requestIP: () => ({ address: init.ip! }) } : {};
+    // A client on the server's own machine addresses it as localhost (unless a test says otherwise).
+    if (init.ip && ["127.0.0.1", "::1"].includes(init.ip) && !headers.has("host")) headers.set("host", "localhost:8420");
     return app.fetch(new Request(`http://test${path}`, { ...init, headers, body: bodyInit }), env);
   };
   const household = async () => services.households.get((await services.householdIds())[0]!);

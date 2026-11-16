@@ -95,7 +95,7 @@ services = await createServices({ dataDir, port, host: "0.0.0.0" }, { fetch: dem
 const admin = publicDemo ? { username: `admin_${randomBytes(4).toString("hex")}`, password: randomBytes(24).toString("base64url") } : { username: "Alex", password: "demo-password" };
 const setupApp = createApp(services);
 const setup = await setupApp.fetch(
-  new Request("http://demo/api/setup/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...admin, householdName: "The Demo House" }) }),
+  new Request("http://localhost/api/setup/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...admin, householdName: "The Demo House" }) }),
   { requestIP: () => ({ address: "127.0.0.1" }) },
 );
 const { householdId } = (await setup.json()) as { householdId: string };

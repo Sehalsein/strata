@@ -15,6 +15,7 @@ import { publicCapabilities } from "../../profile";
 import { launchSecret } from "../../platform/launcher";
 import { dashboardUrls } from "../../platform/network";
 import { describeDevice } from "../deviceInfo";
+import { roleRank } from "../../auth/permissions";
 import { assertMayManage, SIGN_IN_CODE_HEADER, SIGN_IN_CODE_SECONDS, signInCodeSecret, signInMethods, takeIssuedCode } from "../../auth/betterAuth";
 
 /**
@@ -338,9 +339,13 @@ export const authRoutes = new Hono<Env>()
       });
     }
     // Better Auth wipes the password of an account whose email isn't marked confirmed when
-    // a magic link signs it in. Strata never sends mail (people join by invitation link),
-    // so its accounts count as confirmed.
-    if (!row.emailVerified) await s.db.update(user).set({ emailVerified: true }).where(eq(user.id, row.userId));
+    // a magic link signs it in. A home server never sends mail (people join by invitation
+    // link), so its accounts count as confirmed. Not the cloud's: there an unconfirmed
+    // address is one nobody has proven they own.
+    if (!row.emailVerified) {
+      if (s.profile.openSignUp) throw new HTTPException(409, { message: `${row.name} hasn't confirmed their email yet, so they can't sign in with a code.` });
+      await s.db.update(user).set({ emailVerified: true }).where(eq(user.id, row.userId));
+    }
     const captureId = crypto.randomUUID();
     // As a request to this server (Better Auth takes its address from it), marked as ours.
     const origin = new URL(c.req.url).origin;
@@ -378,7 +383,24 @@ export const authRoutes = new Hono<Env>()
     }
     if (input.contentLimit !== undefined) patch.contentLimit = input.contentLimit;
     const db = c.var.services.db;
+    const s = c.var.services;
     const where = and(eq(member.id, c.req.param("memberId")), eq(member.organizationId, c.var.household.organizationId));
+    // Someone else's settings: only from above them in the household (or as the server's
+    // admin), so an admin can't put the owner on a kids' limit. Their name is their
+    // account's, everywhere: the same rule as resetting their password.
+    const [target] = await db.select({ userId: member.userId, role: member.role }).from(member).where(where);
+    if (!target) throw new HTTPException(404, { message: "No such member" });
+    const me = c.var.session;
+    if (target.userId !== me.user.id) {
+      if (!me.user.isServerAdmin && roleRank(target.role) >= roleRank(me.role ?? "")) {
+        throw new HTTPException(403, { message: "Only someone above them in the household can change their settings." });
+      }
+      if (input.name !== undefined) {
+        await assertMayManage(s.db, s.profile, (headers) => s.auth.api.getSession({ headers }), c.req.raw.headers, target.userId).catch((err: unknown) => {
+          throw new HTTPException(403, { message: err instanceof Error ? err.message : "You can't rename them." });
+        });
+      }
+    }
     const columns = { id: member.id, userId: member.userId, contentLimit: member.contentLimit, isKids: member.isKids };
     const [row] = Object.keys(patch).length ? await db.update(member).set(patch).where(where).returning(columns) : await db.select(columns).from(member).where(where);
     if (!row) throw new HTTPException(404, { message: "No such member" });
