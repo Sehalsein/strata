@@ -4,12 +4,12 @@ import StrataDesign
 
 /// An invitation's QR code or link was opened (`strata://invite`, or the invitation's web
 /// page handing over to the app): shows which household and server it's for, then joins,
-/// one question at a time. The invitation fixes the email, so it's never asked: someone new
-/// picks a username (also their name, changeable in Edit Profile) and a password, which can
-/// be skipped (they sign in with a code from their admin until they set one; the app
-/// reminds them). Someone
-/// whose email already has an account on the server only enters its password. Asked first
-/// because any page could open such a link.
+/// one question at a time. The invitation fixes the email, so it's never asked:
+/// - Someone new picks a username (also their name, changeable in Edit Profile) and a
+///   password.
+/// - Someone whose email already has an account on the server enters its password, unless
+///   this device is already signed in to it: then it just joins.
+/// Asked first because any page could open such a link.
 struct InviteView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
@@ -17,16 +17,16 @@ struct InviteView: View {
     /// After joining (Add Profile closes itself).
     var onJoined: () -> Void = {}
 
-    private enum Step: Hashable { case username, password }
+    private enum Step: Hashable { case username, password, joinAs }
 
     @State private var invitation: Invitation?
+    /// This device's sign-in for the invited email, when it has one.
+    @State private var signedIn: SavedSignIn?
     @State private var loadError: String?
     @State private var step = Step.username
     @State private var username = ""
     @State private var password = ""
     @State private var joining = false
-    /// The password step was skipped: one is set later.
-    @State private var passwordLater = false
     @State private var error: String?
     @FocusState private var focused: Bool
 
@@ -36,7 +36,10 @@ struct InviteView: View {
 
     private var address: String { ServerAddress.display(request.server) }
     private var hasAccount: Bool { invitation?.hasAccount == true }
-    private var steps: [Step] { hasAccount ? [.password] : [.username, .password] }
+    private var steps: [Step] {
+        if signedIn != nil { return [.joinAs] }
+        return hasAccount ? [.password] : [.username, .password]
+    }
     private var index: Int { steps.firstIndex(of: step) ?? 0 }
     private var isLast: Bool { index == steps.count - 1 }
     private var trimmedUsername: String { username.trimmingCharacters(in: .whitespaces) }
@@ -52,6 +55,7 @@ struct InviteView: View {
             if !hasAccount, !password.isEmpty, password.count < Self.minimumPassword {
                 return String(localized: "Use at least \(Self.minimumPassword) characters.", bundle: .module)
             }
+        case .joinAs: break
         }
         return nil
     }
@@ -60,6 +64,7 @@ struct InviteView: View {
         switch step {
         case .username: trimmedUsername.wholeMatch(of: Self.usernamePattern) != nil
         case .password: hasAccount ? !password.isEmpty : password.count >= Self.minimumPassword
+        case .joinAs: true
         }
     }
 
@@ -97,12 +102,6 @@ struct InviteView: View {
                 if invitation != nil, steps.count > 1 {
                     ToolbarItem(placement: .principal) {
                         Text("Step \(index + 1) of \(steps.count)", bundle: .module).font(.stFootnote).foregroundStyle(Theme.ink3)
-                    }
-                }
-                if step == .password && !hasAccount {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button(String(localized: "Skip", bundle: .module)) { skip() }
-                            .disabled(joining)
                     }
                 }
             }
@@ -152,6 +151,7 @@ struct InviteView: View {
         case .username: String(localized: "Choose a username", bundle: .module)
         case .password:
             hasAccount ? String(localized: "Sign in to join", bundle: .module) : String(localized: "Choose a password", bundle: .module)
+        case .joinAs: String(localized: "You're already signed in", bundle: .module)
         }
     }
 
@@ -161,11 +161,14 @@ struct InviteView: View {
         case .password:
             hasAccount
                 ? String(localized: "\(invitation?.email ?? "") already has an account here. Enter its password and the household is added to it.", bundle: .module)
-                : String(localized: "At least \(Self.minimumPassword) characters. Or skip it for now: you can sign in with a code from your admin, and set one later in Settings.", bundle: .module)
+                : String(localized: "At least \(Self.minimumPassword) characters.", bundle: .module)
+        case .joinAs:
+            String(localized: "This device is signed in as \(signedIn?.name ?? "you"). Joining adds the household to that account.", bundle: .module)
         }
     }
 
     private var buttonTitle: String {
+        if step == .joinAs { return String(localized: "Join as \(signedIn?.name ?? "")", bundle: .module) }
         guard isLast else { return String(localized: "Continue", bundle: .module) }
         return hasAccount ? String(localized: "Sign In and Join", bundle: .module) : String(localized: "Create Account and Join", bundle: .module)
     }
@@ -190,6 +193,8 @@ struct InviteView: View {
                 .submitLabel(.join)
                 .onSubmit { advance() }
                 .modifier(FieldStyle())
+        case .joinAs:
+            EmptyView()
         }
     }
 
@@ -202,23 +207,20 @@ struct InviteView: View {
 
     private func advance() {
         guard canContinue, !joining else { return }
-        passwordLater = false
         if isLast { Task { await join() } } else { go(by: 1) }
-    }
-
-    /// Leaves the password for later.
-    private func skip() {
-        guard !joining, step == .password else { return }
-        password = ""
-        passwordLater = true
-        Task { await join() }
     }
 
     private func load() async {
         do {
             let found = try await StrataClient(baseURL: request.server, cacheTTL: 0).invitation(id: request.invitationId)
+            // An account already: this device may be signed in to it (only one this device
+            // already has for that server, and only a full sign-in: a watch-only one can't
+            // join households).
+            if found.hasAccount == true {
+                signedIn = await services.store.signIn(forEmail: found.email, serverAt: request.server)
+            }
             invitation = found
-            step = found.hasAccount == true ? .password : .username
+            step = steps.first ?? .username
         } catch {
             let e = StrataError.wrap(error)
             loadError = e.status == 404
@@ -232,13 +234,16 @@ struct InviteView: View {
         joining = true
         error = nil
         defer { joining = false }
-        let account: ServerStore.InvitationAccount
-        if hasAccount {
-            account = .existing(login: invitation.email, password: password)
+        let joined: Bool
+        if let signedIn {
+            joined = await services.store.acceptInvitation(request.invitationId, with: signedIn.id)
         } else {
-            account = .new(email: invitation.email.lowercased(), username: trimmedUsername, name: trimmedUsername, password: passwordLater ? nil : password)
+            let account: ServerStore.InvitationAccount = hasAccount
+                ? .existing(login: invitation.email, password: password)
+                : .new(email: invitation.email.lowercased(), username: trimmedUsername, name: trimmedUsername, password: password)
+            joined = await services.store.acceptInvitation(request.invitationId, url: request.server, as: account)
         }
-        if await services.store.acceptInvitation(request.invitationId, url: request.server, as: account) {
+        if joined {
             services.refreshClient()
             dismiss()
             onJoined()

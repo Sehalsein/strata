@@ -55,22 +55,6 @@ try {
   expect((await json(await req("/api/me", { token: benToken }))).household).toMatchObject({ name: "Ann's home", role: "member" });
   expect(sent.filter((e) => String(e.to) === "ben@example.com")).toHaveLength(0);
 
-  // Someone with a household of their own can invite any address, but signing up "with
-  // the password for later" for an address that already has an account flags nothing:
-  // Better Auth answers with a made-up success, and Ben keeps needing his own password.
-  await req("/api/auth/sign-up/email", { method: "POST", json: { email: "eve@example.com", password: "a-good-password", name: "Eve", username: "eve", callbackURL: "/" } });
-  const eveLink = new URL(linkIn(sent.filter((e) => String(e.to) === "eve@example.com").at(-1)!.text));
-  await req(`${eveLink.pathname}${eveLink.search}`, { redirect: "manual" });
-  const eve = (await req("/api/auth/sign-in/username", { method: "POST", json: { username: "eve", password: "a-good-password" } })).headers.get("set-auth-token")!;
-  const lure = await json(await req("/api/auth/organization/invite-member", { method: "POST", token: eve, json: { email: "ben@example.com", role: "member" } }));
-  expect(lure.id).toBeTruthy();
-  const fake = await req("/api/auth/sign-up/email", {
-    method: "POST",
-    json: { email: "ben@example.com", password: crypto.randomUUID(), name: "x", username: "notben", invitationId: lure.id, passwordLater: true },
-  });
-  expect(fake.status).toBe(200);
-  expect((await json(await req("/api/me", { token: benToken }))).needsPassword).toBe(false);
-
   console.log("cloud email scenario passed");
   server.services.shutdown();
   process.exit(0);

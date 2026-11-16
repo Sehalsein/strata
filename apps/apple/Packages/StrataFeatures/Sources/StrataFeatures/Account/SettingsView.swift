@@ -131,30 +131,6 @@ struct SettingsView: View {
     }
     #endif
 
-    #if os(iOS)
-    /// No password yet: signing in elsewhere takes a code from their admin.
-    private var noPasswordBanner: some View {
-        VStack(alignment: .leading, spacing: Metrics.space3) {
-            Label {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("No password yet", bundle: .module).font(.stHeadline).foregroundStyle(Theme.ink)
-                    Text("Signing in on another device takes a code from your admin. Set a password to sign in on your own.", bundle: .module)
-                        .font(.stFootnote).foregroundStyle(Theme.ink2)
-                }
-            } icon: {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.warning)
-            }
-            Button { showChangePassword = true } label: {
-                Text("Set Password", bundle: .module).font(.stHeadline)
-            }
-            .buttonStyle(.bordered)
-            .tint(Theme.warning)
-        }
-        .padding(.vertical, Metrics.space1)
-        .listRowBackground(Theme.warning.opacity(0.14))
-    }
-    #endif
-
     private var form: some View {
         Form {
             #if !os(tvOS)
@@ -181,13 +157,6 @@ struct SettingsView: View {
                 } footer: {
                     if let note = profileNote(active) { Text(note) }
                 }
-                #if os(iOS)
-                // Joined without choosing a password: a banner until they set one. (Not on a
-                // watch-only sign-in: the server only takes it from the device they joined on.)
-                if active.needsPassword == true, !active.viewerOnly {
-                    Section { noPasswordBanner }
-                }
-                #endif
             }
             #endif
 
@@ -237,7 +206,7 @@ struct SettingsView: View {
                         }
                     }
                     #if os(iOS)
-                    if active.needsPassword != true, !active.viewerOnly {
+                    if !active.viewerOnly {
                         Button { showChangePassword = true } label: {
                             Label(String(localized: "Change Password", bundle: .module), systemImage: "key")
                         }
@@ -371,8 +340,6 @@ struct ChangePasswordView: View {
 
     /// The server's minimum.
     private static let minimumLength = 8
-    /// No password yet (joined without choosing one): a first one, no current needed.
-    private var isFirst: Bool { services.store.active?.needsPassword == true }
 
     private var problem: String? {
         if new.isEmpty { return nil }
@@ -384,16 +351,10 @@ struct ChangePasswordView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if isFirst {
-                    Section {} footer: {
-                        Text("With a password, you can sign in on any device yourself, without a code from your admin.", bundle: .module)
-                    }
-                } else {
-                    Section {
-                        SecureField(String(localized: "Current password", bundle: .module), text: $current).textContentType(.password)
-                    } footer: {
-                        Text("Other devices signed in as \(services.store.active?.name ?? "you") will be signed out.", bundle: .module)
-                    }
+                Section {
+                    SecureField(String(localized: "Current password", bundle: .module), text: $current).textContentType(.password)
+                } footer: {
+                    Text("Other devices signed in as \(services.store.active?.name ?? "you") will be signed out.", bundle: .module)
                 }
                 Section {
                     SecureField(String(localized: "New password", bundle: .module), text: $new).textContentType(.newPassword)
@@ -406,7 +367,7 @@ struct ChangePasswordView: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.bg)
-            .navigationTitle(isFirst ? Text("Set a Password", bundle: .module) : Text("Change Password", bundle: .module))
+            .navigationTitle(Text("Change Password", bundle: .module))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
@@ -415,7 +376,7 @@ struct ChangePasswordView: View {
                         ProgressView()
                     } else {
                         Button(String(localized: "Save", bundle: .module)) { Task { await save() } }
-                            .disabled((!isFirst && current.isEmpty) || new.count < Self.minimumLength || confirm != new)
+                            .disabled(current.isEmpty || new.count < Self.minimumLength || confirm != new)
                     }
                 }
             }
@@ -427,11 +388,7 @@ struct ChangePasswordView: View {
         error = nil
         defer { saving = false }
         do {
-            if isFirst {
-                try await services.store.setFirstPassword(new)
-            } else {
-                try await services.store.changePassword(current: current, new: new)
-            }
+            try await services.store.changePassword(current: current, new: new)
             services.refreshClient()
             dismiss()
         } catch {

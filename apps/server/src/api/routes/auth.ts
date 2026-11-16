@@ -294,37 +294,7 @@ export const authRoutes = new Hono<Env>()
       : [];
     // Role of the household this device is in, for what it may do (`permissions`).
     if (household) c.var.session.role = household.role;
-    const [flags] = await db.select({ needsPassword: user.needsPassword }).from(user).where(eq(user.id, me.id));
-    return c.json({
-      user: me,
-      viewerOnly,
-      mustChangePassword: c.var.session.mustChangePassword,
-      // Joined without choosing a password: they sign in with a code from their admin until
-      // they set one (the apps remind them).
-      needsPassword: !!flags?.needsPassword,
-      household: household ?? null,
-      permissions: permissions(c),
-    });
-  })
-
-  // A first password, for an account that joined by invitation without choosing one (it
-  // has a random one nobody knows, so there's no current password to give). Once set, the
-  // usual change-password applies. Never from a watch-only session (a home-network join, a
-  // TV, a sign-in code): those must not turn into a full one, and a home join needs no
-  // credential at all, so it would hand anyone on the network the account (an admin's too).
-  .post("/me/password", requireAuth, async (c) => {
-    if (c.var.session.viewerOnly) {
-      throw new HTTPException(403, { message: "Set your password on the device you joined from, or ask your household's admin to set one for you." });
-    }
-    const { password } = await body(c, z.object({ password: z.string().min(8, "Use at least 8 characters.").max(256) }));
-    const s = c.var.services;
-    const id = c.var.session.user.id;
-    const [row] = await s.db.select({ needsPassword: user.needsPassword }).from(user).where(eq(user.id, id));
-    if (!row?.needsPassword) throw new HTTPException(409, { message: "This account already has a password. Change it with your current one." });
-    const ctx = await s.auth.$context;
-    await ctx.internalAdapter.updatePassword(id, await ctx.password.hash(password));
-    await s.db.update(user).set({ needsPassword: false }).where(eq(user.id, id));
-    return c.json({ ok: true });
+    return c.json({ user: me, viewerOnly, mustChangePassword: c.var.session.mustChangePassword, household: household ?? null, permissions: permissions(c) });
   })
 
   // Whose accounts the signed-in person may manage here (reset a password, download their

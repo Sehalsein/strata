@@ -46,8 +46,6 @@ public struct SavedSignIn: Codable, Sendable, Hashable, Identifiable {
     public var isServerAdmin: Bool
     /// Signed in with a temporary password from an admin: a new one comes first.
     public var mustChangePassword: Bool?
-    /// Joined without choosing a password: the app reminds them to set one.
-    public var needsPassword: Bool?
 
     public init(serverID: String, userID: String, username: String?, name: String, household: Household? = nil,
                 viewerOnly: Bool = false, isServerAdmin: Bool = false) {
@@ -343,9 +341,7 @@ public final class ServerStore {
 
     /// How someone joins by invitation: a new account, or one they already have here.
     public enum InvitationAccount: Sendable {
-        /// `password` nil: choose one later (the account gets a random one nobody knows and
-        /// is marked as needing one; a code from an admin signs it in meanwhile).
-        case new(email: String, username: String, name: String, password: String?)
+        case new(email: String, username: String, name: String, password: String)
         case existing(login: String, password: String)
     }
 
@@ -363,9 +359,8 @@ public final class ServerStore {
             let token: String
             switch account {
             case let .new(email, username, name, password):
-                let chosen = password ?? Self.randomPassword()
-                let made = try await anon.signUp(email: email, username: username, name: name, password: chosen, invitationId: invitationId, passwordLater: password == nil)
-                if let made { token = made } else { token = try await anon.signIn(login: username, password: chosen) }
+                let made = try await anon.signUp(email: email, username: username, name: name, password: password, invitationId: invitationId)
+                if let made { token = made } else { token = try await anon.signIn(login: username, password: password) }
             case let .existing(login, password):
                 do {
                     token = try await anon.signIn(login: login, password: password)
@@ -523,17 +518,37 @@ public final class ServerStore {
 
     // MARK: - Account
 
-    /// A password nobody will know, for an account whose owner chooses theirs later.
-    private static func randomPassword() -> String {
-        (0..<4).map { _ in UUID().uuidString }.joined()
+    /// The full (not watch-only) sign-in on this device for `email` on the server at `url`,
+    /// if there is one: an invitation to it joins without asking for a password.
+    public func signIn(forEmail email: String, serverAt url: URL) async -> SavedSignIn? {
+        guard let server = savedServer(matching: url.absoluteString) else { return nil }
+        for candidate in signIns(onServer: server.id) where !candidate.viewerOnly {
+            guard let client = client(forSignIn: candidate.id), let me = try? await client.me() else { continue }
+            if me.user.email?.lowercased() == email.lowercased() { return candidate }
+        }
+        return nil
     }
 
-    /// Sets the first password of the active account, which joined without choosing one
-    /// (`SavedSignIn.needsPassword`): no current password needed. Throws `StrataError`.
-    public func setFirstPassword(_ password: String) async throws {
-        guard let client else { throw Self.signedOut }
-        try await client.setFirstPassword(password)
-        await refreshActive()
+    /// Accepts an invitation with a sign-in this device already has (the invited email's),
+    /// then makes that sign-in active, in the new household. Returns false and sets
+    /// `lastError` on failure.
+    @discardableResult
+    public func acceptInvitation(_ invitationId: String, with signInID: String) async -> Bool {
+        lastError = nil
+        guard let client = client(forSignIn: signInID) else {
+            lastError = StrataError.wrap(Self.signedOut).message
+            return false
+        }
+        do {
+            try await client.acceptInvitation(id: invitationId)
+            switchTo(signInID)
+            await refreshActive()
+            Log.auth.info("joined by invitation with a saved sign-in")
+            return true
+        } catch {
+            lastError = StrataError.wrap(error).message
+            return false
+        }
     }
 
     /// Changes the active account's password, which signs it out everywhere else; this
@@ -771,6 +786,5 @@ extension SavedSignIn {
         viewerOnly = me.viewerOnly
         isServerAdmin = me.user.isServerAdmin
         mustChangePassword = me.mustChangePassword
-        needsPassword = me.needsPassword
     }
 }

@@ -108,9 +108,6 @@ public struct Me: Codable, Sendable, Hashable {
     /// Signed in with a temporary password from an admin: until a new one is chosen, the
     /// server answers nothing else. Absent from older servers.
     public var mustChangePassword: Bool?
-    /// Joined by invitation without choosing a password: they sign in with a code from
-    /// their admin until they set one. Absent from older servers.
-    public var needsPassword: Bool?
 
     public init(user: User, viewerOnly: Bool = false, household: Household? = nil) {
         self.user = user
