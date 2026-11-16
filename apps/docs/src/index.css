@@ -1,0 +1,9 @@
+/* The landing site's styles (the dashboard's tokens plus the Liquid Glass utilities), with Tailwind scanning this app too. */
+@import "../../landing/src/index.css";
+@source "./";
+@source "../../landing/src/ui.tsx";
+@source "../../landing/src/sections.tsx";
+
+html {
+  scroll-padding-top: 6rem;
+}
