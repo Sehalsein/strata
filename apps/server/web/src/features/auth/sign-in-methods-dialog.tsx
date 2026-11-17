@@ -1,11 +1,14 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { KeyRound, LoaderCircle, Plus, Trash } from "lucide-react";
+import { Check, KeyRound, LoaderCircle, Pencil, Plus, Trash, X } from "lucide-react";
 import { useSession } from "@/app/session";
 import { authClient } from "@/lib/auth-client";
 import { relativeTime } from "@/lib/format";
 import { useApiMutation } from "@/lib/query";
+import type { SavedPasskey } from "@/lib/types";
+import { passkeyAvailability } from "./passkey-availability";
 import { InlineError } from "@/components/page";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -65,7 +68,8 @@ function GoogleSection({ enabled }: { enabled: boolean }) {
 }
 
 function PasskeySection({ enabled }: { enabled: boolean }) {
-  const { me } = useSession();
+  const { me, info } = useSession();
+  const available = passkeyAvailability(info.signIn);
   const passkeys = useQuery({ queryKey: keys.passkeys, queryFn: authClient.listPasskeys, enabled });
   const [name, setName] = useState("");
   const add = useApiMutation(() => authClient.addPasskey(name.trim() || `${me.user.name}'s passkey`), {
@@ -86,32 +90,97 @@ function PasskeySection({ enabled }: { enabled: boolean }) {
       ) : (passkeys.data ?? []).length > 0 ? (
         <ul className="divide-y rounded-lg border">
           {passkeys.data!.map((p) => (
-            <li key={p.id} className="flex items-center gap-3 px-3 py-2">
-              <KeyRound className="text-muted-foreground size-4" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{p.name || "Passkey"}</p>
-                <p className="text-muted-foreground text-xs">Added {relativeTime(new Date(p.createdAt).getTime())}</p>
-              </div>
-              <Button variant="ghost" size="icon-sm" className="text-destructive" onClick={() => remove.mutate(p.id)} aria-label={`Remove ${p.name || "passkey"}`}>
-                <Trash />
-              </Button>
-            </li>
+            <PasskeyRow key={p.id} passkey={p} onRemove={() => remove.mutate(p.id)} />
           ))}
         </ul>
       ) : null}
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          add.mutate();
-        }}
-      >
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. MacBook" maxLength={64} aria-label="Passkey name" />
-        <Button type="submit" variant="outline" disabled={add.isPending}>
-          {add.isPending ? <LoaderCircle className="animate-spin" /> : <Plus />} Add passkey
-        </Button>
-      </form>
+      {available?.ok === false ? (
+        <Alert>
+          <KeyRound />
+          <AlertTitle>Passkeys can't be added here</AlertTitle>
+          <AlertDescription>
+            <p>
+              {available.reason}
+              {available.address && (
+                <>
+                  {" "}
+                  <a href={available.address} className="text-foreground underline underline-offset-4">
+                    Open it there
+                  </a>
+                </>
+              )}
+            </p>
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <>
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              add.mutate();
+            }}
+          >
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. MacBook" maxLength={64} aria-label="Passkey name" />
+            <Button type="submit" variant="outline" disabled={add.isPending}>
+              {add.isPending ? <LoaderCircle className="animate-spin" /> : <Plus />} Add passkey
+            </Button>
+          </form>
+          {available?.localOnly && (
+            <p className="text-muted-foreground text-xs">
+              Passkeys made here work at this address on this computer only. To use them from other devices, give the server an HTTPS address (STRATA_PUBLIC_URL); passkeys made before that change stop working.
+            </p>
+          )}
+        </>
+      )}
       <InlineError error={add.error} />
     </section>
+  );
+}
+
+/** One saved passkey: its name (renamed in place) and when it was added. */
+function PasskeyRow({ passkey: p, onRemove }: { passkey: SavedPasskey; onRemove: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(p.name ?? "");
+  const rename = useApiMutation(() => authClient.renamePasskey(p.id, name.trim()), {
+    success: "Passkey renamed",
+    invalidate: [keys.passkeys],
+    onSuccess: () => setEditing(false),
+  });
+  const label = p.name || "Passkey";
+  if (editing)
+    return (
+      <li>
+        <form
+          className="flex items-center gap-2 px-3 py-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim()) rename.mutate();
+          }}
+        >
+          <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={64} aria-label="Passkey name" autoFocus onFocus={(e) => e.target.select()} className="h-8" />
+          <Button type="submit" variant="ghost" size="icon-sm" disabled={!name.trim() || rename.isPending} aria-label="Save name">
+            {rename.isPending ? <LoaderCircle className="animate-spin" /> : <Check />}
+          </Button>
+          <Button type="button" variant="ghost" size="icon-sm" onClick={() => (setEditing(false), setName(p.name ?? ""))} aria-label="Cancel renaming">
+            <X />
+          </Button>
+        </form>
+      </li>
+    );
+  return (
+    <li className="flex items-center gap-3 px-3 py-2">
+      <KeyRound className="text-muted-foreground size-4" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{label}</p>
+        <p className="text-muted-foreground text-xs">Added {relativeTime(new Date(p.createdAt).getTime())}</p>
+      </div>
+      <Button variant="ghost" size="icon-sm" onClick={() => setEditing(true)} aria-label={`Rename ${label}`}>
+        <Pencil />
+      </Button>
+      <Button variant="ghost" size="icon-sm" className="text-destructive" onClick={onRemove} aria-label={`Remove ${label}`}>
+        <Trash />
+      </Button>
+    </li>
   );
 }

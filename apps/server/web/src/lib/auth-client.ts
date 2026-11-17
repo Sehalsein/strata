@@ -122,9 +122,13 @@ export const authClient = {
     await call(ba.signIn.social({ provider: "google", callbackURL: back, newUserCallbackURL: `${back}?welcome=1`, errorCallbackURL: `${back}?auth_error=google` }) as Promise<BaResult<unknown>>);
   },
 
-  /** Signs in with a passkey saved on this device or a phone nearby. */
-  async signInWithPasskey() {
-    await call(ba.signIn.passkey() as Promise<BaResult<unknown>>);
+  /**
+   * Signs in with a passkey saved on this device or a phone nearby. `autoFill`: waits for one
+   * picked from the username field's suggestions instead (rejects when another sign-in
+   * replaces it).
+   */
+  async signInWithPasskey({ autoFill = false }: { autoFill?: boolean } = {}) {
+    await call(ba.signIn.passkey({ autoFill }) as Promise<BaResult<unknown>>);
   },
 
   /** Emails a reset link when an account has that address (the answer is the same either way). */
@@ -169,6 +173,10 @@ export const authClient = {
   /** Saves a passkey for the signed-in account (the browser asks to create one). */
   async addPasskey(name: string) {
     await call(ba.passkey.addPasskey({ name }) as Promise<BaResult<unknown>>);
+  },
+
+  async renamePasskey(id: string, name: string) {
+    await call(ba.passkey.updatePasskey({ id, name }) as Promise<BaResult<unknown>>);
   },
 
   async deletePasskey(id: string) {

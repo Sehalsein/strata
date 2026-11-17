@@ -142,7 +142,20 @@ export const authRoutes = new Hono<Env>()
       /** True when this client may join without a password (see /join). */
       localJoin: await canJoinLocally(c),
       /** Ways in besides a password that this server is set up for (the sign-in page's buttons). */
-      signIn: (({ google, passkeys }) => ({ google: !!google, passkey: !!passkeys, passwordReset: emailConfigured(), signUp: s.profile.openSignUp, confirmEmail: s.profile.openSignUp && emailConfigured() }))(signInMethods()),
+      signIn: (({ google, passkeys }) => ({
+        google: !!google,
+        passkey: !!passkeys,
+        /**
+         * Where passkeys work: the domain they belong to (a page on it or a subdomain, over
+         * HTTPS, or http://localhost) and the address to open. Elsewhere (a LAN IP, plain
+         * HTTP) the dashboard explains instead of offering a button that fails.
+         */
+        passkeyDomain: passkeys?.rpID ?? null,
+        passkeyAddress: passkeys?.origin[0] ?? null,
+        passwordReset: emailConfigured(),
+        signUp: s.profile.openSignUp,
+        confirmEmail: s.profile.openSignUp && emailConfigured(),
+      }))(signInMethods({ profile: s.profile, port: s.config.port })),
     });
   })
 
@@ -296,7 +309,7 @@ export const authRoutes = new Hono<Env>()
 
   .get("/privacy", async (c) => {
     const s = c.var.services;
-    const { google, passkeys } = signInMethods();
+    const { google, passkeys } = signInMethods({ profile: s.profile, port: s.config.port });
     return c.json({
       serverName: s.settings.get().serverName,
       contact: process.env.STRATA_PRIVACY_CONTACT || null,
