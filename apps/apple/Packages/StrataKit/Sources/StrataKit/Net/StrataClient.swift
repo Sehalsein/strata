@@ -650,7 +650,13 @@ public final class StrataClient: Sendable {
         guard var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw StrataError(kind: .invalidInput, message: String(localized: "That doesn't look like a valid server address.", bundle: .module))
         }
-        comps.path = path
+        // A path the server gave (a row's `seeAll`, "/api/rows/home/because%3Amovie%3A27205")
+        // is already encoded: encoding it again sends "%253A", and the server can't find the row.
+        if path.contains("%"), path.removingPercentEncoding != nil {
+            comps.percentEncodedPath = path
+        } else {
+            comps.path = path
+        }
         comps.queryItems = query.isEmpty ? nil : query
         // URLComponents leaves "+" alone in queries; servers read it as a space.
         comps.percentEncodedQuery = comps.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")

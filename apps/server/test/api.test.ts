@@ -713,6 +713,10 @@ describe("playback", () => {
       expect(because.status).toBe(200);
       expect(await json(because)).toMatchObject({ title: "Because you watched Big Buck Bunny", items: [] });
       expect((await server.request(`/api/rows/home/${encodeURIComponent("because:movie:x")}`, { token })).status).toBe(404);
+      // Apps that encoded the seeAll path a second time still get the row.
+      const twice = await server.request(`/api/rows/home/${encodeURIComponent(encodeURIComponent("because:movie:10378"))}`, { token });
+      expect(twice.status).toBe(200);
+      expect((await json(twice)).title).toBe("Because you watched Big Buck Bunny");
       // The pages API says what was saved.
       const home = (await json(await server.request("/api/admin/pages", { token }))).pages[0];
       expect(home.rows.slice(0, 3).map((r: any) => [r.id, r.on, r.name ?? null, r.count ?? null])).toEqual([
