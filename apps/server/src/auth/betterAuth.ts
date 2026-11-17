@@ -605,7 +605,7 @@ export function createAuth(options: AuthOptions) {
           subject: "Reset your Strata password",
           ...simpleEmail({
             greeting: `Hi ${user.name},`,
-            lines: ["Someone asked to reset the password for your Strata account. If it was you, choose a new one with the button below. The link works for an hour."],
+            lines: ["Someone asked to reset the password for your Strata account. If it was you, choose a new one with the button below: on your iPhone or iPad it opens the Strata app. The link works for an hour."],
             button: { label: "Choose a new password", url },
             footer: "If you didn't ask, ignore this email: your password stays as it is.",
           }),

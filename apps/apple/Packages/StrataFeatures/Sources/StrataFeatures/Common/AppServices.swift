@@ -220,6 +220,51 @@ public struct SignInCodeRequest: Identifiable, Hashable {
     public var id: String { code }
 }
 
+/// A password-reset link from the email "Forgot password?" sends:
+/// `strata://reset-password?server=<address>&token=<token>` (the web page the email's
+/// link lands on opens it), or the links themselves pasted as text
+/// (`https://<server>/reset-password?token=<token>`, or the email's
+/// `https://<server>/api/auth/reset-password/<token>`).
+public struct ResetPasswordRequest: Identifiable, Hashable {
+    public let server: URL
+    public let token: String
+    public var id: String { token }
+
+    public init?(_ url: URL) {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ name: String) -> String? { query.first { $0.name == name }?.value.flatMap { $0.isEmpty ? nil : $0 } }
+        switch url.scheme?.lowercased() {
+        case "strata" where url.host == "reset-password":
+            // No user@ part: the address shown must be the one the password goes to.
+            guard let token = value("token"), let server = value("server").flatMap(URL.init(string:)),
+                  server.scheme == "http" || server.scheme == "https", server.host != nil,
+                  server.user == nil, server.password == nil else { return nil }
+            self.server = server
+            self.token = token
+        case "http", "https":
+            guard url.user == nil, url.password == nil else { return nil }
+            let parts = url.pathComponents.filter { $0 != "/" }
+            let token: String
+            if parts == ["reset-password"], let found = value("token") {
+                token = found
+            } else if parts.count == 4, Array(parts.prefix(3)) == ["api", "auth", "reset-password"], !parts[3].isEmpty {
+                token = parts[3]
+            } else {
+                return nil
+            }
+            guard var origin = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+            origin.path = ""
+            origin.query = nil
+            origin.fragment = nil
+            guard let server = origin.url else { return nil }
+            self.server = server
+            self.token = token
+        default:
+            return nil
+        }
+    }
+}
+
 /// An invitation to a household: its QR code in the dashboard
 /// (`strata://invite?server=<address>&id=<id>`), or the link passed on as text
 /// (`https://<server>/invite/<id>`, whose page opens the app).
@@ -295,6 +340,8 @@ public struct TVLinkRequest: Identifiable, Hashable {
 /// title's page: a link never starts playback by itself),
 /// `strata://link?user_code=<code>&server=<id or address>` (approve a TV's sign-in),
 /// `strata://sign-in?server=<address>&code=<code>` (a member's QR code: sign in as them),
+/// `strata://reset-password?server=<address>&token=<token>` (a password-reset email's
+/// link: choose a new password),
 /// `strata://invite?server=<address>&id=<id>` (an invitation: join its household),
 /// `strata://tv-link?key=<key>` (a TV with no server yet: send it this phone's), and
 /// the TV's own `https://<server>/link?user_code=<code>` when it opens the app.
@@ -305,6 +352,7 @@ public final class AppCoordinator {
     public var pendingLink: LinkRequest?
     public var pendingSignIn: SignInCodeRequest?
     public var pendingTVLink: TVLinkRequest?
+    public var pendingReset: ResetPasswordRequest?
     public var pendingInvite: InviteRequest?
 
     public init() {}
@@ -312,6 +360,10 @@ public final class AppCoordinator {
     public func handle(url: URL) {
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
+        if let reset = ResetPasswordRequest(url) {
+            pendingReset = reset
+            return
+        }
         // The QR code on the TV is the server's own page; opened in the app, the server is
         // the link's origin.
         if let invite = InviteRequest(url) {

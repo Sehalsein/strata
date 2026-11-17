@@ -93,6 +93,20 @@ public final class StrataClient: Sendable {
         throw StrataError(kind: .decoding, message: String(localized: "The server signed you in but sent no session. Is the app up to date?", bundle: .module))
     }
 
+    /// "Forgot password?": the server emails the account a link to choose a new one, which
+    /// opens the app (`strata://reset-password`). Answers the same whether or not an
+    /// account uses `email`; 404 where the server can't send email.
+    public func requestPasswordReset(email: String) async throws {
+        let body = PasswordResetRequestBody(email: email.trimmingCharacters(in: .whitespacesAndNewlines), redirectTo: "/reset-password")
+        let _: OKResponse = try await send("POST", "/api/auth/request-password-reset", body: body)
+    }
+
+    /// Chooses a new password with the token from the emailed link. Signs the account out
+    /// everywhere; 400 `INVALID_TOKEN` once the link has expired or been used.
+    public func resetPassword(token: String, newPassword: String) async throws {
+        let _: OKResponse = try await send("POST", "/api/auth/reset-password", body: ResetPasswordBody(newPassword: newPassword, token: token))
+    }
+
     /// Ends this session on the server.
     public func signOut() async throws {
         let _: OKResponse = try await send("POST", "/api/auth/sign-out", body: EmptyBody())
@@ -733,6 +747,8 @@ private struct Credentials: Encodable { var username: String; var password: Stri
 private struct EmailCredentials: Encodable { var email: String; var password: String }
 private struct SetupBody: Encodable { var username: String; var password: String; var householdName: String?; var setupCode: String? }
 private struct SetActiveBody: Encodable { var organizationId: String }
+private struct PasswordResetRequestBody: Encodable { var email: String; var redirectTo: String }
+private struct ResetPasswordBody: Encodable { var newPassword: String; var token: String }
 private struct SignUpBody: Encodable { var email: String; var username: String; var name: String; var password: String; var invitationId: String }
 private struct AcceptInvitationBody: Encodable { var invitationId: String }
 private struct AcceptInvitationResponse: Decodable {

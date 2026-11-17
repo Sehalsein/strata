@@ -67,6 +67,7 @@ For the nightly channel, download from `server-nightly` instead of `server-stabl
 | | `STRATA_PUBLIC_URL` | None. The server's HTTPS address (e.g. `https://strata.example.com` behind a reverse proxy or Tailscale). Passkeys belong to it, so everyone signs in with them from anywhere; without it, passkeys work only at `http://localhost:<port>` on this machine. |
 | | `STRATA_DEBUG=1` | Off. Turns on debug logging, including ffmpeg command lines. |
 | | `STRATA_NO_FFMPEG_DOWNLOAD=1` | Off. Stops a source run from downloading ffmpeg. |
+| | `STRATA_EMAIL_LOG=1` | Off. For development: emails (like password resets) go to the log instead of Resend, so "Forgot password?" works without email set up. |
 
 Port and bind address are set only on the command line or in env, never in the dashboard (it shows them read-only). That way a settings change can't cut the dashboard off.
 

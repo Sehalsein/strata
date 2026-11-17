@@ -195,6 +195,11 @@ describe("setup and auth", () => {
       expect(sent).toHaveLength(1);
       expect(sent[0]).toMatchObject({ to: ["bob@example.com"], subject: "Reset your Strata password" });
       const link = /https?:\/\/\S+reset-password\/(\w+)/.exec(sent[0].text)!;
+      // The link checks the token, then opens the page that hands it to the app.
+      const emailed = new URL(/https?:\/\/\S+reset-password\/\S+/.exec(sent[0].text)![0]);
+      const opened = await server.request(emailed.pathname + emailed.search);
+      expect(opened.status).toBe(302);
+      expect(opened.headers.get("location")).toEndWith(`/reset-password?token=${link[1]}`);
       const reset = await server.request("/api/auth/reset-password", { method: "POST", json: { newPassword: "bobs-new-password", token: link[1] } });
       expect(reset.status).toBe(200);
       expect((await signIn("bob", "bobs-password")).status).toBe(401);

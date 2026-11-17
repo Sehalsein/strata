@@ -6,16 +6,23 @@ const log = logger("email");
  * Email, by Resend (https://resend.com), only when the server has RESEND_API_KEY and
  * STRATA_EMAIL_FROM (e.g. `Strata <no-reply@example.com>`, on a domain verified in
  * Resend). Without them Strata sends no mail and nothing that needs it shows.
+ * For development, STRATA_EMAIL_LOG=1 writes each email to the server's log instead.
  */
 export function emailConfigured(): boolean {
-  return !!(process.env.RESEND_API_KEY && process.env.STRATA_EMAIL_FROM);
+  return !!(process.env.RESEND_API_KEY && process.env.STRATA_EMAIL_FROM) || emailToLog();
 }
+
+const emailToLog = () => process.env.STRATA_EMAIL_LOG === "1" && !process.env.RESEND_API_KEY;
 
 /** Addresses Strata made up for accounts without an email: nothing can be sent to them. */
 export const isPlaceholderEmail = (email: string) => email.toLowerCase().endsWith("@users.strata");
 
 export async function sendEmail(message: { to: string; subject: string; text: string; html: string }): Promise<void> {
   if (!emailConfigured() || isPlaceholderEmail(message.to)) return;
+  if (emailToLog()) {
+    log.info(`email to ${message.to}: ${message.subject}\n${message.text}`);
+    return;
+  }
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },

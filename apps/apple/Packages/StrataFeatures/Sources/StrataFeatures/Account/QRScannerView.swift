@@ -10,6 +10,8 @@ import VisionKit
 enum ScannedCode: Equatable {
     /// A member's sign-in code from the dashboard (`strata://sign-in?server=…&code=…`).
     case signIn(SignInCodeRequest)
+    /// A password-reset link from an email, pasted.
+    case resetPassword(ResetPasswordRequest)
     /// An invitation to a household (its QR code, or its link pasted).
     case invite(InviteRequest)
     /// A server's address (the dashboard's "Your devices" step shows one).
@@ -24,6 +26,10 @@ enum ScannedCode: Equatable {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased() else {
             self = .unknown
+            return
+        }
+        if let reset = ResetPasswordRequest(url) {
+            self = .resetPassword(reset)
             return
         }
         if let invite = InviteRequest(url) {

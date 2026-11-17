@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { CircleCheck, LoaderCircle, MailCheck } from "lucide-react";
+import { useEffect, useState } from "react";
+import { CircleCheck, LoaderCircle, MailCheck, Smartphone } from "lucide-react";
 import { errorMessage } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
 import { AuthScreen } from "@/features/auth/login-page";
@@ -10,6 +10,9 @@ import { FieldGroup, FormField } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 
 const MIN_PASSWORD = 8;
+
+/** The Strata apps for iPhone, iPad and Apple TV. */
+const APP_STORE_URL = "https://apps.apple.com/us/app/strata-tv/id6804102192";
 
 /** /forgot-password: asks for the account's email and sends a reset link (always the same answer). */
 export function ForgotPasswordPage({ onBack }: { onBack: () => void }) {
@@ -75,11 +78,55 @@ export function ForgotPasswordPage({ onBack }: { onBack: () => void }) {
   );
 }
 
-/** /reset-password?token=…: the emailed link lands here to choose a new password. */
-export function ResetPasswordPage({ onDone }: { onDone: () => void }) {
+/**
+ * /reset-password?token=…: the emailed link lands here (Better Auth checks the token first).
+ * Choosing the new password happens in the Strata app, like everything else someone in a
+ * household does, so this page hands the token over: it opens the app at "Choose a new
+ * password" and points to the App Store for anyone without it. An admin without the app
+ * can still choose it here.
+ */
+export function ResetPasswordPage({ serverName, onDone }: { serverName: string; onDone: () => void }) {
   const params = new URLSearchParams(window.location.search);
   const token = params.get("token");
   const linkError = params.get("error");
+  const link = token && !linkError ? `strata://reset-password?${new URLSearchParams({ server: window.location.origin, token })}` : null;
+  const [inBrowser, setInBrowser] = useState(false);
+
+  // Straight on to the app where it's installed; the buttons stay for when it isn't.
+  useEffect(() => {
+    if (link) window.location.href = link;
+  }, [link]);
+
+  if (!link) return <ResetPasswordForm token={null} onDone={onDone} />;
+  if (inBrowser) return <ResetPasswordForm token={token} onDone={onDone} />;
+  const where = serverName && serverName !== "Strata" ? serverName : "this Strata server";
+  return (
+    <AuthScreen>
+      <Card>
+        <CardHeader className="text-center">
+          <Smartphone className="text-muted-foreground mx-auto size-8" />
+          <CardTitle className="text-xl">Choose a new password</CardTitle>
+          <CardDescription>For your account on {where}. You'll choose it in the Strata app on your iPhone or iPad.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <Button asChild>
+            <a href={link}>Open in Strata</a>
+          </Button>
+          <Button variant="outline" asChild>
+            <a href={APP_STORE_URL}>Get Strata on the App Store</a>
+          </Button>
+          <p className="text-muted-foreground text-center text-xs">Got the app just now? Come back to this page and tap Open in Strata.</p>
+          <Button variant="link" className="h-auto p-0 text-xs" onClick={() => setInBrowser(true)}>
+            No iPhone or iPad? Choose it in this browser
+          </Button>
+        </CardContent>
+      </Card>
+    </AuthScreen>
+  );
+}
+
+/** The new password, chosen in the browser (or why the link doesn't work). */
+function ResetPasswordForm({ token, onDone }: { token: string | null; onDone: () => void }) {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [state, setState] = useState<"idle" | "saving" | "done">("idle");
@@ -116,11 +163,11 @@ export function ResetPasswordPage({ onDone }: { onDone: () => void }) {
                 Sign in
               </Button>
             </div>
-          ) : !token || linkError ? (
+          ) : !token ? (
             <div className="flex flex-col gap-4">
               <Alert variant="destructive">
                 <AlertTitle>This link doesn't work</AlertTitle>
-                <AlertDescription>It may have expired (links last an hour) or been used already. Ask for a new one.</AlertDescription>
+                <AlertDescription>It may have expired (links last an hour) or been used already. Ask for a new one: Forgot password? when signing in, in the Strata app or here.</AlertDescription>
               </Alert>
               <Button variant="outline" onClick={() => (window.location.href = "/forgot-password")}>
                 Send a new link

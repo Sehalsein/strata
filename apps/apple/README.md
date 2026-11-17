@@ -58,6 +58,7 @@ Debug builds accept `-StrataOpenURL strata://…` as a launch argument:
 - `strata://show/<id>`
 - `strata://watch/movie/<id>`
 - `strata://watch/episode/<show>/<season>/<episode>`
+- `strata://reset-password?server=<address>&token=<token>` (the token is in a reset email's link; with `STRATA_EMAIL_LOG=1` the server logs the email)
 
 ## CI and TestFlight
 
