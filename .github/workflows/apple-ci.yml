@@ -1,10 +1,10 @@
 name: Apple CI
 
 on:
+  # Every PR: "iOS and iPadOS" and "tvOS" are required checks, so they report on each one. A PR
+  # that doesn't touch the Apple apps gets them in seconds, skipped on a Linux runner (see
+  # `changes`); one that does builds for real.
   pull_request:
-    paths:
-      - "apps/apple/**"
-      - ".github/workflows/apple-*.yml"
   push:
     # main, and the branches work happens on (a push there checks it before any PR exists).
     branches:
@@ -27,10 +27,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Apple changed?
+    runs-on: ubuntu-latest
+    outputs:
+      apple: ${{ steps.diff.outputs.apple }}
+    steps:
+      - name: Check out repository
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Look for Apple changes
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Pushes and manual runs are already filtered to the Apple apps (see `on`).
+          if [ "$EVENT" != pull_request ]; then
+            echo "apple=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE...$HEAD" | grep -qE '^(apps/apple/|\.github/workflows/apple-[^/]*\.yml$)'; then
+            echo "apple=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "apple=false" >> "$GITHUB_OUTPUT"
+            echo "No changes to apps/apple: the iOS and tvOS builds are skipped."
+          fi
+
   build:
+    # Always runs, so each check reports under its own name: a job skipped whole reports as
+    # "${{ matrix.name }}", which wouldn't satisfy the required checks. Without Apple changes,
+    # every step is skipped on a Linux runner.
     name: ${{ matrix.name }}
+    needs: changes
     # macOS 26: the packages target macOS 26, and their SwiftUI tests run on the host.
-    runs-on: macos-26
+    runs-on: ${{ needs.changes.outputs.apple == 'true' && 'macos-26' || 'ubuntu-latest' }}
+    env:
+      APPLE_CHANGED: ${{ needs.changes.outputs.apple }}
     timeout-minutes: 50
     strategy:
       fail-fast: false
@@ -47,17 +82,21 @@ jobs:
 
     steps:
       - name: Check out repository
+        if: env.APPLE_CHANGED == 'true'
         uses: actions/checkout@v7
 
       - name: Select Xcode 26
+        if: env.APPLE_CHANGED == 'true'
         run: |
           sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
           xcodebuild -version
 
       - name: Install XcodeGen
+        if: env.APPLE_CHANGED == 'true'
         run: brew install xcodegen
 
       - name: Restore FFmpeg
+        if: env.APPLE_CHANGED == 'true'
         id: ffmpeg-cache
         uses: actions/cache@v4
         with:
@@ -66,16 +105,17 @@ jobs:
 
       # StrataRemux links FFmpeg (LGPL, built from source); the framework isn't kept in git.
       - name: Build FFmpeg
-        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        if: env.APPLE_CHANGED == 'true' && (steps.ffmpeg-cache.outputs.cache-hit != 'true')
         working-directory: apps/apple
         run: Packages/StrataRemux/scripts/build-ffmpeg.sh
 
       - name: Generate Xcode project
+        if: env.APPLE_CHANGED == 'true'
         working-directory: apps/apple
         run: xcodegen generate
 
       - name: Run Swift package tests
-        if: matrix.id == 'ios'
+        if: env.APPLE_CHANGED == 'true' && (matrix.id == 'ios')
         working-directory: apps/apple
         run: |
           swift test --package-path Packages/StrataKit
@@ -83,6 +123,7 @@ jobs:
           swift test --package-path Packages/StrataRemux
 
       - name: Build ${{ matrix.name }}
+        if: env.APPLE_CHANGED == 'true'
         uses: Apple-Actions/xcodebuild@v1
         with:
           working-directory: apps/apple
@@ -97,7 +138,7 @@ jobs:
           disable-automatic-package-resolution: false
 
       - name: Upload build log
-        if: ${{ failure() || cancelled() }}
+        if: env.APPLE_CHANGED == 'true' && (failure() || cancelled())
         uses: actions/upload-artifact@v7
         with:
           name: apple-${{ matrix.id }}-logs
