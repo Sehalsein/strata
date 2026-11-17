@@ -72,3 +72,4 @@ Without them Strata sends no email, and the link doesn't show.
 Several containers can share one database. Migrations take a lock, and sign-ins, settings, TV codes, throttling and the catalog cache all live in Postgres.
 
 Background jobs (TorBox sync) run in every container, so one container is plenty for a household.
+
