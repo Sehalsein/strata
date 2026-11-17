@@ -1,5 +1,6 @@
 #if os(tvOS)
 import UIKit
+import ImageIO
 import StrataKit
 
 /// Lays each Top Shelf item's logo on its backdrop (the Top Shelf shows one image per item,
@@ -38,8 +39,8 @@ enum TopShelfArtwork {
     private static func render(image imageURL: URL, logo logoURL: URL) async -> Data? {
         async let imageData = data(imageURL)
         async let logoData = data(logoURL)
-        guard let backdrop = await imageData.flatMap(UIImage.init(data:)),
-              let logo = await logoData.flatMap(UIImage.init(data:)) else { return nil }
+        guard let backdrop = await imageData.flatMap({ decode($0, maxPixel: Int(Self.size.width)) }),
+              let logo = await logoData.flatMap({ decode($0, maxPixel: 600) }) else { return nil }
         let size = Self.size
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -66,10 +67,30 @@ enum TopShelfArtwork {
         return rendered.jpegData(compressionQuality: 0.85)
     }
 
+    /// Artwork is a few hundred KB; anything much bigger isn't artwork.
+    static let maxBytes = 8 << 20
+
+    /// The image's bytes: web art only (never a file or another scheme a server could
+    /// name), a successful answer, and not too big.
     private static func data(_ url: URL) async -> Data? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http", url.host() != nil else { return nil }
         guard let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true else { return nil }
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              data.count <= maxBytes else { return nil }
         return data
+    }
+
+    /// Decodes straight to at most `maxPixel` on the long side, never at full size.
+    private static func decode(_ data: Data, maxPixel: Int) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return UIImage(cgImage: image)
     }
 }
 #endif
