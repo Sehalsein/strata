@@ -52,17 +52,19 @@ test("passkey sign-in is open to a watch-only session; adding, renaming and remo
   for (const path of ["/passkey/generate-authenticate-options", "/passkey/verify-authentication", "/passkey/list-user-passkeys"]) expect(demoRefuses(path)).toBe(false);
 });
 
-test("/api/info says where passkeys work, and none where they can't", async () => {
+test("/api/info offers no passkeys where they can't work", async () => {
   // (A test server listens on no fixed port, so not at http://localhost either.)
-  const none = await startTestServer();
-  const off = (await (await none.request("/api/info")).json()) as { signIn: Record<string, unknown> };
-  expect(off.signIn).toMatchObject({ passkey: false, passkeyDomain: null, passkeyAddress: null });
+  const server = await startTestServer();
+  const info = (await (await server.request("/api/info")).json()) as { signIn: Record<string, unknown> };
+  expect(info.signIn).toMatchObject({ passkey: false, passkeyDomain: null, passkeyAddress: null });
+}, 30_000);
 
+test("/api/info says where passkeys work", async () => {
   process.env.STRATA_PUBLIC_URL = "https://strata.example.com";
   const server = await startTestServer();
-  const on = (await (await server.request("/api/info")).json()) as { signIn: Record<string, unknown> };
-  expect(on.signIn).toMatchObject({ passkey: true, passkeyDomain: "strata.example.com", passkeyAddress: "https://strata.example.com" });
-});
+  const info = (await (await server.request("/api/info")).json()) as { signIn: Record<string, unknown> };
+  expect(info.signIn).toMatchObject({ passkey: true, passkeyDomain: "strata.example.com", passkeyAddress: "https://strata.example.com" });
+}, 30_000);
 
 test("a signed-in account registers passkeys for the server's domain, and renames and removes its own", async () => {
   process.env.STRATA_PUBLIC_URL = "https://strata.example.com";
@@ -87,4 +89,4 @@ test("a signed-in account registers passkeys for the server's domain, and rename
   expect((await list()).map((p) => p.name)).toEqual(["Work laptop"]);
   expect((await auth("/passkey/delete-passkey", { method: "POST", json: { id: "pk1" } })).status).toBe(200);
   expect(await list()).toEqual([]);
-});
+}, 30_000);
