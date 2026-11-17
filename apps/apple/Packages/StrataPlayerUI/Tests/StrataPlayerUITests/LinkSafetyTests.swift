@@ -17,11 +17,11 @@ final class LinkSafetyTests: XCTestCase {
     }
 
     func testOnlyWebLinksOpen() {
-        XCTAssertTrue(PlayerEngine.isOpenable(URL(string: "https://nexus-1.tb-cdn.io/dld/x")!, offline: false))
-        XCTAssertTrue(PlayerEngine.isOpenable(URL(string: "http://192.168.2.163:8490/api/stream/1/master.m3u8")!, offline: false))
-        XCTAssertTrue(PlayerEngine.isOpenable(URL(fileURLWithPath: "/var/mobile/Downloads/a.mkv"), offline: true))
-        XCTAssertFalse(PlayerEngine.isOpenable(URL(string: "smb://nas/share/a.mkv")!, offline: false))
-        XCTAssertFalse(PlayerEngine.isOpenable(URL(string: "ftp://host/a.mkv")!, offline: false))
-        XCTAssertFalse(PlayerEngine.isOpenable(URL(string: "https:///no-host")!, offline: false))
+        XCTAssertTrue(PlayerEngine.isOpenable(URL(string: "https://nexus-1.tb-cdn.io/dld/x")!, local: false))
+        XCTAssertTrue(PlayerEngine.isOpenable(URL(string: "http://192.168.2.163:8490/api/stream/1/master.m3u8")!, local: false))
+        XCTAssertTrue(PlayerEngine.isOpenable(URL(fileURLWithPath: "/var/mobile/Downloads/a.mkv"), local: true))
+        XCTAssertFalse(PlayerEngine.isOpenable(URL(string: "smb://nas/share/a.mkv")!, local: false))
+        XCTAssertFalse(PlayerEngine.isOpenable(URL(string: "ftp://host/a.mkv")!, local: false))
+        XCTAssertFalse(PlayerEngine.isOpenable(URL(string: "https:///no-host")!, local: false))
     }
 }

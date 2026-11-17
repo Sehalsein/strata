@@ -217,6 +217,9 @@ public final class PlayerEngine {
     @ObservationIgnored private var stallTask: Task<Void, Never>?
     @ObservationIgnored private var lastReportAt = Date.distantPast
     @ObservationIgnored private var lastReportedMs: Int?
+    /// The playing response was built on this device (a download), not sent by the server:
+    /// only then may the engine open a file on the device. Never read from the response.
+    @ObservationIgnored private var playsLocalFile = false
     /// Set once the first stream played; before that there's no real position to report
     /// (reporting 0 would wipe the saved resume point).
     private var didStartPlayback = false
@@ -280,6 +283,7 @@ public final class PlayerEngine {
         lastProbedFile = nil
         linkRefreshes = 0
         reportAttempts = []
+        playsLocalFile = false
         self.target = target
         self.meta = meta
         status = .loading
@@ -326,6 +330,7 @@ public final class PlayerEngine {
         startToken += 1
         let token = startToken
         linkRefreshes = 0
+        playsLocalFile = true
         self.target = target
         self.meta = meta
         status = .loading
@@ -486,7 +491,7 @@ public final class PlayerEngine {
         guard probedFiles.insert(fileId).inserted else {
             throw DeviceFailure(message: String(localized: "The server couldn't use what this file holds. Pick another source.", bundle: .module), stage: "reading")
         }
-        guard Self.isOpenable(url, offline: false) else {
+        guard Self.isOpenable(url, local: false) else {
             throw DeviceFailure(message: String(localized: "This file's link isn't one the app can open. Pick another source.", bundle: .module), stage: "reading")
         }
         status = .loading
@@ -525,7 +530,7 @@ public final class PlayerEngine {
 
         // Only web links from the server; files on the device only for a download, whose
         // response the app built itself.
-        guard Self.isOpenable(res.url, offline: res.isOffline) else {
+        guard Self.isOpenable(res.url, local: playsLocalFile) else {
             throw DeviceFailure(message: String(localized: "This copy's link isn't one the app can open. Choose another source.", bundle: .module), stage: "connecting")
         }
         if res.mode.isHLS {
@@ -1363,17 +1368,20 @@ public final class PlayerEngine {
         return out
     }
 
-    /// Whether the engine may open `url`: web links (from the server), or a file on the device
-    /// for a download, whose response the app built itself. In debug builds a file link from
-    /// the server is allowed too, for tests that serve fixtures.
-    nonisolated static func isOpenable(_ url: URL, offline: Bool) -> Bool {
+    /// Whether the engine may open `url`: web links (from the server), or a file inside the
+    /// app's own container for a download (`local`: a response the app built itself, which
+    /// the caller knows; the response can't say so). In debug builds a file link from the
+    /// server is allowed too, for tests that serve fixtures.
+    nonisolated static func isOpenable(_ url: URL, local: Bool) -> Bool {
         switch url.scheme?.lowercased() {
         case "https", "http": return url.host() != nil
         case "file":
             #if DEBUG
             return true
             #else
-            return offline
+            guard local else { return false }
+            let container = URL(fileURLWithPath: NSHomeDirectory()).resolvingSymlinksInPath().path + "/"
+            return url.standardizedFileURL.resolvingSymlinksInPath().path.hasPrefix(container)
             #endif
         default: return false
         }
