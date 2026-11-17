@@ -53,9 +53,19 @@ jobs:
         working-directory: apps/server
         run: bun run typecheck
 
+      # Each file in its own Bun process: one process for the whole suite piles up dozens
+      # of in-memory PGlite databases, and on this runner Bun then segfaults or PGlite
+      # fails to start one.
       - name: Test
         working-directory: apps/server
-        run: bun test
+        run: |
+          failed=0
+          for f in $(find test -name '*.test.ts' | sort); do
+            echo "::group::$f"
+            bun test "./$f" || { failed=1; echo "::error file=apps/server/$f::tests failed"; }
+            echo "::endgroup::"
+          done
+          exit $failed
 
   # The dashboard is embedded in every release binary: a broken build should fail here, not there.
   web:
