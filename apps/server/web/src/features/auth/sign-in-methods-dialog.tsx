@@ -4,6 +4,7 @@ import { Check, KeyRound, LoaderCircle, Pencil, Plus, Trash, X } from "lucide-re
 import { useSession } from "@/app/session";
 import { authClient } from "@/lib/auth-client";
 import { relativeTime } from "@/lib/format";
+import { docsUrl } from "@/lib/docs";
 import { useApiMutation } from "@/lib/query";
 import type { SavedPasskey } from "@/lib/types";
 import { passkeyAvailability } from "./passkey-availability";
@@ -83,7 +84,12 @@ function PasskeySection({ enabled }: { enabled: boolean }) {
     <section className="flex flex-col gap-3">
       <div>
         <p className="font-medium">Passkeys</p>
-        <p className="text-muted-foreground text-sm">Sign in with Face ID, Touch ID or your phone instead of typing a password.</p>
+        <p className="text-muted-foreground text-sm">
+          Sign in with Face ID, Touch ID or your phone instead of typing a password.{" "}
+          <a href={docsUrl("/people/passkeys")} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">
+            Learn more
+          </a>
+        </p>
       </div>
       {passkeys.isPending ? (
         <Skeleton className="h-10" />

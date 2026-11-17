@@ -5,6 +5,7 @@ import { Remote, SettingsReference, Troubleshooting } from "./beyond";
 import { Apps, FirstRun } from "./get-started";
 import { Install } from "./install";
 import { Connections, Folders } from "./library";
+import { Passkeys } from "./passkeys";
 import { Devices, Invites, Kids } from "./people";
 
 export type Article = { path: string; section: string; title: string; summary: string; keywords?: string; body: ComponentType };
@@ -61,6 +62,7 @@ export const SECTIONS: { name: string; blurb: string; articles: Omit<Article, "s
       { path: "/people/invites", title: "Invite the household", summary: "Invite people with a QR code or link, and choose what they can do.", keywords: "invite qr members roles owner admin sign-in code", body: Invites },
       { path: "/people/kids", title: "Kids and content limits", summary: "Keep each person to the ratings that suit them.", keywords: "kids parental ratings pg limit", body: Kids },
       { path: "/people/devices", title: "TVs and devices", summary: "Sign in an Apple TV without typing, and manage what's signed in.", keywords: "apple tv link code approve devices sign out password home", body: Devices },
+      { path: "/people/passkeys", title: "Sign in with a passkey", summary: "Use Face ID, Touch ID or your phone instead of a password.", keywords: "passkey webauthn face id touch id sign in https public url autofill", body: Passkeys },
     ],
   },
   {
