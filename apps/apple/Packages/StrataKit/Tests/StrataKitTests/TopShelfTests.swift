@@ -50,6 +50,26 @@ final class TopShelfTests: XCTestCase {
         XCTAssertNil(TopShelf.playable(URL(string: "strata://title/tmdb:movie:603")!, in: snapshot))
     }
 
+    /// With a logo, the title's own backdrop carries it (the app lays the logo on it);
+    /// without one, an episode's still says which episode it is.
+    func testWithALogoTheBackdropCarriesIt() throws {
+        var show = TitleCard(ref: .tmdb(.show, 9001), title: "Test Show", backdropUrl: backdrop,
+                             episode: EpisodeRef(season: 2, episode: 4, name: "Pilot II", stillUrl: still))
+        show.logoUrl = URL(string: "https://img.test/logo.png")
+        let item = try XCTUnwrap(TopShelf.items(from: [Shelf(id: "nextUp", title: "Up Next", kind: .continue, items: [show])]).first)
+        XCTAssertEqual(item.imageURL, backdrop)
+        XCTAssertEqual(item.logoURL, show.logoUrl)
+        // The art's name follows its images: the same art keeps its file, new art gets a new one.
+        let name = try XCTUnwrap(TopShelf.artworkName(for: item))
+        XCTAssertEqual(TopShelf.artworkName(for: item), name)
+        var moved = item
+        moved.logoURL = URL(string: "https://img.test/other-logo.png")
+        XCTAssertNotEqual(TopShelf.artworkName(for: moved), name)
+        XCTAssertNil(TopShelf.artworkName(for: TopShelf.items(from: shelves)[0]), "no logo, no art to make")
+        // Until the art is made, the Top Shelf shows the backdrop.
+        XCTAssertEqual(TopShelf.image(for: item), backdrop)
+    }
+
     func testAtMostTwelveItems() {
         let many = (1...30).map { TitleCard(ref: .tmdb(.movie, $0), title: "M\($0)", positionMs: 60_000, durationMs: 600_000) }
         XCTAssertEqual(TopShelf.items(from: [Shelf(id: "continue", title: "C", kind: .continue, items: many)]).count, TopShelf.limit)

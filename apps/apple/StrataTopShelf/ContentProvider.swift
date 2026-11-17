@@ -18,7 +18,7 @@ final class ContentProvider: TVTopShelfContentProvider {
         let item = TVTopShelfSectionedItem(identifier: entry.id)
         item.title = [entry.title, entry.subtitle].compactMap { $0 }.joined(separator: " · ")
         item.imageShape = .hdtv
-        if let url = entry.imageURL {
+        if let url = TopShelf.image(for: entry) {
             item.setImageURL(url, for: .screenScale1x)
             item.setImageURL(url, for: .screenScale2x)
         }

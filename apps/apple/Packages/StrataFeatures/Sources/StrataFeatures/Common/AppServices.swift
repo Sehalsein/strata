@@ -97,11 +97,30 @@ public final class AppServices {
     public func updateTopShelf(_ shelves: [Shelf]) {
         #if os(tvOS)
         guard let signIn = store.active?.id else { return }
-        if TopShelf.save(TopShelfSnapshot(signIn: signIn, items: TopShelf.items(from: shelves))) {
+        var items = TopShelf.items(from: shelves)
+        // Art already made for an item keeps showing (no flash back to the plain image).
+        let kept = Set(TopShelf.load()?.items.compactMap(\.artworkFile) ?? [])
+        for i in items.indices {
+            if let name = TopShelf.artworkName(for: items[i]), kept.contains(name) { items[i].artworkFile = name }
+        }
+        if TopShelf.save(TopShelfSnapshot(signIn: signIn, items: items)) {
             TVTopShelfContentProvider.topShelfContentDidChange()
+        }
+        // Then the logos are laid on the art, in the background; the shelf updates once done.
+        topShelfArt?.cancel()
+        topShelfArt = Task { [items] in
+            let made = await TopShelfArtwork.make(for: items)
+            guard !Task.isCancelled, made != items, self.store.active?.id == signIn else { return }
+            if TopShelf.save(TopShelfSnapshot(signIn: signIn, items: made)) {
+                TVTopShelfContentProvider.topShelfContentDidChange()
+            }
         }
         #endif
     }
+
+    #if os(tvOS)
+    @ObservationIgnored private var topShelfArt: Task<Void, Never>?
+    #endif
 
     /// Signed out, or someone else is watching now: the Top Shelf stops showing the last
     /// person's titles (it goes back to the app's own image until Home loads theirs).

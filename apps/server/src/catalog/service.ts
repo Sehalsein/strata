@@ -276,8 +276,10 @@ export class CatalogService {
   /** Continue Watching, Up Next and My List: this person's own rails, asked for on every visit. */
   async homeProfile(userId: string, opts: PageOpts = {}): Promise<Shelf[]> {
     const [cont, nextUp, watchlist] = await Promise.all([
-      homeSafe("continue", () => this.continueWatching(userId)),
-      homeSafe("nextUp", () => this.nextUp(userId)),
+      // With each title's logo (TMDB's details, cached): the Apple TV's Top Shelf lays it
+      // on the artwork.
+      homeSafe("continue", async () => this.withLogos(await this.continueWatching(userId))),
+      homeSafe("nextUp", async () => this.withLogos(await this.nextUp(userId))),
       homeSafe("watchlist", () => this.watchlist(userId)),
     ]);
     const shelves: Shelf[] = [];
@@ -700,8 +702,8 @@ export class CatalogService {
   }
 
   /**
-   * Hero cards with the title's logo from TMDB's details (cached), for the apps to show
-   * in place of the name. Cards TMDB doesn't know, or without a logo, are left as they are.
+   * Cards with the title's logo from TMDB's details (cached), for the apps to show in place
+   * of the name (the hero) or on the artwork (the Top Shelf). Cards TMDB doesn't know, or without a logo, are left as they are.
    */
   private async withLogos<T extends TitleCard | null>(cards: T[]): Promise<T[]> {
     return Promise.all(

@@ -11,8 +11,14 @@ public struct TopShelfSnapshot: Codable, Sendable, Equatable {
         public var title: String
         /// "S2 · E4 · Name" for an episode, else the year.
         public var subtitle: String?
-        /// Landscape art: the episode's still or the title's backdrop.
+        /// Landscape art: the title's backdrop when it has a logo (the two are laid together),
+        /// else the episode's still or the backdrop.
         public var imageURL: URL?
+        /// The title's logo, laid on `imageURL` by the app (`artworkFile`).
+        public var logoURL: URL?
+        /// The art with the logo on it, made by the app: a file in `TopShelf.artworkDirectory`.
+        /// The Top Shelf shows it in place of `imageURL` while it's there.
+        public var artworkFile: String?
         /// 0…1 watched, for the progress bar; nil for Up Next (not started).
         public var progress: Double?
         /// The episode to play, for a show.
@@ -21,11 +27,14 @@ public struct TopShelfSnapshot: Codable, Sendable, Equatable {
 
         public var id: String { [ref, season.map(String.init), episode.map(String.init)].compactMap { $0 }.joined(separator: "/") }
 
-        public init(ref: String, title: String, subtitle: String? = nil, imageURL: URL? = nil, progress: Double? = nil, season: Int? = nil, episode: Int? = nil) {
+        public init(ref: String, title: String, subtitle: String? = nil, imageURL: URL? = nil, logoURL: URL? = nil, artworkFile: String? = nil,
+                    progress: Double? = nil, season: Int? = nil, episode: Int? = nil) {
             self.ref = ref
             self.title = title
             self.subtitle = subtitle
             self.imageURL = imageURL
+            self.logoURL = logoURL
+            self.artworkFile = artworkFile
             self.progress = progress
             self.season = season
             self.episode = episode
@@ -67,9 +76,23 @@ public enum TopShelf {
     /// At most this many items: the Top Shelf shows a row, not a library.
     public static let limit = 12
 
-    private static var file: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)?
-            .appendingPathComponent("TopShelf.json")
+    private static var container: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)
+    }
+
+    private static var file: URL? { container?.appendingPathComponent("TopShelf.json") }
+
+    /// Where the app keeps the art it made (backdrop and logo together).
+    public static var artworkDirectory: URL? { container?.appendingPathComponent("TopShelfArt", isDirectory: true) }
+
+    /// What the Top Shelf shows for `item`: the art made for it, while the file is there,
+    /// else the remote art.
+    public static func image(for item: TopShelfSnapshot.Item) -> URL? {
+        if let name = item.artworkFile, let file = artworkDirectory?.appendingPathComponent(name),
+           FileManager.default.fileExists(atPath: file.path) {
+            return file
+        }
+        return item.imageURL
     }
 
     public static func load() -> TopShelfSnapshot? {
@@ -88,9 +111,21 @@ public enum TopShelf {
     /// Forgets it (signed out): the Top Shelf goes back to the app's own image.
     @discardableResult
     public static func clear() -> Bool {
+        if let dir = artworkDirectory { try? FileManager.default.removeItem(at: dir) }
         guard let file, FileManager.default.fileExists(atPath: file.path) else { return false }
         try? FileManager.default.removeItem(at: file)
         return true
+    }
+
+    /// The art file for an item: named for its art and logo, so a changed one is made again
+    /// and an unchanged one is kept.
+    public static func artworkName(for item: TopShelfSnapshot.Item) -> String? {
+        guard let image = item.imageURL, let logo = item.logoURL else { return nil }
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in (image.absoluteString + "|" + logo.absoluteString).utf8 {
+            hash = (hash ^ UInt64(byte)) &* 1_099_511_628_211
+        }
+        return String(hash, radix: 16) + ".jpg"
     }
 
     /// The items of Home's Continue Watching and Up Next rows, in order.
@@ -100,11 +135,15 @@ public enum TopShelf {
         var items: [TopShelfSnapshot.Item] = []
         for card in cards {
             let episode = card.episode
+            // With a logo, the title's own backdrop carries it (as the Apple TV app's Up Next
+            // does); without one, the episode's still says which episode it is.
+            let art = card.logoUrl != nil ? card.backdropUrl ?? episode?.stillUrl : episode?.stillUrl ?? card.backdropUrl
             let item = TopShelfSnapshot.Item(
                 ref: card.ref.description,
                 title: card.title,
                 subtitle: episode.map { "\($0.code) · \($0.name)" } ?? card.yearText,
-                imageURL: episode?.stillUrl ?? card.backdropUrl ?? card.posterUrl,
+                imageURL: art ?? card.posterUrl,
+                logoURL: card.logoUrl,
                 progress: card.progressFraction,
                 season: episode?.season,
                 episode: episode?.episode
