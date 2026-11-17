@@ -170,7 +170,20 @@ export const catalogRoutes = new Hono<Env>()
   .get("/rows/:page/:row", cacheFor(TTL.page), async (c) => {
     const page = z.enum(PAGE_IDS).parse(c.req.param("page"));
     // Hono has already decoded the path parameter: decoding it again would break ids with "%".
-    const shelf = await viewer(c).rowList(page, c.req.param("row").slice(0, 300));
+    const row = c.req.param("row").slice(0, 300);
+    let shelf = await viewer(c).rowList(page, row);
+    // Apps up to 0.4.3 encoded the server's seeAll path a second time ("because%253Amovie…"):
+    // a row not found as sent is looked for once more, decoded.
+    if (!shelf && row.includes("%")) {
+      const decoded = (() => {
+        try {
+          return decodeURIComponent(row);
+        } catch {
+          return null;
+        }
+      })();
+      if (decoded && decoded !== row) shelf = await viewer(c).rowList(page, decoded);
+    }
     if (!shelf) throw new HTTPException(404, { message: "That row isn't on this page any more." });
     return c.json({ title: shelf.title, items: forApp(c, shelf.items) });
   })

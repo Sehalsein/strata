@@ -93,6 +93,15 @@ final class ClientTests: XCTestCase {
         XCTAssertNil(body["candidateId"])
     }
 
+    /// A row's See all path comes from the server already encoded: it goes out as it came,
+    /// not encoded again ("because:movie:969681" was sent as "because%253Amovie…").
+    func testServerGivenRowPathIsNotEncodedTwice() async throws {
+        StubProtocol.reset { _ in .init(status: 200, body: Data(#"{"items":[]}"#.utf8)) }
+        _ = try await client().rowList("/api/rows/home/because%3Amovie%3A969681")
+        let url = try XCTUnwrap(StubProtocol.recorded.first?.url)
+        XCTAssertEqual(url.absoluteString, "http://strata.test:8420/api/rows/home/because%3Amovie%3A969681")
+    }
+
     func testPlay202IsPreparing() async throws {
         StubProtocol.reset { _ in .fixture("preparing", status: 202) }
         let outcome = try await client().play(.movie(.tmdb(.movie, 10378)), candidateId: "hash:abc")
