@@ -141,7 +141,7 @@ struct WatchView: View {
             }
         }
         .sheet(isPresented: $showDetails) {
-            StreamDetailsPanel(session: engine.session, bytesRead: engine.remuxStats?.bytesFetched).presentationDetents([.medium])
+            StreamDetailsPanel(session: engine.session).presentationDetents([.medium])
         }
         #if os(iOS)
         .onAppear { PlayerOrientation.enterPlayer() }
@@ -407,19 +407,18 @@ private struct UpNextOverlay: View {
     }
 }
 
-/// The video layer, with Picture in Picture attached once it's on screen.
-/// On Apple TV it also asks the TV to match the video's frame rate and dynamic range.
+/// The video, with Picture in Picture attached once a stream is on screen. On Apple TV the
+/// engine asks the TV to match the video's frame rate and dynamic range itself.
 private struct PlayerSurface: View {
     let engine: PlayerEngine
     let pip: PiPController
 
     var body: some View {
         #if os(iOS)
-        AVPlayerContainer(player: engine.player, gravity: engine.videoGravity) { layer in pip.attach(playerLayer: layer) }
-        #elseif os(tvOS)
-        AVPlayerContainer(player: engine.player, gravity: engine.videoGravity).matchingDisplay(engine.displayCriteria)
+        VideoSurface(engine: engine) { layer in pip.attach(playerLayer: layer) }
+            .onAppear { pip.onActiveChange = { [engine] active in engine.setPictureInPictureActive(active) } }
         #else
-        AVPlayerContainer(player: engine.player, gravity: engine.videoGravity)
+        VideoSurface(engine: engine)
         #endif
     }
 }

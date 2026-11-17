@@ -60,6 +60,7 @@ public struct RootView: View {
         // At launch and on every switch: find the server, check the session is still good
         // and refresh the account and household.
         .task(id: services.store.activeID) {
+            services.syncTopShelfOwner()
             guard services.store.activeID != nil else { return }
             _ = await services.store.connect()
             services.refreshClient()
@@ -240,11 +241,23 @@ struct MainShell: View {
         .onChange(of: services.coordinator.pendingRoute) { _, route in
             if route != nil, [.search, .profile].contains(tab) { tab = .home }
         }
+        // The Top Shelf's Play button, including one that launched the app.
+        .onChange(of: services.coordinator.pendingPlay) { playPending() }
+        .onAppear { playPending() }
         // Episode notifications follow the calendar: on launch, account switches and return.
         .task(id: services.store.active.map { "\($0.id)/\($0.household?.id ?? "")" }) { await services.refreshEpisodeAlerts() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await services.refreshEpisodeAlerts() } }
         }
+    }
+}
+
+extension MainShell {
+    /// Plays the Top Shelf item a link asked for, now that someone is signed in.
+    func playPending() {
+        guard let item = services.coordinator.pendingPlay else { return }
+        services.coordinator.pendingPlay = nil
+        services.playFromTopShelf(item)
     }
 }
 

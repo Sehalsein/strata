@@ -1,4 +1,5 @@
 import type { Library, FileRow } from "../library";
+import { rememberedCandidate, type RememberedPick } from "../sourcePicks";
 import { logger } from "../log";
 import { probe, type MediaInfo } from "../media/probe";
 import type { FfmpegInfo } from "../platform/ffmpeg";
@@ -37,6 +38,8 @@ export interface PlayRequest extends SessionTarget {
   audioStreamIndex?: number;
   /** Without a chosen source, prefer one no taller than this (the app on cellular data). */
   preferMaxHeight?: number;
+  /** Without a chosen source, the copy this person played before (see SourcePicks). */
+  remembered?: RememberedPick;
   caps: ClientCaps;
 }
 
@@ -74,6 +77,8 @@ export interface PlayResponse {
   seekToMs: number;
   durationMs: number;
   candidate: Candidate;
+  /** The candidate is the copy this person played before (asked for no copy): if it won't play, the app forgets it. */
+  remembered: boolean;
   audioTracks: { index: number; codec: string; channels: number; language?: string; title?: string; selected: boolean }[];
   /**
    * `url` is set for tracks the server can serve as WebVTT (cue times are media time).
@@ -271,6 +276,7 @@ export class PlaybackService {
       seekToMs: direct ? startMs : 0,
       durationMs: info.durationMs,
       candidate,
+      remembered: req.remembered?.chosen !== undefined && req.remembered.chosen === candidate.id,
       audioTracks,
       ...this.subtitles([
         ...session.subtitles.map((t): UnlabeledTrack => ({
@@ -434,9 +440,11 @@ export class PlaybackService {
     }
     const candidates = await findCandidates(this.library, this.settings(), target);
     const limit = req.preferMaxHeight;
+    const remembered = !req.candidateId && req.remembered ? rememberedCandidate(req.remembered, candidates, limit) : undefined;
+    if (remembered && req.remembered) req.remembered.chosen = remembered.id;
     const candidate = req.candidateId
       ? candidates.find((c) => c.id === req.candidateId)
-      : ((limit ? candidates.find((c) => c.resolution !== undefined && c.resolution <= limit) : undefined) ?? candidates[0]);
+      : (remembered ?? (limit ? candidates.find((c) => c.resolution !== undefined && c.resolution <= limit) : undefined) ?? candidates[0]);
     if (candidate) return (await this.library.get(candidate.fileId))!;
     if (req.candidateId) throw new PlaybackError(GONE, 404);
     // Nothing in the library: the best ready releases, in turn, past any that turn out

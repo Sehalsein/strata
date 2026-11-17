@@ -53,9 +53,24 @@ jobs:
         working-directory: apps/server
         run: bun run typecheck
 
+      # Each file in its own Bun process: one process for the whole suite piles up dozens
+      # of in-memory PGlite databases, and on this runner Bun then segfaults or PGlite
+      # fails to start one.
       - name: Test
         working-directory: apps/server
-        run: bun test
+        run: |
+          set -uo pipefail
+          files=$(find test src -name '*.test.ts' | sort) || exit 1
+          # Finding no tests (a moved folder, say) fails, rather than passing on nothing.
+          [ -n "$files" ] || { echo "::error::no test files found"; exit 1; }
+          failed=0
+          for f in $files; do
+            echo "::group::$f"
+            bun test "./$f" || { failed=1; echo "::error file=apps/server/$f::tests failed"; }
+            echo "::endgroup::"
+          done
+          echo "Ran $(wc -w <<< "$files") test files"
+          exit $failed
 
   # The dashboard is embedded in every release binary: a broken build should fail here, not there.
   web:

@@ -35,11 +35,6 @@ struct SourcePickerSheet: View {
     /// The server is still looking (further than the library, or again for Refresh).
     @State private var looking = false
 
-    /// The source you chose last time, which Play goes back to.
-    private var lastPicked: String? {
-        services.client.flatMap { SourceMemory.shared.pick(for: target, server: $0.baseURL) }
-    }
-
     /// Older servers' fallback: the quality picker the app used to work out itself.
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", uhd = "4K", hd = "1080p", sd = "720p"
@@ -245,7 +240,8 @@ struct SourcePickerSheet: View {
                     ForEach(shown) { candidate in
                         Button { choose(candidate) } label: {
                             SourceRow(candidate: candidate, isCurrent: candidate.id == current,
-                                      isLastPicked: purpose == .play && current == nil && candidate.id == lastPicked)
+                                      isLastPicked: purpose == .play && current == nil && candidate.picked == true)
+                                .equatable()
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(.card)
@@ -253,14 +249,19 @@ struct SourcePickerSheet: View {
                     }
                 }
                 #else
-                VStack(spacing: 0) {
+                // Lazy: a title can have hundreds of copies, and only the rows on screen are
+                // built. Each row's text is worked out once (SourceRow's init) and a row is
+                // redrawn only when what it shows changes (`.equatable()`).
+                let lastID = shown.last?.id
+                LazyVStack(spacing: 0) {
                     ForEach(shown) { candidate in
                         Button { choose(candidate) } label: {
                             SourceRow(candidate: candidate, isCurrent: candidate.id == current,
-                                      isLastPicked: purpose == .play && current == nil && candidate.id == lastPicked)
+                                      isLastPicked: purpose == .play && current == nil && candidate.picked == true)
+                                .equatable()
                         }
                         .buttonStyle(.plain)
-                        if candidate.id != shown.last?.id { Divider().overlay(Theme.hairline) }
+                        if candidate.id != lastID { Divider().overlay(Theme.hairline) }
                     }
                 }
                 .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Metrics.radiusMD, style: .continuous))
@@ -307,10 +308,27 @@ struct SourcePickerSheet: View {
     #endif
 }
 
-struct SourceRow: View {
+struct SourceRow: View, Equatable {
     let candidate: Candidate
     var isCurrent = false
     var isLastPicked = false
+    /// Worked out once per row, not on every redraw while the list scrolls.
+    private let name: String
+    private let specs: [String]
+    private let detail: String?
+
+    init(candidate: Candidate, isCurrent: Bool = false, isLastPicked: Bool = false) {
+        self.candidate = candidate
+        self.isCurrent = isCurrent
+        self.isLastPicked = isLastPicked
+        name = candidate.displayName
+        specs = Array(candidate.specLabels.prefix(4))
+        detail = candidate.detail ?? candidate.sizeLabel
+    }
+
+    static func == (a: SourceRow, b: SourceRow) -> Bool {
+        a.candidate == b.candidate && a.isCurrent == b.isCurrent && a.isLastPicked == b.isLastPicked
+    }
 
     #if os(tvOS)
     private let inset = Metrics.space6
@@ -321,11 +339,11 @@ struct SourceRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: Metrics.space3) {
             VStack(alignment: .leading, spacing: Metrics.space2) {
-                Text(candidate.displayName).font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(2).multilineTextAlignment(.leading)
+                Text(name).font(.stHeadline).foregroundStyle(Theme.ink).lineLimit(2).multilineTextAlignment(.leading)
                 HStack(spacing: Metrics.space2) {
-                    ForEach(candidate.specLabels.prefix(4), id: \.self) { SpecBadge($0) }
+                    ForEach(specs, id: \.self) { SpecBadge($0) }
                 }
-                if let detail = candidate.detail ?? candidate.sizeLabel {
+                if let detail {
                     Text(detail).font(.stFootnote).foregroundStyle(Theme.ink3)
                 }
                 if isCurrent {

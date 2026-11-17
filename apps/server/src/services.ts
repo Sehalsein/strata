@@ -1,4 +1,5 @@
 import { lt, sql } from "drizzle-orm";
+import { SourcePicks } from "./sourcePicks";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -100,12 +101,13 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
     kitsu: new Kitsu(cache, fetchImpl),
   };
   const progress = new ProgressStore(db);
+  const picks = new SourcePicks(db);
   const sessions = new SessionManager(
     db,
     !profile.localMedia ? null : { transcodeDir: paths.transcode, getFfmpeg: ffmpeg, keepAwake: new KeepAwake(), maxTranscodes: () => settings.get().maxTranscodes, hwAllowed: () => settings.get().hardwareAcceleration },
   );
   const subtitles = new SubtitleService(join(paths.root, "cache", "subtitles"), ffmpeg);
-  const households = new Households({ db, box, serverSettings: settings, cache, throttle, anime, progress, sessions, ffmpeg, fetch: fetchImpl });
+  const households = new Households({ db, box, serverSettings: settings, cache, throttle, anime, progress, picks, sessions, ffmpeg, fetch: fetchImpl });
 
   /** Runs `fn` for every household, one after another; a failing one doesn't stop the rest. */
   const eachHousehold = async (what: string, fn: (h: Household) => Promise<unknown>) => {

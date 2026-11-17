@@ -150,7 +150,10 @@ public struct ContinueCard: View {
                             .foregroundStyle(Theme.onArtwork)
                             .padding(14)
                             // Not interactive: the card is the control, the glyph only marks it.
-                            .glassEffect(.regular, in: .circle)
+                            // A still disc, not live glass: glass samples what's behind it on every
+                            // frame, and a rail of these made Home stutter while scrolling.
+                            .background(.black.opacity(0.35), in: .circle)
+                            .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 1))
                             .opacity(0.9)
                     }
             }

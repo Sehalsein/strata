@@ -1,10 +1,18 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import { openDatabase } from "../src/db";
+import { closeDatabase, openDatabase, type Db } from "../src/db";
 import { apiCache as tmdbCache } from "../src/db/schema";
 import { ApiCache } from "../src/catalog/apiCache";
 import { Omdb } from "../src/catalog/omdb";
 import { fakeTmdb, setUp, startTestServer, type TestServer } from "./helpers";
+
+/** In-memory databases the tests open, closed once they've run: the whole suite shares one
+ *  process, and databases left open pile up until it runs out of memory. */
+const opened: Db[] = [];
+const keep = (db: Db) => (opened.push(db), db);
+afterAll(async () => {
+  await Promise.all(opened.map((db) => closeDatabase(db)));
+});
 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 
@@ -32,7 +40,7 @@ const fetchBoth = (async (input: string | URL | Request, init?: RequestInit) => 
 }) as typeof fetch;
 
 test("OMDb: IMDb and Rotten Tomatoes ratings, episode ratings, cached", async () => {
-  const db = await openDatabase("memory");
+  const db = keep(await openDatabase("memory"));
   omdbCalls = 0;
   const omdb = new Omdb(new ApiCache(db), () => "omdb-key", fetchBoth);
   expect(await omdb.ratings("tt1254207")).toEqual({ imdb: 6.4, rottenTomatoes: 88 });
@@ -48,7 +56,7 @@ test("OMDb: IMDb and Rotten Tomatoes ratings, episode ratings, cached", async ()
 });
 
 test("OMDb: no key means no ratings and no requests; a bad key isn't cached", async () => {
-  const db = await openDatabase("memory");
+  const db = keep(await openDatabase("memory"));
   omdbCalls = 0;
   expect(await new Omdb(new ApiCache(db), () => undefined, fetchBoth).ratings("tt1254207")).toBeNull();
   expect(omdbCalls).toBe(0);
@@ -57,7 +65,7 @@ test("OMDb: no key means no ratings and no requests; a bad key isn't cached", as
 });
 
 test("OMDb: OMDb down keeps the last answer", async () => {
-  const db = await openDatabase("memory");
+  const db = keep(await openDatabase("memory"));
   expect(await new Omdb(new ApiCache(db), () => "omdb-key", fetchBoth).ratings("tt1254207")).toEqual({ imdb: 6.4, rottenTomatoes: 88 });
   await db.update(tmdbCache).set({ fetchedAt: 0 });
   const down = new Omdb(new ApiCache(db), () => "omdb-key", (async () => new Response("down", { status: 503 })) as unknown as typeof fetch);

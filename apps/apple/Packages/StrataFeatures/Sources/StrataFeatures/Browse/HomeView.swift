@@ -122,7 +122,10 @@ struct HomeView: View {
     }
 
     private func loadMine() async {
-        if let list = await services.load({ try await $0.homeProfile() }).value { mine = list }
+        guard let list = await services.load({ try await $0.homeProfile() }).value else { return }
+        mine = list
+        // The Apple TV's Top Shelf shows the same Continue Watching and Up Next.
+        services.updateTopShelf(list)
     }
 }
 

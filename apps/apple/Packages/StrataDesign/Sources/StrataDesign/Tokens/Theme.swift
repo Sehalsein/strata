@@ -10,6 +10,9 @@ import AppKit
 public enum Theme {
     // MARK: Surfaces — layers, not shadows
     public static let bg = adaptive(dark: 0x0B0C0F, light: 0xFFFFFF)
+    /// Behind a grouped list (Settings): in light, the system's grey, so its white sections
+    /// stand out from it; in dark, `bg`, which the lighter sections already stand out from.
+    public static let groupedBg = adaptive(dark: 0x0B0C0F, light: 0xF2F2F7)
     public static let surface1 = adaptive(dark: 0x14161A, light: 0xF4F4F6)
     public static let surface2 = adaptive(dark: 0x1D2025, light: 0xEBEBEF)
     public static let surface3 = adaptive(dark: 0x292D33, light: 0xDFDFE5)

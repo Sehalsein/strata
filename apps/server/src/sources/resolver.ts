@@ -23,6 +23,8 @@ export interface Candidate {
   seeders?: number;
   /** Torrent name, for discovered releases. */
   releaseTitle?: string;
+  /** The copy the asking person played last (Choose Source marks it; Play goes back to it). */
+  picked?: boolean;
   /** Audio languages a found release says it has (ISO 639-1, "multi" for several). */
   languages?: string[];
   isPack?: boolean;

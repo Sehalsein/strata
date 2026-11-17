@@ -15,7 +15,8 @@ struct CalendarView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 TVPageHeader(title: String(localized: "Calendar", bundle: .module))
-                VStack(alignment: .leading, spacing: Self.dayGap) {
+                // Lazy: weeks of days, each with its artwork; only those on screen are built.
+                LazyVStack(alignment: .leading, spacing: Self.dayGap) {
                     content
                 }
                 .padding(.horizontal, Metrics.gutter)

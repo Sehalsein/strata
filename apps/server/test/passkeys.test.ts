@@ -1,8 +1,15 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, test } from "bun:test";
 import { passkey } from "../src/db/schema";
 import { isIpAddress, signInMethods, viewerMayCall, demoRefuses } from "../src/auth/betterAuth";
 import { deploymentProfile } from "../src/profile";
-import { setUp, startTestServer } from "./helpers";
+import { setUp, startTestServer, type TestServer } from "./helpers";
+
+/** Servers the tests start, shut down once they've run (each holds an in-memory database). */
+const started: TestServer[] = [];
+const keep = (server: TestServer) => (started.push(server), server);
+afterAll(async () => {
+  await Promise.all(started.map((server) => server.services.shutdown()));
+});
 
 const home = deploymentProfile("home", "bun");
 const cloud = deploymentProfile("cloud", "workers");
@@ -54,21 +61,21 @@ test("passkey sign-in is open to a watch-only session; adding, renaming and remo
 
 test("/api/info offers no passkeys where they can't work", async () => {
   // (A test server listens on no fixed port, so not at http://localhost either.)
-  const server = await startTestServer();
+  const server = keep(await startTestServer());
   const info = (await (await server.request("/api/info")).json()) as { signIn: Record<string, unknown> };
   expect(info.signIn).toMatchObject({ passkey: false, passkeyDomain: null, passkeyAddress: null });
 }, 30_000);
 
 test("/api/info says where passkeys work", async () => {
   process.env.STRATA_PUBLIC_URL = "https://strata.example.com";
-  const server = await startTestServer();
+  const server = keep(await startTestServer());
   const info = (await (await server.request("/api/info")).json()) as { signIn: Record<string, unknown> };
   expect(info.signIn).toMatchObject({ passkey: true, passkeyDomain: "strata.example.com", passkeyAddress: "https://strata.example.com" });
 }, 30_000);
 
 test("a signed-in account registers passkeys for the server's domain, and renames and removes its own", async () => {
   process.env.STRATA_PUBLIC_URL = "https://strata.example.com";
-  const server = await startTestServer();
+  const server = keep(await startTestServer());
   const { token } = await setUp(server);
   const auth = (path: string, init: Parameters<typeof server.request>[1] = {}) => server.request(`/api/auth${path}`, { token, ...init, headers: { Origin: "https://strata.example.com", ...init.headers } });
 

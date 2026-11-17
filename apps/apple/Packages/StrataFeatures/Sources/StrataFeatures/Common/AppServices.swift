@@ -2,6 +2,9 @@ import SwiftUI
 import StrataKit
 import StrataDesign
 import StrataPlayerUI
+#if os(tvOS)
+import TVServices
+#endif
 
 /// App-wide state: the server store, LAN discovery, the shared player, and
 /// navigation requests that come from outside a screen (deep links, Up Next).
@@ -87,6 +90,62 @@ public final class AppServices {
 
     public func play(_ request: WatchRequest) {
         watching = request
+    }
+
+    /// Keeps the Apple TV's Top Shelf showing this person's Continue Watching and Up Next
+    /// (Home's rows, as just loaded). Elsewhere it does nothing.
+    public func updateTopShelf(_ shelves: [Shelf]) {
+        #if os(tvOS)
+        guard let signIn = store.active?.id else { return }
+        var items = TopShelf.items(from: shelves)
+        // Art already made for an item keeps showing (no flash back to the plain image).
+        let kept = Set(TopShelf.load()?.items.compactMap(\.artworkFile) ?? [])
+        for i in items.indices {
+            if let name = TopShelf.artworkName(for: items[i]), kept.contains(name) { items[i].artworkFile = name }
+        }
+        if TopShelf.save(TopShelfSnapshot(signIn: signIn, items: items)) {
+            TVTopShelfContentProvider.topShelfContentDidChange()
+        }
+        // Then the logos are laid on the art, in the background; the shelf updates once done.
+        topShelfArt?.cancel()
+        topShelfArt = Task { [items] in
+            let made = await TopShelfArtwork.make(for: items)
+            guard !Task.isCancelled, made != items, self.store.active?.id == signIn else { return }
+            if TopShelf.save(TopShelfSnapshot(signIn: signIn, items: made)) {
+                TVTopShelfContentProvider.topShelfContentDidChange()
+            }
+        }
+        #endif
+    }
+
+    #if os(tvOS)
+    @ObservationIgnored private var topShelfArt: Task<Void, Never>?
+    #endif
+
+    /// Signed out, or someone else is watching now: the Top Shelf stops showing the last
+    /// person's titles (it goes back to the app's own image until Home loads theirs).
+    public func syncTopShelfOwner() {
+        #if os(tvOS)
+        guard let snapshot = TopShelf.load(), snapshot.signIn != store.active?.id else { return }
+        if TopShelf.clear() { TVTopShelfContentProvider.topShelfContentDidChange() }
+        #endif
+    }
+
+    /// Plays a Top Shelf item (the remote's Play button on it), if it's this person's;
+    /// otherwise opens its page.
+    public func playFromTopShelf(_ item: TopShelfSnapshot.Item) {
+        guard let ref = TitleRef(string: item.ref) else { return }
+        guard let snapshot = TopShelf.load(), snapshot.signIn == store.active?.id, snapshot.items.contains(item) else {
+            coordinator.pendingRoute = .title(ref)
+            return
+        }
+        let target: PlaybackTarget
+        if let season = item.season, let episode = item.episode {
+            target = .episode(show: ref, season: season, episode: episode)
+        } else {
+            target = .movie(ref)
+        }
+        play(WatchRequest(target: target, meta: PlaybackMeta(title: item.title, subtitle: item.subtitle, artworkURL: item.imageURL)))
     }
 
     /// Plays what Play chose for a title, with its title, logo and artwork in the player.
@@ -338,6 +397,8 @@ public struct TVLinkRequest: Identifiable, Hashable {
 /// `strata://movie/<id>`, `strata://show/<id>`,
 /// `strata://watch/movie/<id>`, `strata://watch/episode/<show>/<season>/<episode>` (open the
 /// title's page: a link never starts playback by itself),
+/// `strata://play/<ref>[/<season>/<episode>]` (the Apple TV's Top Shelf Play button: plays
+/// only an item on this person's Top Shelf now; any other opens the title's page),
 /// `strata://link?user_code=<code>&server=<id or address>` (approve a TV's sign-in),
 /// `strata://sign-in?server=<address>&code=<code>` (a member's QR code: sign in as them),
 /// `strata://reset-password?server=<address>&token=<token>` (a password-reset email's
@@ -349,6 +410,8 @@ public struct TVLinkRequest: Identifiable, Hashable {
 @Observable
 public final class AppCoordinator {
     public var pendingRoute: Route?
+    /// A Top Shelf item to play (`strata://play/…`), once someone is signed in.
+    public var pendingPlay: TopShelfSnapshot.Item?
     public var pendingLink: LinkRequest?
     public var pendingSignIn: SignInCodeRequest?
     public var pendingTVLink: TVLinkRequest?
@@ -386,6 +449,13 @@ public final class AppCoordinator {
             let kind = url.pathComponents.dropFirst().first
             if kind == "movie", let id = parts.first { pendingRoute = .title(.tmdb(.movie, id)) }
             if kind == "episode", parts.count == 3 { pendingRoute = .title(.tmdb(.show, parts[0])) }
+        case "play":
+            // Only what's on the Top Shelf now plays from a link; anything else opens its page.
+            if let item = TopShelf.playable(url, in: TopShelf.load()) {
+                pendingPlay = item
+            } else if let text = url.pathComponents.dropFirst().first, let ref = TitleRef(string: text) {
+                pendingRoute = .title(ref)
+            }
         case "tv-link":
             if let key = TVLink.key(in: url) { pendingTVLink = TVLinkRequest(key: key) }
         case "link":

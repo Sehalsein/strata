@@ -8,8 +8,9 @@ WORKDIR /app
 # Exactly the versions in the repo's lockfile.
 COPY package.json bun.lock ./
 COPY apps/server/package.json ./apps/server/
-# The other workspace's manifest, which the lockfile also lists (nothing of it is installed).
+# The other workspaces' manifests, which the lockfile also lists (nothing of them is installed).
 COPY apps/landing/package.json ./apps/landing/
+COPY apps/docs/package.json ./apps/docs/
 RUN bun install --frozen-lockfile --production
 WORKDIR /app/apps/server
 # The clips first, so changing the server doesn't fetch them again.

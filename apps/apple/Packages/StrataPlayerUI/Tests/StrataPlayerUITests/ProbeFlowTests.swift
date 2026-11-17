@@ -7,10 +7,8 @@ import StrataKit
 /// reads the file's header itself, sends it, and asks to play again.
 @MainActor
 final class ProbeFlowTests: XCTestCase {
-    /// A file StrataRemux's tests use (HEVC, E-AC-3, SRT), read through a `file:` link.
-    private let media = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent().appendingPathComponent("StrataRemux/Tests/StrataRemuxTests/Fixtures/hevc_eac3_srt.mkv")
+    /// A short HEVC, E-AC-3, SRT file, read through a `file:` link.
+    private let media = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/hevc_eac3_srt.mkv")
 
     private func engine() -> PlayerEngine {
         let config = URLSessionConfiguration.ephemeral
@@ -75,8 +73,8 @@ final class ProbeFlowTests: XCTestCase {
         guard case .failed(let message) = engine.status else { return XCTFail("\(engine.status)") }
         XCTAssertTrue(message.hasPrefix("This file couldn't be read ("), message)
         XCTAssertTrue(message.hasSuffix("). Pick another source."), message)
-        // Nothing reported; the player then asks for other copies to fall back to (none here).
-        XCTAssertEqual(ServerStub.recorded.map { $0.url!.path }, ["/api/play", "/api/sources"], "nothing reported")
+        // The player then asks for other copies to fall back to (none here).
+        XCTAssertEqual(ServerStub.recorded.map { $0.url!.path }, ["/api/play", "/api/sources"])
     }
 
     func testProbesAFileOnlyOncePerLoad() async throws {
@@ -106,9 +104,12 @@ final class ServerStub: URLProtocol, @unchecked Sendable {
         requests = []
     }
 
+    /// The play flow's requests. Play reports (`/api/play/report`) go out in the background
+    /// when a play fails, and can land after a test's checks or in the next test, so
+    /// they're left out.
     static var recorded: [URLRequest] {
         lock.lock(); defer { lock.unlock() }
-        return requests
+        return requests.filter { $0.url?.path != "/api/play/report" }
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }

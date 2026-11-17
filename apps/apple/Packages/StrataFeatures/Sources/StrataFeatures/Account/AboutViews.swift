@@ -73,7 +73,7 @@ struct AcknowledgementsView: View {
         #if !os(tvOS)
         .navigationBarTitleDisplayMode(.inline)
         .scrollContentBackground(.hidden)
-        .background(Theme.bg)
+        .background(Theme.groupedBg)
         #endif
     }
 }
@@ -152,7 +152,7 @@ struct AcknowledgementDetailView: View {
         #if !os(tvOS)
         .navigationBarTitleDisplayMode(.inline)
         .scrollContentBackground(.hidden)
-        .background(Theme.bg)
+        .background(Theme.groupedBg)
         #endif
     }
 

@@ -93,6 +93,34 @@ final class ClientTests: XCTestCase {
         XCTAssertNil(body["candidateId"])
     }
 
+    /// A row's See all path comes from the server already encoded: it goes out as it came,
+    /// not encoded again ("because:movie:969681" was sent as "because%253Amovie…").
+    func testServerGivenRowPathIsNotEncodedTwice() async throws {
+        StubProtocol.reset { _ in .init(status: 200, body: Data(#"{"items":[]}"#.utf8)) }
+        _ = try await client().rowList("/api/rows/home/because%3Amovie%3A969681")
+        let url = try XCTUnwrap(StubProtocol.recorded.first?.url)
+        XCTAssertEqual(url.absoluteString, "http://strata.test:8420/api/rows/home/because%3Amovie%3A969681")
+    }
+
+    /// The copy played is kept on the server (for every device); nil forgets it, sent as null.
+    func testSetPickRemembersAndForgets() async throws {
+        StubProtocol.reset { _ in .init(status: 200, body: Data(#"{"ok":true}"#.utf8)) }
+        let episode = PlaybackTarget.episode(show: .tmdb(.show, 9001), season: 1, episode: 2)
+        try await client().setPick(episode, candidateId: "file:3")
+        try await client().setPick(episode, candidateId: nil)
+        let bodies = StubProtocol.recorded.compactMap(\.jsonBody)
+        XCTAssertEqual(StubProtocol.recorded.map { $0.url?.path }, ["/api/play/pick", "/api/play/pick"])
+        XCTAssertEqual(bodies[0]["candidateId"] as? String, "file:3")
+        XCTAssertEqual(bodies[0]["season"] as? Int, 1)
+        XCTAssertTrue(bodies[1]["candidateId"] is NSNull, "forgetting sends null, not nothing")
+    }
+
+    /// A server from before picks were kept answers 404: nothing to do.
+    func testSetPickIgnoresOlderServers() async throws {
+        StubProtocol.reset { _ in .init(status: 404, body: Data(#"{"error":"Not found"}"#.utf8)) }
+        try await client().setPick(.movie(.tmdb(.movie, 10378)), candidateId: "file:1")
+    }
+
     func testPlay202IsPreparing() async throws {
         StubProtocol.reset { _ in .fixture("preparing", status: 202) }
         let outcome = try await client().play(.movie(.tmdb(.movie, 10378)), candidateId: "hash:abc")

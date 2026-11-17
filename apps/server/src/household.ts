@@ -1,4 +1,6 @@
 import { CatalogService } from "./catalog/service";
+import { SourcePicks, type RememberedPick } from "./sourcePicks";
+import type { Candidate } from "./sources/resolver";
 import { CalendarService } from "./catalog/calendar";
 import { ContentFilter } from "./catalog/contentRating";
 import { Viewer } from "./catalog/viewer";
@@ -65,6 +67,8 @@ export interface Shared {
   throttle: Throttle;
   anime: { ids: AnimeIds; anilist: Anilist; kitsu: Kitsu };
   progress: ProgressStore;
+  /** The copy each person last played of a title, per household. */
+  picks: SourcePicks;
   sessions: SessionManager;
   ffmpeg: () => FfmpegInfo | null;
   fetch: typeof fetch;
@@ -146,6 +150,22 @@ export class Household {
     this.onlineSubtitles = new AddonSubtitleFinder(() => this.addons(), (t) => this.discovery.stremioIds(t), () => this.subtitleLanguages(), shared.fetch, this.addonHealth);
     this.playback = new PlaybackService(this.library, shared.sessions, shared.progress, settings, shared.ffmpeg, torbox, this.discovery, (show, s, e) => this.catalog.nextEpisode(show, s, e), (id) => this.housekeeping.recordPlayed(id),
       (target) => this.subtitlesFor(target), (ref) => this.followAddonLink(ref));
+  }
+
+  /** What Play should go back to for this person's `target` in this household. */
+  rememberedPick(userId: string, target: TitleTarget): Promise<RememberedPick | undefined> {
+    return this.shared.picks.remembered(userId, this.organizationId, target);
+  }
+
+  /** The exact copy this person last played of `target` here, if any. */
+  pickedSource(userId: string, target: TitleTarget): Promise<string | undefined> {
+    return this.shared.picks.exact(userId, this.organizationId, target);
+  }
+
+  /** Remembers `candidate` (a copy in this household's library) for this person's `target`, or forgets the pick. */
+  async setPick(userId: string, target: TitleTarget, candidate: Candidate | null) {
+    if (candidate) await this.shared.picks.remember(userId, this.organizationId, target, candidate);
+    else await this.shared.picks.forget(userId, this.organizationId, target);
   }
 
   /**
