@@ -5,7 +5,7 @@ import type { PlayRequest } from "../playback/service";
 import type { PlayReportDevice, PlayReportInput } from "../playback/reports";
 import type { DiscoveryTarget } from "../sources/discovery";
 import { targetRef, tmdbRef, type TitleRef, type TitleTarget } from "./ref";
-import type { BrowseList, Shelf, TitleCard, TitleType } from "./service";
+import { parseBecauseRowId, type BrowseList, type Shelf, type TitleCard, type TitleType } from "./service";
 import type { PageId } from "./pageLayouts";
 
 const notFound = () => new HTTPException(404, { message: "Title not found" });
@@ -50,8 +50,11 @@ export class Viewer {
   /** One row of a page in full ("See all"), with this person's content limit; null for a row it doesn't have. */
   async rowList(page: PageId, rowId: string): Promise<Shelf | null> {
     // A "Because you watched" row is named for its title: one above the limit isn't shown, not even by name.
-    const because = /^because:(movie|show):(\d+)$/.exec(rowId);
-    if (because) await this.assertAllowed(tmdbRef(because[1] as TitleType, Number(because[2])));
+    if (rowId.startsWith("because:")) {
+      const seed = parseBecauseRowId(rowId);
+      if (!seed) return null;
+      await this.assertAllowed(tmdbRef(seed.type, seed.id));
+    }
     const shelf = await this.household.catalog.rowList(page, rowId, this.userId);
     if (!shelf) return null;
     return (await this.shelves([shelf]))[0] ?? { ...shelf, items: [] };

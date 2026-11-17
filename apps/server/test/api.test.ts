@@ -385,6 +385,9 @@ describe("setup and auth", () => {
     expect((await because(666, bob)).status).toBe(403);
     expect((await because(10378, bob)).status).toBe(200);
     expect((await because(666, token)).status).toBe(200);
+    // Other spellings of the same title don't get past the check: they aren't rows at all.
+    for (const id of ["because:movie:666:x", "because:movie:0x29a", "because:movie:0666", "because:movie:666.0", "because:movie: 666"])
+      expect((await server.request(`/api/rows/home/${encodeURIComponent(id)}`, { token: bob })).status).toBe(404);
     // Other accounts are unaffected.
     expect(await titles(token)).toEqual([666, 10378]);
     // Nor the files of those titles, by id.

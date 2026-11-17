@@ -112,6 +112,15 @@ const FOR_YOU_MIN_VOTES = 150;
 /** "Because you watched" rows at most: one each for the strongest taste signals. */
 const BECAUSE_ROWS = 3;
 
+/**
+ * The title a "Because you watched" row follows, from its id ("because:movie:27205"), or
+ * null for any other spelling. The one parser: the content limit is checked on what this returns.
+ */
+export function parseBecauseRowId(rowId: string): { type: TitleType; id: number } | null {
+  const m = /^because:(movie|show):([1-9]\d{0,9})$/.exec(rowId);
+  return m ? { type: m[1] as TitleType, id: Number(m[2]) } : null;
+}
+
 /** What a person has started, finished or listed ("movie:603"), left out of what's recommended to them. */
 function seenKeys(history: { mediaType: string; titleId: number }[], listed: { type: TitleType; titleId: number }[]): Set<string> {
   return new Set([...history.map((h) => `${h.mediaType === "movie" ? "movie" : "show"}:${h.titleId}`), ...listed.map((l) => `${l.type}:${l.titleId}`)]);
@@ -1025,10 +1034,9 @@ export class CatalogService {
    * person watches (and when For you is rebuilt), and the row on screen should still open.
    */
   private async becauseRow(userId: string, rowId: string): Promise<Shelf | null> {
-    const [, kind, idText] = rowId.split(":");
-    const type = kind === "movie" || kind === "show" ? kind : null;
-    const id = Number(idText);
-    if (!type || !Number.isSafeInteger(id) || id <= 0) return null;
+    const seed = parseBecauseRowId(rowId);
+    if (!seed) return null;
+    const { type, id } = seed;
     const [history, listed, { name, items }] = await Promise.all([this.progress.history(userId), this.progress.watchlist(userId), this.seedRecs(type, id)]);
     if (!name) return null;
     const seen = seenKeys(history, listed);
