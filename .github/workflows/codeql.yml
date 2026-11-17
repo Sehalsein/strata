@@ -78,9 +78,11 @@ jobs:
           fi
           range="$BASE...$HEAD"
           [ "$EVENT" = push ] && range="$BASE..$HEAD"
-          # Unquoted paths (non-ASCII names aren't escaped), and a moved file counts at both paths.
-          files=$(git -c core.quotePath=false diff --name-only --no-renames "$range") || analyze
-          if grep -qE '^(apps/apple/|apps/macos/|\.github/workflows/codeql\.yml$)' <<< "$files"; then
+          # NUL-separated paths, which git never quotes or escapes, and a moved file counts at
+          # both its paths.
+          files="$RUNNER_TEMP/changed-files"
+          git diff -z --name-only --no-renames "$range" > "$files" || analyze
+          if tr '\0' '\n' < "$files" | grep -qE '^(apps/apple/|apps/macos/|\.github/workflows/codeql\.yml$)'; then
             analyze
           fi
           echo "swift=false" >> "$GITHUB_OUTPUT"

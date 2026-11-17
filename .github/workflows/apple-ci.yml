@@ -56,9 +56,11 @@ jobs:
           if ! git cat-file -e "$BASE^{commit}" 2>/dev/null || ! git cat-file -e "$HEAD^{commit}" 2>/dev/null; then
             build
           fi
-          # Unquoted paths (non-ASCII names aren't escaped), and a moved file counts at both paths.
-          files=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE...$HEAD") || build
-          if grep -qE '^(apps/apple/|\.github/workflows/apple-[^/]*\.yml$)' <<< "$files"; then
+          # NUL-separated paths, which git never quotes or escapes, and a moved file counts at
+          # both its paths.
+          files="$RUNNER_TEMP/changed-files"
+          git diff -z --name-only --no-renames "$BASE...$HEAD" > "$files" || build
+          if tr '\0' '\n' < "$files" | grep -qE '^(apps/apple/|\.github/workflows/apple-[^/]*\.yml$)'; then
             build
           fi
           echo "apple=false" >> "$GITHUB_OUTPUT"
