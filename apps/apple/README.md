@@ -7,12 +7,11 @@ The SwiftUI app for Strata servers on iPhone, iPad and Apple TV (iOS, iPadOS and
 ```sh
 brew install xcodegen
 cd apps/apple
-Packages/StrataRemux/scripts/build-ffmpeg.sh   # once: FFmpeg isn't kept in git
 xcodegen generate
 open Strata.xcodeproj
 ```
 
-Pick the `Strata` scheme and an iPhone, iPad or Apple TV simulator. FFmpeg is built for Apple silicon simulators only.
+Pick the `Strata` scheme and an iPhone, iPad or Apple TV simulator (Apple silicon). Playback runs on [AetherEngine](https://github.com/superuser404notfound/AetherEngine), which Swift Package Manager fetches with its FFmpeg build; it needs Xcode 27.
 
 On first launch the app lists Strata servers on your network. You can also type an address; port 8420 is added for you.
 
@@ -29,8 +28,7 @@ On first launch the app lists Strata servers on your network. You can also type 
 |---|---|
 | `Packages/StrataKit` | Server API client (`StrataClient`), models, multi-server `ServerStore` (Keychain tokens, address failover), Bonjour `ServerBrowser` (`_strata._tcp`), device playback capabilities, HLS media-time maths |
 | `Packages/StrataDesign` | Tokens (`Theme`, `Metrics`, type scale), artwork and placeholders, poster and continue cards, rails, hero, glass buttons, badges, availability labels, the Strata mark |
-| `Packages/StrataPlayerUI` | `PlayerEngine` (AVPlayer over the server's direct and HLS streams, restart-on-seek, WebVTT subtitles, progress reporting), the glass player chrome, Now Playing, remote commands, PiP and AirPlay |
-| `Packages/StrataRemux` | Repackages files on the device into HLS for the player, using FFmpeg (LGPL, built by `scripts/build-ffmpeg.sh`) |
+| `Packages/StrataPlayerUI` | `PlayerEngine` (plays the server's sessions on [AetherEngine](https://github.com/superuser404notfound/AetherEngine): TorBox links, downloads and the server's own streams; copy fallback, fresh links, restart-on-seek for server HLS, subtitles, progress and play reports), `MediaProbe` (a file's media info for the server), the glass player chrome, Now Playing, remote commands, PiP and AirPlay |
 | `Packages/StrataFeatures` | Screens: connect, sign-in (password, home-network join, TV code), Who's watching, households, Home, Movies, Shows, Search, My List, movie and show pages, source picker, player |
 | `App/` | The `@main` app and app delegate |
 | `StrataWidgets/` | Lock Screen and Dynamic Island Now Playing Live Activity |

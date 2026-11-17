@@ -31,20 +31,19 @@ public struct SubtitleOverlay: View {
     private var pictures: some View {
         GeometryReader { geo in
             let frame = videoFrame(in: geo.size)
-            // By position, not by value: hashing the PNGs on every redraw isn't free.
-            ForEach(Array(engine.activeCueImages.enumerated()), id: \.offset) { _, image in
-                if let cg = engine.picture(image) {
-                    let width = image.width * frame.width, height = image.height * frame.height
-                    // Lifted above the controls when they show.
-                    let bottom = frame.minY + (image.y + image.height) * frame.height
-                    let lift = raised ? max(0, bottom - (geo.size.height - Self.raisedInset)) : 0
-                    Image(decorative: cg, scale: 1)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: width, height: height)
-                        .position(x: frame.minX + image.x * frame.width + width / 2,
-                                  y: frame.minY + image.y * frame.height + height / 2 - lift)
-                }
+            // By position, not by value: comparing images on every redraw isn't free.
+            ForEach(Array(engine.activeCueImages.enumerated()), id: \.offset) { _, picture in
+                let r = picture.rect
+                let width = r.width * frame.width, height = r.height * frame.height
+                // Lifted above the controls when they show.
+                let bottom = frame.minY + r.maxY * frame.height
+                let lift = raised ? max(0, bottom - (geo.size.height - Self.raisedInset)) : 0
+                Image(decorative: picture.image, scale: 1)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: width, height: height)
+                    .position(x: frame.minX + r.minX * frame.width + width / 2,
+                              y: frame.minY + r.minY * frame.height + height / 2 - lift)
             }
         }
         .ignoresSafeArea()
@@ -231,19 +230,9 @@ public struct UpNextCard: View {
 /// What's playing and how: shown from the player's info button.
 public struct StreamDetailsPanel: View {
     let session: PlayResponse?
-    /// Device mode: data read from the file so far.
-    let bytesRead: Int64?
 
-    public init(session: PlayResponse?, bytesRead: Int64? = nil) {
+    public init(session: PlayResponse?) {
         self.session = session
-        self.bytesRead = bytesRead
-    }
-
-    /// The audio line, saying when DTS or TrueHD is being decoded on the device.
-    private func audio(_ session: PlayResponse) -> String {
-        let title = session.selectedAudio?.displayTitle ?? "—"
-        guard session.mode == .device, let plan = session.remux, plan.audio != "copy" else { return title }
-        return String(localized: "\(title) → Lossless (ALAC)", bundle: .module)
     }
 
     public var body: some View {
@@ -256,11 +245,8 @@ public struct StreamDetailsPanel: View {
                     row("File", c.displayName)
                     row("Playback", session.mode.label)
                     row("Video", [c.resolutionLabel, c.codecLabel, c.hdrLabel].compactMap { $0 }.joined(separator: " · "))
-                    row("Audio", audio(session))
+                    row("Audio", session.selectedAudio?.displayTitle ?? "—")
                     if let size = c.sizeLabel { row("Size", size) }
-                    if session.mode == .device, let bytesRead, bytesRead > 0, let read = Formatting.size(bytes: Int(bytesRead)) {
-                        row("Read", read)
-                    }
                 }
                 if !session.reasons.isEmpty {
                     Text(session.reasons.joined(separator: "; "))

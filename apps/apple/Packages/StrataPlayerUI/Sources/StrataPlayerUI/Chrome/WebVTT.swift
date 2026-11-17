@@ -1,13 +1,17 @@
 import Foundation
-import StrataRemux
+import CoreGraphics
 
 public struct VTTCue: Equatable, Sendable {
     public let start: TimeInterval
     public let end: TimeInterval
-    /// Empty for a picture subtitle.
     public let text: String
-    /// A picture subtitle (PGS, VobSub) read from the file.
-    public var image: SubtitleImage? = nil
+}
+
+/// A picture subtitle (PGS, VobSub, DVB) to draw now, and where: `rect` is in the video's
+/// frame, 0…1 on each axis.
+public struct SubtitlePicture: Equatable, @unchecked Sendable {
+    public let image: CGImage
+    public let rect: CGRect
 }
 
 /// Minimal WebVTT parser. Handles WEBVTT header, cue timings, and multi-line

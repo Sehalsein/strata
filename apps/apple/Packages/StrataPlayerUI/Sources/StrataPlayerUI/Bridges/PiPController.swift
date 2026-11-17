@@ -10,6 +10,8 @@ public final class PiPController: NSObject, AVPictureInPictureControllerDelegate
     public private(set) var isActive: Bool = false
 
     private var controller: AVPictureInPictureController?
+    /// Told when the window opens and closes (the engine keeps the video running behind it).
+    public var onActiveChange: ((Bool) -> Void)?
 
     public override init() {
         super.init()
@@ -18,6 +20,8 @@ public final class PiPController: NSObject, AVPictureInPictureControllerDelegate
     /// Wire the controller to an `AVPlayerLayer`. Call once the player layer
     /// is hosted on screen.
     public func attach(playerLayer: AVPlayerLayer) {
+        // The same layer as last time: its controller still works.
+        guard controller?.playerLayer !== playerLayer else { return }
         isAvailable = AVPictureInPictureController.isPictureInPictureSupported()
         // The iPhone simulator reports no PiP support, so the button is hidden there.
         Log.player.debug("pip attach supported=\(self.isAvailable, privacy: .public)")
@@ -40,11 +44,18 @@ public final class PiPController: NSObject, AVPictureInPictureControllerDelegate
         }
     }
 
+    nonisolated public func pictureInPictureControllerWillStartPictureInPicture(_ controller: AVPictureInPictureController) {
+        Task { @MainActor in self.onActiveChange?(true) }
+    }
+
     nonisolated public func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
         Task { @MainActor in self.isActive = true }
     }
 
     nonisolated public func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
-        Task { @MainActor in self.isActive = false }
+        Task { @MainActor in
+            self.isActive = false
+            self.onActiveChange?(false)
+        }
     }
 }

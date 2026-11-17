@@ -465,7 +465,7 @@ public final class StrataClient: Sendable {
     }
 
     /// Sends the media info the app read from a file (answering `.needsProbe`). `info` is
-    /// in the server's `MediaInfo` shape, as StrataRemux's `MediaInfo` encodes.
+    /// in the server's `MediaInfo` shape, as StrataPlayerUI's `MediaInfo` encodes.
     public func reportProbe<Info: Encodable & Sendable>(fileId: Int, info: Info) async throws {
         let _: OKResponse = try await send("POST", "/api/files/\(fileId)/probe", body: info)
     }

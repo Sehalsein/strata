@@ -7,10 +7,8 @@ import StrataKit
 /// reads the file's header itself, sends it, and asks to play again.
 @MainActor
 final class ProbeFlowTests: XCTestCase {
-    /// A file StrataRemux's tests use (HEVC, E-AC-3, SRT), read through a `file:` link.
-    private let media = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent().appendingPathComponent("StrataRemux/Tests/StrataRemuxTests/Fixtures/hevc_eac3_srt.mkv")
+    /// A short HEVC, E-AC-3, SRT file, read through a `file:` link.
+    private let media = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/hevc_eac3_srt.mkv")
 
     private func engine() -> PlayerEngine {
         let config = URLSessionConfiguration.ephemeral

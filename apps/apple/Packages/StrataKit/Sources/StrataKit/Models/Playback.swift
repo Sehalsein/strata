@@ -237,8 +237,8 @@ public struct ClientCaps: Codable, Sendable, Hashable {
     public var maxHeight: Int
     public var hdr: [String]
     public var dvProfiles: [Int]
-    /// The app can repackage files itself (StrataRemux), so the server hands over the
-    /// file's link instead of streaming it.
+    /// The app plays files itself (AetherEngine reads MKV, DTS, TrueHD…), so the server
+    /// hands over the file's link instead of streaming it.
     public var deviceRemux: Bool
 
     public init(containers: [String], videoCodecs: [String], audioCodecs: [String], maxHeight: Int, hdr: [String], dvProfiles: [Int], deviceRemux: Bool = false) {

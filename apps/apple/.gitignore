@@ -22,7 +22,3 @@ Packages/*/strata-url-cache/
 
 ## macOS noise
 .DS_Store
-
-## FFmpeg build (scripts/build-ffmpeg.sh) — regenerable
-Packages/StrataRemux/.build-ffmpeg/
-Packages/StrataRemux/Frameworks/

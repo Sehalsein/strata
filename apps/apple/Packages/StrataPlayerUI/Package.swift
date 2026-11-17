@@ -11,14 +11,14 @@ let package = Package(
     dependencies: [
         .package(path: "../StrataKit"),
         .package(path: "../StrataDesign"),
-        .package(path: "../StrataRemux"),
+        .package(url: "https://github.com/superuser404notfound/AetherEngine", exact: "7.70.0"),
     ],
     targets: [
         .target(
             name: "StrataPlayerUI",
-            dependencies: ["StrataKit", "StrataDesign", "StrataRemux"],
+            dependencies: ["StrataKit", "StrataDesign", .product(name: "AetherEngine", package: "AetherEngine")],
             resources: [.copy("Resources/PrivacyInfo.xcprivacy"), .process("Resources/Localizable.xcstrings")]
         ),
-        .testTarget(name: "StrataPlayerUITests", dependencies: ["StrataPlayerUI"]),
+        .testTarget(name: "StrataPlayerUITests", dependencies: ["StrataPlayerUI"], exclude: ["Fixtures"]),
     ]
 )

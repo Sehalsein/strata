@@ -8,8 +8,7 @@ import StrataKit
 @MainActor
 final class OfflinePlayTests: XCTestCase {
     private var fixture: URL {
-        URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("../../../StrataRemux/Tests/StrataRemuxTests/Fixtures/hevc_eac3_srt.mkv").standardized
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/hevc_eac3_srt.mkv")
     }
 
     func testPlaysADownloadedFileWithoutAServer() async throws {
