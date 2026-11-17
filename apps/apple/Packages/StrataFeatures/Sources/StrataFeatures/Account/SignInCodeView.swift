@@ -26,8 +26,10 @@ struct SignInCodeView: View {
                     .foregroundStyle(Theme.accentText)
                 VStack(spacing: Metrics.space2) {
                     Text("Sign in to \(serverName ?? "Strata")?", bundle: .module).font(.stTitle2).multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text("This code signs this device in to \(address) as the person it was made for, able to watch.", bundle: .module)
                         .font(.stCallout).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle.fill").font(.stFootnote).foregroundStyle(Theme.danger)
@@ -39,7 +41,8 @@ struct SignInCodeView: View {
                 .disabled(signingIn)
             }
             .padding(Metrics.gutter)
-            .frame(maxWidth: 480)
+            // The TV's type is far larger: a phone's width would cut the title and address short.
+            .frame(maxWidth: Metrics.isTV ? 1000 : 480)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.bg.ignoresSafeArea())
             .toolbar {

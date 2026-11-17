@@ -1,4 +1,4 @@
-import { ArrowRight, ChevronRight, Download, Info, Laptop, Play, Plus, Server } from "lucide-react";
+import { ArrowRight, ChevronRight, Download, Info, Laptop, Play, Plus, Server, Smartphone } from "lucide-react";
 import { Poster, PosterWall } from "@/components/poster-wall";
 import { cn } from "@/lib/utils";
 import { Faq, Reveal, Screens, Transform } from "./sections";
@@ -6,9 +6,13 @@ import { Features, Steps } from "./showcase";
 import { GlassLink, GlassMark, Glow, Heading } from "./ui";
 
 const SOURCE_URL = "https://github.com/Sehalsein/strata";
+/** The knowledge base: setup guides (apps/docs). */
+const DOCS_URL = "https://docs.strata.sehalsein.com";
 /** The Mac app (the server, in the menu bar), and how to install on Linux. */
 const MAC_DOWNLOAD = "https://github.com/Sehalsein/strata/releases/download/server-stable/Strata.dmg";
 const LINUX_INSTALL = "https://github.com/Sehalsein/strata/blob/main/apps/server/README.md#install";
+/** The apps for iPhone, iPad and Apple TV. */
+const APP_STORE_URL = "https://apps.apple.com/us/app/strata-tv/id6804102192";
 /** Some of the server's own profile pictures (this site passes /api through to it). */
 const AVATARS = ["fox", "panda", "robot", "owl", "dino", "penguin"];
 
@@ -46,6 +50,8 @@ function Nav() {
         </a>
         {[
           ["Install", "#install"],
+          ["Docs", DOCS_URL],
+          ["Get the app", APP_STORE_URL],
           ["Source", SOURCE_URL],
           ["Privacy", "/privacy"],
         ].map(([label, href]) => (
@@ -83,6 +89,9 @@ function Hero() {
         <div className="animate-in fade-in slide-in-from-bottom-5 mt-10 flex w-full flex-col items-center justify-center gap-3 duration-700 sm:flex-row">
           <GlassLink href={MAC_DOWNLOAD} solid size="lg" className="w-full sm:w-auto">
             <Download /> Download for macOS
+          </GlassLink>
+          <GlassLink href={APP_STORE_URL} size="lg" className="w-full sm:w-auto">
+            <Smartphone /> Get the app
           </GlassLink>
           <GlassLink href="#install" size="lg" className="w-full sm:w-auto">
             Other ways to install
@@ -237,6 +246,20 @@ brew install --cask strata`}</pre>
             </a>
           </div>
         </div>
+        <div className="glass flex flex-col gap-5 rounded-[1.75rem] p-7 md:col-span-2 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="glass-thin flex size-11 shrink-0 items-center justify-center rounded-2xl">
+              <Smartphone className="size-5" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold">Then get the app</h3>
+              <p className="text-sm text-white/50">For iPhone, iPad and Apple TV. It finds your server on your network.</p>
+            </div>
+          </div>
+          <GlassLink href={APP_STORE_URL} solid className="w-fit shrink-0">
+            Get it on the App Store <ArrowRight />
+          </GlassLink>
+        </div>
       </Reveal>
     </section>
   );
@@ -255,9 +278,14 @@ function Closing() {
           </div>
           <h2 className="max-w-2xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl">Tonight's movie is one tap away.</h2>
           <p className="max-w-lg text-white/60">Install Strata, add your media, invite the people you watch with, and press play.</p>
-          <GlassLink href={MAC_DOWNLOAD} solid size="lg">
-            <Download /> Download for macOS
-          </GlassLink>
+          <div className="flex w-full flex-col items-center justify-center gap-3 sm:flex-row">
+            <GlassLink href={MAC_DOWNLOAD} solid size="lg" className="w-full sm:w-auto">
+              <Download /> Download for macOS
+            </GlassLink>
+            <GlassLink href={APP_STORE_URL} size="lg" className="w-full sm:w-auto">
+              <Smartphone /> Get the app
+            </GlassLink>
+          </div>
         </div>
       </div>
     </section>
@@ -275,6 +303,12 @@ function Footer() {
         <nav className="flex gap-6">
           <a href="#install" className="hover:text-white">
             Install
+          </a>
+          <a href={DOCS_URL} className="hover:text-white">
+            Docs
+          </a>
+          <a href={APP_STORE_URL} className="hover:text-white">
+            App Store
           </a>
           <a href={SOURCE_URL} className="hover:text-white">
             Source

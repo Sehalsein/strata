@@ -5,7 +5,9 @@
 //   DATABASE_URL=… bash deploy.sh                # migrates Neon, then deploys
 // Optional secrets: RESEND_API_KEY (password-reset email), GOOGLE_CLIENT_ID and
 // GOOGLE_CLIENT_SECRET (Sign in with Google), STRATA_ADMIN_EMAILS (system admins),
-// STRATA_OPERATOR and STRATA_PRIVACY_CONTACT (the privacy page), SENTRY_DSN (error reports).
+// STRATA_OPERATOR and STRATA_PRIVACY_CONTACT (the privacy page), SENTRY_DSN (error reports),
+// STRATA_APPLE_APP_IDS ("<team id>.com.sehalsein.strata": lets the iOS app save passwords
+// for this address in the Passwords app; see apps/apple/TESTFLIGHT.md).
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "strata",
@@ -20,7 +22,7 @@
   "assets": {
     "directory": "../../apps/server/web/dist",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*", "/.well-known/apple-app-site-association"]
   },
   // TorBox sync every 15 minutes; cleanup and pruning once a day. Which jobs each runs is in
   // apps/server/src/cloudSchedule.ts, which must list the same expressions.

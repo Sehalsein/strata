@@ -147,6 +147,26 @@ whether to show uncached releases. The next episode is pre-warmed during playbac
 
 Scrapers need IMDb ids; these come from TMDB `external_ids`. Anime adds AniList/Kitsu ids.
 
+## Catalog sources
+
+TMDB stays the source of a title's identity (with AniList for anime TMDB doesn't have):
+file matching, progress, My List, the calendar, content ratings and discovery all key off
+it. Other catalogs plug in around it:
+
+- **Catalog add-ons** (AIO Metadata, Cinemeta, MDBList… any Stremio add-on with the
+  `catalog` resource) sit in the household's add-on list. Their catalogs that need nothing
+  filled in are offered as Home rows; the household ticks which ones show
+  (`homeCatalogs`), and the first few start on.
+- `TitleIds` (`src/catalog/titleIds.ts`) is the one place that knows other sites' ids:
+  IMDb and TVDB (looked up on TMDB), TMDB's own, and Kitsu, MAL and AniList (through the
+  anime id list). Every add-on title becomes a Strata title, so it opens, plays and keeps
+  progress like any other; one nobody can place is left out.
+- `AddonRows` (`src/catalog/addonRows.ts`) is a `ShelfSource`: Home asks every source for
+  its rows after TMDB's own. A row waits at most 6 s and keeps the add-on's artwork.
+
+The apps don't know where a row or title came from: they draw the rows the server sends
+and pass a title's ref back as they got it, whatever its source.
+
 ## Playback
 
 `POST /api/play { tmdbId, season?, episode?, candidateId?, startMs?, caps }` →
@@ -177,6 +197,20 @@ Subtitles: text subtitles (SRT/ASS) are converted to WebVTT. Image subtitles (PG
 can't be converted; in device mode the app reads them from the file and draws them itself
 (sent as `embedded: false` with their `streamIndex`).
 
+Subtitle add-ons (any Stremio add-on with the `subtitles` resource, like OpenSubtitles v3)
+sit in the same add-on list as stream add-ons. As a title starts, `AddonSubtitleFinder`
+asks them by IMDb or Kitsu id, alongside getting the file ready, and keeps the best few in
+each of the household's subtitle languages (`subtitleLanguages`, else its language); slow
+ones are left out after 4 s. They come after the file's own tracks as `a<n>`, each with a
+link to `GET /api/subtitles/<token>.vtt`. The token is signed for the household and names
+the add-on and its file, so the route fetches only that (the add-on must still be on) and
+converts it to WebVTT in TypeScript (`webvtt.ts`), which works on the cloud server too.
+
+The apps hold no subtitle logic: every track comes with a `label` to show as it is, and the
+response says which track to turn on (`selectedSubtitleId`), from `autoSubtitles` (forced
+only, when the audio is foreign, or always) and the audio's language
+(`src/playback/subtitleChoice.ts`).
+
 Seeking: an HLS stream starts at the resume point (`startOffsetMs`). A seek outside it
 starts a new session at that offset, which replaces the old one.
 
@@ -203,6 +237,7 @@ POST /api/play  POST /api/play/:sid/link  DELETE /api/play/:sid
 POST /api/downloads                    a file to keep on the device
 POST /api/files/:id/link  GET /api/files/:id/content  POST /api/files/:id/probe
 GET  /api/stream/:sid/...              file bytes, HLS playlist/segments, WebVTT subtitles
+GET  /api/subtitles/:token.vtt         a subtitle add-on's subtitle, as WebVTT
 POST /api/progress  POST /api/watched  DELETE /api/continue/:type/:tmdbId
 GET/PUT /api/watchlist
 /api/admin/...                         household admins: status, settings, secrets, devices,

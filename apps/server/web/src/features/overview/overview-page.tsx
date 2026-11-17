@@ -12,7 +12,7 @@ import { JobsCard } from "./jobs-card";
 import { PlayReportsCard } from "./play-reports-card";
 import { SessionsCard } from "./sessions-card";
 import { SetupChecklist } from "./setup-checklist";
-import { LibraryCard, ProvidersCard } from "./status-cards";
+import { LibraryCard, ProvidersCard, SectionCards } from "./status-cards";
 
 export default function OverviewPage() {
   const { isHouseholdAdmin } = useSession();
@@ -96,7 +96,7 @@ function AdminOverview() {
             <AlertDescription>
               <p>This household's catalog and file matching are off until it has a TMDB key.</p>
               <Button size="sm" variant="outline" asChild className="mt-1">
-                <Link href="/settings#connections">Add key</Link>
+                <Link href="/settings/connections">Add key</Link>
               </Button>
             </AlertDescription>
           </Alert>
@@ -104,6 +104,8 @@ function AdminOverview() {
       </div>
 
       <SetupChecklist status={data} isServerAdmin={isServerAdmin} />
+
+      <SectionCards stats={data.library} />
 
       <div className="grid gap-4 md:grid-cols-2">
         <LibraryCard stats={data.library} />

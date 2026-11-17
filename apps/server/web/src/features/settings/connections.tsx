@@ -4,7 +4,7 @@ import { LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
-import type { SecretKey, SettingsResponse } from "@/lib/types";
+import type { SecretKey, Settings, SettingsResponse } from "@/lib/types";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,13 +13,18 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { KeyGuideButton } from "./key-guides";
+import tmdbLogo from "@/assets/logos/tmdb.svg";
+import torboxLogo from "@/assets/logos/torbox.png";
+import { ChoiceSelect, minutesLabel, type SetFn } from "./fields";
 
 interface Provider {
   key: SecretKey;
   name: string;
-  /** Initials and colour for its mark. */
-  mark: { text: string; className: string };
+  /** Its mark: the service's own logo on its tile colour, or initials where it has none. */
+  mark: { logo?: string; text: string; className: string };
   what: string;
+  /** Small print under the card's text (an attribution its terms ask for). */
+  note?: React.ReactNode;
   required?: boolean;
 }
 
@@ -27,14 +32,26 @@ const PROVIDERS: Provider[] = [
   {
     key: "tmdbApiKey",
     name: "TMDB",
-    mark: { text: "TM", className: "bg-sky-600 text-white" },
+    // TMDB's own square logo, on its navy (themoviedb.org/about/logos-attribution).
+    mark: { logo: tmdbLogo, text: "TMDB", className: "bg-[#0d253f] p-1" },
     what: "The catalog: titles, artwork, cast, and matching your files to them.",
+    // TMDB's API terms ask for this attribution in the product.
+    note: (
+      <>
+        This product uses the{" "}
+        <a href="https://www.themoviedb.org" target="_blank" rel="noreferrer" className="underline underline-offset-4">
+          TMDB
+        </a>{" "}
+        API but is not endorsed or certified by TMDB.
+      </>
+    ),
     required: true,
   },
   {
     key: "torboxApiKey",
     name: "TorBox",
-    mark: { text: "TB", className: "bg-emerald-600 text-white" },
+    // TorBox's app icon (torbox.app).
+    mark: { logo: torboxLogo, text: "TorBox", className: "bg-white" },
     what: "Plays your TorBox library straight from TorBox, and finds releases of titles you don't have. Saving a key starts a library sync.",
   },
   {
@@ -50,18 +67,20 @@ const PROVIDERS: Provider[] = [
  * another's, nor the server's. Keys are checked with the provider before they're saved,
  * then stored encrypted and never shown again. New add-ons join this list.
  */
-export function Connections({ secrets }: { secrets: SettingsResponse["secrets"] }) {
+export function Connections({ secrets, draft, set }: { secrets: SettingsResponse["secrets"]; draft: Settings; set: SetFn }) {
   return (
     <div className="flex flex-col gap-3">
       {PROVIDERS.map((p) => (
-        <ProviderCard key={p.key} provider={p} configured={!!secrets[p.key]} />
+        <ProviderCard key={p.key} provider={p} configured={!!secrets[p.key]}>
+          {p.key === "torboxApiKey" && <TorboxSync draft={draft} set={set} />}
+        </ProviderCard>
       ))}
       <p className="text-muted-foreground pt-2 text-xs">Keys are checked with each service before they're saved, then stored encrypted. They're never shown again.</p>
     </div>
   );
 }
 
-function ProviderCard({ provider: p, configured }: { provider: Provider; configured: boolean }) {
+function ProviderCard({ provider: p, configured, children }: { provider: Provider; configured: boolean; children?: React.ReactNode }) {
   const [entering, setEntering] = useState(false);
   const [value, setValue] = useState("");
   const [pending, setPending] = useState(false);
@@ -114,8 +133,8 @@ function ProviderCard({ provider: p, configured }: { provider: Provider; configu
   return (
     <Card className="gap-0 py-0">
       <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start">
-        <div className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg text-xs font-bold", p.mark.className)} aria-hidden>
-          {p.mark.text}
+        <div className={cn("flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg text-xs font-bold", p.mark.className)} aria-hidden>
+          {p.mark.logo ? <img src={p.mark.logo} alt="" className="size-full object-contain" /> : p.mark.text}
         </div>
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -123,6 +142,7 @@ function ProviderCard({ provider: p, configured }: { provider: Provider; configu
             {status}
           </div>
           <p className="text-muted-foreground text-sm">{p.what}</p>
+          {p.note && <p className="text-muted-foreground/80 text-xs">{p.note}</p>}
           {configured && p.key === "torboxApiKey" && <TorboxAccountLine />}
         </div>
         {!entering && (
@@ -144,6 +164,9 @@ function ProviderCard({ provider: p, configured }: { provider: Provider; configu
           </div>
         )}
       </div>
+
+      {/* The service's own settings, once it's connected. */}
+      {configured && !entering && children}
 
       {entering && (
         <form onSubmit={save} noValidate className="bg-muted/30 flex flex-col gap-3 border-t p-5">
@@ -202,6 +225,51 @@ function ProviderCard({ provider: p, configured }: { provider: Provider; configu
   );
 }
 
+/**
+ * How Strata keeps the household's TorBox library in step: picking up what's new, and
+ * clearing out what it added that nobody plays. Saved with the page's Save bar.
+ */
+function TorboxSync({ draft, set }: { draft: Settings; set: SetFn }) {
+  return (
+    <div className="divide-y border-t">
+      <SyncRow
+        id="torbox-sync"
+        label="Sync every"
+        hint={draft.torboxSyncMinutes === 0 ? "Off: new TorBox items show up only when you add them here." : "Picks up what's new in your TorBox account."}
+      >
+        <ChoiceSelect id="torbox-sync" className="sm:w-full" value={draft.torboxSyncMinutes} options={SYNC_INTERVALS} describe={minutesLabel} onChange={(v) => set("torboxSyncMinutes", v)} />
+      </SyncRow>
+      <SyncRow
+        id="torbox-cleanup"
+        label="Clean up after"
+        hint={
+          draft.torboxCleanupDays === 0
+            ? "Off: everything Strata adds stays in TorBox."
+            : "Removes releases Strata added for you once nobody has played them this long. What you add yourself is never touched."
+        }
+      >
+        <ChoiceSelect id="torbox-cleanup" className="sm:w-full" value={draft.torboxCleanupDays} options={CLEANUP_DAYS} describe={(d) => `After ${d} days`} onChange={(v) => set("torboxCleanupDays", v)} />
+      </SyncRow>
+    </div>
+  );
+}
+
+function SyncRow({ id, label, hint, children }: { id: string; label: string; hint: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:pl-[4.75rem]">
+      <div className="min-w-0 space-y-0.5">
+        <label htmlFor={id} className="text-sm font-medium">
+          {label}
+        </label>
+        <p id={`${id}-hint`} className="text-muted-foreground max-w-md text-xs">
+          {hint}
+        </p>
+      </div>
+      <div className="w-full sm:w-48 sm:shrink-0">{children}</div>
+    </div>
+  );
+}
+
 /** The TorBox account a key belongs to: who, which plan, until when. */
 function TorboxAccountLine() {
   const account = useQuery({ queryKey: ["admin", "torbox-account"], queryFn: api.torboxAccount, staleTime: 5 * 60_000, retry: false });
@@ -212,3 +280,8 @@ function TorboxAccountLine() {
   const planName = typeof plan === "number" ? (["Free", "Essential", "Pro", "Standard"][plan] ?? `Plan ${plan}`) : plan;
   return <p className="text-sm pt-1">{[email, planName && `${planName} plan`, until && `until ${until}`].filter(Boolean).join(" · ")}</p>;
 }
+
+// The scheduled sync runs every 15 minutes, so nothing shorter is offered.
+const SYNC_INTERVALS = [{ value: 0, label: "Off" }, ...[15, 30, 60, 180, 360, 720, 1440].map((m) => ({ value: m, label: minutesLabel(m) }))];
+
+const CLEANUP_DAYS = [{ value: 0, label: "Never" }, ...[3, 7, 14, 30, 60, 90, 180, 365].map((d) => ({ value: d, label: `After ${d} days` }))];

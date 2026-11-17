@@ -72,7 +72,7 @@ export default function LibraryPage() {
 
   return (
     <Page>
-      <PageHeader title="Library" description="Every file Strata knows about, local and TorBox. Fix wrong or missing matches here." />
+      <PageHeader title="Library" description="Every file Strata knows about, local and TorBox. Fix wrong or missing matches here." guide="/library/folders" />
 
       <Card className="gap-4 py-4">
         <CardContent className="flex flex-col gap-4 px-4">
@@ -116,7 +116,7 @@ export default function LibraryPage() {
           </Tabs>
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-            <FilterSelect label="Source" value={state.provider} onChange={(v) => update({ provider: v as LibraryState["provider"] })} options={[["all", "All sources"], ["local", "Local"], ["torbox", "TorBox"]]} />
+            <FilterSelect label="Source" value={state.provider} onChange={(v) => update({ provider: v as LibraryState["provider"] })} options={[["all", "All sources"], ["local", "Local"], ["torbox", "TorBox"], ["link", "Add-on links"]]} />
             <FilterSelect label="Type" value={state.mediaType} onChange={(v) => update({ mediaType: v as LibraryState["mediaType"] })} options={[["all", "All types"], ["movie", "Movies"], ["episode", "Episodes"]]} />
             <FilterSelect label="Activity" value={state.accessed} onChange={(v) => update({ accessed: v as LibraryState["accessed"] })} options={[["all", "All activity"], ["yes", "Accessed"], ["no", "Never accessed"]]} />
             <FilterSelect label="Sort by" value={state.sort} onChange={(v) => update({ sort: v as LibrarySort, direction: defaultDirection(v as LibrarySort) })} options={SORTS.map((s) => [s.value, s.label])} />
@@ -191,8 +191,8 @@ export default function LibraryPage() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline" className={f.provider === "torbox" ? "text-torbox" : "text-local"}>
-                      {f.provider === "torbox" ? "TorBox" : "Local"}
+                    <Badge variant="outline" className={f.provider === "torbox" ? "text-torbox" : f.provider === "link" ? "" : "text-local"}>
+                      {f.provider === "torbox" ? "TorBox" : f.provider === "link" ? "Add-on link" : "Local"}
                     </Badge>
                   </TableCell>
                   <TableCell className="font-mono text-xs">

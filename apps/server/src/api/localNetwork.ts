@@ -5,9 +5,11 @@ import type { Env } from "./context";
 const PROXY_HEADERS = ["forwarded", "x-forwarded-for", "x-real-ip", "cf-connecting-ip", "true-client-ip"];
 
 /**
- * Whether the request comes straight from this machine or the home network
- * (loopback, private IPv4 ranges, link-local, IPv6 unique-local). Proxied
- * requests never count, whatever address the proxy connects from.
+ * Whether the request comes straight from another device on the home network (private
+ * IPv4 ranges, link-local, IPv6 unique-local). Proxied requests never count, whatever
+ * address the proxy connects from; nor does this machine itself: a reverse proxy on it,
+ * even one that adds no forwarding header, connects from here, and makes everyone's
+ * requests come from here.
  */
 export function isLocalRequest(c: Context<Env>): boolean {
   // A cloud server has no home network: its "local" peers are its host's proxies.
@@ -18,7 +20,12 @@ export function isLocalRequest(c: Context<Env>): boolean {
   if (c.req.header("origin") !== undefined) return false;
   if (!isLocalHost(c.req.header("host") ?? new URL(c.req.url).host)) return false;
   const address = c.env?.requestIP?.(c.req.raw)?.address;
-  return address ? isLocalAddress(address) : false;
+  return address ? isLocalAddress(address) && !isLoopbackAddress(address) : false;
+}
+
+function isLoopbackAddress(raw: string): boolean {
+  const address = raw.toLowerCase().replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/, "");
+  return address === "::1" || /^127\./.test(address);
 }
 
 /**
@@ -33,12 +40,36 @@ export function isLocalHost(raw: string | undefined): boolean {
   return /\.(local|lan|home|internal|home\.arpa)$/.test(host);
 }
 
-/** Straight from this machine: a loopback peer address and no proxy headers. */
+/**
+ * Straight from this machine: a loopback peer address, no proxy headers, addressed to
+ * this machine by name (`localhost`, 127.0.0.1, [::1]) and, from a browser, from that same
+ * address. The peer address alone isn't enough: a web page whose domain is made to resolve
+ * to 127.0.0.1 (DNS rebinding) connects from loopback too, but keeps its own name in Host.
+ */
 export function isLoopbackRequest(c: Context<Env>): boolean {
   if (c.var.services.profile.behindProxy) return false;
   if (PROXY_HEADERS.some((h) => c.req.header(h) !== undefined)) return false;
+  const host = c.req.header("host") ?? new URL(c.req.url).host;
+  if (!isLoopbackHost(host)) return false;
+  const origin = c.req.header("origin");
+  if (origin !== undefined) {
+    let originHost: string | null = null;
+    try {
+      originHost = new URL(origin).host;
+    } catch {
+      return false;
+    }
+    if (originHost.toLowerCase() !== host.toLowerCase()) return false;
+  }
   const address = c.env?.requestIP?.(c.req.raw)?.address?.toLowerCase();
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+/** `localhost`, 127.0.0.1 or [::1], with or without a port. */
+export function isLoopbackHost(raw: string | undefined): boolean {
+  if (!raw) return false;
+  const host = raw.toLowerCase().replace(/:\d+$/, "").replace(/^\[(.*)\]$/, "$1");
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
 export function isLocalAddress(raw: string): boolean {

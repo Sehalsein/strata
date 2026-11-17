@@ -25,6 +25,11 @@ export interface DeploymentProfile {
   readonly homeNetworkJoin: boolean;
   /** Updates itself (the Mac app and the binaries); otherwise it's updated by deploying it. */
   readonly selfUpdate: boolean;
+  /**
+   * Without an HTTPS address, passkeys still work at http://localhost:<port> on this machine
+   * (browsers allow WebAuthn there). Never the cloud: nobody browses to its localhost.
+   */
+  readonly localhostPasskeys: boolean;
   /** Keeps state on this machine: the secret key in a file, the bundled database backed up daily. */
   readonly localState: boolean;
   /** Clients reach it through its host's proxy; their address comes from the proxy's headers. */
@@ -51,6 +56,7 @@ export function deploymentProfile(mode: Mode, runtimeName: "bun" | "workers" = r
     bonjour: home,
     homeNetworkJoin: home,
     selfUpdate: home && runtimeName === "bun",
+    localhostPasskeys: home,
     localState: home,
     behindProxy: !home,
     scheduler: runtimeName === "workers" ? "cron" : "timers",

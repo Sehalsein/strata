@@ -1,3 +1,5 @@
+import { etagJson } from "./etag";
+import { requestTiming } from "./timing";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
@@ -33,7 +35,10 @@ export function createApp(services: Services) {
     await next();
   });
 
+  app.use("/api/*", requestTiming());
   app.use("/api/*", gzipJson());
+  // After gzip (so it sees the plain JSON): unchanged answers go back as 304s.
+  app.use("/api/*", etagJson());
   // Nothing the apps or dashboard send is near this; a bigger body is refused before it's read.
   app.use("/api/*", bodyLimit({ maxSize: 1024 * 1024, onError: (c) => c.json({ error: "Request too large" }, 413) }));
 
@@ -57,6 +62,16 @@ export function createApp(services: Services) {
   app.route("/api", catalogRoutes);
 
   app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));
+
+  // Lets the Strata apps save and fill passwords for this server's address in the iOS
+  // Passwords app: Apple fetches this file to check the app may use the domain. Only where
+  // STRATA_APPLE_APP_IDS names the apps ("<team id>.com.sehalsein.strata", comma-separated):
+  // the cloud server, whose address is built into the apps.
+  app.get("/.well-known/apple-app-site-association", (c) => {
+    const apps = (process.env.STRATA_APPLE_APP_IDS ?? "").split(",").map((a) => a.trim()).filter(Boolean);
+    if (!apps.length) return c.json({ error: "Not found" }, 404);
+    return c.json({ webcredentials: { apps } }, 200, { "cache-control": "public, max-age=3600" });
+  });
   app.get("*", webHandler(services.config.webDir));
 
   app.onError((err, c) => {

@@ -11,18 +11,24 @@ const hashToken = (value: string) => createHash("sha256").update(value).digest("
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
 /**
- * First-run setup makes whoever completes it the admin, so on a server reachable from
- * the internet it needs a code only the owner can see: printed in the server's log at
- * start while no account exists (a new one each start; only its hash is kept, shared
- * by every server on the database). The dashboard opened on the server's own machine
- * doesn't need it.
+ * First-run setup makes whoever completes it the admin, so it always needs a code only
+ * the owner can see: printed in the server's log at start while no account exists (a new
+ * one each start; only its hash is kept, shared by every server on the database), or
+ * handed to Strata.app, which started the server (api/routes/auth.ts, /launcher/setup-code).
+ * Not even a request from the server's own machine goes without: a reverse proxy on it
+ * makes everyone's requests come from there.
  */
 export async function announceSetupCode(db: Db): Promise<void> {
+  const code = await newSetupCode(db);
+  log.info(`No account yet. To set up this server, open its dashboard and enter the setup code ${code}`);
+}
+
+/** A new setup code (replacing the last one), as "XXXX-XXXX-XXXX". */
+export async function newSetupCode(db: Db): Promise<string> {
   const code = Array.from({ length: 12 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("");
   await db.execute(sql`INSERT INTO strata_meta (key, value) VALUES ('setup_code', ${hashToken(code)})
     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
-  const pretty = code.match(/.{4}/g)!.join("-");
-  log.info(`No account yet. To set up this server, open its dashboard and enter the setup code ${pretty}`);
+  return code.match(/.{4}/g)!.join("-");
 }
 
 export async function checkSetupCode(db: Db, code: string): Promise<boolean> {

@@ -115,6 +115,8 @@ struct AnimeListView: View {
     @Environment(AppServices.self) private var services
     let id: String
     let title: String
+    /// `id` is a row's full-list path from the server (any page's "See all"), not an Anime list.
+    var fullRow = false
     @State private var items: Loadable<[TitleCard]> = .loading
 
     var body: some View {
@@ -145,6 +147,10 @@ struct AnimeListView: View {
     }
 
     private func load(force: Bool = false) async {
-        await services.loadCached(force: force, { try await $0.animeList(id, $1) }) { items = $0 }
+        if fullRow {
+            await services.loadCached(force: force, { try await $0.rowList(id, $1) }) { items = $0 }
+        } else {
+            await services.loadCached(force: force, { try await $0.animeList(id, $1) }) { items = $0 }
+        }
     }
 }

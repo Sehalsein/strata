@@ -339,6 +339,72 @@ public final class ServerStore {
         }
     }
 
+    /// How someone joins by invitation: a new account, or one they already have here.
+    public enum InvitationAccount: Sendable {
+        case new(email: String, username: String, name: String, password: String)
+        case existing(login: String, password: String)
+    }
+
+    /// Set when joining as a new account found the email already has one (where the server
+    /// doesn't say beforehand, the cloud): sign in to it instead.
+    public private(set) var joinFoundExistingAccount = false
+
+    /// Joins a household by invitation (from its link or QR code): creates the account or
+    /// signs in to an existing one, accepts the invitation, opens its household, then saves
+    /// the sign-in and makes it active. Returns false and sets `lastError` on failure (and
+    /// `joinFoundExistingAccount` when a new account's email turned out to have one).
+    @discardableResult
+    public func acceptInvitation(_ invitationId: String, url: URL, as account: InvitationAccount) async -> Bool {
+        isAuthenticating = true
+        lastError = nil
+        joinFoundExistingAccount = false
+        defer { isAuthenticating = false }
+        do {
+            let anon = StrataClient(baseURL: url, session: session, cacheTTL: 0)
+            let info = try await anon.info()
+            let token: String
+            switch account {
+            case let .new(email, username, name, password):
+                // The email may have an account already. A server that confirms new accounts'
+                // email answers that like any sign-up (so nobody learns which emails have
+                // one), and then the new username doesn't sign in; others say so outright.
+                let existing = { () -> StrataError in
+                    self.joinFoundExistingAccount = true
+                    return StrataError(kind: .http, status: 409, message: String(localized: "\(email) already has an account here. Sign in with its password to join.", bundle: .module))
+                }
+                let made: String?
+                do {
+                    made = try await anon.signUp(email: email, username: username, name: name, password: password, invitationId: invitationId)
+                } catch let e as StrataError where e.code == "USER_ALREADY_EXISTS" || e.code == "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL" {
+                    throw existing()
+                }
+                if let made {
+                    token = made
+                } else {
+                    do {
+                        token = try await anon.signIn(login: username, password: password)
+                    } catch let e as StrataError where e.status == 401 {
+                        throw existing()
+                    }
+                }
+            case let .existing(login, password):
+                do {
+                    token = try await anon.signIn(login: login, password: password)
+                } catch let e as StrataError where e.status == 401 {
+                    throw StrataError(kind: .http, status: 401, message: String(localized: "Wrong username or password.", bundle: .module))
+                }
+            }
+            try await StrataClient(baseURL: url, token: token, session: session, cacheTTL: 0).acceptInvitation(id: invitationId)
+            try await adopt(token: token, url: url, info: info)
+            Log.auth.info("joined by invitation server=\(info.id, privacy: .public)")
+            return true
+        } catch {
+            lastError = StrataError.wrap(error).message
+            Log.auth.error("joining by invitation failed: \(StrataError.wrap(error).message, privacy: .public)")
+            return false
+        }
+    }
+
     /// Finishes a sign-in that produced `token` some other way (a TV approved by code from
     /// a phone): saves it and makes it active.
     @discardableResult
@@ -366,10 +432,33 @@ public final class ServerStore {
     private func adopt(token: String, url: URL, info: ServerInfo) async throws {
         let me = try await StrataClient(baseURL: url, token: token, session: session, cacheTTL: 0).me()
 
+        // A server says who it is (its id) itself, so any server can claim to be one this
+        // device knows. Before a new address joins a known server (where every sign-in on it
+        // would then send its token), the new sign-in must work at an address already known
+        // for it: a server pretending to be it can't make the real one accept its token.
+        // Nothing of this device's is sent to the new address meanwhile.
+        if let known = server(id: info.id), !known.addresses.contains(url) {
+            var confirmed = false
+            for address in known.addresses {
+                let there = try? await StrataClient(baseURL: address, token: token, session: session, cacheTTL: 0).me()
+                if there?.user.id == me.user.id { confirmed = true; break }
+            }
+            guard confirmed else {
+                let knownAt = known.addresses.first.map(ServerAddress.display) ?? ""
+                throw StrataError(kind: .invalidInput, message: String(localized: "\(ServerAddress.display(url)) says it's \(known.name), which this device knows at \(knownAt), but \(known.name) there didn't confirm it, so nothing was signed in. If \(known.name) has moved, remove it from this device first (press and hold it in Settings), then sign in again.", bundle: .module))
+            }
+        }
+
         var server = server(id: info.id) ?? SavedServer(id: info.id, name: info.serverName, addresses: [])
         server.name = server.customName ?? info.serverName
         server.version = info.version
-        server.addresses = [url] + server.addresses.filter { $0 != url }
+        // As with addresses added by hand: a server reached over HTTPS doesn't switch to a
+        // plain-HTTP address on the internet (it's kept, after the others).
+        if url.scheme == "http", !ServerAddress.isLocal(url), server.addresses.contains(where: { $0.scheme == "https" }) {
+            server.addresses = server.addresses.filter { $0 != url } + [url]
+        } else {
+            server.addresses = [url] + server.addresses.filter { $0 != url }
+        }
         upsert(server)
         if hiddenServerIDs.contains(info.id) { showHiddenServers(info.id) }
 
@@ -477,6 +566,39 @@ public final class ServerStore {
     }
 
     // MARK: - Account
+
+    /// The full (not watch-only) sign-in on this device for `email` on the server at `url`,
+    /// if there is one: an invitation to it joins without asking for a password.
+    public func signIn(forEmail email: String, serverAt url: URL) async -> SavedSignIn? {
+        guard let server = savedServer(matching: url.absoluteString) else { return nil }
+        for candidate in signIns(onServer: server.id) where !candidate.viewerOnly {
+            guard let client = client(forSignIn: candidate.id), let me = try? await client.me() else { continue }
+            if me.user.email?.lowercased() == email.lowercased() { return candidate }
+        }
+        return nil
+    }
+
+    /// Accepts an invitation with a sign-in this device already has (the invited email's),
+    /// then makes that sign-in active, in the new household. Returns false and sets
+    /// `lastError` on failure.
+    @discardableResult
+    public func acceptInvitation(_ invitationId: String, with signInID: String) async -> Bool {
+        lastError = nil
+        guard let client = client(forSignIn: signInID) else {
+            lastError = StrataError.wrap(Self.signedOut).message
+            return false
+        }
+        do {
+            try await client.acceptInvitation(id: invitationId)
+            switchTo(signInID)
+            await refreshActive()
+            Log.auth.info("joined by invitation with a saved sign-in")
+            return true
+        } catch {
+            lastError = StrataError.wrap(error).message
+            return false
+        }
+    }
 
     /// Changes the active account's password, which signs it out everywhere else; this
     /// device keeps going with the new session the server returns. Throws `StrataError`

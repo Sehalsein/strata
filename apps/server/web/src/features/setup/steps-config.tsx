@@ -11,7 +11,8 @@ import { FieldGroup, FieldLabel, FormField } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { SwitchField } from "@/features/settings/fields";
+import { ChoiceSelect, SwitchField } from "@/features/settings/fields";
+import { CATALOG_LANGUAGES, languageName } from "@/features/settings/languages";
 import { MediaFolders } from "@/features/settings/media-folders";
 import { KeyGuideButton } from "@/features/settings/key-guides";
 import { SecretKeyForm } from "@/features/settings/secret-key-form";
@@ -158,8 +159,17 @@ export function BasicsStep({ info, onNext, onBack }: StepProps) {
             <FormField label="Server name" description="Shown in the apps when they find this server." error={nameError}>
               {(p) => <Input {...p} value={draft.serverName} maxLength={64} onChange={(e) => setDraft({ ...draft, serverName: e.target.value })} />}
             </FormField>
-            <FormField label="Metadata language" description="TMDB language tag, e.g. en-US, fr-FR, ja-JP.">
-              {(p) => <Input {...p} className="font-mono" value={draft.language} onChange={(e) => setDraft({ ...draft, language: e.target.value })} spellCheck={false} autoCapitalize="off" />}
+            <FormField label="Metadata language" description="Titles, overviews and artwork from TMDB, in this language where it has them.">
+              {(p) => (
+                <ChoiceSelect
+                  id={p.id}
+                  className="sm:w-full"
+                  value={draft.language}
+                  options={CATALOG_LANGUAGES.map((l) => ({ value: l.code, label: l.name }))}
+                  describe={languageName}
+                  onChange={(v) => setDraft({ ...draft, language: v })}
+                />
+              )}
             </FormField>
           </div>
           {local && (

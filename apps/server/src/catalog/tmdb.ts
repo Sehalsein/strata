@@ -1,3 +1,4 @@
+import { timed } from "../api/timing";
 import { logger } from "../log";
 import { CachedMissing, type ApiCache } from "./apiCache";
 import { globalFetch } from "../net";
@@ -38,6 +39,7 @@ export interface TmdbListItem {
   poster_path?: string | null;
   backdrop_path?: string | null;
   vote_average?: number;
+  vote_count?: number;
   popularity?: number;
   genre_ids?: number[];
 }
@@ -73,7 +75,7 @@ export interface TmdbMovie {
   belongs_to_collection?: { id: number; name: string; poster_path?: string | null } | null;
   credits?: TmdbCredits;
   recommendations?: TmdbPage;
-  release_dates?: { results: { iso_3166_1: string; release_dates: { certification: string; type: number }[] }[] };
+  release_dates?: { results: { iso_3166_1: string; release_dates: { certification: string; type: number; release_date?: string; note?: string }[] }[] };
   external_ids?: { imdb_id?: string | null };
   videos?: { results: { key: string; site: string; type: string; official?: boolean; name: string }[] };
   /** With `images` appended: logos in the server's language, English and no language. */
@@ -211,11 +213,16 @@ export class Tmdb {
   trending(type: "movie" | "tv", page = 1) {
     return this.get<TmdbPage>(`/trending/${type}/week`, page > 1 ? { page: String(page) } : {}, 6 * HOUR);
   }
-  popular(type: "movie" | "tv") {
-    return this.get<TmdbPage>(`/${type}/popular`, {}, 12 * HOUR);
+  popular(type: "movie" | "tv", page = 1) {
+    return this.get<TmdbPage>(`/${type}/popular`, page > 1 ? { page: String(page) } : {}, 12 * HOUR);
   }
-  topRated(type: "movie" | "tv") {
-    return this.get<TmdbPage>(`/${type}/top_rated`, {}, DAY);
+  topRated(type: "movie" | "tv", page = 1) {
+    return this.get<TmdbPage>(`/${type}/top_rated`, page > 1 ? { page: String(page) } : {}, DAY);
+  }
+  /** The movie or show TMDB knows by another site's id: IMDb ("tt…") or TVDB. */
+  find(externalId: string, source: "imdb_id" | "tvdb_id") {
+    if (!/^(tt\d{1,10}|\d{1,10})$/.test(externalId)) throw new TmdbError("That isn't an id TMDB can look up.", 400);
+    return this.get<{ movie_results: TmdbListItem[]; tv_results: TmdbListItem[] }>(`/find/${externalId}`, { external_source: source }, 7 * DAY);
   }
   /** Films in cinemas in `region` now. */
   nowPlaying(region: string, page = 1) {
@@ -233,7 +240,7 @@ export class Tmdb {
         // A title TMDB doesn't have (a stale anime mapping, say) is remembered for a day
         // rather than asked about on every page view.
         { ttl, maxStale: Infinity, missingTtl: DAY, missing: (err) => err instanceof TmdbError && err.status === 404, backoff: REFRESH_BACKOFF_MS },
-        () => this.fetch<T>(path, query, key),
+        () => timed("tmdb", () => this.fetch<T>(path, query, key)),
       );
     } catch (err) {
       if (err instanceof CachedMissing) throw new TmdbError("That title isn't in the catalog.", 404);

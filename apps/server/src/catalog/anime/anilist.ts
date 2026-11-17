@@ -1,3 +1,4 @@
+import { timed } from "../../api/timing";
 import { logger } from "../../log";
 import { runtime } from "#runtime";
 import type { ApiCache } from "../apiCache";
@@ -322,7 +323,7 @@ export class Anilist {
     }
     try {
       const lifetime = typeof ttl === "number" ? ttl : ttl(((await this.cache.read(cacheKey))?.value as T | undefined) ?? null);
-      return await this.cache.get<T | null>(cacheKey, { ttl: lifetime, maxStale: MAX_STALE_MS, backoff: FAILURE_TTL_MS }, () => this.fetchQueued<T>(query, variables));
+      return await this.cache.get<T | null>(cacheKey, { ttl: lifetime, maxStale: MAX_STALE_MS, backoff: FAILURE_TTL_MS }, () => timed("anilist", () => this.fetchQueued<T>(query, variables)));
     } catch (err) {
       log.warn(`AniList request failed`, err);
       return null;

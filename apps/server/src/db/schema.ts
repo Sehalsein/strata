@@ -239,7 +239,8 @@ export const householdSettings = pgTable(
   (t) => [primaryKey({ columns: [t.organizationId, t.key] })],
 );
 
-export type FileProvider = "local" | "torbox";
+/** Where a file plays from: this server's disk, TorBox, or an add-on's link. */
+export type FileProvider = "local" | "torbox" | "link";
 export type MatchStatus = "pending" | "matched" | "unmatched" | "manual" | "ignored";
 
 export const files = pgTable(
@@ -359,6 +360,21 @@ export const watchlist = pgTable(
     source: text("source").$type<TitleSource>().notNull().default("tmdb"),
     titleId: integer("title_id").notNull(),
     addedAt: ms("added_at").notNull().$defaultFn(now),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.source, t.type, t.titleId] })],
+);
+
+/** Titles someone asked to be reminded of when they come out (the calendar notifies them). */
+export const reminders = pgTable(
+  "reminders",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    source: text("source").$type<TitleSource>().notNull().default("tmdb"),
+    type: text("type").$type<"movie" | "show">().notNull(),
+    titleId: integer("title_id").notNull(),
+    createdAt: ms("created_at").notNull().$defaultFn(now),
   },
   (t) => [primaryKey({ columns: [t.userId, t.source, t.type, t.titleId] })],
 );

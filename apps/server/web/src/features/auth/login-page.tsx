@@ -1,10 +1,11 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { KeyRound, LoaderCircle, MailCheck } from "lucide-react";
 import { api, ApiError, errorMessage, privacyUrl } from "@/lib/api";
 import { queryClient, queryKeys } from "@/lib/query";
 import type { ServerInfo } from "@/lib/types";
 import { AuthError, authClient } from "@/lib/auth-client";
+import { passkeyAutofillAvailable, passkeyAvailability } from "./passkey-availability";
 import { BrandMark } from "@/components/brand-mark";
 import { PosterWall } from "@/components/poster-wall";
 import { ModeToggle } from "@/components/mode-toggle";
@@ -134,6 +135,29 @@ export function SignInForm({ onSignedIn, onCancel, submitLabel = "Sign in" }: { 
   // Google and passkeys show only where the server is set up for them.
   const info = useQuery({ queryKey: queryKeys.info, queryFn: api.info, staleTime: 60_000 });
   const methods = info.data?.signIn;
+  const passkeys = info.data ? passkeyAvailability(methods) : null;
+  const done = useRef(onSignedIn);
+  done.current = onSignedIn;
+
+  // Passkeys in the username field's suggestions, where the browser offers them: picking one
+  // signs in. Replaced (and so ended) by any other passkey sign-in.
+  const autofill = !!passkeys?.ok;
+  useEffect(() => {
+    if (!autofill) return;
+    let live = true;
+    void (async () => {
+      if (!(await passkeyAutofillAvailable()) || !live) return;
+      try {
+        await authClient.signInWithPasskey({ autoFill: true });
+        if (live) await done.current();
+      } catch {
+        // Cancelled, or replaced by the button: nothing to say.
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [autofill]);
 
   const signInWith = async (method: "google" | "passkey") => {
     setOther(method);
@@ -172,7 +196,7 @@ export function SignInForm({ onSignedIn, onCancel, submitLabel = "Sign in" }: { 
     <form onSubmit={submit} noValidate>
       <FieldGroup>
         <FormField label="Username or email">
-          {(p) => <Input {...p} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="off" spellCheck={false} required autoFocus />}
+          {(p) => <Input {...p} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete={autofill ? "username webauthn" : "username"} autoCapitalize="off" spellCheck={false} required autoFocus />}
         </FormField>
         <FormField label="Password">
           {(p) => <Input {...p} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />}
@@ -197,10 +221,26 @@ export function SignInForm({ onSignedIn, onCancel, submitLabel = "Sign in" }: { 
             <div className="text-muted-foreground flex items-center gap-3 text-xs">
               <span className="bg-border h-px flex-1" /> or <span className="bg-border h-px flex-1" />
             </div>
-            {methods.passkey && (
+            {passkeys?.ok && (
               <Button type="button" variant="outline" className="w-full" onClick={() => void signInWith("passkey")} disabled={!!other || pending}>
                 {other === "passkey" ? <LoaderCircle className="animate-spin" /> : <KeyRound />} Sign in with a passkey
               </Button>
+            )}
+            {passkeys && !passkeys.ok && (
+              <p className="text-muted-foreground flex gap-2 text-xs">
+                <KeyRound className="mt-px size-3.5 shrink-0" />
+                <span>
+                  {passkeys.reason}
+                  {passkeys.address && (
+                    <>
+                      {" "}
+                      <a href={passkeys.address} className="text-foreground underline underline-offset-4">
+                        Open it there
+                      </a>
+                    </>
+                  )}
+                </span>
+              </p>
             )}
             {methods.google && (
               <Button type="button" variant="outline" className="w-full" onClick={() => void signInWith("google")} disabled={!!other || pending}>

@@ -140,6 +140,11 @@ public final class AppServices {
     public func sources(for target: PlaybackTarget, discover: Bool) async -> [Candidate] {
         await load { try await $0.sources(target, discover: discover) }.value ?? []
     }
+
+    /// The sources with the server's filters for them; nil when they couldn't be loaded.
+    public func sourceList(for target: PlaybackTarget, discover: Bool) async -> SourceList? {
+        await load { try await $0.sourceList(target, discover: discover) }.value
+    }
 }
 
 public enum Loadable<T> {
@@ -180,6 +185,8 @@ public enum Route: Hashable {
     case browse(TitleType, BrowseList)
     /// An Anime tab list in full: its id and title.
     case animeList(String, String)
+    /// A row in full, from the server: the path its shelf names and its title.
+    case rowList(String, String)
     /// Every title of a shelf the server sent, past what its rail shows.
     case shelf(Shelf)
     case person(Int)
@@ -258,6 +265,52 @@ public struct ResetPasswordRequest: Identifiable, Hashable {
     }
 }
 
+/// An invitation to a household: its QR code in the dashboard
+/// (`strata://invite?server=<address>&id=<id>`), or the link passed on as text
+/// (`https://<server>/invite/<id>`, whose page opens the app).
+public struct InviteRequest: Identifiable, Hashable {
+    public let server: URL
+    public let invitationId: String
+    public var id: String { invitationId }
+
+    public init?(_ url: URL) {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let named: URL?
+        let id: String?
+        switch url.scheme?.lowercased() {
+        case "strata" where url.host == "invite":
+            named = query.first(where: { $0.name == "server" })?.value.flatMap(URL.init(string:))
+            id = query.first(where: { $0.name == "id" })?.value
+        case "http", "https":
+            let parts = url.pathComponents.filter { $0 != "/" }
+            guard parts.count == 2, parts[0] == "invite" else { return nil }
+            named = url
+            id = parts[1]
+        default:
+            return nil
+        }
+        guard let id, !id.isEmpty, let named, let server = Self.origin(named) else { return nil }
+        self.server = server
+        self.invitationId = id
+    }
+
+    /// Only the scheme, host and port of the server a link names. A link with a user or
+    /// password in its address ("https://my.server@elsewhere.example") is refused: it's
+    /// only ever used to make one address look like another.
+    static func origin(_ url: URL) -> URL? {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = parts.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = parts.host, !host.isEmpty,
+              parts.user == nil, parts.password == nil else { return nil }
+        parts.scheme = scheme
+        parts.host = host.lowercased()
+        parts.path = ""
+        parts.query = nil
+        parts.fragment = nil
+        return parts.url
+    }
+}
+
 /// A TV's sign-in code to approve, from a scanned QR code or typed in Settings.
 public struct LinkRequest: Identifiable, Hashable {
     public let code: String
@@ -289,6 +342,7 @@ public struct TVLinkRequest: Identifiable, Hashable {
 /// `strata://sign-in?server=<address>&code=<code>` (a member's QR code: sign in as them),
 /// `strata://reset-password?server=<address>&token=<token>` (a password-reset email's
 /// link: choose a new password),
+/// `strata://invite?server=<address>&id=<id>` (an invitation: join its household),
 /// `strata://tv-link?key=<key>` (a TV with no server yet: send it this phone's), and
 /// the TV's own `https://<server>/link?user_code=<code>` when it opens the app.
 @MainActor
@@ -299,6 +353,7 @@ public final class AppCoordinator {
     public var pendingSignIn: SignInCodeRequest?
     public var pendingTVLink: TVLinkRequest?
     public var pendingReset: ResetPasswordRequest?
+    public var pendingInvite: InviteRequest?
 
     public init() {}
 
@@ -311,6 +366,10 @@ public final class AppCoordinator {
         }
         // The QR code on the TV is the server's own page; opened in the app, the server is
         // the link's origin.
+        if let invite = InviteRequest(url) {
+            pendingInvite = invite
+            return
+        }
         if url.scheme == "http" || url.scheme == "https" {
             guard url.path == "/link", let code = value("user_code") else { return }
             link(code, server: url.absoluteString)
@@ -320,7 +379,7 @@ public final class AppCoordinator {
         let parts = url.pathComponents.dropFirst().compactMap { Int($0) }
         switch url.host {
         case "title":
-            if let text = url.pathComponents.dropFirst().first, let ref = TitleRef(string: text), ref.isSupported { pendingRoute = .title(ref) }
+            if let text = url.pathComponents.dropFirst().first, let ref = TitleRef(string: text) { pendingRoute = .title(ref) }
         case "movie": if let id = parts.first { pendingRoute = .title(.tmdb(.movie, id)) }
         case "show": if let id = parts.first { pendingRoute = .title(.tmdb(.show, id)) }
         case "watch":

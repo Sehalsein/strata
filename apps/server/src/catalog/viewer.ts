@@ -5,7 +5,8 @@ import type { PlayRequest } from "../playback/service";
 import type { PlayReportDevice, PlayReportInput } from "../playback/reports";
 import type { DiscoveryTarget } from "../sources/discovery";
 import { targetRef, tmdbRef, type TitleRef, type TitleTarget } from "./ref";
-import type { BrowseList, Shelf, TitleType } from "./service";
+import type { BrowseList, Shelf, TitleCard, TitleType } from "./service";
+import type { PageId } from "./pageLayouts";
 
 const notFound = () => new HTTPException(404, { message: "Title not found" });
 
@@ -43,7 +44,18 @@ export class Viewer {
   }
 
   showsPage(): Promise<Shelf[]> {
-    return this.household.catalog.showsPage().then((s) => this.shelves(s));
+    return this.household.catalog.showsPage(this.userId).then((s) => this.shelves(s));
+  }
+
+  /** One row of a page in full ("See all"), with this person's content limit; null for a row it doesn't have. */
+  async rowList(page: PageId, rowId: string): Promise<Shelf | null> {
+    const shelf = await this.household.catalog.rowList(page, rowId, this.userId);
+    if (!shelf) return null;
+    return (await this.shelves([shelf]))[0] ?? { ...shelf, items: [] };
+  }
+
+  moviesPage(): Promise<Shelf[]> {
+    return this.household.catalog.moviesPage(this.userId).then((s) => this.shelves(s));
   }
 
   animeCategories() {
@@ -67,7 +79,7 @@ export class Viewer {
 
   /** Episodes of the shows on this person's list: the last week and the next month. */
   calendar() {
-    return this.household.calendar.episodes(this.userId);
+    return this.household.calendar.entries(this.userId);
   }
 
   async person(id: number) {
@@ -214,10 +226,20 @@ export class Viewer {
     return (await this.limited()) ? this.household.content.filter(this.userId, cards) : cards;
   }
 
-  /** Drops titles above the limit, and shelves left empty. */
+  /**
+   * Drops titles above the limit, and shelves left empty. An add-on's own poster is shown
+   * only without a limit: under one, every card shows TMDB's, so what the profile sees is
+   * the title the limit judged.
+   */
   private async shelves(shelves: Shelf[]): Promise<Shelf[]> {
-    if (!(await this.limited())) return shelves;
-    const filtered = await Promise.all(shelves.map(async (shelf) => ({ ...shelf, items: await this.cards(shelf.items) })));
+    const limited = await this.limited();
+    const artwork = <T extends TitleCard>(c: T): T => {
+      if (c.addonPosterUrl === undefined) return c;
+      const { addonPosterUrl, ...card } = c;
+      return { ...card, posterUrl: limited ? card.posterUrl : addonPosterUrl } as T;
+    };
+    if (!limited) return shelves.map((shelf) => ({ ...shelf, items: shelf.items.map(artwork) }));
+    const filtered = await Promise.all(shelves.map(async (shelf) => ({ ...shelf, items: (await this.cards(shelf.items)).map(artwork) })));
     return filtered.filter((shelf) => shelf.items.length > 0);
   }
 

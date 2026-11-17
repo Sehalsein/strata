@@ -72,6 +72,10 @@ public struct RootView: View {
         .sheet(item: Binding(get: { services.coordinator.pendingSignIn }, set: { services.coordinator.pendingSignIn = $0 })) { request in
             SignInCodeView(request: request)
         }
+        // An invitation's QR code or link: create the account (or sign in) and join.
+        .sheet(item: Binding(get: { services.coordinator.pendingInvite }, set: { services.coordinator.pendingInvite = $0 })) { request in
+            InviteView(request: request)
+        }
         #if os(iOS)
         // A password-reset email's link: choose a new password, then sign in with it.
         .sheet(item: Binding(get: { services.coordinator.pendingReset }, set: { services.coordinator.pendingReset = $0 })) { request in
@@ -346,6 +350,7 @@ extension View {
                 }
             case .browse(let type, let list): BrowseListView(type: type, list: list)
             case .animeList(let id, let title): AnimeListView(id: id, title: title)
+            case .rowList(let path, let title): AnimeListView(id: path, title: title, fullRow: true)
             case .shelf(let shelf): ShelfGridView(shelf: shelf)
             case .person(let id): PersonView(personId: id)
             case .myList: MyListView()

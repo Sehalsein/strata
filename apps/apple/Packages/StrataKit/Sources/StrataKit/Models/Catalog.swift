@@ -113,8 +113,8 @@ public struct TitleCard: Codable, Sendable, Hashable, Identifiable {
 }
 
 extension TitleCard: ListItem {
-    /// From a source this app knows, and naming its title one way or another.
-    var isUsable: Bool { sentRef.map(\.isSupported) ?? (tmdbId != nil) }
+    /// Naming its title one way or another (any source: the server decides what's a title).
+    var isUsable: Bool { sentRef != nil || tmdbId != nil }
 }
 
 public struct Shelf: Codable, Sendable, Hashable, Identifiable {
@@ -140,9 +140,13 @@ public struct Shelf: Codable, Sendable, Hashable, Identifiable {
     public var style: Style? { styleName.flatMap(Style.init(rawValue:)) }
     /// The full list behind the rail ("See all"): an Anime tab list, for `StrataClient.animeList`.
     public var more: String?
+    /// The full list behind the rail ("See all"): a path on the server, for `StrataClient.rowList`.
+    /// Newer servers send it, and cut the rail to the length the household chose: the app
+    /// shows the rail as sent.
+    public var seeAll: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, kind, items, more
+        case id, title, kind, items, more, seeAll
         case styleName = "style"
     }
 
@@ -356,11 +360,13 @@ public struct MovieDetail: Codable, Sendable, Hashable, Identifiable {
     public var sources: [Candidate]
     public var progress: WatchProgress?
     public var inWatchlist: Bool
+    /// "Remind me" when it comes out: only for a film with a release still to come (and absent from older servers).
+    public var remind: Reminder?
 
     enum CodingKeys: String, CodingKey {
         case type, tmdbId, imdbId, title, tagline, overview, year, releaseDate, runtimeMinutes, genres, rating, ratings, certification
         case posterUrl, backdropUrl, logoUrl, cast, directors, trailer, videos, anime, collection, related, recommendations, available, sources
-        case progress, inWatchlist
+        case progress, inWatchlist, remind
         case sentRef = "ref"
     }
 
@@ -375,6 +381,31 @@ public struct MovieDetail: Codable, Sendable, Hashable, Identifiable {
     public var releaseDateValue: Date? { Formatting.date(releaseDate) }
     /// Resume position when there's meaningful progress.
     public var resumeMs: Int? { progress.flatMap { $0.isResumable ? $0.positionMs : nil } }
+}
+
+/// What's still to come for a title, as the server words it, and whether this person asked
+/// to be reminded. The calendar then lists it and the app notifies on the day. A reminder
+/// that's on comes without a date once there's nothing dated to come, so it can be turned off.
+public struct Reminder: Codable, Sendable, Hashable {
+    public var on: Bool
+    /// YYYY-MM-DD; nil when nothing dated is to come.
+    public var date: String?
+    /// The exact time, when known.
+    public var airsAt: String?
+    /// "In cinemas", "Season 2 premieres"; nil with no date.
+    public var label: String?
+
+    public init(on: Bool, date: String? = nil, airsAt: String? = nil, label: String? = nil) {
+        self.on = on; self.date = date; self.airsAt = airsAt; self.label = label
+    }
+
+    /// "In cinemas · Mar 1, 2027"; nil when nothing dated is to come.
+    public var text: String? {
+        guard let label else { return nil }
+        let when = airsAt.flatMap { try? Date($0, strategy: .iso8601) } ?? Formatting.date(date)
+        guard let when else { return label }
+        return "\(label) · \(when.formatted(.dateTime.month(.abbreviated).day().year()))"
+    }
 }
 
 // MARK: - Show
@@ -441,11 +472,13 @@ public struct ShowDetail: Codable, Sendable, Hashable, Identifiable {
     public var available: [Provider]
     public var upNext: UpNext?
     public var inWatchlist: Bool
+    /// "Remind me" of its next episode or premiere, when one is dated (absent from older servers).
+    public var remind: Reminder?
 
     enum CodingKeys: String, CodingKey {
         case type, tmdbId, imdbId, title, tagline, overview, year, firstAirDate, lastAirDate, status, genres, rating, ratings
         case certification, posterUrl, backdropUrl, logoUrl, cast, trailer, videos, anime, seasons, related, recommendations, available
-        case upNext, inWatchlist
+        case upNext, inWatchlist, remind
         case sentRef = "ref"
     }
 
@@ -576,5 +609,83 @@ public struct CalendarEpisode: Codable, Sendable, Hashable, Identifiable {
 }
 
 extension CalendarEpisode: ListItem {
-    var isUsable: Bool { sentRef.map(\.isSupported) ?? (tmdbId != nil) }
+    var isUsable: Bool { sentRef != nil || tmdbId != nil }
+}
+
+/// Something on the calendar, worded by the server: an episode of a show the person follows,
+/// or a release of a film on their list ("In cinemas", "Out to stream or rent"). The app shows
+/// it as sent and notifies with the server's `alert`.
+public struct CalendarEntry: Codable, Sendable, Hashable, Identifiable {
+    public struct Play: Codable, Sendable, Hashable {
+        public var season: Int
+        public var episode: Int
+    }
+
+    public struct Alert: Codable, Sendable, Hashable {
+        public var title: String
+        public var body: String
+        /// Show it once, straight away (it's ready to play now), rather than at `date`.
+        public var now: Bool?
+    }
+
+    public var id: String
+    public var kind: String
+    public var ref: TitleRef
+    public var title: String
+    public var posterUrl: URL?
+    public var backdropUrl: URL?
+    /// What it is, in the server's words: "S2 E5 · The One Where…", "In cinemas".
+    public var label: String
+    /// `YYYY-MM-DD`, and the exact time when known (ISO).
+    public var date: String
+    public var airsAt: String?
+    /// Out, and Strata can play it now.
+    public var ready: Bool
+    public var play: Play?
+    public var alert: Alert?
+
+    public init(id: String, kind: String, ref: TitleRef, title: String, posterUrl: URL? = nil, backdropUrl: URL? = nil, label: String, date: String, airsAt: String? = nil, ready: Bool, play: Play? = nil, alert: Alert? = nil) {
+        self.id = id
+        self.kind = kind
+        self.ref = ref
+        self.title = title
+        self.posterUrl = posterUrl
+        self.backdropUrl = backdropUrl
+        self.label = label
+        self.date = date
+        self.airsAt = airsAt
+        self.ready = ready
+        self.play = play
+        self.alert = alert
+    }
+
+    /// When it is: the exact time, or the start of its day here.
+    public var when: Date {
+        if let airsAt, let time = CalendarDates.instant(airsAt) { return time }
+        return CalendarDates.day(date) ?? .distantPast
+    }
+
+    /// Whether `when` is a time of day, not just the day.
+    public var hasTime: Bool { airsAt.flatMap(CalendarDates.instant) != nil }
+}
+
+/// `GET /api/calendar`: episodes as older apps read them, and the server's worded entries.
+struct CalendarResponse: Codable, Sendable {
+    var items: [CalendarEpisode]
+    var entries: [CalendarEntry]?
+}
+
+enum CalendarDates {
+    static func instant(_ s: String) -> Date? {
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return withFraction.date(from: s) ?? ISO8601DateFormatter().date(from: s)
+    }
+
+    /// A calendar day, not an instant: midnight here.
+    static func day(_ s: String) -> Date? {
+        let parts = s.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+    }
 }

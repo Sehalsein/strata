@@ -1,3 +1,4 @@
+import { newSetupCode } from "../src/setupCode";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { parseSize, rankReleases, relevant, type Release } from "../src/sources/discovery";
@@ -108,7 +109,7 @@ describe("discovery end to end", () => {
 
     // No ffprobe here, as on the cloud server: the app reads files itself.
     server = await startTestServer(fakeFetch, { ffmpeg: null, keys: { tmdbApiKey: "test-key", torboxApiKey: "tb-test" } });
-    token = ((await (await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "aa", password: "password1" } })).json()) as { token: string }).token;
+    token = ((await (await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { setupCode: await newSetupCode(server.services.db), username: "aa", password: "password1" } })).json()) as { token: string }).token;
   }, 60_000);
 
   afterAll(() => {
@@ -244,8 +245,8 @@ describe("slow add-ons", () => {
     const tmdb = { movie: async () => ({ id: 1, imdb_id: "tt1" }) } as never;
     const settings = settingsSchema.parse({ useTorboxSearch: false });
     const addons = [
-      { id: "fast", url: "https://fast.example/manifest.json", name: "Fast", enabled: true, idPrefixes: ["tt"], kind: "stremio" as const, configurable: false, allowPrivate: false },
-      { id: "slow", url: "https://slow.example/manifest.json", name: "Slow", enabled: true, idPrefixes: ["tt"], kind: "stremio" as const, configurable: false, allowPrivate: false },
+      { id: "fast", url: "https://fast.example/manifest.json", name: "Fast", enabled: true, resources: ["stream" as const], idPrefixes: ["tt"], subtitleIdPrefixes: null, catalogs: [], kind: "stremio" as const, configurable: false, allowPrivate: false },
+      { id: "slow", url: "https://slow.example/manifest.json", name: "Slow", enabled: true, resources: ["stream" as const], idPrefixes: ["tt"], subtitleIdPrefixes: null, catalogs: [], kind: "stremio" as const, configurable: false, allowPrivate: false },
     ];
     const discovery = new Discovery(tmdb, {} as never, () => settings as never, () => null, fetchImpl, () => {}, undefined, async () => {}, () => addons);
     const target = { source: "tmdb" as const, mediaType: "movie" as const, titleId: 1 };
@@ -272,7 +273,7 @@ describe("an add-on's word on what's cached", () => {
     const fetchImpl = (async () => Response.json({ streams: [{ name: "[TB+] Torrentio", title: "Film.2008.1080p.WEB", infoHash: "a".repeat(40) }] })) as unknown as typeof fetch;
     const tmdb = { movie: async () => ({ id: 1, imdb_id: "tt1" }) } as never;
     const settings = settingsSchema.parse({ useTorboxSearch: false });
-    const addons = [{ id: "t", url: "https://t.example/manifest.json", name: "T", enabled: true, idPrefixes: ["tt"], kind: "stremio" as const, configurable: false, allowPrivate: false }];
+    const addons = [{ id: "t", url: "https://t.example/manifest.json", name: "T", enabled: true, resources: ["stream" as const], idPrefixes: ["tt"], subtitleIdPrefixes: null, catalogs: [], kind: "stremio" as const, configurable: false, allowPrivate: false }];
     const target = { source: "tmdb" as const, mediaType: "movie" as const, titleId: 1 };
     const library = { knownHashes: async () => new Set<string>() } as never;
 

@@ -23,6 +23,8 @@ export interface Candidate {
   seeders?: number;
   /** Torrent name, for discovered releases. */
   releaseTitle?: string;
+  /** Audio languages a found release says it has (ISO 639-1, "multi" for several). */
+  languages?: string[];
   isPack?: boolean;
   // For the apps to show as they are (they know nothing about providers).
   /** The source's name. */
@@ -33,7 +35,7 @@ export interface Candidate {
   detail?: string;
 }
 
-const PROVIDER_LABEL: Record<FileProvider, string> = { local: "Library", torbox: "TorBox" };
+const PROVIDER_LABEL: Record<FileProvider, string> = { local: "Library", torbox: "TorBox", link: "Add-on" };
 
 /** "48.3 GB", "700 MB"; undefined when unknown. */
 export function sizeLabel(bytes: number): string | undefined {
@@ -82,18 +84,24 @@ export function heightToResolution(height: number, width: number): number {
   return 480;
 }
 
-export function rankCandidates(candidates: Candidate[], settings: Pick<Settings, "sourcePriority" | "maxResolution">): Candidate[] {
-  const priority = (p: FileProvider) => {
-    const i = settings.sourcePriority.indexOf(p);
-    return i === -1 ? 99 : i;
-  };
+/** Where a copy plays from, when copies are otherwise alike: this server's disk, then TorBox, then an add-on's link. */
+const PROVIDER_RANK: Record<FileProvider, number> = { local: 0, torbox: 1, link: 2 };
+
+/**
+ * A title's library copies, best first: within the quality limit, then best quality, then
+ * where it plays from. An add-on link's quality is only what its add-on named it until the
+ * file itself has been read, so an unread link never outranks the household's own copies.
+ */
+export function rankCandidates(candidates: Candidate[], settings: Pick<Settings, "maxResolution">): Candidate[] {
   const withinCap = (c: Candidate) => (c.resolution ?? 1080) <= settings.maxResolution;
+  const unverified = (c: Candidate) => c.provider === "link" && !c.probed;
   return [...candidates].sort(
     (a, b) =>
+      Number(unverified(a)) - Number(unverified(b)) ||
       Number(withinCap(b)) - Number(withinCap(a)) ||
-      priority(a.provider) - priority(b.provider) ||
       (b.resolution ?? 0) - (a.resolution ?? 0) ||
       (SOURCE_RANK[b.source ?? "dvd"] ?? 0) - (SOURCE_RANK[a.source ?? "dvd"] ?? 0) ||
+      PROVIDER_RANK[a.provider] - PROVIDER_RANK[b.provider] ||
       b.size - a.size,
   );
 }

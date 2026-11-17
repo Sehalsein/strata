@@ -1,3 +1,4 @@
+import { newSetupCode } from "../src/setupCode";
 import { expect, test } from "bun:test";
 import { deploymentProfile } from "../src/profile";
 import { startTestServer } from "./helpers";
@@ -20,7 +21,7 @@ test("a cloud server runs in this process too: no setup, no updates, capabilitie
   try {
     const info = await json(await server.request("/api/info"));
     expect(info).toMatchObject({ mode: "cloud", setupRequired: false, capabilities: { localMedia: false, homeNetworkJoin: false, selfUpdate: false, openSignUp: true } });
-    expect((await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "x", password: "x-password" } })).status).toBe(404);
+    expect((await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { setupCode: await newSetupCode(server.services.db), username: "x", password: "x-password" } })).status).toBe(404);
     expect((await server.request("/api/join", { method: "POST", ip: "192.168.1.5", json: {} })).status).toBe(403);
     expect(server.services.updater.status().disabledReason).toContain("deploying");
     // Its admin asking to update gets told why not (it used to be a 500).
@@ -44,7 +45,7 @@ test("a cloud server runs in this process too: no setup, no updates, capabilitie
 test("the demo is read-only once it's set up, for everyone", async () => {
   const server = await startTestServer();
   try {
-    const setup = await json(await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "admin", password: "test-password" } }));
+    const setup = await json(await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { setupCode: await newSetupCode(server.services.db), username: "admin", password: "test-password" } }));
     server.services.profile.readOnly = true;
     const me = await json(await server.request("/api/me", { token: setup.token }));
     expect(me.permissions).toEqual({ administerHousehold: false, administerServer: false, change: false });

@@ -19,7 +19,19 @@ export interface ServerInfo {
   /** The public site in front of this server (the cloud's landing page), which has the privacy page. */
   siteUrl?: string | null;
   /** Ways in besides a password that this server is set up for. */
-  signIn?: { google: boolean; passkey: boolean; passwordReset?: boolean; /** Cloud: anyone may make an account (and gets a household of their own). */ signUp?: boolean; /** New accounts confirm their email before signing in. */ confirmEmail?: boolean };
+  signIn?: {
+    google: boolean;
+    passkey: boolean;
+    /** The domain passkeys belong to ("localhost" on a home server without an HTTPS address). */
+    passkeyDomain?: string | null;
+    /** The one address passkeys work at (see features/auth/passkey-availability.ts). */
+    passkeyAddress?: string | null;
+    passwordReset?: boolean;
+    /** Cloud: anyone may make an account (and gets a household of their own). */
+    signUp?: boolean;
+    /** New accounts confirm their email before signing in. */
+    confirmEmail?: boolean;
+  };
 }
 
 /** What a server does (src/profile.ts on the server). */
@@ -131,6 +143,23 @@ export interface SignInCode {
   link: string;
 }
 
+/** GET /api/invitations/:id: an invitation, as whoever holds its link sees it. */
+export interface InvitationInfo {
+  email: string;
+  /** The email already has an account on this server. */
+  hasAccount: boolean;
+  role: string;
+  household: string;
+  serverName: string;
+  expiresAt: string;
+  /** The server's address for devices (not this machine's localhost). */
+  server: string;
+  /** strata://invite?server=…&id=…: what the QR code holds (opens the app). */
+  link: string;
+  /** https://<server>/invite/<id>: the same, to pass on as text; the page opens the app. */
+  page: string;
+}
+
 /** GET /api/admin/devices: a device signed in to the household, and whose it is. */
 export interface HouseholdDevice {
   id: string;
@@ -174,7 +203,8 @@ export interface MediaFolder {
   kind: MediaFolderKind;
 }
 
-export type Provider = "local" | "torbox";
+/** Where a file plays from: this server's disk, TorBox, or an add-on's link. */
+export type Provider = "local" | "torbox" | "link";
 
 export interface Settings {
   serverName: string;
@@ -183,16 +213,17 @@ export interface Settings {
   region: string;
   scanIntervalMinutes: number;
   torboxSyncMinutes: number;
-  sourcePriority: Provider[];
   maxResolution: number;
   hardwareAcceleration: boolean;
   maxTranscodes: number;
   discoveryEnabled: boolean;
   torrentioUrl: string;
   useTorboxSearch: boolean;
-  releaseOrder: "strata" | "addons";
   showUncached: boolean;
   maxReleaseSizeGb: number;
+  /** ISO 639-1 codes, most wanted first; empty means the household's language. */
+  subtitleLanguages: string[];
+  autoSubtitles: "forced" | "foreign" | "always";
   bonjourEnabled: boolean;
   localJoin: boolean;
   torboxCleanupDays: number;
@@ -221,7 +252,7 @@ export interface UpdateStatus {
   lastUpdate: { result: "ok" | "rolled-back"; fromVersion: string; toVersion: string; at: string; message?: string } | null;
 }
 
-/** A Stremio stream add-on the household finds releases with (its URL stays on the server). */
+/** A Stremio add-on the household finds releases or subtitles with (its URL stays on the server). */
 export interface StreamAddon {
   id: string;
   name: string;
@@ -230,10 +261,19 @@ export interface StreamAddon {
   kind: "stremio" | "aiostreams";
   /** It has its own configure page (opened through /api/admin/addons/:id/configure). */
   configurable: boolean;
+  /** What it's asked for. */
+  resources: ("stream" | "subtitles" | "catalog")[];
+  /** Its catalogs of titles, and whether each is a row on Home. */
+  catalogs: { key: string; name: string; type: "movie" | "show"; home: boolean }[];
   /** It's asked for anime by Kitsu id too. */
   anime: boolean;
-  /** The server's Torrentio, until the household changes its list. */
+  /** The built-in Strata entry (always there; it can be moved or switched off, not edited or removed). */
   isDefault: boolean;
+  builtIn: boolean;
+  /** What a built-in add-on covers, in words. */
+  description?: string;
+  /** How it's doing, as the server last found it. */
+  health: { state: "ok" | "failing" | "paused" | "unknown"; message?: string; at?: number; latencyMs?: number; pausedUntil?: number };
 }
 
 export type SecretKey = "tmdbApiKey" | "torboxApiKey" | "omdbApiKey";
@@ -438,3 +478,29 @@ export interface LogEntry {
   message: string;
 }
 
+
+/** A page of the apps (Home, Movies, Shows, Anime) and the rows on it, in order. */
+export type PageId = "home" | "movies" | "shows" | "anime";
+
+export interface PageRow {
+  id: string;
+  title: string;
+  /** Strata's own row, one made for each person (Continue Watching, Top picks…), or an add-on catalog. */
+  source: "strata" | "personal" | "addon";
+  /** The add-on's name, for an add-on catalog. */
+  addon?: string;
+  /** The page's carousel: always first. */
+  hero?: boolean;
+  defaultOn: boolean;
+  on: boolean;
+  /** The household's name for it, shown in place of `title`. */
+  name?: string;
+  /** Titles the row shows before "See all"; unset is 15. */
+  count?: number;
+}
+
+export interface PageLayout {
+  id: PageId;
+  title: string;
+  rows: PageRow[];
+}

@@ -14,6 +14,7 @@ import { isAvatarImage } from "../avatars";
 import { sameSecret } from "../secrets";
 import type { DeploymentProfile } from "../profile";
 import { roleRank } from "./permissions";
+import { LOGIN_PER_USER, LOGIN_PER_USER_ADDRESS, Throttle } from "../throttle";
 import { runtime } from "#runtime";
 
 const DAY_S = 24 * 60 * 60;
@@ -81,27 +82,53 @@ export function isSystemAdmin(profile: DeploymentProfile, user: { role?: string 
 function adminEmailProven(user: { emailVerified?: boolean | null }): boolean {
   return !emailConfigured() || !!user.emailVerified;
 }
+/** Where passkeys work: the domain they belong to, and the page origins that may use them. */
+export interface PasskeySetup {
+  /** The WebAuthn relying party id: a passkey only works on this host or a subdomain of it. */
+  rpID: string;
+  origin: string[];
+}
+
 /**
- * The ways in besides a password, each on only when the server is set up for it, so a
- * home server shows neither:
+ * The ways in besides a password, each on only when the server is set up for it:
  * - Google: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (redirect URI
  *   `<address>/api/auth/callback/google`).
- * - Passkeys: a public HTTPS address (STRATA_PUBLIC_URL); browsers only allow them on HTTPS.
- *   They belong to its host, or to STRATA_PASSKEY_RP_ID, a domain it's under: passkeys
- *   made at strata.example.com keep working when the server moves to app.strata.example.com.
+ * - Passkeys: browsers only allow them on HTTPS (or http://localhost), at a hostname (never
+ *   an IP address), and each one belongs to that hostname for good. So:
+ *   - With an HTTPS STRATA_PUBLIC_URL, they belong to its host, or to STRATA_PASSKEY_RP_ID, a
+ *     domain it's under: passkeys made at strata.example.com keep working when the server
+ *     moves to app.strata.example.com.
+ *   - Otherwise a home server (`localhostPasskeys`) offers them at http://localhost:<port>,
+ *     on its own machine only. Other addresses (a LAN IP, plain HTTP) can't use them; the
+ *     dashboard says why.
+ *   - Otherwise (the cloud without an HTTPS address) there are none.
  */
-export function signInMethods() {
+export function signInMethods(where: { profile: Pick<DeploymentProfile, "localhostPasskeys">; port?: number }) {
   const google = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET } : null;
-  let passkeys: { rpID: string; origin: string } | null = null;
+  return { google, passkeys: passkeySetup(where) };
+}
+
+function passkeySetup({ profile, port }: { profile: Pick<DeploymentProfile, "localhostPasskeys">; port?: number }): PasskeySetup | null {
+  let url: URL | null = null;
   try {
-    const url = process.env.STRATA_PUBLIC_URL ? new URL(process.env.STRATA_PUBLIC_URL) : null;
-    const rpID = process.env.STRATA_PASSKEY_RP_ID || url?.hostname;
-    const under = !!url && !!rpID && (url.hostname === rpID || url.hostname.endsWith(`.${rpID}`));
-    if (url?.protocol === "https:" && under) passkeys = { rpID: rpID!, origin: url.origin };
+    url = process.env.STRATA_PUBLIC_URL ? new URL(process.env.STRATA_PUBLIC_URL) : null;
   } catch {
-    // Not a URL: no passkeys.
+    // Not a URL: as if unset.
   }
-  return { google, passkeys };
+  if (url?.protocol === "https:" && !isIpAddress(url.hostname)) {
+    const rpID = (process.env.STRATA_PASSKEY_RP_ID || url.hostname).toLowerCase();
+    const host = url.hostname.toLowerCase();
+    if (host === rpID || host.endsWith(`.${rpID}`)) return { rpID, origin: [url.origin] };
+    return null; // An RP id the address isn't under: browsers would refuse every passkey.
+  }
+  if (profile.localhostPasskeys && port) return { rpID: "localhost", origin: [`http://localhost:${port}`] };
+  return null;
+}
+
+/** An IPv4 or IPv6 address (WebAuthn needs a hostname). */
+export function isIpAddress(host: string): boolean {
+  const h = host.replace(/^\[|\]$/g, "");
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(":");
 }
 
 /** The admin plugin's permissions (see `admin()` below for who gets which). */
@@ -116,7 +143,7 @@ const accessControl = createAccessControl(defaultStatements);
  * plugin later is refused until it's listed here.
  */
 const VIEWER_ALLOWED =
-  /^\/(get-session|sign-out|sign-in\/.+|sign-up\/.+|magic-link\/verify|callback\/.+|device|device\/(code|token|approve|deny)|organization\/(list|set-active|get-full-organization|get-active-member|get-active-member-role)|update-user|change-password|multi-session\/(list-device-sessions|set-active)|request-password-reset|forget-password|reset-password(\/.+)?|verify-email|send-verification-email|error|ok)$/;
+  /^\/(get-session|sign-out|sign-in\/.+|passkey\/(generate-authenticate-options|verify-authentication)|sign-up\/.+|magic-link\/verify|callback\/.+|device|device\/(code|token|approve|deny)|organization\/(list|set-active|get-full-organization|get-active-member|get-active-member-role)|update-user|change-password|multi-session\/(list-device-sessions|set-active)|request-password-reset|forget-password|reset-password(\/.+)?|verify-email|send-verification-email|error|ok)$/;
 
 /** Whether a watch-only session (viewerOnly) may call this Better Auth path. */
 export function viewerMayCall(path: string): boolean {
@@ -124,7 +151,7 @@ export function viewerMayCall(path: string): boolean {
 }
 
 /** Better Auth paths the public demo refuses for everyone: changes to its accounts and household. */
-const DEMO_REFUSED = /^\/(change-password|update-user|change-email|delete-user|set-password|admin\/|organization\/(create|update|delete|invite-member|remove-member|update-member-role|leave|cancel-invitation)$)/;
+const DEMO_REFUSED = /^\/(change-password|update-user|change-email|delete-user|set-password|admin\/|passkey\/(generate-register-options|verify-registration|update-passkey|delete-passkey)$|organization\/(create|update|delete|invite-member|remove-member|update-member-role|leave|cancel-invitation)$)/;
 
 /** Whether the read-only demo refuses this Better Auth path. */
 export function demoRefuses(path: string): boolean {
@@ -179,6 +206,8 @@ export interface AuthOptions {
   secretKey: Buffer;
   /** The address people reach the server at, when known (cloud). */
   baseURL?: string;
+  /** The port this server listens on (passkeys at http://localhost on a home server). */
+  port?: number;
 }
 
 /**
@@ -204,7 +233,7 @@ export interface AuthOptions {
  */
 export function createAuth(options: AuthOptions) {
   const { db, profile } = options;
-  const methods = signInMethods();
+  const methods = signInMethods({ profile: options.profile, port: options.port });
   const confirmEmail = profile.openSignUp && emailConfigured();
   /**
    * Whether the caller (by their headers) is an owner or admin of `organizationId` (or of
@@ -224,6 +253,40 @@ export function createAuth(options: AuthOptions) {
   type HookContext = Parameters<Parameters<typeof createAuthMiddleware>[0]>[0];
   type PathRule = { before?: (ctx: HookContext) => Promise<void>; after?: (ctx: HookContext) => Promise<unknown> };
   const returnedOk = (ctx: HookContext) => !!ctx.context.returned && !(ctx.context.returned instanceof Error);
+
+  // Wrong passwords per account, on top of Better Auth's per-address limit: guessing spread
+  // over many addresses still locks the account for a while; one address guessing locks
+  // only itself out of it first. Counted per account whichever way it's named (username
+  // or email); a success clears them.
+  const throttle = new Throttle(db);
+  const loginKeys = async (ctx: HookContext): Promise<string[] | null> => {
+    const b = (ctx.body ?? {}) as { username?: unknown; email?: unknown };
+    const named = String(b.username ?? b.email ?? "").trim().toLowerCase();
+    if (!named) return null;
+    const column = b.username !== undefined ? schema.user.username : schema.user.email;
+    const [found] = await db.select({ id: schema.user.id }).from(schema.user).where(eq(column, named)).limit(1);
+    const who = found?.id ?? `name:${named}`;
+    const address = ctx.headers?.get(CLIENT_ADDRESS_HEADER) ?? "unknown";
+    return [`login-user:${who}`, `login-user-address:${who}:${address}`];
+  };
+  const passwordSignIn: PathRule = {
+    before: async (ctx) => {
+      const keys = await loginKeys(ctx);
+      if (!keys) return;
+      const wait = Math.max(...(await Promise.all(keys.map((k) => throttle.retryAfter(k)))));
+      if (wait) throw new APIError("TOO_MANY_REQUESTS", { message: `Too many wrong passwords for this account. Try again in ${Math.ceil(wait / 60_000)} minutes.` });
+    },
+    after: async (ctx) => {
+      const keys = await loginKeys(ctx);
+      if (!keys) return;
+      const returned = ctx.context.returned as { statusCode?: number } | undefined;
+      if (returnedOk(ctx)) await Promise.all(keys.map((k) => throttle.reset(k)));
+      else if (returned?.statusCode === 401) {
+        await throttle.fail(keys[0]!, LOGIN_PER_USER);
+        await throttle.fail(keys[1]!, LOGIN_PER_USER_ADDRESS);
+      }
+    },
+  };
 
   // An invitation's id lets whoever has it sign up into its role: only the household's
   // owner and admins see them.
@@ -295,6 +358,8 @@ export function createAuth(options: AuthOptions) {
         if (!sameSecret(ctx.headers?.get(SIGN_IN_CODE_HEADER) ?? "", signInCodeSecret())) throw new APIError("NOT_FOUND", { message: "Not found" });
       },
     },
+    "/sign-in/username": passwordSignIn,
+    "/sign-in/email": passwordSignIn,
     "/request-password-reset": needsEmail,
     "/forget-password": needsEmail,
     "/admin/set-user-password": {
@@ -397,6 +462,18 @@ export function createAuth(options: AuthOptions) {
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         if (profile.readOnly && demoRefuses(ctx.path)) throw new APIError("FORBIDDEN", { message: "The demo can't be changed." });
+        // The admin plugin trusts the role saved on the account, which only follows the
+        // admin list (the cloud's STRATA_ADMIN_EMAILS) at sign-in: someone taken off it keeps
+        // the role until then. So its routes ask again here. The two it allows everyone
+        // (setting someone's password, removing them) have their own rule (mayManageTarget).
+        // (Asked of HTTP requests: the server's own calls, like setup making the first admin,
+        // have no request and are trusted.)
+        if (ctx.request && ctx.path.startsWith("/admin/") && ctx.path !== "/admin/set-user-password" && ctx.path !== "/admin/remove-user") {
+          const caller = ctx.headers ? await auth.api.getSession({ headers: ctx.headers }) : null;
+          if (!caller || !isSystemAdmin(profile, caller.user as { role?: string | null; email?: string | null; emailVerified?: boolean | null })) {
+            throw new APIError("FORBIDDEN", { message: "Only the server's admin can do that." });
+          }
+        }
         if (!viewerMayCall(ctx.path)) {
           const caller = ctx.headers ? await auth.api.getSession({ headers: ctx.headers }) : null;
           if ((caller?.session as { viewerOnly?: boolean | null } | undefined)?.viewerOnly) {
@@ -412,12 +489,14 @@ export function createAuth(options: AuthOptions) {
         create: {
           // Cloud: the server's admins are named by email (STRATA_ADMIN_EMAILS). A picture
           // from elsewhere (Google's) isn't kept: profile pictures are the server's own.
-          // Someone signing up from an invitation counts as confirmed: the household's admin
-          // sent the link to that address (the sign-up hook checked the invitation).
+          // On a home server someone signing up from an invitation counts as confirmed: only
+          // its admins invite, and they sent the link to that address (the sign-up hook checked
+          // the invitation). Not in the cloud: anyone there can invite any address (from their
+          // own household), so an invitation proves nothing about who owns it.
           before: async (user, ctx) => {
             const image = user.image != null && !isAvatarImage(user.image) ? null : user.image;
             // An invitation's link is passed on by hand, so it doesn't prove an admin's address.
-            const invited = ctx?.path === "/sign-up/email" && !!(ctx.body as { invitationId?: unknown } | undefined)?.invitationId && !(confirmEmail && isAdminEmail(profile, user.email));
+            const invited = !profile.openSignUp && ctx?.path === "/sign-up/email" && !!(ctx.body as { invitationId?: unknown } | undefined)?.invitationId;
             const emailVerified = invited || !!user.emailVerified;
             return { data: { ...user, image, ...(invited ? { emailVerified: true } : {}), ...(isSystemAdmin(profile, { email: user.email, emailVerified }) ? { role: "admin" } : {}) } };
           },
@@ -610,7 +689,9 @@ export function createAuth(options: AuthOptions) {
         // Invitations last a week; the dashboard shows their link (no mail is sent), and
         // its id is what proves the invitee (see the sign-up hook), not a verified email.
         invitationExpiresIn: 7 * DAY_S,
-        requireEmailVerificationOnInvitation: false,
+        // Where addresses are confirmed by mail (the cloud), only a confirmed one can take up
+        // an invitation: otherwise whoever registered someone's address first gets theirs.
+        requireEmailVerificationOnInvitation: confirmEmail,
         sendInvitationEmail: async () => {},
         // Households are made by the server admin (or setup); in the cloud, also one by each
         // new account (its own, see the sign-up `after` hook).

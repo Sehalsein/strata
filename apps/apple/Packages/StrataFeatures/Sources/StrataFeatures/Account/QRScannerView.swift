@@ -12,9 +12,11 @@ enum ScannedCode: Equatable {
     case signIn(SignInCodeRequest)
     /// A password-reset link from an email, pasted.
     case resetPassword(ResetPasswordRequest)
+    /// An invitation to a household (its QR code, or its link pasted).
+    case invite(InviteRequest)
     /// A server's address (the dashboard's "Your devices" step shows one).
     case server(String)
-    /// A TV's sign-in code: approved from Settings › Link a TV, not here.
+    /// A TV's sign-in code: approved from Settings › Sign In on a TV, not here.
     case tvLink
     /// A TV's "Sign in with your phone" code: this phone needs to be signed in first.
     case tvPhoneLink
@@ -28,6 +30,10 @@ enum ScannedCode: Equatable {
         }
         if let reset = ResetPasswordRequest(url) {
             self = .resetPassword(reset)
+            return
+        }
+        if let invite = InviteRequest(url) {
+            self = .invite(invite)
             return
         }
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -85,7 +91,7 @@ struct QRScannerSheet: View {
                             .allowsHitTesting(false)
                     }
                     .frame(maxHeight: 420)
-                    Text("Point the camera at the QR code in your server's dashboard: someone's sign-in code (Members › Sign-in code), or the server's address.", bundle: .module)
+                    Text("Point the camera at the QR code in your server's dashboard: someone's sign-in code (Members › Sign-in code), an invitation, or the server's address.", bundle: .module)
                         .font(.stCallout).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
                 } else if asking {
                     ProgressView().frame(maxHeight: 420)
@@ -97,7 +103,7 @@ struct QRScannerSheet: View {
                         .font(.stCallout).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
                 }
                 VStack(alignment: .leading, spacing: Metrics.space2) {
-                    TextField(String(localized: "Or paste a link", bundle: .module), text: $pasted, prompt: Text("Or paste a sign-in link or address", bundle: .module))
+                    TextField(String(localized: "Or paste a link", bundle: .module), text: $pasted, prompt: Text("Or paste a sign-in link, invitation or address", bundle: .module))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)

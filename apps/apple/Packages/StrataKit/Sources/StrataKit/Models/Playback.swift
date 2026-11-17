@@ -124,6 +124,9 @@ public struct Candidate: Codable, Sendable, Hashable, Identifiable {
     public var label: String?
     public var originLabel: String?
     public var detail: String?
+    /// The filter options this source falls under (`SourceFilterGroup` option ids), as the
+    /// server says: the app only matches them, it never works them out.
+    public var filterTags: [String]?
 
     public var readiness: Readiness { Readiness(availability) }
 
@@ -175,6 +178,52 @@ public struct Candidate: Codable, Sendable, Hashable, Identifiable {
         case 8: "7.1"
         default: "\(channels)ch"
         }
+    }
+}
+
+/// A group of Choose Source's filters, as the server offers it ("Quality": 4K, 1080p…).
+/// One option per group can be picked; a source shows when its `filterTags` include every
+/// picked option.
+public struct SourceFilterGroup: Codable, Sendable, Hashable, Identifiable {
+    public struct Option: Codable, Sendable, Hashable, Identifiable {
+        public var id: String
+        public var label: String
+        public var count: Int
+    }
+
+    public var id: String
+    public var title: String
+    public var options: [Option]
+
+    public init(id: String, title: String, options: [Option]) {
+        self.id = id
+        self.title = title
+        self.options = options
+    }
+}
+
+/// `GET /api/sources`: the sources, best first, and the filters worth offering for them.
+/// Older servers send no filters.
+public struct SourceList: Codable, Sendable, Hashable {
+    public var items: [Candidate]
+    public var filters: [SourceFilterGroup]
+
+    public init(items: [Candidate], filters: [SourceFilterGroup] = []) {
+        self.items = items
+        self.filters = filters
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        items = try c.decode([Candidate].self, forKey: .items)
+        filters = (try? c.decodeIfPresent([SourceFilterGroup].self, forKey: .filters)) ?? []
+    }
+
+    /// The sources that match every picked option (by group id → option id).
+    public func matching(_ picked: [String: String]) -> [Candidate] {
+        let wanted = picked.values
+        guard !wanted.isEmpty else { return items }
+        return items.filter { c in wanted.allSatisfy { (c.filterTags ?? []).contains($0) } }
     }
 }
 
@@ -257,6 +306,9 @@ public struct SubtitleTrack: Codable, Sendable, Hashable, Identifiable {
     public var embedded: Bool?
     /// The track's stream index in the file (device mode).
     public var streamIndex: Int?
+    /// The name to show, written by the server ("French · OpenSubtitles v3"). Older servers
+    /// don't send one, so `displayTitle` falls back to naming it from its fields.
+    public var label: String?
 
     public var isEmbedded: Bool { embedded == true && streamIndex != nil }
     public var isTextBased: Bool { url != nil || isEmbedded }
@@ -265,6 +317,7 @@ public struct SubtitleTrack: Codable, Sendable, Hashable, Identifiable {
     /// The player can show it: text, or a picture read from the file.
     public var isShowable: Bool { isTextBased || isPicture }
     public var displayTitle: String {
+        if let label, !label.isEmpty { return label }
         let lang = language.flatMap(LanguageName.display)
         var head = title?.isEmpty == false ? title! : (lang ?? String(localized: "Track \(id)", bundle: .module))
         if forced, !head.localizedCaseInsensitiveContains("forced") { head += String(localized: " (Forced)", bundle: .module) }
@@ -324,6 +377,8 @@ public struct PlayResponse: Codable, Sendable, Hashable {
     public var candidate: Candidate
     public var audioTracks: [AudioTrack]
     public var subtitleTracks: [SubtitleTrack]
+    /// The subtitle track to turn on as playback starts (the server decides); nil for none.
+    public var selectedSubtitleId: String?
     public var chapters: [Chapter]
     public var reasons: [String]
     public var nextEpisode: NextEpisode?

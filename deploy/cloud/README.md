@@ -51,7 +51,7 @@ Provider keys (TMDB, TorBox, OMDb) belong to each household. They're set in the 
 Both are off unless set up, and the sign-in page only shows what's on.
 
 - **Google:** create a Google Cloud OAuth client with the redirect URI `<STRATA_PUBLIC_URL>/api/auth/callback/google`, then set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. People connect Google to their account first, from the dashboard's account menu. It never creates accounts.
-- **Passkeys:** set `STRATA_PUBLIC_URL` to an HTTPS address.
+- **Passkeys:** set `STRATA_PUBLIC_URL` to an HTTPS address (not an IP address). Passkeys belong to its hostname for good, so pick a stable one; to move between subdomains later, set `STRATA_PASSKEY_RP_ID` to the parent domain (`strata.example.com` for `app.strata.example.com`) before anyone adds a passkey. People add them from **Sign-in methods** in the dashboard's account menu, and the sign-in page offers them (also in the username field's autofill).
 
 ### Email
 

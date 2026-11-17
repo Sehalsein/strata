@@ -64,6 +64,7 @@ For the nightly channel, download from `server-nightly` instead of `server-stabl
 | `--data-dir` | `STRATA_DATA_DIR` | `~/Library/Application Support/Strata` (macOS), `~/.local/share/strata` (Linux) |
 | `--web-dir` | `STRATA_WEB_DIR` | The embedded dashboard |
 | `--database-url` | `DATABASE_URL` | The bundled database in the data folder |
+| | `STRATA_PUBLIC_URL` | None. The server's HTTPS address (e.g. `https://strata.example.com` behind a reverse proxy or Tailscale). Passkeys belong to it, so everyone signs in with them from anywhere; without it, passkeys work only at `http://localhost:<port>` on this machine. |
 | | `STRATA_DEBUG=1` | Off. Turns on debug logging, including ffmpeg command lines. |
 | | `STRATA_NO_FFMPEG_DOWNLOAD=1` | Off. Stops a source run from downloading ffmpeg. |
 | | `STRATA_EMAIL_LOG=1` | Off. For development: emails (like password resets) go to the log instead of Resend, so "Forgot password?" works without email set up. |
@@ -217,6 +218,14 @@ About the keys:
 The server advertises itself on the LAN as `_strata._tcp` (TXT `version`, `api`, `id`). It uses `dns-sd` on macOS and `avahi-publish-service` on Linux (`apt install avahi-utils`). Turn it off under Settings → Network.
 
 `id` is a stable per-install id, kept in `<data-dir>/server-id` and also returned by `GET /api/info`.
+
+## Behind a reverse proxy
+
+First-run setup always needs the setup code from the server's log; Strata.app fills it in for you. The password-free home-network join (Settings → Network) trusts devices that connect straight from your LAN. The server can't tell a reverse proxy from those devices unless the proxy says so:
+
+- Connections from the server's own machine never count as the home network, so a proxy on the same machine is always safe.
+- A proxy on **another** machine on your LAN must send `X-Forwarded-For` (Caddy and Traefik do by default; in nginx add `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). If it can't, turn the home-network join off.
+- `STRATA_TRUST_PROXY=1` makes rate limits count the address in `X-Forwarded-For` rather than the proxy's.
 
 ## Known limitations
 

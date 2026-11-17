@@ -1,5 +1,7 @@
 import type {
   StreamAddon,
+  PageId,
+  PageLayout,
   AnilistResult,
   AdminStatus,
   FsListing,
@@ -16,6 +18,7 @@ import type {
   ContentLimit,
   HouseholdDevice,
   SignInCode,
+  InvitationInfo,
   PlayReport,
   PlayLink,
 } from "./types";
@@ -44,6 +47,9 @@ let auth: ApiAuth = { headers: () => ({}), onUnauthorized: () => {} };
 export function configureApiAuth(next: ApiAuth) {
   auth = next;
 }
+
+/** The request got no answer (the server is down or restarting), as opposed to an error from it. */
+export const isUnreachable = (err: unknown) => err instanceof ApiError && err.status === 0;
 
 export async function request<T>(method: string, path: string, body?: unknown, opts: { auth?: boolean } = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -99,14 +105,20 @@ export const api = {
   signInCode: (memberId: string) =>
     request<SignInCode>("POST", `/household/members/${encodeURIComponent(memberId)}/sign-in-code`),
 
+  /** An invitation's details and its link at an address phones can reach (for its QR code). */
+  invitation: (invitationId: string) => request<InvitationInfo>("GET", `/invitations/${encodeURIComponent(invitationId)}`),
+
   status: () => request<AdminStatus>("GET", "/admin/status"),
   settings: () => request<SettingsResponse>("GET", "/admin/settings"),
   updateSettings: (patch: Partial<Settings>) => request<{ settings: Settings }>("PATCH", "/admin/settings", patch),
   setSecret: (key: SecretKey, value: string | null) => request<{ ok: true }>("PUT", `/admin/secrets/${key}`, { value }),
   torboxAccount: () => request<TorboxAccount>("GET", "/admin/torbox/account"),
+  pages: () => request<{ pages: PageLayout[]; maxAddonRows: number }>("GET", "/admin/pages"),
+  /** The whole list, in order; an empty list puts the page back to its defaults. */
+  setPage: (page: PageId, rows: { id: string; on: boolean; name?: string; count?: number }[]) => request<{ pages: PageLayout[] }>("PUT", `/admin/pages/${page}`, { rows }),
   addons: () => request<{ items: StreamAddon[] }>("GET", "/admin/addons"),
   addAddon: (url: string) => request<StreamAddon>("POST", "/admin/addons", { url }),
-  updateAddon: (id: string, patch: { enabled?: boolean; index?: number; url?: string }) => request<{ items: StreamAddon[] }>("PATCH", `/admin/addons/${encodeURIComponent(id)}`, patch),
+  updateAddon: (id: string, patch: { enabled?: boolean; index?: number; url?: string; homeCatalogs?: string[] }) => request<{ items: StreamAddon[] }>("PATCH", `/admin/addons/${encodeURIComponent(id)}`, patch),
   removeAddon: (id: string) => request<{ ok: true }>("DELETE", `/admin/addons/${encodeURIComponent(id)}`),
   removeAllAddons: () => request<{ ok: true }>("DELETE", "/admin/addons"),
   refreshAddons: () => request<{ items: StreamAddon[]; failed: string[] }>("POST", "/admin/addons/refresh"),

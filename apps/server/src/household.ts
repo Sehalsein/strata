@@ -14,7 +14,10 @@ import { ADDS_PER_HOUSEHOLD, PLAY_REPORTS_PER_USER, SEARCHES_PER_HOUSEHOLD, type
 import type { Db } from "./db";
 import { Library } from "./library";
 import type { FfmpegInfo } from "./platform/ffmpeg";
-import { PlaybackService } from "./playback/service";
+import { PlaybackError, PlaybackService, type UnlabeledTrack } from "./playback/service";
+import { AddonSubtitleFinder, type OnlineSubtitle } from "./playback/addonSubtitles";
+import { subtitleLanguagesOf } from "./playback/subtitleChoice";
+import { toWebVtt } from "./playback/webvtt";
 import { HouseholdPlays } from "./playback/plays";
 import { PlayReports } from "./playback/reports";
 import type { SessionManager } from "./playback/sessions";
@@ -22,16 +25,25 @@ import type { ProgressStore } from "./progress";
 import type { SecretBox } from "./secrets";
 import { householdSettingsSchema, HOUSEHOLD_SECRET_KEYS, SettingsStore, type HouseholdSettingsStore, type ServerSettingsStore, type Settings } from "./settings";
 import { Discovery } from "./sources/discovery";
-import { AddonError, defaultAddons, inspectAddon, streamAddonListSchema, type StreamAddon } from "./sources/addons";
+import { AddonError, assertAddonReady, catalogKey, followLink, isBuiltIn, MAX_HOME_ROWS, withStrata, defaultAddons, fetchSubtitleFile, findsSubtitles, inspectAddon, keepCatalogChoices, streamAddonListSchema, type StreamAddon } from "./sources/addons";
+import { Buffer } from "node:buffer";
+import { TitleIds } from "./catalog/titleIds";
+import { AddonHealth } from "./sources/addonHealth";
+import { AddonRows } from "./catalog/addonRows";
+import { BUILT_IN_ROWS, MAX_ADDON_ROWS_PER_PAGE, PAGE_IDS, PAGE_TITLES, type PageId, type PageLayout, type RowOption } from "./catalog/pageLayouts";
+import { SharedWork } from "./inFlight";
+import type { TitleTarget } from "./catalog/ref";
 import { TorboxHousekeeping } from "./sources/torbox/cleanup";
 import { TorboxClient } from "./sources/torbox/client";
 import { syncTorbox } from "./sources/torbox/sync";
 import { scanLocal } from "./sources/local/scanner";
 import type { SecretKey } from "./settings";
 import { runtime } from "#runtime";
+import { logger } from "./log";
 import { AnimeMove } from "./jobs/anilistMove";
 
 const MINUTE = 60_000;
+const log = logger("household");
 
 const PROVIDER_NAMES: Record<SecretKey, string> = { tmdbApiKey: "TMDB", omdbApiKey: "OMDb", torboxApiKey: "TorBox" };
 
@@ -82,6 +94,16 @@ export class Household {
   readonly tmdb: Tmdb;
   /** OMDb ratings, with its key (or the server's). */
   readonly omdb: Omdb;
+  /** Other sites' ids for a title (IMDb, TVDB, Kitsu…) as Strata's own. */
+  readonly titleIds: TitleIds;
+  /** Its add-ons' catalogs as rows for its pages. */
+  readonly addonRows!: AddonRows;
+  /** How each of its add-ons is doing, for the dashboard (and which are paused). */
+  readonly addonHealth = new AddonHealth();
+  /** Subtitles from its subtitle add-ons. */
+  readonly onlineSubtitles: AddonSubtitleFinder;
+  /** Converted subtitle files, by the add-on's link. */
+  private subtitleFiles = new SharedWork<string, string>({ remember: true, ttlMs: 6 * 3_600_000, max: 100 });
   private torboxClient?: { key: string; client: TorboxClient };
 
   /** Use `Households.get`: the settings must be loaded before the rest is built. */
@@ -97,17 +119,141 @@ export class Household {
     this.omdb = new Omdb(shared.cache, () => settingsStore.getSecret("omdbApiKey"), shared.fetch);
     const tmdb = this.tmdb;
     this.library = new Library(db, organizationId, tmdb, new Matcher(tmdb, new AnimeMatcher(shared.anime.anilist, shared.anime.ids, tmdb, shared.anime.kitsu)), shared.anime.anilist);
-    this.catalog = new CatalogService(tmdb, this.library, shared.progress, settings, shared.anime, this.omdb);
+    this.titleIds = new TitleIds(tmdb, shared.anime.ids);
+    const addonRows = (this.addonRows = new AddonRows(() => this.addons(), this.titleIds, (refs) => this.catalog.titleCards(refs), (refs) => this.library.availability(refs), shared.fetch, this.addonHealth));
+    this.catalog = new CatalogService(tmdb, this.library, shared.progress, settings, shared.anime, this.omdb, [addonRows]);
     this.content = new ContentFilter(db, organizationId, tmdb, settings, shared.anime);
-    this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, show) => this.content.allowed(userId, show));
+    this.calendar = new CalendarService(tmdb, this.library, shared.progress, { ids: shared.anime.ids, anilist: shared.anime.anilist }, (userId, show) => this.content.allowed(userId, show), () => this.settings().region,
+      // Out, not in the library, but ready on TorBox (or an add-on's ready link): it plays now too.
+      // Each check is a release search, so it spends the household's search allowance like
+      // the Sources screen does; once that's used up, the calendar just doesn't say.
+      async ({ ref, season, episode }) => {
+        if (!this.discovery.available) return false;
+        try {
+          await this.spendSearch();
+        } catch {
+          return false;
+        }
+        return !!(await this.discovery.bestCached({ source: ref.source, mediaType: ref.type === "movie" ? "movie" : "episode", titleId: ref.id, season, episode }));
+      });
     this.housekeeping = new TorboxHousekeeping(db, organizationId, this.library);
     this.plays = new HouseholdPlays(shared.sessions, organizationId, this.library);
     this.playReports = new PlayReports(db, organizationId);
     const torbox = () => this.torbox();
     this.discovery = new Discovery(tmdb, this.library, settings, torbox, shared.fetch, (id, hash, name) => this.housekeeping.recordAdded(id, hash, name), shared.anime.ids,
       () => shared.throttle.spend(`adds:${organizationId}`, ADDS_PER_HOUSEHOLD, "This household has added a lot of releases to TorBox today."),
-      () => this.addons());
-    this.playback = new PlaybackService(this.library, shared.sessions, shared.progress, settings, shared.ffmpeg, torbox, this.discovery, (show, s, e) => this.catalog.nextEpisode(show, s, e), (id) => this.housekeeping.recordPlayed(id));
+      () => this.addons(), this.addonHealth, (data) => shared.box.seal(data, `link:${organizationId}`));
+    this.onlineSubtitles = new AddonSubtitleFinder(() => this.addons(), (t) => this.discovery.stremioIds(t), () => this.subtitleLanguages(), shared.fetch, this.addonHealth);
+    this.playback = new PlaybackService(this.library, shared.sessions, shared.progress, settings, shared.ffmpeg, torbox, this.discovery, (show, s, e) => this.catalog.nextEpisode(show, s, e), (id) => this.housekeeping.recordPlayed(id),
+      (target) => this.subtitlesFor(target), (ref) => this.followAddonLink(ref));
+  }
+
+  /**
+   * Where a kept add-on link (a library file's sealed ref) plays from now: its add-on's link
+   * followed to the file. The add-on must still be in the list and on.
+   */
+  private async followAddonLink(sealedRef: string): Promise<string> {
+    let claim: { a?: unknown; u?: unknown };
+    try {
+      claim = JSON.parse(this.shared.box.open(sealedRef, `link:${this.organizationId}`));
+    } catch {
+      throw new PlaybackError("This copy can't be played any more. Pick another source.", 410);
+    }
+    const addon = this.addons().find((a) => a.id === claim.a);
+    if (!addon || typeof claim.u !== "string") throw new PlaybackError("The add-on this copy came from has been removed. Pick another source.", 410);
+    if (!addon.enabled) throw new PlaybackError(`${addon.name} is switched off, so this copy can't play. Pick another source.`, 409);
+    const url = claim.u;
+    try {
+      return await this.addonHealth.track(addon.id, addon.name, () => followLink(url, addon, this.shared.fetch));
+    } catch (err) {
+      log.warn(`${addon.name}'s link didn't lead to a file`, err);
+      throw new PlaybackError(`${addon.name} couldn't play this copy just now. Try again, or pick another source.`, 502);
+    }
+  }
+
+  /**
+   * Each page's rows as the dashboard lays them out: the page's order (its own rows, the
+   * per-person ones, every add-on catalog), each on or off. A page not laid out yet shows as
+   * it is: its own rows on, and the add-on rows that were ticked for Home (of its kind).
+   */
+  pages(): { id: PageId; title: string; rows: (RowOption & { on: boolean; name?: string; count?: number })[] }[] {
+    const addonOptions = this.addonRows.options();
+    return PAGE_IDS.map((page) => {
+      const options: RowOption[] = [
+        ...BUILT_IN_ROWS[page].map((r) => ({ ...r, defaultOn: true })),
+        // Add-on rows start off: a page shows Strata's own and the per-person rows until laid out.
+        // Movie catalogs for Movies, series catalogs for Shows; Home and Anime take either.
+        ...addonOptions
+          .filter((o) => (page === "movies" ? o.type === "movie" : page === "shows" ? o.type === "series" : true))
+          .map((o) => ({ id: o.id, title: o.title, source: "addon" as const, addon: o.addon, defaultOn: false })),
+      ];
+      const layout = this.settings().pageLayouts?.[page];
+      if (!layout?.length) return { id: page, title: PAGE_TITLES[page], rows: options.map((o) => ({ ...o, on: o.defaultOn })) };
+      const byId = new Map(options.map((o) => [o.id, o]));
+      const listed = layout.filter((r) => byId.has(r.id)).map((r) => ({ ...byId.get(r.id)!, on: r.on, ...(r.name ? { name: r.name } : {}), ...(r.count ? { count: r.count } : {}) }));
+      const rest = options.filter((o) => !layout.some((r) => r.id === o.id)).map((o) => ({ ...o, on: o.source !== "addon" }));
+      return { id: page, title: PAGE_TITLES[page], rows: [...listed, ...rest] };
+    });
+  }
+
+  /** Saves a page's layout (rows by id, in order, on or off); throws AddonError for rows it doesn't have or too many add-on rows. */
+  async setPageLayout(page: PageId, rows: PageLayout) {
+    const known = new Set(this.pages().find((p) => p.id === page)!.rows.map((r) => r.id));
+    const seen = new Set<string>();
+    const twice = rows.find((r) => seen.size === seen.add(r.id).size);
+    if (twice) throw new AddonError(`"${twice.id}" is listed twice.`);
+    const unknown = rows.find((r) => !known.has(r.id));
+    if (unknown) throw new AddonError(`${PAGE_TITLES[page]} has no row "${unknown.id}".`);
+    if (rows.filter((r) => r.on && r.id.startsWith("addon:")).length > MAX_ADDON_ROWS_PER_PAGE) throw new AddonError(`A page can show up to ${MAX_ADDON_ROWS_PER_PAGE} add-on rows. Turn one off first.`);
+    await this.settingsStore.update({ pageLayouts: { ...(this.settings().pageLayouts ?? {}), [page]: rows } });
+  }
+
+  /** The languages its subtitle add-ons are asked for: as set, else the household's language. */
+  subtitleLanguages(): string[] {
+    return subtitleLanguagesOf(this.settings());
+  }
+
+  /** Subtitles the household's add-ons have for a title, as tracks the apps fetch from this server. */
+  private async subtitlesFor(target: TitleTarget): Promise<UnlabeledTrack[]> {
+    if (!this.onlineSubtitles.active) return [];
+    const found = await this.onlineSubtitles.find(target);
+    return found.map((s, i) => ({
+      id: `a${i}`,
+      codec: "webvtt",
+      language: s.language,
+      forced: false,
+      isDefault: false,
+      external: true,
+      detail: s.rank > 1 ? `${s.source} · ${s.rank}` : s.source,
+      url: `/api/subtitles/${this.subtitleToken(s)}.vtt`,
+    }));
+  }
+
+  /**
+   * A link to one add-on subtitle that only this server could have made, for this household.
+   * The add-on and its file's address are sealed (encrypted and authenticated), so the apps
+   * never see the address (it may hold the add-on's key) and can't point it anywhere else.
+   */
+  private subtitleToken(s: OnlineSubtitle): string {
+    const sealed = this.shared.box.seal(JSON.stringify({ a: s.addonId, u: s.url }), `subtitle:${this.organizationId}`);
+    return Buffer.from(sealed, "utf8").toString("base64url");
+  }
+
+  /**
+   * The subtitle a token from `subtitlesFor` names, as WebVTT; null when the token isn't
+   * this household's or its add-on is gone or off. Throws when the file can't be had.
+   */
+  async addonSubtitleVtt(token: string): Promise<string | null> {
+    let claim: { a?: unknown; u?: unknown };
+    try {
+      claim = JSON.parse(this.shared.box.open(Buffer.from(token, "base64url").toString("utf8"), `subtitle:${this.organizationId}`));
+    } catch {
+      return null;
+    }
+    const addon = this.addons().find((a) => a.id === claim.a && a.enabled && findsSubtitles(a));
+    if (!addon || typeof claim.u !== "string") return null;
+    const url = claim.u;
+    return this.subtitleFiles.get(url, async () => toWebVtt(await fetchSubtitleFile(url, addon, this.shared.fetch)));
   }
 
   /** One person's view of the catalog, with their content limit applied (see Viewer). */
@@ -189,9 +335,9 @@ export class Household {
    */
   addons(): StreamAddon[] {
     const raw = this.settingsStore.getSecret("streamAddons");
-    if (raw === undefined) return defaultAddons(this.shared.serverSettings.get().torrentioUrl);
+    if (raw === undefined) return defaultAddons();
     const parsed = streamAddonListSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : [];
+    return withStrata(parsed.success ? parsed.data : []);
   }
 
   /**
@@ -200,21 +346,35 @@ export class Household {
    */
   async addAddon(url: string, allowPrivate = false): Promise<StreamAddon> {
     const found = await inspectAddon(url, this.shared.fetch, allowPrivate);
+    await assertAddonReady(found, this.shared.fetch);
     const list = this.addons();
     if (list.some((a) => a.url === found.url)) throw new AddonError("That add-on is already in the list.");
     if (list.length >= MAX_ADDONS) throw new AddonError(`A household can have up to ${MAX_ADDONS} add-ons.`);
-    const addon: StreamAddon = { ...found, id: crypto.randomUUID(), enabled: true };
+    // Its first catalogs start on Home, while there's room.
+    let room = MAX_HOME_ROWS - list.reduce((n, a) => n + a.catalogs.filter((c) => c.home).length, 0);
+    const catalogs = found.catalogs.map((c) => (c.home && room > 0 ? (room--, c) : { ...c, home: false }));
+    const addon: StreamAddon = { ...found, catalogs, id: crypto.randomUUID(), enabled: true };
     await this.saveAddons([...list, addon]);
     return addon;
   }
 
-  /** Turns an add-on on or off, or moves it (`index`); false when there's no such add-on. */
-  async updateAddon(id: string, patch: { enabled?: boolean; index?: number }): Promise<boolean> {
+  /**
+   * Turns an add-on on or off, moves it (`index`), or says which of its catalogs are rows on
+   * Home (`homeCatalogs`, by catalogKey); false when there's no such add-on.
+   */
+  async updateAddon(id: string, patch: { enabled?: boolean; index?: number; homeCatalogs?: string[] }): Promise<boolean> {
     const list = this.addons();
     const at = list.findIndex((a) => a.id === id);
     if (at < 0) return false;
     const [addon] = list.splice(at, 1);
     if (patch.enabled !== undefined) addon!.enabled = patch.enabled;
+    if (patch.homeCatalogs) {
+      const on = new Set(patch.homeCatalogs);
+      const others = list.reduce((n, a) => n + a.catalogs.filter((c) => c.home).length, 0);
+      const mine = addon!.catalogs.filter((c) => on.has(catalogKey(c))).length;
+      if (others + mine > MAX_HOME_ROWS) throw new AddonError(`Home can show up to ${MAX_HOME_ROWS} add-on rows. Untick one first.`);
+      addon!.catalogs = addon!.catalogs.map((c) => ({ ...c, home: on.has(catalogKey(c)) }));
+    }
     list.splice(Math.max(0, Math.min(patch.index ?? at, list.length)), 0, addon!);
     await this.saveAddons(list);
     return true;
@@ -225,10 +385,17 @@ export class Household {
     const list = this.addons();
     const at = list.findIndex((a) => a.id === id);
     if (at < 0) return null;
+    if (isBuiltIn(list[at]!)) throw new AddonError("Strata is built in: it has no address to change.");
     const found = await inspectAddon(url, this.shared.fetch, allowPrivate);
+    await assertAddonReady(found, this.shared.fetch);
     if (list.some((a, i) => i !== at && a.url === found.url)) throw new AddonError("That add-on is already in the list.");
     // A new id: it's no longer the server's default once it points somewhere else.
-    const addon: StreamAddon = { ...found, id: found.url === list[at]!.url ? id : crypto.randomUUID(), enabled: list[at]!.enabled };
+    const addon: StreamAddon = {
+      ...found,
+      catalogs: keepCatalogChoices(found.catalogs, list[at]!.catalogs),
+      id: found.url === list[at]!.url ? id : crypto.randomUUID(),
+      enabled: list[at]!.enabled,
+    };
     list[at] = addon;
     await this.saveAddons(list);
     return addon;
@@ -240,8 +407,10 @@ export class Household {
     const failed: string[] = [];
     const next = await Promise.all(
       list.map(async (a) => {
+        if (isBuiltIn(a)) return a;
         try {
-          return { ...a, ...(await inspectAddon(a.url, this.shared.fetch, a.allowPrivate)), id: a.id, enabled: a.enabled };
+          const found = await this.addonHealth.track(a.id, a.name, () => inspectAddon(a.url, this.shared.fetch, a.allowPrivate));
+          return { ...a, ...found, catalogs: keepCatalogChoices(found.catalogs, a.catalogs), id: a.id, enabled: a.enabled };
         } catch {
           failed.push(a.name);
           return a;
@@ -252,14 +421,18 @@ export class Household {
     return failed;
   }
 
+  /** Removes every add-on but the built-in Strata entry (which can only be switched off). */
   async removeAllAddons(): Promise<void> {
-    await this.saveAddons([]);
+    await this.saveAddons(this.addons().filter(isBuiltIn));
   }
 
   async removeAddon(id: string): Promise<boolean> {
     const list = this.addons();
-    if (!list.some((a) => a.id === id)) return false;
+    const addon = list.find((a) => a.id === id);
+    if (!addon) return false;
+    if (isBuiltIn(addon)) throw new AddonError("Strata is built in: switch it off instead.");
     await this.saveAddons(list.filter((a) => a.id !== id));
+    this.addonHealth.forget(id);
     return true;
   }
 

@@ -43,17 +43,32 @@ try {
   expect(me.household).toMatchObject({ name: "Ann's home", role: "owner" });
   expect((await req("/api/auth/sign-in/username", { method: "POST", json: { username: "ann", password: "a-good-password" } })).status).toBe(200);
 
-  // Someone invited signs up and is in straight away: the invitation went to that address.
+  // Someone invited confirms their address like anyone else: anyone here can invite any
+  // address, so an invitation proves nothing about who owns it.
   const token = (await req("/api/auth/sign-in/username", { method: "POST", json: { username: "ann", password: "a-good-password" } })).headers.get("set-auth-token")!;
   const invite = await json(await req("/api/auth/organization/invite-member", { method: "POST", token, json: { email: "ben@example.com", role: "member" } }));
   const ben = await req("/api/auth/sign-up/email", { method: "POST", json: { email: "ben@example.com", password: "a-good-password", name: "Ben", username: "ben", invitationId: invite.id } });
   expect(ben.status).toBe(200);
+  expect((await req("/api/auth/sign-in/username", { method: "POST", json: { username: "ben", password: "a-good-password" } })).status).toBe(403);
+  const benLink = new URL(linkIn(sent.filter((e) => String(e.to) === "ben@example.com").at(-1)!.text));
+  await req(`${benLink.pathname}${benLink.search}`, { redirect: "manual" });
   const benIn = await req("/api/auth/sign-in/username", { method: "POST", json: { username: "ben", password: "a-good-password" } });
   expect(benIn.status).toBe(200);
   const benToken = benIn.headers.get("set-auth-token")!;
   expect((await req("/api/auth/organization/accept-invitation", { method: "POST", token: benToken, json: { invitationId: invite.id } })).status).toBe(200);
   expect((await json(await req("/api/me", { token: benToken }))).household).toMatchObject({ name: "Ann's home", role: "member" });
-  expect(sent.filter((e) => String(e.to) === "ben@example.com")).toHaveLength(0);
+
+  // Registering someone else's address with an invitation of one's own gets nowhere: the
+  // account can't sign in until the real owner confirms it, so it can't take up the
+  // invitations later sent to that address either.
+  const eveSignUp = await req("/api/auth/sign-up/email", { method: "POST", json: { email: "eve@example.com", password: "a-good-password", name: "Eve", username: "eve", callbackURL: "/" } });
+  expect(eveSignUp.status).toBe(200);
+  const eveLink = new URL(linkIn(sent.filter((e) => String(e.to) === "eve@example.com").at(-1)!.text));
+  await req(`${eveLink.pathname}${eveLink.search}`, { redirect: "manual" });
+  const eve = (await req("/api/auth/sign-in/username", { method: "POST", json: { username: "eve", password: "a-good-password" } })).headers.get("set-auth-token")!;
+  const lure = await json(await req("/api/auth/organization/invite-member", { method: "POST", token: eve, json: { email: "victim@example.com", role: "member" } }));
+  expect((await req("/api/auth/sign-up/email", { method: "POST", json: { email: "victim@example.com", password: "eves-password", name: "V", username: "notvictim", invitationId: lure.id } })).status).toBe(200);
+  expect((await req("/api/auth/sign-in/username", { method: "POST", json: { username: "notvictim", password: "eves-password" } })).status).toBe(403);
 
   console.log("cloud email scenario passed");
   server.services.shutdown();

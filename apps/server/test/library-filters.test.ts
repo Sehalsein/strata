@@ -1,3 +1,4 @@
+import { newSetupCode } from "../src/setupCode";
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { files, mediaItems, member, progress, user } from "../src/db/schema";
 import { startTestServer, type TestServer } from "./helpers";
@@ -6,7 +7,7 @@ let server: TestServer;
 let token: string;
 beforeAll(async () => {
   server = await startTestServer();
-  const setup = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { username: "admin", password: "test-password" } });
+  const setup = await server.request("/api/setup/admin", { method: "POST", ip: "127.0.0.1", json: { setupCode: await newSetupCode(server.services.db), username: "admin", password: "test-password" } });
   token = (await setup.json() as { token: string }).token;
   const db = server.services.db;
   const household = await server.household();

@@ -1,3 +1,4 @@
+import { pageLayoutsSchema } from "./catalog/pageLayouts";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "./db";
@@ -48,20 +49,26 @@ export const householdSettingsSchema = z.object({
   torboxSyncMinutes: z.number().int().min(0).default(15),
   /** Remove releases Strata added to TorBox once unplayed this many days (0 = never). */
   torboxCleanupDays: z.number().int().min(0).max(365).default(14),
-  sourcePriority: z.array(z.enum(["local", "torbox"])).default(["local", "torbox"]),
   maxResolution: z.number().int().default(2160),
   // Discovery: finding TorBox-playable releases for titles not in the library.
   discoveryEnabled: z.boolean().default(true),
   useTorboxSearch: z.boolean().default(true),
-  /**
-   * After cached, language and limits: Strata's own order, or the order the add-ons gave
-   * (for add-ons set up to sort the way someone likes, like AIOStreams).
-   */
-  releaseOrder: z.enum(["strata", "addons"]).default("strata"),
   /** Offer releases TorBox hasn't cached (they must download before playing). */
   showUncached: z.boolean().default(true),
   /** Largest release discovery will pick automatically, in GB (0 = no limit). */
   maxReleaseSizeGb: z.number().min(0).default(0),
+  /**
+   * Languages to fetch subtitles in from subtitle add-ons, as ISO 639-1 codes, most wanted
+   * first. Empty means the household's language.
+   */
+  subtitleLanguages: z.array(z.string().regex(/^[a-z]{2}$/)).max(10).default([]),
+  /**
+   * When subtitles turn on as a title starts: "forced" only forced tracks (foreign dialogue),
+   * "foreign" also when the audio isn't in a subtitle language, "always" every time.
+   */
+  autoSubtitles: z.enum(["forced", "foreign", "always"]).default("forced"),
+  /** How Home, Movies, Shows and Anime are laid out: which rows, in what order (see pageLayouts.ts). */
+  pageLayouts: pageLayoutsSchema,
 });
 
 /** What a household's code sees: the server's settings with its own on top. */

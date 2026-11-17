@@ -84,7 +84,7 @@ export async function createServices(config: RuntimeConfig, overrides: ServiceOv
   const fetchImpl = overrides.fetch ?? globalFetch;
   const cache = new ApiCache(db);
   const throttle = new Throttle(db);
-  const auth = createAuth({ db, profile, secretKey: box.signingKey(), baseURL: process.env.STRATA_PUBLIC_URL || undefined });
+  const auth = createAuth({ db, profile, secretKey: box.signingKey(), baseURL: process.env.STRATA_PUBLIC_URL || undefined, port: config.port });
   const hasAccounts = async () => (await db.select({ id: user.id }).from(user).limit(1)).length > 0;
   const householdIds = async () => (await db.select({ id: organization.id }).from(organization)).map((o) => o.id);
   if (profile.firstRunSetup && !(await hasAccounts())) await announceSetupCode(db);

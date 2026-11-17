@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LoaderCircle, RefreshCw, ServerOff } from "lucide-react";
-import { api, errorMessage, privacyUrl } from "@/lib/api";
+import { api, errorMessage, isUnreachable, privacyUrl } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
 import { queryClient, queryKeys } from "@/lib/query";
 import { navigate, usePath } from "@/lib/router";
@@ -111,15 +111,7 @@ export function App() {
     );
   } else if (inviteId && !info.data.setupRequired) {
     screen = (
-      <InvitePage
-        invitationId={decodeURIComponent(inviteId)}
-        serverName={info.data.serverName}
-        me={me.data ?? null}
-        onJoined={async () => {
-          await authChanged();
-          navigate("/", { replace: true });
-        }}
-      />
+      <InvitePage invitationId={decodeURIComponent(inviteId)} serverName={info.data.serverName} />
     );
   } else if (info.data.setupRequired || inWizard) {
     screen = (
@@ -189,6 +181,12 @@ export function App() {
 }
 
 function Unreachable({ error, retrying, onRetry }: { error: unknown; retrying: boolean; onRetry: () => void }) {
+  // Usually a restart: try again every few seconds, so the dashboard comes back by itself.
+  useEffect(() => {
+    if (!isUnreachable(error)) return;
+    const timer = setInterval(onRetry, 5_000);
+    return () => clearInterval(timer);
+  }, [error, onRetry]);
   return (
     <div className="flex min-h-svh items-center justify-center p-6">
       <div className="flex max-w-sm flex-col items-center gap-3 text-center">

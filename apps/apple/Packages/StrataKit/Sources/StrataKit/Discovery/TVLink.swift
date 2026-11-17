@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Network
 import Observation
@@ -5,9 +6,14 @@ import Security
 
 /// Signing a TV in from a phone without typing the server on either: the TV shows a QR
 /// code (`strata://tv-link?key=…`) and waits on the local network (`_strata-tv._tcp`).
-/// The phone that scans it finds the TV, shows it saw the code (the key), and hands over
-/// the addresses of the server it's signed in to. The TV gets a sign-in code from that
-/// server and sends it back, and the phone approves it as it would the TV's own QR code.
+/// The phone that scans it finds the TV and hands over the addresses of the server it's
+/// signed in to. The TV gets a sign-in code from that server and sends it back, and the
+/// phone approves it as it would the TV's own QR code.
+///
+/// The key never crosses the network: anything on it can advertise a "TV", so the phone
+/// sends a fresh challenge with a proof that it has the key (an HMAC over the challenge
+/// and the addresses), and accepts only an answer the TV signs the same way. A device that
+/// didn't see the QR code can neither take the offer nor answer it.
 ///
 /// Both sides need `_strata-tv._tcp` in `NSBonjourServices`.
 public enum TVLink {
@@ -39,17 +45,55 @@ public enum TVLink {
 
     /// Phone → TV: one line of JSON.
     struct Offer: Codable {
-        var key: String
+        /// Random, new for each search.
+        var challenge: String
         /// The server's addresses, best first.
         var addresses: [String]
+        /// `proof(key, "offer", challenge, addresses…)`.
+        var proof: String
     }
 
     /// TV → phone: one line of JSON.
     struct Answer: Codable {
         var userCode: String?
         var error: String?
+        /// `proof(key, "answer", challenge, userCode or error)`: the phone ignores answers
+        /// without it.
+        var proof: String?
         /// The phone reached a TV showing another code.
         var wrongKey: Bool?
+    }
+
+    /// HMAC-SHA256 under the key of its parts (each length-prefixed, so they can't run
+    /// together), as hex.
+    static func proof(_ key: String, _ parts: [String]) -> String {
+        var message = Data()
+        for part in parts {
+            let bytes = Data(part.utf8)
+            message.append(contentsOf: withUnsafeBytes(of: UInt32(bytes.count).bigEndian, Array.init))
+            message.append(bytes)
+        }
+        let mac = HMAC<SHA256>.authenticationCode(for: message, using: SymmetricKey(data: Data(key.utf8)))
+        return Data(mac).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// What an answer's proof covers: the challenge, and which it carries (a code or an error)
+    /// with its text.
+    static func answerParts(_ challenge: String, code: String?, error: String?) -> [String] {
+        ["answer", challenge, code != nil ? "code" : "error", code ?? error ?? ""]
+    }
+
+    /// Compares two proofs in constant time.
+    static func same(_ a: String, _ b: String) -> Bool {
+        let x = Array(a.utf8), y = Array(b.utf8)
+        guard x.count == y.count else { return false }
+        return zip(x, y).reduce(0) { $0 | ($1.0 ^ $1.1) } == 0
+    }
+
+    static func newChallenge() -> String {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
     /// Reads up to the first newline (at most 16 KB).
@@ -131,14 +175,17 @@ public final class TVLinkHost {
         guard let data, let offer = try? JSONDecoder().decode(TVLink.Offer.self, from: data) else {
             return TVLink.Answer(error: String(localized: "That wasn't a Strata request.", bundle: .module))
         }
-        guard offer.key == key else { return TVLink.Answer(wrongKey: true) }
-        guard !busy, let onOffer else { return TVLink.Answer(error: String(localized: "This TV is already signing in.", bundle: .module)) }
+        guard TVLink.same(offer.proof, TVLink.proof(key, ["offer", offer.challenge] + offer.addresses)) else { return TVLink.Answer(wrongKey: true) }
+        let signed = { (code: String?, error: String?) in
+            TVLink.Answer(userCode: code, error: error, proof: TVLink.proof(self.key, TVLink.answerParts(offer.challenge, code: code, error: error)))
+        }
+        guard !busy, let onOffer else { return signed(nil, String(localized: "This TV is already signing in.", bundle: .module)) }
         busy = true
         defer { busy = false }
         do {
-            return TVLink.Answer(userCode: try await onOffer(offer.addresses))
+            return signed(try await onOffer(offer.addresses), nil)
         } catch {
-            return TVLink.Answer(error: StrataError.wrap(error).message)
+            return signed(nil, StrataError.wrap(error).message)
         }
     }
 }
@@ -153,7 +200,10 @@ public enum TVLinkClient {
 
     /// `endpoints` replaces the search on the network (tests).
     static func link(key: String, addresses: [URL], timeout: TimeInterval, endpoints: [NWEndpoint]?) async throws -> String {
-        let search = Search(offer: TVLink.Offer(key: key, addresses: addresses.map(\.absoluteString)), endpoints: endpoints)
+        let challenge = TVLink.newChallenge()
+        let sent = addresses.map(\.absoluteString)
+        let offer = TVLink.Offer(challenge: challenge, addresses: sent, proof: TVLink.proof(key, ["offer", challenge] + sent))
+        let search = Search(offer: offer, key: key, endpoints: endpoints)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 search.begin(continuation, timeout: timeout)
@@ -166,6 +216,7 @@ public enum TVLinkClient {
     /// Browses for TVs and tries each until one takes the key.
     private final class Search: @unchecked Sendable {
         private let offer: TVLink.Offer
+        private let key: String
         private let queue = DispatchQueue(label: "strata.tvlink.search")
         private var browser: NWBrowser?
         private var tried = Set<NWEndpoint>()
@@ -173,8 +224,9 @@ public enum TVLinkClient {
         private var continuation: CheckedContinuation<String, Error>?
         private let endpoints: [NWEndpoint]?
 
-        init(offer: TVLink.Offer, endpoints: [NWEndpoint]?) {
+        init(offer: TVLink.Offer, key: String, endpoints: [NWEndpoint]?) {
             self.offer = offer
+            self.key = key
             self.endpoints = endpoints
         }
 
@@ -215,6 +267,11 @@ public enum TVLinkClient {
             TVLink.readLine(connection) { [weak self] data in
                 connection.cancel()
                 guard let self, let data, let answer = try? JSONDecoder().decode(TVLink.Answer.self, from: data) else { return }
+                // Only the TV that showed the code can sign its answer; anything else that
+                // answers (a device pretending to be a TV) is ignored.
+                guard answer.wrongKey != true, let proof = answer.proof, (answer.userCode == nil) != (answer.error == nil),
+                      TVLink.same(proof, TVLink.proof(self.key, TVLink.answerParts(self.offer.challenge, code: answer.userCode, error: answer.error))),
+                      answer.userCode.map({ $0.range(of: "^[A-Z0-9-]{4,16}$", options: .regularExpression) != nil }) ?? true else { return }
                 if let code = answer.userCode {
                     self.finish(.success(code))
                 } else if answer.wrongKey != true, let error = answer.error {
