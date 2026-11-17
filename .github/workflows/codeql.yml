@@ -2,7 +2,7 @@ name: CodeQL
 
 # Code scanning (CodeQL's advanced setup; GitHub's default setup must be off, or GitHub refuses
 # these results). Workflows, TypeScript and Ruby are quick and run on every change. Swift needs
-# a macOS runner and a full Xcode build (10-20 minutes), so it runs only when the Apple apps
+# a macOS runner and full Xcode builds (about 20 minutes), so it runs only when the Apple apps
 # (apps/apple) or the Mac launcher (apps/macos) change, and every week.
 
 on:
@@ -128,15 +128,18 @@ jobs:
           build-mode: manual
 
       # Everything CodeQL should see is compiled while it watches: the app (with its packages
-      # and widgets) and the Mac launcher.
+      # and widgets) for iOS and for tvOS, so code under `#if os(tvOS)` is analyzed too, and
+      # the Mac launcher.
       - name: Build the app
         working-directory: apps/apple
         run: |
-          xcodebuild build \
-            -project Strata.xcodeproj -scheme Strata -configuration Debug \
-            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO COMPILER_INDEX_STORE_ENABLE=NO
+          for platform in "iphonesimulator|iOS Simulator" "appletvsimulator|tvOS Simulator"; do
+            xcodebuild build \
+              -project Strata.xcodeproj -scheme Strata -configuration Debug \
+              -sdk "${platform%%|*}" -destination "generic/platform=${platform#*|}" \
+              -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO COMPILER_INDEX_STORE_ENABLE=NO
+          done
 
       - name: Build the Mac launcher
         run: swiftc -swift-version 6 -target arm64-apple-macos14 apps/macos/StrataLauncher/main.swift -o "$RUNNER_TEMP/StrataLauncher"
