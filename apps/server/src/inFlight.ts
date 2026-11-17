@@ -72,6 +72,11 @@ export class SharedWork<K, V> {
     this.done.delete(key);
   }
 
+  /** Forgets every remembered value whose key matches. */
+  deleteWhere(match: (key: K) => boolean) {
+    for (const key of [...this.done.keys()]) if (match(key)) this.done.delete(key);
+  }
+
   clear() {
     this.done.clear();
   }

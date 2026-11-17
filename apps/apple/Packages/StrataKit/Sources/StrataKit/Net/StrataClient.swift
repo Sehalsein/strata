@@ -409,10 +409,12 @@ public final class StrataClient: Sendable {
         try await sourceList(target, discover: discover).items
     }
 
-    /// The sources with the filters the server offers for them (Choose Source).
-    public func sourceList(_ target: PlaybackTarget, discover: Bool = false) async throws -> SourceList {
+    /// The sources with the filters the server offers for them (Choose Source). `refresh`
+    /// (with `discover`) has the server search again instead of answering from its last look.
+    public func sourceList(_ target: PlaybackTarget, discover: Bool = false, refresh: Bool = false) async throws -> SourceList {
         var query = target.queryItems
         if discover { query.append(URLQueryItem(name: "discover", value: "1")) }
+        if discover && refresh { query.append(URLQueryItem(name: "refresh", value: "1")) }
         return try await get("/api/sources", query: query, cached: false)
     }
 

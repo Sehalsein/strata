@@ -210,7 +210,8 @@ export const catalogRoutes = new Hono<Env>()
   .get("/titles/:ref", cacheFor(TTL.title), async (c) => c.json(await viewer(c).title(refParam(c.req.param("ref")))))
   .get("/titles/:ref/seasons/:season", cacheFor(TTL.title), async (c) => c.json(await viewer(c).titleSeason(refParam(c.req.param("ref")), intParam(c, "season"))))
 
-  // Library sources are instant; `discover=1` adds releases from scrapers (a few seconds).
+  // Library sources are instant; `discover=1` adds releases from scrapers (a few seconds),
+  // remembered a while; `refresh=1` with it searches again instead (Choose Source's Refresh).
   // The title is `ref`, or as older apps send it, `mediaType` and `tmdbId`.
   .get("/sources", async (c) => {
     const refText = c.req.query("ref");
@@ -230,7 +231,7 @@ export const catalogRoutes = new Hono<Env>()
     const target: TitleTarget = { ...title, season, episode };
     let items = await viewer(c).sources(target);
     if (c.req.query("discover") === "1") {
-      items.push(...(await viewer(c).discover(target)));
+      items.push(...(await viewer(c).discover(target, { refresh: c.req.query("refresh") === "1" })));
       items = collapseDuplicates(items);
     }
     // The filters Choose Source offers, worked out here: the apps draw them as they come.

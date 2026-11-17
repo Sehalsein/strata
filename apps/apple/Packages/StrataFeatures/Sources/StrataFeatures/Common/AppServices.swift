@@ -142,8 +142,8 @@ public final class AppServices {
     }
 
     /// The sources with the server's filters for them; nil when they couldn't be loaded.
-    public func sourceList(for target: PlaybackTarget, discover: Bool) async -> SourceList? {
-        await load { try await $0.sourceList(target, discover: discover) }.value
+    public func sourceList(for target: PlaybackTarget, discover: Bool, refresh: Bool = false) async -> SourceList? {
+        await load { try await $0.sourceList(target, discover: discover, refresh: refresh) }.value
     }
 }
 

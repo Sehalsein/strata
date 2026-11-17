@@ -60,6 +60,7 @@ describe("discovery end to end", () => {
   let server: TestServer;
   let cdn: ReturnType<typeof Bun.serve>;
   let token: string;
+  let torrentioCalls = 0;
   const torrents: { id: number; hash: string; name: string; download_present: boolean; progress: number; files: { id: number; name: string; size: number }[] }[] = [];
 
   beforeAll(async () => {
@@ -74,6 +75,7 @@ describe("discovery end to end", () => {
       if (url.hostname === "api.themoviedb.org") return fakeTmdb(input, init);
       if (url.hostname === "torrentio.strem.fun") {
         expect(url.pathname).toBe("/stream/movie/tt1254207.json");
+        torrentioCalls++;
         return json({
           streams: [
             { name: "Torrentio\n1080p", title: "Big.Buck.Bunny.2008.1080p.BluRay.x264\n👤 50 💾 1.2 GB ⚙️ YTS", infoHash: CACHED.toUpperCase(), behaviorHints: { filename: "Big.Buck.Bunny.2008.1080p.BluRay.x264.mkv" } },
@@ -125,6 +127,18 @@ describe("discovery end to end", () => {
       [`hash:${UNCACHED}`, "uncached"],
     ]);
     expect(items[0]!.size).toBe(Math.round(1.2 * 1024 ** 3));
+  });
+
+  test("a search is remembered; refresh=1 asks the sources again", async () => {
+    const look = (extra = "") => server.request(`/api/sources?mediaType=movie&tmdbId=10378&discover=1${extra}`, { token });
+    expect((await look()).status).toBe(200);
+    const before = torrentioCalls;
+    expect((await look()).status).toBe(200);
+    expect(torrentioCalls).toBe(before);
+    const refreshed = await look("&refresh=1");
+    expect(refreshed.status).toBe(200);
+    expect(torrentioCalls).toBe(before + 1);
+    expect(((await refreshed.json()) as { items: unknown[] }).items).toHaveLength(2);
   });
 
   test("play with nothing in the library adds the cached release; the app reads it and plays it from TorBox", async () => {
