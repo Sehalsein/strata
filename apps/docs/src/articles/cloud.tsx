@@ -127,7 +127,7 @@ export function Cloud() {
           Sign in with your <UI>Username or email</UI> and <UI>Password</UI>, or <UI>Continue with Google</UI> if you signed up with it.
         </li>
         <li>
-          <UI>Sign in with a passkey</UI> once you've added one from the account menu's <UI>Sign-in methods</UI> — no password to type.
+          <UI>Sign in with a passkey</UI> once you've added one from the account menu's <UI>Sign-in methods</UI> — no password to type. See <A href="/people/passkeys">Sign in with a passkey</A>.
         </li>
         <li>
           Forgot it? <UI>Forgot password?</UI> under the password field emails you a reset link.
