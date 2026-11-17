@@ -257,6 +257,14 @@ export const catalogRoutes = new Hono<Env>()
     return needsProbe(c, () => viewer(c).play(req));
   })
 
+  // The copy this person played of a title, kept so Play goes back to it on every device
+  // (null forgets it: it stopped playing).
+  .post("/play/pick", async (c) => {
+    const req = toTarget(await body(c, z.object({ ...targetFields, candidateId: z.string().max(200).nullable() })));
+    await viewer(c).setPick(req, req.candidateId);
+    return c.json({ ok: true });
+  })
+
   // A file to download and watch offline (iPhone and iPad): its link and how to play it.
   .post("/downloads", async (c) => {
     const req = toTarget(await body(c, z.object({ ...targetFields, ...prepareFields })));

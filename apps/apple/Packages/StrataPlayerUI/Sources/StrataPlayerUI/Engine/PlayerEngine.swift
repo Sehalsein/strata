@@ -352,16 +352,14 @@ public final class PlayerEngine {
         await task.value
     }
 
-    /// Plays the server's choice (or `candidateId`, or the copy you chose before). When the
-    /// server's choice won't open on this device (its link doesn't connect, the file can't be
-    /// read or decoded here), the next copy the server lists that's ready to play is tried,
-    /// up to `maxFallbacks` of them; the one that plays is remembered for next time. A copy
-    /// you picked yourself isn't swapped: its failure is shown, with Choose Source.
+    /// Plays `candidateId`, or the server's choice (which is the copy you played before, on
+    /// any device, when the server remembers one). When that won't open on this device (its
+    /// link doesn't connect, the file can't be read or decoded here), the next copy the server
+    /// lists that's ready to play is tried, up to `maxFallbacks` of them; the one that plays is
+    /// remembered on the server for next time. A copy you picked yourself isn't swapped: its
+    /// failure is shown, with Choose Source.
     private func loadWithFallback(client: StrataClient, target: PlaybackTarget, candidateId: String?, startMs: Int?, gen: Int, token: Int) async throws {
-        let memory = SourceMemory.shared
-        // A source you picked before for this (or, for a show, one like it).
-        let remembered = candidateId == nil ? await rememberedSource(for: target, client: client) : nil
-        var pick = candidateId ?? remembered
+        var pick = candidateId
         var failedCandidates = Set<String>()
         var failedFiles = Set<Int>()
         var others: [Candidate]?
@@ -370,14 +368,7 @@ public final class PlayerEngine {
             try Task.checkCancellation()
             var res: PlayResponse?
             do {
-                do {
-                    res = try await requestPlay(client: client, target: target, candidateId: pick, startMs: startMs, audioIndex: nil, gen: gen)
-                } catch let error as StrataError where attempt == 0 && pick == remembered && remembered != nil && error.kind == .http && [404, 410].contains(error.status ?? 0) {
-                    // That file is gone: let the server choose again.
-                    memory.forget(target, server: client.baseURL)
-                    pick = nil
-                    res = try await requestPlay(client: client, target: target, candidateId: nil, startMs: startMs, audioIndex: nil, gen: gen)
-                }
+                res = try await requestPlay(client: client, target: target, candidateId: pick, startMs: startMs, audioIndex: nil, gen: gen)
                 try await start(res!, gen: gen, token: token, newTitle: true, autoplay: true)
                 fallbackNote = nil
                 loadingStep = nil
@@ -385,8 +376,9 @@ public final class PlayerEngine {
                     reportAttempts.append(PlayReport.Attempt(fileId: res!.candidate.fileId, copy: Self.copyLabel(res!.candidate)))
                     sendReport(.recovered, message: "Played copy \(reportAttempts.count) after \(reportAttempts.count - 1) didn't.")
                 }
-                // Your pick, or a copy that played after others didn't: start with it next time.
-                if candidateId != nil || attempt > 0 { memory.remember(res!.candidate, for: target, server: client.baseURL) }
+                // Your pick, or a copy that played after others didn't: start with it next time,
+                // on every device.
+                if candidateId != nil || attempt > 0 { remember(res!.candidate.id, for: target, client: client) }
                 return
             } catch let failure as DeviceFailure {
                 guard gen == generation else { throw CancellationError() }
@@ -407,7 +399,8 @@ public final class PlayerEngine {
                     failedFiles.insert(lastProbedFile)
                 }
                 if let pick { failedCandidates.insert(pick) }
-                if pick == remembered, remembered != nil { memory.forget(target, server: client.baseURL) }
+                // The copy the server went back to for you didn't play: it stops going back.
+                if res?.remembered == true { remember(nil, for: target, client: client) }
                 if others == nil { others = (try? await client.sources(target, discover: false)) ?? [] }
                 guard gen == generation else { throw CancellationError() }
                 // Ready now or shortly; not one the server would have to download first.
@@ -438,14 +431,16 @@ public final class PlayerEngine {
         return String(localized: "\(why) Switching to \(what) (try \(attempt + 1) of \(maxFallbacks + 1))…", bundle: .module)
     }
 
-    /// The source you chose for `target` before, or for a show the episode's copy most like
-    /// the one you chose for another episode (asked of the library only, which is quick).
-    private func rememberedSource(for target: PlaybackTarget, client: StrataClient) async -> String? {
-        let memory = SourceMemory.shared
-        if let id = memory.pick(for: target, server: client.baseURL) { return id }
-        guard memory.hasShowPreference(target, server: client.baseURL),
-              let sources = try? await client.sources(target, discover: false) else { return nil }
-        return memory.match(sources, for: target, server: client.baseURL)?.id
+    /// Tells the server which copy played (or, nil, to stop going back to it). In the
+    /// background: Play must not wait on it, and a server too old to remember ignores it.
+    private func remember(_ candidateId: String?, for target: PlaybackTarget, client: StrataClient) {
+        Task.detached(priority: .utility) {
+            do {
+                try await client.setPick(target, candidateId: candidateId)
+            } catch {
+                Log.player.warning("couldn't save the copy played: \(StrataError.wrap(error).message, privacy: .public)")
+            }
+        }
     }
 
     /// Plays the next episode (from `nextEpisode`), from the start.

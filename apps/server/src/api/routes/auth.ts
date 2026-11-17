@@ -3,7 +3,7 @@ import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { account, continueHidden, invitation, member, organization, passkey, progress, reminders, session, user, watchlist } from "../../db/schema";
+import { account, continueHidden, invitation, member, organization, passkey, progress, reminders, session, sourcePicks, user, watchlist } from "../../db/schema";
 import { emailConfigured } from "../../email";
 import { API_VERSION, VERSION } from "../../version";
 import { body, permissions, requireAuth, requireHousehold, requireHouseholdAdmin, type Env } from "../context";
@@ -100,6 +100,7 @@ async function exportFor(c: Context<Env>, id: string): Promise<Response> {
   const myList = await db.select().from(watchlist).where(eq(watchlist.userId, id));
   const releaseReminders = await db.select().from(reminders).where(eq(reminders.userId, id));
   const hiddenFromContinueWatching = await db.select().from(continueHidden).where(eq(continueHidden.userId, id));
+  const copiesPlayed = await db.select().from(sourcePicks).where(eq(sourcePicks.userId, id));
   const strip = <T extends { userId?: unknown }>(rows: T[]) => rows.map(({ userId: _, ...r }) => r);
   const file = {
     exportedAt: new Date().toISOString(),
@@ -113,6 +114,7 @@ async function exportFor(c: Context<Env>, id: string): Promise<Response> {
     myList: strip(myList),
     reminders: strip(releaseReminders),
     hiddenFromContinueWatching: strip(hiddenFromContinueWatching),
+    copiesPlayed: strip(copiesPlayed),
   };
   return new Response(JSON.stringify(file, null, 2), {
     headers: { "Content-Type": "application/json", "Content-Disposition": `attachment; filename="strata-${person?.username ?? "account"}-data.json"` },

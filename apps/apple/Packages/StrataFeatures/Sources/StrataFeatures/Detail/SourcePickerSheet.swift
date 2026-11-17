@@ -35,11 +35,6 @@ struct SourcePickerSheet: View {
     /// The server is still looking (further than the library, or again for Refresh).
     @State private var looking = false
 
-    /// The source you chose last time, which Play goes back to.
-    private var lastPicked: String? {
-        services.client.flatMap { SourceMemory.shared.pick(for: target, server: $0.baseURL) }
-    }
-
     /// Older servers' fallback: the quality picker the app used to work out itself.
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", uhd = "4K", hd = "1080p", sd = "720p"
@@ -245,7 +240,7 @@ struct SourcePickerSheet: View {
                     ForEach(shown) { candidate in
                         Button { choose(candidate) } label: {
                             SourceRow(candidate: candidate, isCurrent: candidate.id == current,
-                                      isLastPicked: purpose == .play && current == nil && candidate.id == lastPicked)
+                                      isLastPicked: purpose == .play && current == nil && candidate.picked == true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(.card)
@@ -257,7 +252,7 @@ struct SourcePickerSheet: View {
                     ForEach(shown) { candidate in
                         Button { choose(candidate) } label: {
                             SourceRow(candidate: candidate, isCurrent: candidate.id == current,
-                                      isLastPicked: purpose == .play && current == nil && candidate.id == lastPicked)
+                                      isLastPicked: purpose == .play && current == nil && candidate.picked == true)
                         }
                         .buttonStyle(.plain)
                         if candidate.id != shown.last?.id { Divider().overlay(Theme.hairline) }

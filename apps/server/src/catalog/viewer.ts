@@ -144,7 +144,8 @@ export class Viewer {
   /** The library's copies of a title (instant). */
   async sources(target: TitleTarget) {
     await this.assertAllowed(targetRef(target));
-    return this.household.catalog.sources(target);
+    const [items, picked] = await Promise.all([this.household.catalog.sources(target), this.household.pickedSource(this.userId, target)]);
+    return picked ? items.map((c) => (c.id === picked ? { ...c, picked: true } : c)) : items;
   }
 
   /** Releases from the scrapers (a few seconds), within the household's hourly allowance. */
@@ -158,12 +159,29 @@ export class Viewer {
 
   async play(req: PlayRequest) {
     await this.assertAllowed(targetRef(req));
-    return this.household.playback.play({ userId: this.userId }, req);
+    return this.household.playback.play({ userId: this.userId }, { ...req, remembered: await this.remembered(req) });
   }
 
   async prepareDownload(req: Omit<PlayRequest, "startMs">) {
     await this.assertAllowed(targetRef(req));
-    return this.household.playback.prepareDownload(req);
+    return this.household.playback.prepareDownload({ ...req, remembered: await this.remembered(req) });
+  }
+
+  /** The copy this person played before, for a play that names none. */
+  private remembered(req: Pick<PlayRequest, "candidateId"> & TitleTarget) {
+    return req.candidateId ? Promise.resolve(undefined) : this.household.rememberedPick(this.userId, req);
+  }
+
+  /**
+   * Remembers the copy this person played of `target` (one in the library), so Play goes
+   * back to it on every device; null forgets it (it stopped playing). A copy that isn't in
+   * the library (a release, an add-on link) isn't remembered: once played, it is.
+   */
+  async setPick(target: TitleTarget, candidateId: string | null) {
+    await this.assertAllowed(targetRef(target));
+    if (candidateId === null) return this.household.setPick(this.userId, target, null);
+    const candidate = (await this.household.catalog.sources(target)).find((c) => c.id === candidateId);
+    if (candidate) await this.household.setPick(this.userId, target, candidate);
   }
 
   /** A fresh link for this person's TorBox play whose link expired; null when there's no such play. */

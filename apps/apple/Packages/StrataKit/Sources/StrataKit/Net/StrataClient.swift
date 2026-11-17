@@ -464,6 +464,16 @@ public final class StrataClient: Sendable {
         return .started(res)
     }
 
+    /// Remembers the copy you played of `target`, for Play to go back to on every device;
+    /// nil forgets it (it stopped playing). Servers before this answer 404: ignored.
+    public func setPick(_ target: PlaybackTarget, candidateId: String?) async throws {
+        do {
+            let _: OKResponse = try await send("POST", "/api/play/pick", body: Targeted(target, PickBody(candidateId: candidateId)))
+        } catch let error as StrataError where error.status == 404 {
+            return
+        }
+    }
+
     /// Sends the media info the app read from a file (answering `.needsProbe`). `info` is
     /// in the server's `MediaInfo` shape, as StrataPlayerUI's `MediaInfo` encodes.
     public func reportProbe<Info: Encodable & Sendable>(fileId: Int, info: Info) async throws {
@@ -831,6 +841,18 @@ private struct Targeted<Body: Encodable>: Encodable {
         try target.encode(to: encoder)
         try body.encode(to: encoder)
     }
+}
+
+private struct PickBody: Encodable {
+    var candidateId: String?
+
+    func encode(to encoder: Encoder) throws {
+        // Sent as null to forget, not left out.
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(candidateId, forKey: .candidateId)
+    }
+
+    private enum CodingKeys: String, CodingKey { case candidateId }
 }
 
 private struct PlayBody: Encodable {

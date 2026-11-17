@@ -647,6 +647,40 @@ describe("playback", () => {
     expect((await server.request(`/api/play/${play.sessionId}`, { method: "DELETE", token })).status).toBe(200);
   }, 30_000);
 
+  test.skipIf(noFfmpeg)("the copy someone played is remembered for them, on every device", async () => {
+    const sources = await json(await server.request("/api/sources?mediaType=movie&tmdbId=10378", { token }));
+    const id = sources.items[0].id;
+    expect(sources.items[0].picked).toBeUndefined();
+    const first = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, startMs: 0 } }));
+    expect(first.remembered).toBe(false);
+    await server.request(`/api/play/${first.sessionId}`, { method: "DELETE", token });
+
+    expect((await server.request("/api/play/pick", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, candidateId: id } })).status).toBe(200);
+    // Choose Source marks it, and Play (with no copy named) goes back to it.
+    const marked = await json(await server.request("/api/sources?mediaType=movie&tmdbId=10378", { token }));
+    expect(marked.items.find((c: any) => c.id === id).picked).toBe(true);
+    const again = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, startMs: 0 } }));
+    expect(again.candidate.id).toBe(id);
+    expect(again.remembered).toBe(true);
+    await server.request(`/api/play/${again.sessionId}`, { method: "DELETE", token });
+    // Naming a copy isn't a remembered play.
+    const named = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, startMs: 0, candidateId: id } }));
+    expect(named.remembered).toBe(false);
+    await server.request(`/api/play/${named.sessionId}`, { method: "DELETE", token });
+    // It's in the person's data, and a copy that isn't this title's is ignored.
+    const data = await json(await server.request("/api/me/export", { token }));
+    expect(data.copiesPlayed.map((p: any) => p.candidateId)).toEqual([id]);
+    await server.request("/api/play/pick", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, candidateId: "file:999999" } });
+    expect((await json(await server.request("/api/me/export", { token }))).copiesPlayed.map((p: any) => p.candidateId)).toEqual([id]);
+
+    // Forgotten (it stopped playing): Play is back to the server's choice.
+    await server.request("/api/play/pick", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, candidateId: null } });
+    expect((await json(await server.request("/api/sources?mediaType=movie&tmdbId=10378", { token }))).items[0].picked).toBeUndefined();
+    const after = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, startMs: 0 } }));
+    expect(after.remembered).toBe(false);
+    await server.request(`/api/play/${after.sessionId}`, { method: "DELETE", token });
+  }, 30_000);
+
   test.skipIf(noFfmpeg)("embedded and sidecar subtitles are served as WebVTT", async () => {
     const play = await json(await server.request("/api/play", { method: "POST", token, json: { mediaType: "movie", tmdbId: 10378, startMs: 0 } }));
     const tracks = play.subtitleTracks;

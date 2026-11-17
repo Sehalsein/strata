@@ -127,6 +127,9 @@ public struct Candidate: Codable, Sendable, Hashable, Identifiable {
     /// The filter options this source falls under (`SourceFilterGroup` option ids), as the
     /// server says: the app only matches them, it never works them out.
     public var filterTags: [String]?
+    /// The copy you played last of this title, as the server remembers it for you (Choose
+    /// Source marks it; Play goes back to it on every device). Older servers don't say.
+    public var picked: Bool? = nil
 
     public var readiness: Readiness { Readiness(availability) }
 
@@ -375,6 +378,9 @@ public struct PlayResponse: Codable, Sendable, Hashable {
     public var seekToMs: Int
     public var durationMs: Int
     public var candidate: Candidate
+    /// The server chose the copy you played before (no copy was named): if it won't play,
+    /// the app has it forgotten. Older servers don't say.
+    public var remembered: Bool? = nil
     public var audioTracks: [AudioTrack]
     public var subtitleTracks: [SubtitleTrack]
     /// The subtitle track to turn on as playback starts (the server decides); nil for none.

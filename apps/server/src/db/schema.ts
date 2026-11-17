@@ -335,6 +335,41 @@ export const progress = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.source, t.mediaType, t.titleId, t.season, t.episode] })],
 );
 
+/**
+ * The copy a person last played of a movie or episode, in a household (file ids belong to a
+ * household's library), so Play goes back to it on every device. Its traits let the rest of
+ * a show pick the episode's copy most like it.
+ */
+export const sourcePicks = pgTable(
+  "source_picks",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    mediaType: text("media_type").$type<"movie" | "episode">().notNull(),
+    source: text("source").$type<TitleSource>().notNull().default("tmdb"),
+    /** Movie id, or the show id for episodes, at `source`. */
+    titleId: integer("title_id").notNull(),
+    season: integer("season").notNull().default(0),
+    episode: integer("episode").notNull().default(0),
+    /** A library candidate id ("file:12"). */
+    candidateId: text("candidate_id").notNull(),
+    resolution: integer("resolution"),
+    /** Release type: remux, bluray, web… */
+    releaseSource: text("release_source"),
+    hdr: text("hdr"),
+    videoCodec: text("video_codec"),
+    updatedAt: ms("updated_at").notNull().$defaultFn(now),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.organizationId, t.source, t.mediaType, t.titleId, t.season, t.episode] }),
+    index("source_picks_show").on(t.userId, t.organizationId, t.source, t.mediaType, t.titleId, t.updatedAt),
+  ],
+);
+
 /** Titles taken off Continue Watching / Next Up; they come back when watched again. */
 export const continueHidden = pgTable(
   "continue_hidden",

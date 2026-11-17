@@ -293,4 +293,23 @@ export const migrations: string[] = [
     PRIMARY KEY (user_id, source, type, title_id)
   );
   `,
+  /* 9: the copy each person last played of a title, so Play goes back to it on every device */ `
+  CREATE TABLE source_picks (
+    user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+    organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+    media_type TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'tmdb',
+    title_id INTEGER NOT NULL,
+    season INTEGER NOT NULL DEFAULT 0,
+    episode INTEGER NOT NULL DEFAULT 0,
+    candidate_id TEXT NOT NULL,
+    resolution INTEGER,
+    release_source TEXT,
+    hdr TEXT,
+    video_codec TEXT,
+    updated_at BIGINT NOT NULL,
+    PRIMARY KEY (user_id, organization_id, source, media_type, title_id, season, episode)
+  );
+  CREATE INDEX source_picks_show ON source_picks(user_id, organization_id, source, media_type, title_id, updated_at);
+  `,
 ];
