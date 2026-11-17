@@ -546,7 +546,7 @@ struct HeroCarousel: View {
                       overview: roomy ? card.overview : nil, paged: true, featured: true) {
             // Play when the server can play it now; otherwise the wide button opens it.
             if let choice = playChoice(card) {
-                PlayButton(choice.label, maxWidth: primaryWidth, size: heroControlSize) { services.play(choice, title: card.title, artworkURL: card.backdropUrl) }
+                PlayButton(choice.label, maxWidth: primaryWidth, size: heroControlSize) { services.play(choice, title: card.title, artworkURL: card.backdropUrl, logoURL: card.logoUrl) }
                 #if os(tvOS)
                 .focused($focus, equals: .play)
                 #endif

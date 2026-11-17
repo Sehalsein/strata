@@ -229,12 +229,7 @@ struct WatchView: View {
                 if !chromeVisible { ProgressView().controlSize(.large).tint(.white) }
                 #endif
                 if !chromeVisible {
-                    Text((engine.meta ?? request.meta).title)
-                        .font(.stTitle2)
-                        .foregroundStyle(Theme.onArtwork)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                        .frame(maxWidth: 520)
+                    LoadingTitle(meta: engine.meta ?? request.meta)
                 }
                 if let loadingCaption {
                     Text(loadingCaption)
@@ -323,7 +318,7 @@ struct WatchView: View {
     private func playNext() {
         upNextDismissed = false
         guard let next = engine.nextEpisode else { return }
-        let meta = PlaybackMeta(title: request.meta.title, subtitle: String(localized: "S\(next.season) · E\(next.episode) · \(next.name)", bundle: .module), artworkURL: next.stillUrl ?? request.meta.artworkURL)
+        let meta = PlaybackMeta(title: request.meta.title, subtitle: String(localized: "S\(next.season) · E\(next.episode) · \(next.name)", bundle: .module), artworkURL: next.stillUrl ?? request.meta.artworkURL, logoURL: request.meta.logoURL)
         Task { await engine.playNext(meta: meta) }
     }
 
@@ -426,5 +421,49 @@ private struct PlayerSurface: View {
         #else
         AVPlayerContainer(player: engine.player, gravity: engine.videoGravity)
         #endif
+    }
+}
+
+/// The title on the loading screen: its logo when it has one and the logo loads, else its
+/// name. While the logo loads, the name holds its place unseen, so the caption under it
+/// doesn't jump.
+private struct LoadingTitle: View {
+    let meta: PlaybackMeta
+
+    #if os(tvOS)
+    private let maxLogo = CGSize(width: 640, height: 200)
+    #else
+    private let maxLogo = CGSize(width: 320, height: 110)
+    #endif
+
+    var body: some View {
+        Group {
+            if let logoURL = meta.logoURL {
+                AsyncImage(url: logoURL, transaction: Transaction(animation: .easeOut(duration: 0.25))) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFit()
+                            .frame(maxWidth: maxLogo.width, maxHeight: maxLogo.height)
+                            .shadow(color: .black.opacity(0.35), radius: 12)
+                            .transition(.opacity)
+                    case .failure: name
+                    default: name.hidden()
+                    }
+                }
+            } else {
+                name
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(meta.title)
+    }
+
+    private var name: some View {
+        Text(meta.title)
+            .font(.stTitle2)
+            .foregroundStyle(Theme.onArtwork)
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .frame(maxWidth: 520)
     }
 }
