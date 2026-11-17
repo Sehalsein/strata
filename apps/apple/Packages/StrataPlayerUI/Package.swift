@@ -11,7 +11,8 @@ let package = Package(
     dependencies: [
         .package(path: "../StrataKit"),
         .package(path: "../StrataDesign"),
-        .package(url: "https://github.com/superuser404notfound/AetherEngine", exact: "7.70.0"),
+        // AetherEngine 7.70.0, pinned to its commit so a moved tag can't change what ships.
+        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "3cfe848106482150209281c176ed72df5ac2674c"),
     ],
     targets: [
         .target(

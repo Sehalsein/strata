@@ -486,6 +486,9 @@ public final class PlayerEngine {
         guard probedFiles.insert(fileId).inserted else {
             throw DeviceFailure(message: String(localized: "The server couldn't use what this file holds. Pick another source.", bundle: .module), stage: "reading")
         }
+        guard Self.isOpenable(url, offline: false) else {
+            throw DeviceFailure(message: String(localized: "This file's link isn't one the app can open. Pick another source.", bundle: .module), stage: "reading")
+        }
         status = .loading
         let info: MediaInfo
         do {
@@ -493,10 +496,11 @@ public final class PlayerEngine {
             info = try await MediaProbe.probe(url: url)
         } catch {
             guard gen == generation, !(error is CancellationError) else { throw CancellationError() }
-            Log.player.warning("probe failed: \(error.localizedDescription, privacy: .public)")
-            throw DeviceFailure(message: String(localized: "This file couldn't be read (\(error.localizedDescription)). Pick another source.", bundle: .module),
+            let why = Self.redact(error.localizedDescription)
+            Log.player.warning("probe failed: \(why, privacy: .public)")
+            throw DeviceFailure(message: String(localized: "This file couldn't be read (\(why)). Pick another source.", bundle: .module),
                                 stage: "reading", detail: Self.describeRaw(error), reason: .unreachable,
-                                servers: url.host.map { [PlayReport.Server(host: $0, error: error.localizedDescription)] } ?? [])
+                                servers: url.host.map { [PlayReport.Server(host: $0, error: why)] } ?? [])
         }
         guard gen == generation else { throw CancellationError() }
         try await client.reportProbe(fileId: fileId, info: info)
@@ -519,6 +523,11 @@ public final class PlayerEngine {
         starting = true
         defer { starting = false }
 
+        // Only web links from the server; files on the device only for a download, whose
+        // response the app built itself.
+        guard Self.isOpenable(res.url, offline: res.isOffline) else {
+            throw DeviceFailure(message: String(localized: "This copy's link isn't one the app can open. Choose another source.", bundle: .module), stage: "connecting")
+        }
         if res.mode.isHLS {
             loadingStep = .preparingStream
             try await waitForPlaylist(res.url, gen: gen)
@@ -617,7 +626,7 @@ public final class PlayerEngine {
             case .playing, .paused, .ended:
                 return
             case .error(let message):
-                throw StrataError(kind: .network, message: message)
+                throw StrataError(kind: .network, message: Self.redact(message))
             default:
                 if aether.hasFirstFrameReadyForDisplay { return }
             }
@@ -976,7 +985,9 @@ public final class PlayerEngine {
     /// What a failed start means, from the engine's typed reason.
     private static func failure(_ error: Error, info: PlaybackErrorInfo?, res: PlayResponse) -> DeviceFailure {
         let host = res.url.host
-        let detail = [host, info.map { "\($0.kind.rawValue): \($0.message)" } ?? describeRaw(error)].compactMap { $0 }.joined(separator: ": ")
+        // Engine messages can quote a link, and TorBox links carry the account's key.
+        let said = redact(info?.message ?? error.localizedDescription)
+        let detail = [host, info.map { "\($0.kind.rawValue): \(redact($0.message))" } ?? describeRaw(error)].compactMap { $0 }.joined(separator: ": ")
         let server = { (why: String) in host.map { [PlayReport.Server(host: $0, error: why)] } ?? [] }
         switch info?.kind {
         case .sourceRateLimited?:
@@ -989,13 +1000,12 @@ public final class PlayerEngine {
         case .sourceOpenFailed?:
             if info?.underlyingDomain == NSURLErrorDomain {
                 return DeviceFailure(message: String(localized: "This copy's server didn't answer. Choose another source.", bundle: .module),
-                                     stage: "connecting", detail: detail, reason: .unreachable, servers: server(info?.message ?? "no answer"))
+                                     stage: "connecting", detail: detail, reason: .unreachable, servers: server(said))
             }
-            return DeviceFailure(message: String(localized: "This copy couldn't be opened (\(info?.message ?? error.localizedDescription)). Choose another source.", bundle: .module),
+            return DeviceFailure(message: String(localized: "This copy couldn't be opened (\(said)). Choose another source.", bundle: .module),
                                  stage: "connecting", detail: detail)
         default:
-            let message = info?.message ?? StrataError.wrap(error).message
-            return DeviceFailure(message: String(localized: "This file can't play on this device (\(message)). Pick another source.", bundle: .module),
+            return DeviceFailure(message: String(localized: "This file can't play on this device (\(said)). Pick another source.", bundle: .module),
                                  stage: "starting", detail: detail, reason: .unplayable)
         }
     }
@@ -1274,7 +1284,7 @@ public final class PlayerEngine {
             reportProgress(force: true)
         case .error(let message):
             stopStallWatch()
-            failedWhilePlaying(message)
+            failedWhilePlaying(Self.redact(message))
         case .idle:
             break
         }
@@ -1336,7 +1346,37 @@ public final class PlayerEngine {
     nonisolated static func describeRaw(_ error: Error) -> String {
         let ns = error as NSError
         let url = (ns.userInfo[NSURLErrorFailingURLErrorKey] as? URL)?.host
-        return [url, "\(ns.localizedDescription) (\(ns.domain) \(ns.code))"].compactMap { $0 }.joined(separator: ": ")
+        return [url, "\(redact(ns.localizedDescription)) (\(ns.domain) \(ns.code))"].compactMap { $0 }.joined(separator: ": ")
+    }
+
+    /// Text that may quote a link, with each link cut to its scheme and host: TorBox links
+    /// (and the server's) carry a key in their path or query, which must not reach a
+    /// report, the log or the screen.
+    nonisolated static func redact(_ text: String) -> String {
+        let links = #/[A-Za-z][A-Za-z0-9+.\-]*://[^\s"'<>()]+/#
+        var out = text.replacing(links) { match in
+            let link = String(match.output)
+            guard let url = URL(string: link), let scheme = url.scheme, let host = url.host() else { return "<link>" }
+            return "\(scheme)://\(host)/…"
+        }
+        out = out.replacing(#/(?i)(token|key|apikey|api_key|password)=[^&\s]+/#) { "\($0.output.1)=…" }
+        return out
+    }
+
+    /// Whether the engine may open `url`: web links (from the server), or a file on the device
+    /// for a download, whose response the app built itself. In debug builds a file link from
+    /// the server is allowed too, for tests that serve fixtures.
+    nonisolated static func isOpenable(_ url: URL, offline: Bool) -> Bool {
+        switch url.scheme?.lowercased() {
+        case "https", "http": return url.host() != nil
+        case "file":
+            #if DEBUG
+            return true
+            #else
+            return offline
+            #endif
+        default: return false
+        }
     }
 
     /// How a report names a copy: "2160p · REMUX · HDR10".
