@@ -73,8 +73,8 @@ final class ProbeFlowTests: XCTestCase {
         guard case .failed(let message) = engine.status else { return XCTFail("\(engine.status)") }
         XCTAssertTrue(message.hasPrefix("This file couldn't be read ("), message)
         XCTAssertTrue(message.hasSuffix("). Pick another source."), message)
-        // Nothing reported; the player then asks for other copies to fall back to (none here).
-        XCTAssertEqual(ServerStub.recorded.map { $0.url!.path }, ["/api/play", "/api/sources"], "nothing reported")
+        // The player then asks for other copies to fall back to (none here).
+        XCTAssertEqual(ServerStub.recorded.map { $0.url!.path }, ["/api/play", "/api/sources"])
     }
 
     func testProbesAFileOnlyOncePerLoad() async throws {
@@ -104,9 +104,12 @@ final class ServerStub: URLProtocol, @unchecked Sendable {
         requests = []
     }
 
+    /// The play flow's requests. Play reports (`/api/play/report`) go out in the background
+    /// when a play fails, and can land after a test's checks or in the next test, so
+    /// they're left out.
     static var recorded: [URLRequest] {
         lock.lock(); defer { lock.unlock() }
-        return requests
+        return requests.filter { $0.url?.path != "/api/play/report" }
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
