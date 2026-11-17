@@ -1,11 +1,19 @@
-import { expect, test } from "bun:test";
-import { openDatabase } from "../src/db";
+import { afterAll, expect, test } from "bun:test";
+import { closeDatabase, openDatabase, type Db } from "../src/db";
 import { apiCache as tmdbCache } from "../src/db/schema";
 import { ApiCache } from "../src/catalog/apiCache";
 import { Tmdb, logoUrl } from "../src/catalog/tmdb";
 
+/** In-memory databases the tests open, closed once they've run: the whole suite shares one
+ *  process, and databases left open pile up until it runs out of memory. */
+const opened: Db[] = [];
+const keep = (db: Db) => (opened.push(db), db);
+afterAll(async () => {
+  await Promise.all(opened.map((db) => closeDatabase(db)));
+});
+
 test("TMDB: stale answers come back at once and refresh behind; failures keep the old copy", async () => {
-  const db = await openDatabase("memory");
+  const db = keep(await openDatabase("memory"));
   let calls = 0;
   let fail = false;
   const tmdb = new Tmdb(new ApiCache(db), () => "key", () => "en-US", (async () => {
