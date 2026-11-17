@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import { AioMetadata, AioStreams, Cinemeta, Comet, Directory, Jackettio, MdbList, MediaFusion, OpenSubtitles, Torrentio } from "./addon-guides";
 import { AddonsInstall, AddonsOrder, AddonsPages, AddonsSubtitles } from "./addons";
 import { Remote, SettingsReference, Troubleshooting } from "./beyond";
+import { Cloud } from "./cloud";
 import { Apps, FirstRun } from "./get-started";
 import { Install } from "./install";
 import { Connections, Folders } from "./library";
@@ -18,6 +19,7 @@ export const SECTIONS: { name: string; blurb: string; articles: Omit<Article, "s
     articles: [
       { path: "/get-started/install", title: "Install the server", summary: "Run Strata on a Mac or a Linux machine, as an app or a service.", keywords: "mac dmg homebrew linux binary service systemd update", body: Install },
       { path: "/get-started/first-run", title: "First-run setup", summary: "The setup code, the admin account and the wizard, step by step.", keywords: "setup code wizard admin account household", body: FirstRun },
+      { path: "/get-started/cloud", title: "Sign up for Strata Cloud", summary: "No server to run: make an account at app.strata.sehalsein.com and set up your household.", keywords: "cloud hosted sign up signup register create account email confirm google onboarding app.strata.sehalsein.com", body: Cloud },
       { path: "/get-started/apps", title: "Connect the apps", summary: "Find your server from iPhone, iPad and Apple TV, and sign in.", keywords: "iphone ipad apple tv connect discovery bonjour qr", body: Apps },
     ],
   },
