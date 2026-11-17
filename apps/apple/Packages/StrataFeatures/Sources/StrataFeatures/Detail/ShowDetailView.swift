@@ -77,7 +77,7 @@ struct ShowDetailView: View {
                           credits: [HeroCredit(String(localized: "Starring", bundle: .module), show.cast.prefix(3).map(\.name))].filter { !$0.names.isEmpty }) {
                 // Plays when it's in the library or the server lists a source for it.
                 if let choice = (playOptions ?? TitleActions.libraryPlay(show)).choice {
-                    PlayButton(choice.label, size: Metrics.heroControlSize) { services.play(choice, title: show.title, artworkURL: show.backdropUrl) }
+                    PlayButton(choice.label, size: Metrics.heroControlSize) { services.play(choice, title: show.title, artworkURL: show.backdropUrl, logoURL: show.logoUrl) }
                     #if os(tvOS)
                     .focused($heroFocus, equals: .play)
                     #endif
@@ -286,7 +286,7 @@ struct ShowDetailView: View {
     private func play(_ show: ShowDetail, season: Int, episode: Int, name: String?, still: URL?, candidateId: String? = nil, startMs: Int? = nil) {
         let subtitle = [code(season, episode), name].compactMap { $0 }.joined(separator: " · ")
         services.play(WatchRequest(target: .episode(show: show.ref, season: season, episode: episode),
-                                   meta: PlaybackMeta(title: show.title, subtitle: subtitle, artworkURL: still ?? show.backdropUrl),
+                                   meta: PlaybackMeta(title: show.title, subtitle: subtitle, artworkURL: still ?? show.backdropUrl, logoURL: show.logoUrl),
                                    candidateId: candidateId, startMs: startMs))
     }
 
@@ -301,7 +301,7 @@ struct ShowDetailView: View {
         resolving = episode.id
         defer { resolving = nil }
         if let choice = await services.titles.play(episode, of: show.ref) {
-            services.play(choice, title: show.title, artworkURL: episode.stillUrl ?? show.backdropUrl)
+            services.play(choice, title: show.title, artworkURL: episode.stillUrl ?? show.backdropUrl, logoURL: show.logoUrl)
         } else {
             notice = String(localized: "\(code(episode.season, episode.episode)) isn't in your library.", bundle: .module)
         }

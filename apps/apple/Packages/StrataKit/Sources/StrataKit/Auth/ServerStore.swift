@@ -24,6 +24,13 @@ public struct SavedServer: Codable, Sendable, Hashable, Identifiable {
 
     /// The address in use.
     public var url: URL { addresses[0] }
+
+    /// Takes the server's name (unless one was given on this device) and version from its
+    /// `/api/info`, as it is now.
+    mutating func adopt(_ info: ServerInfo) {
+        name = customName ?? info.serverName
+        version = info.version
+    }
 }
 
 /// One account signed in on this device: who, on which server, in which household. Each
@@ -450,8 +457,7 @@ public final class ServerStore {
         }
 
         var server = server(id: info.id) ?? SavedServer(id: info.id, name: info.serverName, addresses: [])
-        server.name = server.customName ?? info.serverName
-        server.version = info.version
+        server.adopt(info)
         // As with addresses added by hand: a server reached over HTTPS doesn't switch to a
         // plain-HTTP address on the internet (it's kept, after the others).
         if url.scheme == "http", !ServerAddress.isLocal(url), server.addresses.contains(where: { $0.scheme == "https" }) {
@@ -625,12 +631,13 @@ public final class ServerStore {
     public func connect() async -> Bool {
         guard let signIn = active, var server = server(for: signIn), let token = tokens.read(signIn.id) else { return false }
         do {
-            let url = try await reachableAddress(for: server)
-            if url != server.url {
-                server.addresses = [url] + server.addresses.filter { $0 != url }
-                upsert(server)
-                rebuildClient()
-            }
+            let (url, info) = try await reachableAddress(for: server)
+            let moved = url != server.url
+            if moved { server.addresses = [url] + server.addresses.filter { $0 != url } }
+            // What the server says of itself now: its version changes when it's updated.
+            server.adopt(info)
+            if server != self.server(id: server.id) { upsert(server) }
+            if moved { rebuildClient() }
             let me = try await StrataClient(baseURL: url, token: token, session: session, cacheTTL: 0).me()
             update(signIn.id) { $0.apply(me) }
             lastError = nil
@@ -670,8 +677,9 @@ public final class ServerStore {
             return false
         }
         guard e.isConnectivity, server.addresses.count > 1,
-              let url = try? await reachableAddress(for: server, skipping: server.url) else { return false }
+              let (url, info) = try? await reachableAddress(for: server, skipping: server.url) else { return false }
         server.addresses = [url] + server.addresses.filter { $0 != url }
+        server.adopt(info)
         upsert(server)
         rebuildClient()
         Log.auth.info("failed over to \(url.absoluteString, privacy: .private)")
@@ -721,12 +729,13 @@ public final class ServerStore {
 
     private static let signedOut = StrataError(kind: .http, status: 401, message: String(localized: "Not signed in.", bundle: .module))
 
-    private func reachableAddress(for server: SavedServer, skipping: URL? = nil) async throws -> URL {
+    /// The first of a server's addresses that answers as that server, with what it said.
+    private func reachableAddress(for server: SavedServer, skipping: URL? = nil) async throws -> (URL, ServerInfo) {
         var firstError: Error?
         for url in server.addresses where url != skipping {
             do {
                 let info = try await StrataClient(baseURL: url, session: session, cacheTTL: 0).info()
-                if info.id == server.id { return url }
+                if info.id == server.id { return (url, info) }
             } catch {
                 if firstError == nil { firstError = error }
             }

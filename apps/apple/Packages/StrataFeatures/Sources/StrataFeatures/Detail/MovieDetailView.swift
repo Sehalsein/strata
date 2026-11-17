@@ -64,7 +64,7 @@ struct MovieDetailView: View {
                           progress: movie.progress.flatMap { $0.isResumable ? HeroProgress(fraction: $0.fraction, label: Formatting.remaining(ms: $0.remainingMs)) : nil }) {
                 // Plays when it's in the library or the server lists a source for it.
                 if let choice = playChoice(movie) {
-                    PlayButton(choice.label, size: Metrics.heroControlSize) { services.play(choice, title: movie.title, artworkURL: movie.backdropUrl ?? movie.posterUrl) }
+                    PlayButton(choice.label, size: Metrics.heroControlSize) { services.play(choice, title: movie.title, artworkURL: movie.backdropUrl ?? movie.posterUrl, logoURL: movie.logoUrl) }
                         .glassEffectID("play", in: namespace)
                         #if os(tvOS)
                         .focused($heroFocus, equals: .play)
@@ -158,7 +158,7 @@ struct MovieDetailView: View {
 
     private func play(_ movie: MovieDetail, candidateId: String? = nil) {
         services.play(WatchRequest(target: movie.target,
-                                   meta: PlaybackMeta(title: movie.title, subtitle: movie.yearText, artworkURL: movie.backdropUrl ?? movie.posterUrl),
+                                   meta: PlaybackMeta(title: movie.title, subtitle: movie.yearText, artworkURL: movie.backdropUrl ?? movie.posterUrl, logoURL: movie.logoUrl),
                                    candidateId: candidateId))
     }
 

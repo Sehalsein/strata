@@ -89,9 +89,9 @@ public final class AppServices {
         watching = request
     }
 
-    /// Plays what Play chose for a title, with its title and artwork in the player.
-    public func play(_ choice: PlayChoice, title: String, artworkURL: URL?, startMs: Int? = nil) {
-        play(WatchRequest(target: choice.target, meta: PlaybackMeta(title: title, subtitle: choice.subtitle, artworkURL: artworkURL),
+    /// Plays what Play chose for a title, with its title, logo and artwork in the player.
+    public func play(_ choice: PlayChoice, title: String, artworkURL: URL?, logoURL: URL? = nil, startMs: Int? = nil) {
+        play(WatchRequest(target: choice.target, meta: PlaybackMeta(title: title, subtitle: choice.subtitle, artworkURL: artworkURL, logoURL: logoURL),
                           candidateId: choice.candidateId, startMs: startMs))
     }
 
@@ -142,8 +142,8 @@ public final class AppServices {
     }
 
     /// The sources with the server's filters for them; nil when they couldn't be loaded.
-    public func sourceList(for target: PlaybackTarget, discover: Bool) async -> SourceList? {
-        await load { try await $0.sourceList(target, discover: discover) }.value
+    public func sourceList(for target: PlaybackTarget, discover: Bool, refresh: Bool = false) async -> SourceList? {
+        await load { try await $0.sourceList(target, discover: discover, refresh: refresh) }.value
     }
 }
 
@@ -203,7 +203,7 @@ public extension TitleCard {
         guard let target = playbackTarget else { return nil }
         let subtitle = episode.map { "\($0.code) · \($0.name)" } ?? yearText
         return WatchRequest(target: target,
-                            meta: PlaybackMeta(title: title, subtitle: subtitle, artworkURL: episode?.stillUrl ?? backdropUrl ?? posterUrl),
+                            meta: PlaybackMeta(title: title, subtitle: subtitle, artworkURL: episode?.stillUrl ?? backdropUrl ?? posterUrl, logoURL: logoUrl),
                             startMs: restart ? 0 : nil)
     }
 }

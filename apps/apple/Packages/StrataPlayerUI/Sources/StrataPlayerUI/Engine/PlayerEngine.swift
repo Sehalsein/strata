@@ -14,11 +14,14 @@ public struct PlaybackMeta: Sendable, Hashable {
     /// e.g. the show name + "S1 · E2", or the year for a movie.
     public var subtitle: String?
     public var artworkURL: URL?
+    /// The title's logo (the movie's or show's), shown in place of its name while it loads.
+    public var logoURL: URL?
 
-    public init(title: String, subtitle: String? = nil, artworkURL: URL? = nil) {
+    public init(title: String, subtitle: String? = nil, artworkURL: URL? = nil, logoURL: URL? = nil) {
         self.title = title
         self.subtitle = subtitle
         self.artworkURL = artworkURL
+        self.logoURL = logoURL
     }
 }
 
@@ -492,7 +495,7 @@ public final class PlayerEngine {
     /// Plays the next episode (from `nextEpisode`), from the start.
     public func playNext(meta: PlaybackMeta? = nil) async {
         guard let next = nextEpisode, let nextTarget else { return }
-        let m = meta ?? PlaybackMeta(title: next.name, subtitle: next.code, artworkURL: next.stillUrl ?? self.meta?.artworkURL)
+        let m = meta ?? PlaybackMeta(title: next.name, subtitle: next.code, artworkURL: next.stillUrl ?? self.meta?.artworkURL, logoURL: self.meta?.logoURL)
         await load(target: nextTarget, meta: m, startMs: 0)
     }
 

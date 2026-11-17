@@ -27,10 +27,13 @@ struct SourcePickerSheet: View {
     /// Focus starts on the first copy, not the quality filter, once the list is in.
     @FocusState private var focusedRow: String?
     #endif
-    /// Only for servers that send no filters of their own (older ones).
-    @State private var filter: Filter = .all
-    /// The server's filters: the option picked in each group, by group id.
-    @State private var picked: [String: String] = [:]
+    /// The filters you set, kept per server (SourceFilterMemory): the option picked in each
+    /// of the server's groups, and the quality filter for servers that send none (older ones).
+    @State private var saved = SourceFilterMemory.Filters()
+    /// The server's list is in: until then its filters aren't known, so none are drawn.
+    @State private var answered = false
+    /// The server is still looking (further than the library, or again for Refresh).
+    @State private var looking = false
 
     /// The source you chose last time, which Play goes back to.
     private var lastPicked: String? {
@@ -74,7 +77,12 @@ struct SourcePickerSheet: View {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(String(localized: "Cancel", bundle: .module)) { dismiss() } }
+                if lookFurther {
+                    ToolbarItem(placement: .primaryAction) { refreshButton }
+                }
+            }
         }
         .presentationDetents([.medium, .large])
         .task { await load() }
@@ -83,8 +91,14 @@ struct SourcePickerSheet: View {
 
     private var heading: String { purpose == .download ? String(localized: "Download", bundle: .module) : String(localized: "Choose Source", bundle: .module) }
 
-    /// The server's filter groups, when it sends them; else the old quality picker.
-    private var groups: [SourceFilterGroup] { sources.value?.filters ?? [] }
+    /// The server's filter groups, once its list is in and when it sends them; else the old quality picker.
+    private var groups: [SourceFilterGroup] { answered ? sources.value?.filters ?? [] : [] }
+
+    /// The quality filter for servers that send none; none applies until the server answers.
+    private var filter: Filter { answered ? saved.quality.flatMap(Filter.init(rawValue:)) ?? .all : .all }
+
+    /// Of the saved options, those this title's list offers (the rest wait for another title).
+    private var picked: [String: String] { answered ? sources.value?.applicable(saved.picked) ?? [:] : [:] }
 
     /// What's shown: the sources matching the picked options.
     private var shownSources: [Candidate] {
@@ -94,21 +108,68 @@ struct SourcePickerSheet: View {
 
     private var isFiltered: Bool { groups.isEmpty ? filter != .all : !picked.isEmpty }
 
+    private var server: URL? { services.client?.baseURL }
+
+    /// Changes the filters and keeps them for next time.
+    private func setFilters(_ change: (inout SourceFilterMemory.Filters) -> Void) {
+        change(&saved)
+        if let server { SourceFilterMemory.shared.set(saved, server: server) }
+    }
+
     @ViewBuilder private var filterPicker: some View {
-        if groups.isEmpty {
-            Picker(String(localized: "Quality", bundle: .module), selection: $filter) {
-                ForEach(Filter.allCases) { Text($0.title).tag($0) }
+        if !answered {
+            EmptyView()
+        } else if groups.isEmpty {
+            HStack(spacing: Metrics.space2) {
+                Picker(String(localized: "Quality", bundle: .module), selection: Binding(
+                    get: { filter },
+                    set: { value in setFilters { $0.quality = value == .all ? nil : value.rawValue } }
+                )) {
+                    ForEach(Filter.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                if isFiltered { clearButton }
             }
-            .pickerStyle(.segmented)
         } else {
             #if os(tvOS)
-            VStack(alignment: .leading, spacing: Metrics.space3) { groupPickers }
+            VStack(alignment: .leading, spacing: Metrics.space3) {
+                groupPickers
+                if isFiltered { clearButton }
+            }
             #else
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Metrics.space2) { groupPickers }
+                HStack(spacing: Metrics.space2) {
+                    groupPickers
+                    if isFiltered { clearButton }
+                }
             }
             #endif
         }
+    }
+
+    /// Clears every filter, here and for next time.
+    private var clearButton: some View {
+        Button {
+            setFilters { $0 = SourceFilterMemory.Filters() }
+        } label: {
+            Label(String(localized: "Clear", bundle: .module), systemImage: "xmark.circle.fill")
+        }
+        #if !os(tvOS)
+        .buttonStyle(.borderless)
+        .font(.stCallout)
+        #endif
+        .accessibilityLabel(String(localized: "Clear filters", bundle: .module))
+    }
+
+    /// Asks the server to search again.
+    private var refreshButton: some View {
+        Button {
+            Task { await load(refresh: true) }
+        } label: {
+            Label(String(localized: "Refresh", bundle: .module), systemImage: "arrow.clockwise")
+        }
+        .disabled(looking)
+        .accessibilityLabel(String(localized: "Refresh sources", bundle: .module))
     }
 
     /// One menu per group, as the server named it: "All" or one of its options (with counts).
@@ -116,7 +177,7 @@ struct SourcePickerSheet: View {
         ForEach(groups) { group in
             Picker(group.title, selection: Binding(
                 get: { picked[group.id] ?? "" },
-                set: { picked[group.id] = $0.isEmpty ? nil : $0 }
+                set: { value in setFilters { $0.picked[group.id] = value.isEmpty ? nil : value } }
             )) {
                 Text("\(group.title): \(String(localized: "All", bundle: .module))").tag("")
                 ForEach(group.options) { option in
@@ -128,11 +189,19 @@ struct SourcePickerSheet: View {
         }
     }
 
-    private func load() async {
-        guard lookFurther else { sources = .loaded(SourceList(items: known)); return }
-        if !known.isEmpty { sources = .loaded(SourceList(items: known)) } // shown while the server looks further
-        let found = await services.sourceList(for: target, discover: true)
+    /// The sources, with the filters you set last time. On opening, the page's own copies
+    /// show (unfiltered) while the server looks further; Refresh starts over from nothing,
+    /// so nothing from before shows as if it were the new answer.
+    private func load(refresh: Bool = false) async {
+        if let server, !refresh { saved = SourceFilterMemory.shared.filters(server: server) }
+        guard lookFurther else { sources = .loaded(SourceList(items: known)); answered = true; return }
+        answered = false
+        looking = true
+        defer { looking = false }
+        if refresh || known.isEmpty { sources = .loading } else { sources = .loaded(SourceList(items: known)) }
+        let found = await services.sourceList(for: target, discover: true, refresh: refresh)
         if let found, !found.items.isEmpty { sources = .loaded(found) } else { sources = .loaded(SourceList(items: known)) }
+        answered = true
     }
 
     /// The copy playing now first; the rest in the server's order.
@@ -160,9 +229,16 @@ struct SourcePickerSheet: View {
             MessageView(systemImage: "exclamationmark.triangle", title: String(localized: "Couldn't load sources", bundle: .module), message: message)
         case .loaded:
             let shown = ordered(shownSources)
-            if shown.isEmpty {
+            if looking {
+                HStack(spacing: Metrics.space3) {
+                    ProgressView()
+                    Text("Looking for more sources…", bundle: .module).font(.stCallout).foregroundStyle(Theme.ink2)
+                }
+                .padding(.vertical, Metrics.space2)
+            }
+            if shown.isEmpty, !looking {
                 MessageView(systemImage: "rectangle.stack.badge.minus", title: String(localized: "No sources", bundle: .module), message: isFiltered ? String(localized: "Nothing matches these filters. Try others.", bundle: .module) : String(localized: "There's nothing to play this from.", bundle: .module))
-            } else {
+            } else if !shown.isEmpty {
                 #if os(tvOS)
                 // Native TV cards: each copy lifts with the system's focus effect.
                 LazyVStack(spacing: Metrics.space6) {
@@ -202,6 +278,7 @@ struct SourcePickerSheet: View {
                 Text(heading).font(.stTitle1).titleTracking().foregroundStyle(Theme.ink)
                 Text(title).font(.stHeadline).foregroundStyle(Theme.ink2).lineLimit(3)
                 filterPicker.padding(.top, Metrics.space4)
+                if lookFurther { refreshButton }
                 if sources.value != nil, case let count = shownSources.count, count > 0 {
                     Text("\(count) copies", bundle: .module).font(.stFootnote).foregroundStyle(Theme.ink3)
                 }

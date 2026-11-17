@@ -53,8 +53,8 @@ final class ServerStoreTests: XCTestCase {
         defaults.removePersistentDomain(forName: suite)
     }
 
-    private func info(id: String = "srv-1", setup: Bool = false, api: Int = 1) -> StubProtocol.Reply {
-        .json(200, ["name": "strata", "serverName": "Den", "id": id, "version": "0.1.0", "apiVersion": api, "setupRequired": setup])
+    private func info(id: String = "srv-1", setup: Bool = false, api: Int = 1, version: String = "0.1.0", name: String = "Den") -> StubProtocol.Reply {
+        .json(200, ["name": "strata", "serverName": name, "id": id, "version": version, "apiVersion": api, "setupRequired": setup])
     }
 
     func testProbeNormalisesAddress() async throws {
@@ -218,6 +218,35 @@ final class ServerStoreTests: XCTestCase {
         XCTAssertTrue(store.signIns.isEmpty)
         XCTAssertTrue(store.servers.isEmpty)
         XCTAssertNil(tokens.read("srv-1|sehal"))
+    }
+
+    func testConnectKeepsTheServersVersionAndNameCurrent() async throws {
+        var version = "0.1.6"
+        StubProtocol.reset { req in
+            switch req.url?.path {
+            case "/api/info": return self.info(version: version, name: version == "0.1.6" ? "Den" : "The Den")
+            case "/api/auth/sign-in/username": return .json(200, ["token": "t1"])
+            case "/api/me": return self.me("sehal")
+            default: return .json(404, ["error": "Not found"])
+            }
+        }
+        let tokens = TokenStorage.inMemory()
+        let store = ServerStore(defaults: defaults, tokens: tokens, session: StubProtocol.session())
+        _ = await store.signIn(address: "den.local", login: "sehal", password: "pw")
+        XCTAssertEqual(store.activeServer?.version, "0.1.6")
+
+        // The server is updated (and renamed) after signing in: the next connect says so.
+        version = "0.1.8"
+        let ok = await store.connect()
+        XCTAssertTrue(ok, store.lastError ?? "")
+        XCTAssertEqual(store.activeServer?.version, "0.1.8")
+        XCTAssertEqual(store.activeServer?.name, "The Den")
+        XCTAssertEqual(ServerStore(defaults: defaults, tokens: tokens, session: StubProtocol.session()).activeServer?.version, "0.1.8", "kept")
+
+        // A name given on this device stays.
+        store.renameServer("srv-1", to: "Living room")
+        _ = await store.connect()
+        XCTAssertEqual(store.activeServer?.name, "Living room")
     }
 
     func testSignInFailureSetsLastError() async {

@@ -18,6 +18,9 @@ import { addonStreams, defaultAddons, findsStreams, isBuiltIn, isInfoHash, manif
 export { isInfoHash, parseSize } from "./addons";
 
 const log = logger("discovery");
+
+/** A title's search, as discovery remembers it. */
+const releasesKey = (t: DiscoveryTarget) => `${t.source}:${t.mediaType}:${t.titleId}:${t.season ?? ""}:${t.episode ?? ""}`;
 const RELEASE_TTL_MS = 20 * 60_000;
 /** Lookups kept at once (each is a few KB of releases). */
 const RELEASE_CACHE_MAX = 300;
@@ -162,8 +165,16 @@ export class Discovery {
     this.sourceCache.clear();
   }
 
+  /** Drops one title's remembered search and each source's part of it, so the next one asks afresh (Choose Source's Refresh). */
+  forgetTitle(target: DiscoveryTarget) {
+    const key = releasesKey(target);
+    this.cache.delete(key);
+    // Each source's part is kept as "<source>:<key>" or "<source>:<key>:<id kind>".
+    this.sourceCache.deleteWhere((k) => k.endsWith(`:${key}`) || k.includes(`:${key}:`));
+  }
+
   releases(target: DiscoveryTarget): Promise<Release[]> {
-    const key = `${target.source}:${target.mediaType}:${target.titleId}:${target.season ?? ""}:${target.episode ?? ""}`;
+    const key = releasesKey(target);
     return this.cache.get(key, () => this.search(target, key), (v) => !v.partial).then((v) => v.releases);
   }
 

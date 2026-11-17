@@ -148,9 +148,11 @@ export class Viewer {
   }
 
   /** Releases from the scrapers (a few seconds), within the household's hourly allowance. */
-  async discover(target: DiscoveryTarget) {
+  async discover(target: DiscoveryTarget, opts: { refresh?: boolean } = {}) {
     await this.assertAllowed(targetRef(target));
     await this.household.spendSearch();
+    // Refresh asks the sources again rather than answering from the last search.
+    if (opts.refresh) this.household.discovery.forgetTitle(target);
     return this.household.discovery.candidates(target);
   }
 

@@ -245,7 +245,13 @@
     "Choose your own password" : {
 
     },
+    "Clear" : {
+
+    },
     "Clear List" : {
+
+    },
+    "Clear filters" : {
 
     },
     "Close" : {
@@ -487,6 +493,9 @@
     "Link a TV" : {
 
     },
+    "Looking for more sources…" : {
+
+    },
     "Looking for servers…" : {
 
     },
@@ -647,6 +656,12 @@
 
     },
     "Rating" : {
+
+    },
+    "Refresh" : {
+
+    },
+    "Refresh sources" : {
 
     },
     "Released" : {
