@@ -175,6 +175,8 @@ targets:
         CFBundleDisplayName: Strata
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # App Store Connect rejects a 64-bit-only extension without this (ITMS-90502).
+        UIRequiredDeviceCapabilities: [arm64]
         NSExtension:
           NSExtensionPointIdentifier: com.apple.tv-top-shelf
           NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ContentProvider"
