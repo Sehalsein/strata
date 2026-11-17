@@ -22,6 +22,8 @@ describe("taste", () => {
     expect(seeds.map((s) => `${s.type}:${s.id}`)).toEqual(["show:20", "movie:10", "movie:12", "show:40", "movie:11"]);
     expect(seeds[0]!.weight).toBeCloseTo(4, 3);
     expect(seeds.at(-1)!.weight).toBeCloseTo(3 / 4, 2);
+    // Only what was played can have a "Because you watched" row: My List alone doesn't count.
+    expect(seeds.filter((s) => !s.watched).map((s) => `${s.type}:${s.id}`)).toEqual(["show:40"]);
   });
 });
 
@@ -29,8 +31,8 @@ describe("top picks", () => {
   test("titles several seeds recommend rise; seen ones are left out", () => {
     const picks = topPicks(
       [
-        { seed: { type: "movie", id: 1, weight: 3 }, recs: [{ type: "movie", id: 100 }, { type: "movie", id: 101 }, { type: "movie", id: 102 }] },
-        { seed: { type: "movie", id: 2, weight: 1 }, recs: [{ type: "movie", id: 102 }, { type: "movie", id: 103 }, { type: "movie", id: 100 }] },
+        { seed: { type: "movie", id: 1, weight: 3, watched: true }, recs: [{ type: "movie", id: 100 }, { type: "movie", id: 101 }, { type: "movie", id: 102 }] },
+        { seed: { type: "movie", id: 2, weight: 1, watched: true }, recs: [{ type: "movie", id: 102 }, { type: "movie", id: 103 }, { type: "movie", id: 100 }] },
       ],
       new Set(["movie:101"]),
     );

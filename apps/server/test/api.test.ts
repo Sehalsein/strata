@@ -380,6 +380,14 @@ describe("setup and auth", () => {
     expect((await server.request("/api/titles/movie/666", { token: bob })).status).toBe(403);
     expect((await server.request("/api/play", { method: "POST", token: bob, json: { mediaType: "movie", tmdbId: 666 } })).status).toBe(403);
     expect((await server.request("/api/titles/movie/10378", { token: bob })).status).toBe(200);
+    // Nor named by a "Because you watched" row asked for by id.
+    const because = (id: number, t: string) => server.request(`/api/rows/home/${encodeURIComponent(`because:movie:${id}`)}`, { token: t });
+    expect((await because(666, bob)).status).toBe(403);
+    expect((await because(10378, bob)).status).toBe(200);
+    expect((await because(666, token)).status).toBe(200);
+    // Other spellings of the same title don't get past the check: they aren't rows at all.
+    for (const id of ["because:movie:666:x", "because:movie:0x29a", "because:movie:0666", "because:movie:666.0", "because:movie: 666"])
+      expect((await server.request(`/api/rows/home/${encodeURIComponent(id)}`, { token: bob })).status).toBe(404);
     // Other accounts are unaffected.
     expect(await titles(token)).toEqual([666, 10378]);
     // Nor the files of those titles, by id.
@@ -694,6 +702,12 @@ describe("playback", () => {
       expect(full).toMatchObject({ title: "Film night" });
       expect(full.items.length).toBeGreaterThanOrEqual(row.items.length);
       expect((await server.request(`/api/rows/home/${encodeURIComponent("nope")}`, { token })).status).toBe(404);
+      // A "Because you watched" row opens from the title it follows, even once For you no
+      // longer has it (here, it never did: nothing's been watched).
+      const because = await server.request(`/api/rows/home/${encodeURIComponent("because:movie:10378")}`, { token });
+      expect(because.status).toBe(200);
+      expect(await json(because)).toMatchObject({ title: "Because you watched Big Buck Bunny", items: [] });
+      expect((await server.request(`/api/rows/home/${encodeURIComponent("because:movie:x")}`, { token })).status).toBe(404);
       // The pages API says what was saved.
       const home = (await json(await server.request("/api/admin/pages", { token }))).pages[0];
       expect(home.rows.slice(0, 3).map((r: any) => [r.id, r.on, r.name ?? null, r.count ?? null])).toEqual([
