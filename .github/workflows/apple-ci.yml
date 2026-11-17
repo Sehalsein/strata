@@ -46,24 +46,32 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          # Pushes and manual runs are already filtered to the Apple apps (see `on`).
+          set -o pipefail
+          build() { echo "apple=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          # Pushes and manual runs are already filtered to the Apple apps (see `on`). Anything
+          # in doubt builds: a missing commit, or git failing.
           if [ "$EVENT" != pull_request ]; then
-            echo "apple=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$BASE...$HEAD" | grep -qE '^(apps/apple/|\.github/workflows/apple-[^/]*\.yml$)'; then
-            echo "apple=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "apple=false" >> "$GITHUB_OUTPUT"
-            echo "No changes to apps/apple: the iOS and tvOS builds are skipped."
+            build
           fi
+          if ! git cat-file -e "$BASE^{commit}" 2>/dev/null || ! git cat-file -e "$HEAD^{commit}" 2>/dev/null; then
+            build
+          fi
+          # Unquoted paths (non-ASCII names aren't escaped), and a moved file counts at both paths.
+          files=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE...$HEAD") || build
+          if grep -qE '^(apps/apple/|\.github/workflows/apple-[^/]*\.yml$)' <<< "$files"; then
+            build
+          fi
+          echo "apple=false" >> "$GITHUB_OUTPUT"
+          echo "No changes to apps/apple: the iOS and tvOS builds are skipped."
 
   build:
     # Always runs, so each check reports under its own name: a job skipped whole reports as
     # "${{ matrix.name }}", which wouldn't satisfy the required checks. Without Apple changes,
-    # every step is skipped on a Linux runner.
+    # every step is skipped on a Linux runner. Only an explicit "false" skips: anything else builds.
     name: ${{ matrix.name }}
     needs: changes
     # macOS 26: the packages target macOS 26, and their SwiftUI tests run on the host.
-    runs-on: ${{ needs.changes.outputs.apple == 'true' && 'macos-26' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.apple == 'false' && 'ubuntu-latest' || 'macos-26' }}
     env:
       APPLE_CHANGED: ${{ needs.changes.outputs.apple }}
     timeout-minutes: 50
@@ -82,21 +90,21 @@ jobs:
 
     steps:
       - name: Check out repository
-        if: env.APPLE_CHANGED == 'true'
+        if: env.APPLE_CHANGED != 'false'
         uses: actions/checkout@v7
 
       - name: Select Xcode 26
-        if: env.APPLE_CHANGED == 'true'
+        if: env.APPLE_CHANGED != 'false'
         run: |
           sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
           xcodebuild -version
 
       - name: Install XcodeGen
-        if: env.APPLE_CHANGED == 'true'
+        if: env.APPLE_CHANGED != 'false'
         run: brew install xcodegen
 
       - name: Restore FFmpeg
-        if: env.APPLE_CHANGED == 'true'
+        if: env.APPLE_CHANGED != 'false'
         id: ffmpeg-cache
         uses: actions/cache@v4
         with:
@@ -105,17 +113,17 @@ jobs:
 
       # StrataRemux links FFmpeg (LGPL, built from source); the framework isn't kept in git.
       - name: Build FFmpeg
-        if: env.APPLE_CHANGED == 'true' && (steps.ffmpeg-cache.outputs.cache-hit != 'true')
+        if: env.APPLE_CHANGED != 'false' && (steps.ffmpeg-cache.outputs.cache-hit != 'true')
         working-directory: apps/apple
         run: Packages/StrataRemux/scripts/build-ffmpeg.sh
 
       - name: Generate Xcode project
-        if: env.APPLE_CHANGED == 'true'
+        if: env.APPLE_CHANGED != 'false'
         working-directory: apps/apple
         run: xcodegen generate
 
       - name: Run Swift package tests
-        if: env.APPLE_CHANGED == 'true' && (matrix.id == 'ios')
+        if: env.APPLE_CHANGED != 'false' && (matrix.id == 'ios')
         working-directory: apps/apple
         run: |
           swift test --package-path Packages/StrataKit
@@ -123,7 +131,7 @@ jobs:
           swift test --package-path Packages/StrataRemux
 
       - name: Build ${{ matrix.name }}
-        if: env.APPLE_CHANGED == 'true'
+        if: env.APPLE_CHANGED != 'false'
         uses: Apple-Actions/xcodebuild@v1
         with:
           working-directory: apps/apple
@@ -138,7 +146,7 @@ jobs:
           disable-automatic-package-resolution: false
 
       - name: Upload build log
-        if: env.APPLE_CHANGED == 'true' && (failure() || cancelled())
+        if: env.APPLE_CHANGED != 'false' && (failure() || cancelled())
         uses: actions/upload-artifact@v7
         with:
           name: apple-${{ matrix.id }}-logs

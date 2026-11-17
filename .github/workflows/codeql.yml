@@ -66,25 +66,30 @@ jobs:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          # The weekly scan and manual runs always analyze Swift, and so does any change
-          # we can't diff (a first push, a force push).
-          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            echo "swift=true" >> "$GITHUB_OUTPUT"
-            exit 0
+          set -o pipefail
+          analyze() { echo "swift=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          # The weekly scan and manual runs always analyze Swift, and so does anything in doubt:
+          # a change we can't diff (a first push, a force push), or git failing.
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
+            analyze
+          fi
+          if ! git cat-file -e "$BASE^{commit}" 2>/dev/null || ! git cat-file -e "$HEAD^{commit}" 2>/dev/null; then
+            analyze
           fi
           range="$BASE...$HEAD"
           [ "$EVENT" = push ] && range="$BASE..$HEAD"
-          if git diff --name-only "$range" | grep -qE '^(apps/apple/|apps/macos/|\.github/workflows/codeql\.yml$)'; then
-            echo "swift=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "swift=false" >> "$GITHUB_OUTPUT"
-            echo "No changes to apps/apple or apps/macos: skipping the Swift analysis."
+          # Unquoted paths (non-ASCII names aren't escaped), and a moved file counts at both paths.
+          files=$(git -c core.quotePath=false diff --name-only --no-renames "$range") || analyze
+          if grep -qE '^(apps/apple/|apps/macos/|\.github/workflows/codeql\.yml$)' <<< "$files"; then
+            analyze
           fi
+          echo "swift=false" >> "$GITHUB_OUTPUT"
+          echo "No changes to apps/apple or apps/macos: skipping the Swift analysis."
 
   swift:
     name: Analyze (swift)
     needs: changes
-    if: needs.changes.outputs.swift == 'true'
+    if: needs.changes.outputs.swift != 'false'
     # Like apple-ci: the packages target macOS 26 and need Xcode 26.
     runs-on: macos-26
     timeout-minutes: 60
