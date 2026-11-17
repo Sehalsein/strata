@@ -10,6 +10,11 @@ export function Install() {
         Strata has two halves: the <UI>server</UI>, which runs at home next to your files, and the <UI>apps</UI> on iPhone, iPad, Mac and Apple TV, which play from it. Start with the server. It's one
         program with the dashboard, the database and ffmpeg built in, so there's nothing else to install.
       </P>
+      <Callout type="tip" title="Rather not run a server?">
+        <p>
+          <A href="/get-started/cloud">Sign up for Strata Cloud</A> instead: an account at app.strata.sehalsein.com, with nothing to install. It plays from TorBox and add-ons, not files on your disk.
+        </p>
+      </Callout>
 
       <H2>What you need</H2>
       <List>

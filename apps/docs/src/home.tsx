@@ -46,7 +46,13 @@ export function Home() {
         <Glow className="-top-20 -left-40 size-[36rem]" color="rgba(120,140,255,0.12)" />
         <Reveal className="glass relative rounded-[1.75rem] p-6 sm:p-8">
           <p className="mb-1 text-xs font-semibold tracking-[0.18em] text-white/45 uppercase">The quickest way through</p>
-          <p className="mb-6 text-white/60">Five guides, in order, and you're watching.</p>
+          <p className="mb-6 text-white/60">
+            Five guides, in order, and you're watching. No server?{" "}
+            <a href="/get-started/cloud" onClick={(e) => (e.preventDefault(), navigate("/get-started/cloud"))} className="text-white underline-offset-4 hover:underline">
+              Sign up for Strata Cloud
+            </a>{" "}
+            instead.
+          </p>
           <ol className="grid gap-3 md:grid-cols-5">
             {path.map((p, i) => {
               const a = ARTICLES.find((x) => x.path === p);

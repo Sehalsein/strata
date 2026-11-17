@@ -45,7 +45,7 @@ strata.example.com {
       <H2>Running Strata in the cloud</H2>
       <P>
         The same server also runs in the cloud, on Docker or Cloudflare Workers with a Postgres database. It's a different shape: no local folders, so everything plays from TorBox and add-on links, straight
-        to the apps.
+        to the apps. To use the hosted one rather than run your own, see <A href="/get-started/cloud">Sign up for Strata Cloud</A>.
       </P>
       <Table
         head={["", "At home", "In the cloud"]}
