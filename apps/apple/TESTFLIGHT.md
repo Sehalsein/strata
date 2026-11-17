@@ -20,8 +20,11 @@ In Certificates, Identifiers & Profiles, register the explicit bundle IDs below 
 | iOS/iPadOS | `com.sehalsein.strata` | iOS App Store | `AppStore com.sehalsein.strata` |
 | iOS/iPadOS widget | `com.sehalsein.strata.widgets` | iOS App Store | `AppStore com.sehalsein.strata.widgets` |
 | tvOS | `com.sehalsein.strata` | tvOS App Store | `AppStore tvOS com.sehalsein.strata` |
+| tvOS Top Shelf | `com.sehalsein.strata.topshelf` | tvOS App Store | `AppStore tvOS com.sehalsein.strata.topshelf` |
 
 The two bundle IDs above are registered to the Apple Developer team used for Strata.
+
+The tvOS app and its Top Shelf extension share the **App Group** `group.com.sehalsein.strata` (the app writes Continue Watching there; the Top Shelf reads it). Register the group, turn on App Groups with it for `com.sehalsein.strata` and `com.sehalsein.strata.topshelf`, then regenerate `AppStore tvOS com.sehalsein.strata` (a profile made before it won't sign the build).
 
 The iOS app ID `com.sehalsein.strata` needs the **Associated Domains** capability: the app lists `webcredentials:app.strata.sehalsein.com` so the Passwords app saves and fills cloud passwords. Turn it on for the app ID, then regenerate `AppStore com.sehalsein.strata` (a profile made before it won't sign the build). The cloud server must also answer Apple's check: set `STRATA_APPLE_APP_IDS` to `<Team ID>.com.sehalsein.strata` in `deploy/cloudflare/wrangler.jsonc` `vars` (or as a Worker variable) and redeploy. `https://app.strata.sehalsein.com/.well-known/apple-app-site-association` should then list it.
 

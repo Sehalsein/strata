@@ -32,6 +32,7 @@ On first launch the app lists Strata servers on your network. You can also type 
 | `Packages/StrataFeatures` | Screens: connect, sign-in (password, home-network join, TV code), Who's watching, households, Home, Movies, Shows, Search, My List, movie and show pages, source picker, player |
 | `App/` | The `@main` app and app delegate |
 | `StrataWidgets/` | Lock Screen and Dynamic Island Now Playing Live Activity |
+| `StrataTopShelf/` | The Apple TV's Top Shelf: Continue Watching and Up Next from the snapshot the app keeps in the App Group (`TopShelf` in StrataKit); Play starts only an item on it |
 
 ## Tests
 
