@@ -106,7 +106,7 @@ struct SettingsView: View {
         // The large title would sit at the window's edge, away from the centred list.
         .navigationBarTitleDisplayMode(wide ? .inline : .automatic)
         .scrollContentBackground(.hidden)
-        .background(Theme.bg)
+        .background(Theme.groupedBg)
         .onGeometryChange(for: Bool.self) { $0.size.width >= 900 } action: { wide = $0 }
         #endif
     }
@@ -366,7 +366,7 @@ struct ChangePasswordView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(Theme.bg)
+            .background(Theme.groupedBg)
             .navigationTitle(Text("Change Password", bundle: .module))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
