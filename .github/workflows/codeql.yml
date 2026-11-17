@@ -82,7 +82,11 @@ jobs:
           # both its paths.
           files="$RUNNER_TEMP/changed-files"
           git diff -z --name-only --no-renames "$range" > "$files" || analyze
-          if tr '\0' '\n' < "$files" | grep -qE '^(apps/apple/|apps/macos/|\.github/workflows/codeql\.yml$)'; then
+          # grep reads the NUL-separated list itself (no pipeline to break), and only its clean
+          # "no match" (1) skips: a match (0) or an error (2) means analyze.
+          match=0
+          grep -qzE '^(apps/apple/|apps/macos/|\.github/workflows/codeql\.yml$)' "$files" || match=$?
+          if [ "$match" -ne 1 ]; then
             analyze
           fi
           echo "swift=false" >> "$GITHUB_OUTPUT"

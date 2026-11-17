@@ -60,7 +60,11 @@ jobs:
           # both its paths.
           files="$RUNNER_TEMP/changed-files"
           git diff -z --name-only --no-renames "$BASE...$HEAD" > "$files" || build
-          if tr '\0' '\n' < "$files" | grep -qE '^(apps/apple/|\.github/workflows/apple-[^/]*\.yml$)'; then
+          # grep reads the NUL-separated list itself (no pipeline to break), and only its clean
+          # "no match" (1) skips: a match (0) or an error (2) means build.
+          match=0
+          grep -qzE '^(apps/apple/|\.github/workflows/apple-[^/]*\.yml$)' "$files" || match=$?
+          if [ "$match" -ne 1 ]; then
             build
           fi
           echo "apple=false" >> "$GITHUB_OUTPUT"
