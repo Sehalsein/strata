@@ -1,0 +1,147 @@
+name: CodeQL
+
+# Code scanning (CodeQL's advanced setup; GitHub's default setup must be off, or GitHub refuses
+# these results). Workflows, TypeScript and Ruby are quick and run on every change. Swift needs
+# a macOS runner and a full Xcode build (10-20 minutes), so it runs only when the Apple apps
+# (apps/apple) or the Mac launcher (apps/macos) change, and every week.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, javascript-typescript, ruby]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
+
+  changes:
+    name: Swift changed?
+    runs-on: ubuntu-latest
+    outputs:
+      swift: ${{ steps.diff.outputs.swift }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Look for Swift changes
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # The weekly scan and manual runs always analyze Swift, and so does any change
+          # we can't diff (a first push, a force push).
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "swift=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          range="$BASE...$HEAD"
+          [ "$EVENT" = push ] && range="$BASE..$HEAD"
+          if git diff --name-only "$range" | grep -qE '^(apps/apple/|apps/macos/|\.github/workflows/codeql\.yml$)'; then
+            echo "swift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "swift=false" >> "$GITHUB_OUTPUT"
+            echo "No changes to apps/apple or apps/macos: skipping the Swift analysis."
+          fi
+
+  swift:
+    name: Analyze (swift)
+    needs: changes
+    if: needs.changes.outputs.swift == 'true'
+    # Like apple-ci: the packages target macOS 26 and need Xcode 26.
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Select Xcode 26
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # The same FFmpeg cache as apple-ci. CodeQL's autobuild can't build the packages that
+      # link it (StrataFeatures, StrataPlayerUI): the framework isn't kept in git.
+      - name: Restore FFmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: apps/apple/Packages/StrataRemux/Frameworks
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('apps/apple/Packages/StrataRemux/scripts/build-ffmpeg.sh') }}
+
+      - name: Build FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        working-directory: apps/apple
+        run: Packages/StrataRemux/scripts/build-ffmpeg.sh
+
+      - name: Generate Xcode project
+        working-directory: apps/apple
+        run: xcodegen generate
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: swift
+          build-mode: manual
+
+      # Everything CodeQL should see is compiled while it watches: the app (with its packages
+      # and widgets) and the Mac launcher.
+      - name: Build the app
+        working-directory: apps/apple
+        run: |
+          xcodebuild build \
+            -project Strata.xcodeproj -scheme Strata -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO COMPILER_INDEX_STORE_ENABLE=NO
+
+      - name: Build the Mac launcher
+        run: swiftc -swift-version 6 -target arm64-apple-macos14 apps/macos/StrataLauncher/main.swift -o "$RUNNER_TEMP/StrataLauncher"
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:swift
