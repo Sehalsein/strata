@@ -136,6 +136,16 @@ jobs:
           api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
 
+      - name: Download Top Shelf provisioning profile
+        if: matrix.id == 'tvos'
+        uses: Apple-Actions/download-provisioning-profiles@v6
+        with:
+          bundle-id: com.sehalsein.strata.topshelf
+          profile-type: TVOS_APP_STORE
+          issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+
       - name: Archive and export ${{ matrix.name }}
         id: build
         uses: Apple-Actions/xcodebuild@v1
