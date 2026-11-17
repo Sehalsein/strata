@@ -110,7 +110,12 @@ const FULL_ADDON_ROW = 100;
 const FOR_YOU_MIN_RATING = 6.3;
 const FOR_YOU_MIN_VOTES = 150;
 /** "Because you watched" rows at most: one each for the strongest taste signals. */
-const BECAUSE_ROWS = 5;
+const BECAUSE_ROWS = 3;
+
+/** What a person has started, finished or listed ("movie:603"), left out of what's recommended to them. */
+function seenKeys(history: { mediaType: string; titleId: number }[], listed: { type: TitleType; titleId: number }[]): Set<string> {
+  return new Set([...history.map((h) => `${h.mediaType === "movie" ? "movie" : "show"}:${h.titleId}`), ...listed.map((l) => `${l.type}:${l.titleId}`)]);
+}
 
 async function homeSafe<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
   try {
@@ -972,19 +977,8 @@ export class CatalogService {
     const seeds = tasteSeeds(history, listed.map((l) => ({ source: l.source, type: l.type, titleId: l.titleId, addedAt: l.addedAt })));
     if (!seeds.length) return none;
     // Everything they've started, finished or listed is left out, as are the seeds themselves.
-    const seen = new Set<string>([
-      ...history.map((h) => `${h.mediaType === "movie" ? "movie" : "show"}:${h.titleId}`),
-      ...listed.map((l) => `${l.type}:${l.titleId}`),
-    ]);
-    const details = await Promise.all(
-      seeds.map(async (seed) => {
-        const d = await (seed.type === "movie" ? this.tmdb.movie(seed.id) : this.tmdb.show(seed.id)).catch(() => null);
-        // TMDB lists a movie's recommendations as movies and a show's as shows.
-        // Only well-liked ones: TMDB's raw recommendations include plenty that aren't.
-        const items = (d?.recommendations?.results ?? []).filter((r) => (r.vote_average ?? 0) >= FOR_YOU_MIN_RATING && (r.vote_count ?? 0) >= FOR_YOU_MIN_VOTES);
-        return { seed, name: d ? ("title" in d ? d.title : d.name) : null, items };
-      }),
-    );
+    const seen = seenKeys(history, listed);
+    const details = await Promise.all(seeds.map(async (seed) => ({ seed, ...(await this.seedRecs(seed.type, seed.id)) })));
     const usable = details.filter((d) => d.name && d.items.length);
     if (!usable.length) return none;
     const byKey = new Map<string, TmdbListItem>();
@@ -1006,12 +1000,45 @@ export class CatalogService {
     const picks = pickCards.slice(0, 20);
     // Pooling needs more than one title to say something the "Because" rows don't.
     if (usable.length >= 2 && picks.length >= 6) shelves.push({ id: "forYou", title: "Top picks for you", kind: "titles", items: picks });
-    for (const d of usable.slice(0, BECAUSE_ROWS)) {
+    // "Because you watched" means watched: a title only on My List helps the picks, but gets no row.
+    for (const d of usable.filter((d) => d.seed.watched).slice(0, BECAUSE_ROWS)) {
       const recs = bestFirst(recsOf(d).filter((r) => !seen.has(`${r.type}:${r.id}`))).slice(0, 20);
       if (recs.length >= 4) shelves.push({ id: `because:${d.seed.type}:${d.seed.id}`, title: `Because you watched ${d.name}`, kind: "titles", items: await toCards(recs) });
     }
     const byType = { movie: pickCards.filter((c) => c.type === "movie").slice(0, 20), show: pickCards.filter((c) => c.type === "show").slice(0, 20) };
     return { home: shelves, byType };
+  }
+
+  /**
+   * A title's well-liked TMDB recommendations (TMDB lists a movie's as movies and a show's
+   * as shows; its raw list includes plenty that aren't well liked), and the title's name.
+   */
+  private async seedRecs(type: TitleType, id: number): Promise<{ name: string | null; items: TmdbListItem[] }> {
+    const d = await (type === "movie" ? this.tmdb.movie(id) : this.tmdb.show(id)).catch(() => null);
+    const items = (d?.recommendations?.results ?? []).filter((r) => (r.vote_average ?? 0) >= FOR_YOU_MIN_RATING && (r.vote_count ?? 0) >= FOR_YOU_MIN_VOTES);
+    return { name: d ? ("title" in d ? d.title : d.name) : null, items };
+  }
+
+  /**
+   * One "Because you watched …" row in full, for its See all. Built from the title it
+   * follows rather than looked up among the rows For you has now: those change as the
+   * person watches (and when For you is rebuilt), and the row on screen should still open.
+   */
+  private async becauseRow(userId: string, rowId: string): Promise<Shelf | null> {
+    const [, kind, idText] = rowId.split(":");
+    const type = kind === "movie" || kind === "show" ? kind : null;
+    const id = Number(idText);
+    if (!type || !Number.isSafeInteger(id) || id <= 0) return null;
+    const [history, listed, { name, items }] = await Promise.all([this.progress.history(userId), this.progress.watchlist(userId), this.seedRecs(type, id)]);
+    if (!name) return null;
+    const seen = seenKeys(history, listed);
+    const byId = new Map(items.map((r) => [r.id, r]));
+    const recs = bestFirst(items.filter((r) => !seen.has(`${type}:${r.id}`)).map((r) => ({ type, id: r.id, rating: r.vote_average }))).slice(0, 20);
+    const cards = await this.cards(recs.map((r) => byId.get(r.id)!), type);
+    const at = new Map(recs.map((r, i) => [formatRef(tmdbRef(type, r.id)), i]));
+    cards.sort((a, b) => (at.get(a.ref) ?? 0) - (at.get(b.ref) ?? 0));
+    const shelf: Shelf = { id: rowId, title: `Because you watched ${name}`, kind: "titles", items: cards };
+    return applyLayout([shelf], this.layout("home"), { cut: false })[0] ?? null;
   }
 
   /**
@@ -1067,6 +1094,7 @@ export class CatalogService {
       const rows = await this.pageAddonRows(page, { full: true, only: rowId });
       return applyLayout(rows, this.layout(page), { cut: false }).find((s) => s.id === rowId) ?? null;
     }
+    if (page === "home" && rowId.startsWith("because:")) return this.becauseRow(userId, rowId);
     const full = { full: true, only: "" };
     const shelves =
       page === "home"

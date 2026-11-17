@@ -694,6 +694,12 @@ describe("playback", () => {
       expect(full).toMatchObject({ title: "Film night" });
       expect(full.items.length).toBeGreaterThanOrEqual(row.items.length);
       expect((await server.request(`/api/rows/home/${encodeURIComponent("nope")}`, { token })).status).toBe(404);
+      // A "Because you watched" row opens from the title it follows, even once For you no
+      // longer has it (here, it never did: nothing's been watched).
+      const because = await server.request(`/api/rows/home/${encodeURIComponent("because:movie:10378")}`, { token });
+      expect(because.status).toBe(200);
+      expect(await json(because)).toMatchObject({ title: "Because you watched Big Buck Bunny", items: [] });
+      expect((await server.request(`/api/rows/home/${encodeURIComponent("because:movie:x")}`, { token })).status).toBe(404);
       // The pages API says what was saved.
       const home = (await json(await server.request("/api/admin/pages", { token }))).pages[0];
       expect(home.rows.slice(0, 3).map((r: any) => [r.id, r.on, r.name ?? null, r.count ?? null])).toEqual([

@@ -12,6 +12,8 @@ export interface Seed {
   type: TitleType;
   id: number;
   weight: number;
+  /** Played, not only on My List: only these get a "Because you watched …" row. */
+  watched: boolean;
 }
 
 /** One play record, as far as taste cares (a movie, or an episode of a show). */
@@ -38,10 +40,11 @@ const HALF_LIFE_DAYS = 45;
 export function tasteSeeds(history: Watched[], listed: { source: string; type: TitleType; titleId: number; addedAt: number }[], now = Date.now()): Seed[] {
   const fade = (at: number) => Math.pow(0.5, Math.max(0, now - at) / (HALF_LIFE_DAYS * 86_400_000));
   const seeds = new Map<string, Seed & { at: number }>();
-  const add = (type: TitleType, id: number, weight: number, at: number) => {
+  const add = (type: TitleType, id: number, weight: number, at: number, watched = true) => {
     const key = `${type}:${id}`;
-    const s = seeds.get(key) ?? { type, id, weight: 0, at };
+    const s = seeds.get(key) ?? { type, id, weight: 0, watched: false, at };
     s.weight += weight;
+    s.watched ||= watched;
     s.at = Math.max(s.at, at);
     seeds.set(key, s);
   };
@@ -60,12 +63,12 @@ export function tasteSeeds(history: Watched[], listed: { source: string; type: T
     episodes.set(h.titleId, e);
   }
   for (const [id, e] of episodes) add("show", id, Math.min(1 + e.done * 0.5, 4) * fade(e.at), e.at);
-  for (const l of listed) if (l.source === "tmdb") add(l.type, l.titleId, 1 * fade(l.addedAt), l.addedAt);
+  for (const l of listed) if (l.source === "tmdb") add(l.type, l.titleId, 1 * fade(l.addedAt), l.addedAt, false);
   return [...seeds.values()]
     .filter((s) => s.weight > 0.05)
     .sort((a, b) => b.weight - a.weight || b.at - a.at)
     .slice(0, MAX_SEEDS)
-    .map(({ type, id, weight }) => ({ type, id, weight }));
+    .map(({ type, id, weight, watched }) => ({ type, id, weight, watched }));
 }
 
 /** A recommendation, as TMDB lists them (the movie's or show's own type). */
