@@ -104,8 +104,13 @@ public enum TopShelf {
     @discardableResult
     public static func save(_ snapshot: TopShelfSnapshot) -> Bool {
         guard let file, load() != snapshot, let data = try? JSONEncoder().encode(snapshot) else { return false }
-        try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        return true
+        do {
+            try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            return true
+        } catch {
+            Log.net.warning("Top Shelf snapshot not saved: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     /// Forgets it (signed out): the Top Shelf goes back to the app's own image.
@@ -113,8 +118,14 @@ public enum TopShelf {
     public static func clear() -> Bool {
         if let dir = artworkDirectory { try? FileManager.default.removeItem(at: dir) }
         guard let file, FileManager.default.fileExists(atPath: file.path) else { return false }
-        try? FileManager.default.removeItem(at: file)
-        return true
+        do {
+            try FileManager.default.removeItem(at: file)
+            return true
+        } catch {
+            // Left as it was: the owner check runs again at the next launch or switch.
+            Log.net.warning("Top Shelf snapshot not cleared: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     /// The art file for an item: named for its art and logo, so a changed one is made again
