@@ -19,7 +19,19 @@ export interface ServerInfo {
   /** The public site in front of this server (the cloud's landing page), which has the privacy page. */
   siteUrl?: string | null;
   /** Ways in besides a password that this server is set up for. */
-  signIn?: { google: boolean; passkey: boolean; passwordReset?: boolean; /** Cloud: anyone may make an account (and gets a household of their own). */ signUp?: boolean; /** New accounts confirm their email before signing in. */ confirmEmail?: boolean };
+  signIn?: {
+    google: boolean;
+    passkey: boolean;
+    /** The domain passkeys belong to ("localhost" on a home server without an HTTPS address). */
+    passkeyDomain?: string | null;
+    /** The one address passkeys work at (see features/auth/passkey-availability.ts). */
+    passkeyAddress?: string | null;
+    passwordReset?: boolean;
+    /** Cloud: anyone may make an account (and gets a household of their own). */
+    signUp?: boolean;
+    /** New accounts confirm their email before signing in. */
+    confirmEmail?: boolean;
+  };
 }
 
 /** What a server does (src/profile.ts on the server). */

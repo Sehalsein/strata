@@ -82,27 +82,53 @@ export function isSystemAdmin(profile: DeploymentProfile, user: { role?: string 
 function adminEmailProven(user: { emailVerified?: boolean | null }): boolean {
   return !emailConfigured() || !!user.emailVerified;
 }
+/** Where passkeys work: the domain they belong to, and the page origins that may use them. */
+export interface PasskeySetup {
+  /** The WebAuthn relying party id: a passkey only works on this host or a subdomain of it. */
+  rpID: string;
+  origin: string[];
+}
+
 /**
- * The ways in besides a password, each on only when the server is set up for it, so a
- * home server shows neither:
+ * The ways in besides a password, each on only when the server is set up for it:
  * - Google: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (redirect URI
  *   `<address>/api/auth/callback/google`).
- * - Passkeys: a public HTTPS address (STRATA_PUBLIC_URL); browsers only allow them on HTTPS.
- *   They belong to its host, or to STRATA_PASSKEY_RP_ID, a domain it's under: passkeys
- *   made at strata.example.com keep working when the server moves to app.strata.example.com.
+ * - Passkeys: browsers only allow them on HTTPS (or http://localhost), at a hostname (never
+ *   an IP address), and each one belongs to that hostname for good. So:
+ *   - With an HTTPS STRATA_PUBLIC_URL, they belong to its host, or to STRATA_PASSKEY_RP_ID, a
+ *     domain it's under: passkeys made at strata.example.com keep working when the server
+ *     moves to app.strata.example.com.
+ *   - Otherwise a home server (`localhostPasskeys`) offers them at http://localhost:<port>,
+ *     on its own machine only. Other addresses (a LAN IP, plain HTTP) can't use them; the
+ *     dashboard says why.
+ *   - Otherwise (the cloud without an HTTPS address) there are none.
  */
-export function signInMethods() {
+export function signInMethods(where: { profile: Pick<DeploymentProfile, "localhostPasskeys">; port?: number }) {
   const google = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET } : null;
-  let passkeys: { rpID: string; origin: string } | null = null;
+  return { google, passkeys: passkeySetup(where) };
+}
+
+function passkeySetup({ profile, port }: { profile: Pick<DeploymentProfile, "localhostPasskeys">; port?: number }): PasskeySetup | null {
+  let url: URL | null = null;
   try {
-    const url = process.env.STRATA_PUBLIC_URL ? new URL(process.env.STRATA_PUBLIC_URL) : null;
-    const rpID = process.env.STRATA_PASSKEY_RP_ID || url?.hostname;
-    const under = !!url && !!rpID && (url.hostname === rpID || url.hostname.endsWith(`.${rpID}`));
-    if (url?.protocol === "https:" && under) passkeys = { rpID: rpID!, origin: url.origin };
+    url = process.env.STRATA_PUBLIC_URL ? new URL(process.env.STRATA_PUBLIC_URL) : null;
   } catch {
-    // Not a URL: no passkeys.
+    // Not a URL: as if unset.
   }
-  return { google, passkeys };
+  if (url?.protocol === "https:" && !isIpAddress(url.hostname)) {
+    const rpID = (process.env.STRATA_PASSKEY_RP_ID || url.hostname).toLowerCase();
+    const host = url.hostname.toLowerCase();
+    if (host === rpID || host.endsWith(`.${rpID}`)) return { rpID, origin: [url.origin] };
+    return null; // An RP id the address isn't under: browsers would refuse every passkey.
+  }
+  if (profile.localhostPasskeys && port) return { rpID: "localhost", origin: [`http://localhost:${port}`] };
+  return null;
+}
+
+/** An IPv4 or IPv6 address (WebAuthn needs a hostname). */
+export function isIpAddress(host: string): boolean {
+  const h = host.replace(/^\[|\]$/g, "");
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(":");
 }
 
 /** The admin plugin's permissions (see `admin()` below for who gets which). */
@@ -117,7 +143,7 @@ const accessControl = createAccessControl(defaultStatements);
  * plugin later is refused until it's listed here.
  */
 const VIEWER_ALLOWED =
-  /^\/(get-session|sign-out|sign-in\/.+|sign-up\/.+|magic-link\/verify|callback\/.+|device|device\/(code|token|approve|deny)|organization\/(list|set-active|get-full-organization|get-active-member|get-active-member-role)|update-user|change-password|multi-session\/(list-device-sessions|set-active)|request-password-reset|forget-password|reset-password(\/.+)?|verify-email|send-verification-email|error|ok)$/;
+  /^\/(get-session|sign-out|sign-in\/.+|passkey\/(generate-authenticate-options|verify-authentication)|sign-up\/.+|magic-link\/verify|callback\/.+|device|device\/(code|token|approve|deny)|organization\/(list|set-active|get-full-organization|get-active-member|get-active-member-role)|update-user|change-password|multi-session\/(list-device-sessions|set-active)|request-password-reset|forget-password|reset-password(\/.+)?|verify-email|send-verification-email|error|ok)$/;
 
 /** Whether a watch-only session (viewerOnly) may call this Better Auth path. */
 export function viewerMayCall(path: string): boolean {
@@ -125,7 +151,7 @@ export function viewerMayCall(path: string): boolean {
 }
 
 /** Better Auth paths the public demo refuses for everyone: changes to its accounts and household. */
-const DEMO_REFUSED = /^\/(change-password|update-user|change-email|delete-user|set-password|admin\/|organization\/(create|update|delete|invite-member|remove-member|update-member-role|leave|cancel-invitation)$)/;
+const DEMO_REFUSED = /^\/(change-password|update-user|change-email|delete-user|set-password|admin\/|passkey\/(generate-register-options|verify-registration|update-passkey|delete-passkey)$|organization\/(create|update|delete|invite-member|remove-member|update-member-role|leave|cancel-invitation)$)/;
 
 /** Whether the read-only demo refuses this Better Auth path. */
 export function demoRefuses(path: string): boolean {
@@ -180,6 +206,8 @@ export interface AuthOptions {
   secretKey: Buffer;
   /** The address people reach the server at, when known (cloud). */
   baseURL?: string;
+  /** The port this server listens on (passkeys at http://localhost on a home server). */
+  port?: number;
 }
 
 /**
@@ -205,7 +233,7 @@ export interface AuthOptions {
  */
 export function createAuth(options: AuthOptions) {
   const { db, profile } = options;
-  const methods = signInMethods();
+  const methods = signInMethods({ profile: options.profile, port: options.port });
   const confirmEmail = profile.openSignUp && emailConfigured();
   /**
    * Whether the caller (by their headers) is an owner or admin of `organizationId` (or of

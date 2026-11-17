@@ -64,6 +64,7 @@ For the nightly channel, download from `server-nightly` instead of `server-stabl
 | `--data-dir` | `STRATA_DATA_DIR` | `~/Library/Application Support/Strata` (macOS), `~/.local/share/strata` (Linux) |
 | `--web-dir` | `STRATA_WEB_DIR` | The embedded dashboard |
 | `--database-url` | `DATABASE_URL` | The bundled database in the data folder |
+| | `STRATA_PUBLIC_URL` | None. The server's HTTPS address (e.g. `https://strata.example.com` behind a reverse proxy or Tailscale). Passkeys belong to it, so everyone signs in with them from anywhere; without it, passkeys work only at `http://localhost:<port>` on this machine. |
 | | `STRATA_DEBUG=1` | Off. Turns on debug logging, including ffmpeg command lines. |
 | | `STRATA_NO_FFMPEG_DOWNLOAD=1` | Off. Stops a source run from downloading ffmpeg. |
 
