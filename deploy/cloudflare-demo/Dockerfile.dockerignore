@@ -4,6 +4,7 @@
 !bun.lock
 !apps/server/package.json
 !apps/landing/package.json
+!apps/docs/package.json
 !apps/server/src
 !apps/server/scripts/demo
 **/*.test.ts
