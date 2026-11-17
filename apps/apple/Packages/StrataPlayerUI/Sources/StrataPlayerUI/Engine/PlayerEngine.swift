@@ -217,9 +217,6 @@ public final class PlayerEngine {
     @ObservationIgnored private var stallTask: Task<Void, Never>?
     @ObservationIgnored private var lastReportAt = Date.distantPast
     @ObservationIgnored private var lastReportedMs: Int?
-    /// The playing response was built on this device (a download), not sent by the server:
-    /// only then may the engine open a file on the device. Never read from the response.
-    @ObservationIgnored private var playsLocalFile = false
     /// Set once the first stream played; before that there's no real position to report
     /// (reporting 0 would wipe the saved resume point).
     private var didStartPlayback = false
@@ -283,7 +280,6 @@ public final class PlayerEngine {
         lastProbedFile = nil
         linkRefreshes = 0
         reportAttempts = []
-        playsLocalFile = false
         self.target = target
         self.meta = meta
         status = .loading
@@ -330,7 +326,6 @@ public final class PlayerEngine {
         startToken += 1
         let token = startToken
         linkRefreshes = 0
-        playsLocalFile = true
         self.target = target
         self.meta = meta
         status = .loading
@@ -339,7 +334,12 @@ public final class PlayerEngine {
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.start(res, gen: gen, token: token, newTitle: true, autoplay: true)
+                // A download plays as it is: never the server's HLS (which only a server serves).
+                guard res.mode == .direct || res.mode == .device else {
+                    throw DeviceFailure(message: String(localized: "This download can't play on this device. Download it again.", bundle: .module))
+                }
+                // Built on this device from a download: the one start that may open a local file.
+                try await self.start(res, gen: gen, token: token, newTitle: true, autoplay: true, local: true)
             } catch let failure as DeviceFailure {
                 guard gen == self.generation else { return }
                 self.status = .failed(failure.message)
@@ -515,7 +515,9 @@ public final class PlayerEngine {
 
     /// Plays a play response. `newTitle` resets tracks/subtitles; otherwise (a restart for a
     /// seek, an audio switch, a fresh link) the subtitle selection and cues carry over.
-    private func start(_ res: PlayResponse, gen: Int, token: Int, newTitle: Bool, autoplay: Bool) async throws {
+    /// `local`: `res` was built on this device (a download), not sent by the server. Only
+    /// then may a file on the device be opened; every other start passes false.
+    private func start(_ res: PlayResponse, gen: Int, token: Int, newTitle: Bool, autoplay: Bool, local: Bool = false) async throws {
         // A server session this start opened but never installed is stopped, however it ends.
         var installed = false
         defer { if !installed, res.sessionId != session?.sessionId { stopSession(res.sessionId) } }
@@ -525,7 +527,7 @@ public final class PlayerEngine {
 
         // Only web links from the server; files on the device only for a download, whose
         // response the app built itself.
-        guard Self.isOpenable(res.url, local: playsLocalFile) else {
+        guard Self.isOpenable(res.url, local: local) else {
             throw DeviceFailure(message: String(localized: "This copy's link isn't one the app can open. Choose another source.", bundle: .module), stage: "connecting")
         }
         if res.mode.isHLS {
