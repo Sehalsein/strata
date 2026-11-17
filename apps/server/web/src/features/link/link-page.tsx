@@ -26,7 +26,7 @@ export default function LinkPage() {
   };
   return (
     <Page className="max-w-xl">
-      <PageHeader title="Link a TV" description="Sign in a TV without typing a password with the remote: choose “Sign in with a code” on the TV, then scan its QR code or enter the code here." />
+      <PageHeader title="Link a TV" guide="/people/devices" description="Sign in a TV without typing a password with the remote: choose “Sign in with a code” on the TV, then scan its QR code or enter the code here." />
       {code ? <Approve key={code} code={code} onReset={() => choose("")} /> : <EnterCode onSubmit={choose} />}
     </Page>
   );

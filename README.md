@@ -2,7 +2,7 @@
 
 Strata is a media app for the movies and shows you already have. You run the server at home, next to your files, and watch on iPhone, iPad, Mac and Apple TV, with artwork, resume, Continue Watching, My List and a profile for everyone in the house.
 
-Website: [strata.sehalsein.com](https://strata.sehalsein.com)
+Website: [strata.sehalsein.com](https://strata.sehalsein.com) · Setup guides: [docs.strata.sehalsein.com](https://docs.strata.sehalsein.com)
 
 ## Quick start
 
@@ -34,6 +34,7 @@ No server needed. On the app's Connect screen, enter `https://strata-demo.seinse
 | `apps/server/web` | The web dashboard | [README](apps/server/web/README.md) |
 | `apps/apple` | iPhone, iPad and Apple TV apps, in SwiftUI | [README](apps/apple/README.md) |
 | `apps/landing` | The website, strata.sehalsein.com | |
+| `apps/docs` | The knowledge base, docs.strata.sehalsein.com: setup guides | |
 | `deploy/cloud` | The server as a stateless Docker image | [README](deploy/cloud/README.md) |
 | `deploy/cloudflare` | The cloud server on Cloudflare Workers | [README](deploy/cloudflare/README.md) |
 | `deploy/cloudflare-demo` | The public demo | [README](deploy/cloudflare-demo/README.md) |

@@ -11,6 +11,7 @@ export default function MembersPage() {
   return (
     <Page className="max-w-5xl">
       <PageHeader
+        guide="/people/invites"
         title="Members"
         description={`Everyone in ${me.household?.name ?? "this household"}. Each person signs in with their own account, which keeps their progress and My List. A kids account only sees titles within its limit.`}
         actions={

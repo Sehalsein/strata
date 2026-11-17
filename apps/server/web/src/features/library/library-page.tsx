@@ -72,7 +72,7 @@ export default function LibraryPage() {
 
   return (
     <Page>
-      <PageHeader title="Library" description="Every file Strata knows about, local and TorBox. Fix wrong or missing matches here." />
+      <PageHeader title="Library" description="Every file Strata knows about, local and TorBox. Fix wrong or missing matches here." guide="/library/folders" />
 
       <Card className="gap-4 py-4">
         <CardContent className="flex flex-col gap-4 px-4">
