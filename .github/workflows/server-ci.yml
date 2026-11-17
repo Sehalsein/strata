@@ -64,9 +64,19 @@ jobs:
           # Finding no tests (a moved folder, say) fails, rather than passing on nothing.
           [ -n "$files" ] || { echo "::error::no test files found"; exit 1; }
           failed=0
+          out=$(mktemp)
           for f in $files; do
             echo "::group::$f"
-            bun test "./$f" || { failed=1; echo "::error file=apps/server/$f::tests failed"; }
+            if ! bun test "./$f" 2>&1 | tee "$out"; then
+              # PGlite's WebAssembly sometimes crashes on these runners (never locally): the
+              # database itself dies, not a test. That, and only that, gets one more try.
+              if grep -qE "RuntimeError: (Aborted\(\)|Out of bounds memory access)" "$out"; then
+                echo "::warning file=apps/server/$f::PGlite crashed; running the file again"
+                bun test "./$f" || { failed=1; echo "::error file=apps/server/$f::tests failed"; }
+              else
+                failed=1; echo "::error file=apps/server/$f::tests failed"
+              fi
+            fi
             echo "::endgroup::"
           done
           echo "Ran $(wc -w <<< "$files") test files"
