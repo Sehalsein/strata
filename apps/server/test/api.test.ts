@@ -380,6 +380,11 @@ describe("setup and auth", () => {
     expect((await server.request("/api/titles/movie/666", { token: bob })).status).toBe(403);
     expect((await server.request("/api/play", { method: "POST", token: bob, json: { mediaType: "movie", tmdbId: 666 } })).status).toBe(403);
     expect((await server.request("/api/titles/movie/10378", { token: bob })).status).toBe(200);
+    // Nor named by a "Because you watched" row asked for by id.
+    const because = (id: number, t: string) => server.request(`/api/rows/home/${encodeURIComponent(`because:movie:${id}`)}`, { token: t });
+    expect((await because(666, bob)).status).toBe(403);
+    expect((await because(10378, bob)).status).toBe(200);
+    expect((await because(666, token)).status).toBe(200);
     // Other accounts are unaffected.
     expect(await titles(token)).toEqual([666, 10378]);
     // Nor the files of those titles, by id.
