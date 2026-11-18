@@ -29,7 +29,8 @@ concurrency:
 jobs:
   upload:
     name: Upload ${{ matrix.name }}
-    runs-on: macos-15
+    # Xcode 27: uploads are built against the iOS and tvOS 27 SDKs.
+    runs-on: xcode-27
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -79,9 +80,9 @@ jobs:
             exit 1
           fi
 
-      - name: Select Xcode 26
+      - name: Select Xcode 27
         run: |
-          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          sudo xcode-select --switch /Applications/Xcode_27.2.app/Contents/Developer
           xcodebuild -version
 
       - name: Install XcodeGen
