@@ -92,7 +92,8 @@ jobs:
     name: ${{ matrix.channel }} ${{ matrix.version }}
     needs: channel
     # macOS: the darwin binary has to be ad-hoc signed with codesign; Linux ones cross-compile.
-    runs-on: macos-15
+    # Xcode 27, like the Apple apps: the Mac app's launcher is compiled with its swiftc.
+    runs-on: xcode-27
     timeout-minutes: 30
     # Deployment branches: main only. Its secrets (the signing key) exist for nothing else.
     environment: server-release
@@ -112,6 +113,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false # the token stays out of .git/config, away from build steps
+
+      - name: Select Xcode 27
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_27.2.app/Contents/Developer
+          xcodebuild -version
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:

@@ -66,9 +66,10 @@ jobs:
     # every step is skipped on a Linux runner. Only an explicit "false" skips: anything else builds.
     name: ${{ matrix.name }}
     needs: changes
-    # macOS 26: the packages target macOS 26, and their SwiftUI tests run on the host. The
-    # package tests are a job of their own, so they run alongside the two app builds.
-    runs-on: ${{ needs.changes.outputs.apple == 'false' && 'ubuntu-latest' || 'macos-26' }}
+    # Xcode 27 (macOS 27, GitHub's `xcode-27` image): the apps build against the iOS and tvOS
+    # 27 SDKs, and the packages' SwiftUI tests run on the host. The package tests are a job of
+    # their own, so they run alongside the two app builds.
+    runs-on: ${{ needs.changes.outputs.apple == 'false' && 'ubuntu-latest' || 'xcode-27' }}
     env:
       APPLE_CHANGED: ${{ needs.changes.outputs.apple }}
       HOMEBREW_NO_AUTO_UPDATE: "1"
@@ -94,10 +95,10 @@ jobs:
         if: env.APPLE_CHANGED != 'false'
         uses: actions/checkout@v7
 
-      - name: Select Xcode 26
+      - name: Select Xcode 27
         if: env.APPLE_CHANGED != 'false'
         run: |
-          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          sudo xcode-select --switch /Applications/Xcode_27.2.app/Contents/Developer
           xcodebuild -version
 
       - name: Install XcodeGen
