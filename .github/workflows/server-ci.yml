@@ -3,8 +3,8 @@ name: Server CI
 # Typecheck, test and build-check the server and its dashboard on every change to them.
 on:
   push:
-    # main, and the branches work happens on (a push there checks it before any PR exists).
-    branches: [main, strata-server, "fix/**", "feat/**", "codex/**", "test/**"]
+    # main only: work branches are checked by their PR (a push there too ran everything twice).
+    branches: [main]
     paths:
       - "apps/server/**"
       - "package.json"
@@ -38,16 +38,21 @@ jobs:
         with:
           bun-version: 1.2.20
 
-      # The tests generate small media fixtures with ffmpeg and probe them with ffprobe. Without
-      # both on PATH those tests skip themselves, so this step fails loudly if either is missing.
-      - name: Install ffmpeg
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
-          ffmpeg -hide_banner -version | head -1
-          ffprobe -hide_banner -version | head -1
-
       - name: Install
         run: bun install --frozen-lockfile
+
+      # The tests generate small media fixtures with ffmpeg and probe them with ffprobe. Without
+      # both on PATH those tests skip themselves, so this step fails loudly if either is missing.
+      # It's the pinned, checksummed build the server sets up for itself (src/platform/
+      # ffmpegInstall.ts): seconds to fetch, where apt-get took 20 s and sometimes 10 minutes.
+      - name: Install ffmpeg
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/ffmpeg"
+          bun -e 'import { installFfmpeg } from "./apps/server/src/platform/ffmpegInstall.ts"; if (!(await installFfmpeg(process.argv[1]))) process.exit(1);' "$dir"
+          echo "$dir/bin" >> "$GITHUB_PATH"
+          "$dir/bin/ffmpeg" -hide_banner -version | head -1
+          "$dir/bin/ffprobe" -hide_banner -version | head -1
 
       - name: Typecheck
         working-directory: apps/server
@@ -55,7 +60,10 @@ jobs:
 
       # Each file in its own Bun process: one process for the whole suite piles up dozens
       # of in-memory PGlite databases, and on this runner Bun then segfaults or PGlite
-      # fails to start one.
+      # fails to start one. The files run side by side (they use port 0 and their own temp
+      # dirs), and each one's output is printed whole, in order, afterwards. One file per two
+      # cores: a Bun process with PGlite keeps about 1.5 cores busy, and packed tighter, slow
+      # tests start hitting their 5 s timeouts.
       - name: Test
         working-directory: apps/server
         run: |
@@ -63,21 +71,35 @@ jobs:
           files=$(find test src -name '*.test.ts' | sort) || exit 1
           # Finding no tests (a moved folder, say) fails, rather than passing on nothing.
           [ -n "$files" ] || { echo "::error::no test files found"; exit 1; }
-          failed=0
-          out=$(mktemp)
-          for f in $files; do
-            echo "::group::$f"
-            if ! bun test "./$f" 2>&1 | tee "$out"; then
-              # PGlite's WebAssembly sometimes crashes on these runners (never locally): the
-              # database itself dies, not a test. That, and only that, gets one more try.
-              if grep -qE "RuntimeError: (Aborted\(\)|Out of bounds memory access)" "$out"; then
-                echo "::warning file=apps/server/$f::PGlite crashed; running the file again"
-                bun test "./$f" || { failed=1; echo "::error file=apps/server/$f::tests failed"; }
-              else
-                failed=1; echo "::error file=apps/server/$f::tests failed"
-              fi
+          logs="$RUNNER_TEMP/test-logs"
+          mkdir -p "$logs"
+          export logs
+          run_file() {
+            local log="$logs/${1//\//_}"
+            if bun test "./$1" > "$log.out" 2>&1; then echo pass > "$log.status"; return 0; fi
+            # PGlite's WebAssembly sometimes crashes on these runners (never locally): the
+            # database itself dies, not a test. That, and only that, gets one more try.
+            if grep -qE "RuntimeError: (Aborted\(\)|Out of bounds memory access)" "$log.out"; then
+              echo "----- PGlite crashed; running the file again -----" >> "$log.out"
+              if bun test "./$1" >> "$log.out" 2>&1; then echo retried > "$log.status"; else echo retry-failed > "$log.status"; fi
+              return 0
             fi
+            echo fail > "$log.status"
+          }
+          export -f run_file
+          jobs=$(( $(nproc) / 2 )); [ "$jobs" -ge 1 ] || jobs=1
+          printf '%s\n' $files | xargs -P "$jobs" -I{} bash -c 'run_file "$1"' _ {}
+          failed=0
+          for f in $files; do
+            log="$logs/${f//\//_}"
+            echo "::group::$f"
+            cat "$log.out" 2>/dev/null
             echo "::endgroup::"
+            case "$(cat "$log.status" 2>/dev/null)" in
+              pass) ;;
+              retried) echo "::warning file=apps/server/$f::PGlite crashed; passed on the second run" ;;
+              *) failed=1; echo "::error file=apps/server/$f::tests failed" ;;
+            esac
           done
           echo "Ran $(wc -w <<< "$files") test files"
           exit $failed
@@ -109,10 +131,51 @@ jobs:
         working-directory: apps/server
         run: bun scripts/build.ts --target bun-linux-x64 --skip-web
 
+  # Whether the code a first start's ffmpeg setup runs through changed: the download and
+  # unpacking (src/platform), its wiring at start-up (services, jobs, main, profile), and the
+  # build of the binary itself. Anything in doubt runs it.
+  ffmpeg-changes:
+    name: First-run code changed?
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Look for changes
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -o pipefail
+          run() { echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          if ! git cat-file -e "$BASE^{commit}" 2>/dev/null || ! git cat-file -e "$HEAD^{commit}" 2>/dev/null; then
+            run
+          fi
+          range="$BASE...$HEAD"
+          [ "$EVENT" = push ] && range="$BASE..$HEAD"
+          files="$RUNNER_TEMP/changed-files"
+          git diff -z --name-only --no-renames "$range" > "$files" || run
+          # Only grep's clean "no match" (1) skips: a match (0) or an error (2) runs it.
+          match=0
+          grep -qzE '^(apps/server/src/platform/|apps/server/src/(services|jobs|main|profile)\.ts$|apps/server/src/jobs/|apps/server/scripts/build\.ts$|apps/server/package\.json$|package\.json$|bun\.lock$|\.github/workflows/server-ci\.yml$)' "$files" || match=$?
+          if [ "$match" -ne 1 ]; then
+            run
+          fi
+          echo "changed=false" >> "$GITHUB_OUTPUT"
+          echo "No changes to the first-run ffmpeg setup: skipping that check."
+
   # A fresh install on a machine with no ffmpeg: the server sets up its own (pinned and
   # checksummed) on first start, and that ffmpeg works on this platform.
   first-run:
     name: First run sets up ffmpeg (${{ matrix.os }})
+    needs: ffmpeg-changes
+    if: needs.ffmpeg-changes.outputs.changed != 'false'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
