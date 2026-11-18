@@ -46,7 +46,10 @@ jobs:
 
   swift:
     name: Analyze (swift)
-    # Like apple-ci: the packages target macOS 26 and need Xcode 26.
+    # macOS 26 and Xcode 26, while every other Apple build uses Xcode 27: on macOS 27, CodeQL's
+    # build tracer can't start the system's sandbox-exec or the Swift compiler's macro plugin
+    # server ("Bad CPU type in executable"). CodeQL reads the source, so the SDK doesn't change
+    # what it finds. Move this to `xcode-27` once a CodeQL release supports macOS 27.
     runs-on: macos-26
     timeout-minutes: 60
     env:
