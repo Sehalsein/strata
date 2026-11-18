@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { and, eq, gt, lt } from "drizzle-orm";
 import type { Db } from "../db";
 import { playSessions } from "../db/schema";
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 import type { MediaInfo } from "../media/probe";
@@ -238,15 +238,25 @@ export class SessionManager {
       hwEncoder,
     });
     log.debug(`ffmpeg ${redactSecrets(args.slice(1).join(" "))}`);
-    const proc = Bun.spawn(args, { stdout: "ignore", stderr: "pipe" });
+    // ffmpeg's messages go to a file in the session's folder, not a pipe: stopping a session
+    // kills ffmpeg, and Bun 1.2 can throw "Controller is already closed" from a pipe still
+    // being read when its process dies. The stream route serves only the playlist, init and
+    // segments from this folder, never the log.
+    const stderrPath = join(session.dir, "ffmpeg.log");
+    const proc = Bun.spawn(args, { stdout: "ignore", stderr: Bun.file(stderrPath) });
     session.proc = proc;
     void (async () => {
-      const stderr = await new Response(proc.stderr).text();
       const code = await proc.exited;
       // A process replaced by the stall restart below isn't the session's any more.
       if (session.proc !== proc) return;
       session.exitCode = code;
       if (code !== 0 && this.sessions.has(session.id)) {
+        let stderr = "";
+        try {
+          stderr = readFileSync(stderrPath, "utf8");
+        } catch {
+          // The folder went with the session.
+        }
         session.error = redactSecrets(stderr.trim().split("\n").slice(-3).join(" | "));
         log.warn(`ffmpeg exited ${code} for ${session.id.slice(0, 8)}: ${session.error}`);
       }
