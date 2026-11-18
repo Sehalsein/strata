@@ -1,22 +1,12 @@
 name: Apple CI
 
 on:
-  # Every PR: "iOS and iPadOS" and "tvOS" are required checks, so they report on each one. A PR
-  # that doesn't touch the Apple apps gets them in seconds, skipped on a Linux runner (see
-  # `changes`); one that does builds for real.
+  # Every PR: "iOS and iPadOS", "tvOS" and "Swift packages" are required checks, so they report
+  # on each one. A PR that doesn't touch the Apple apps gets them in seconds, skipped on a Linux
+  # runner (see `changes`); one that does builds for real. No push runs: main only takes PRs
+  # that are up to date with it (the "Protect main" ruleset), so a merge would build again
+  # exactly what its PR already built.
   pull_request:
-  push:
-    # main, and the branches work happens on (a push there checks it before any PR exists).
-    branches:
-      - main
-      - strata-server
-      - "fix/**"
-      - "feat/**"
-      - "codex/**"
-      - "test/**"
-    paths:
-      - "apps/apple/**"
-      - ".github/workflows/apple-*.yml"
   workflow_dispatch:
 
 permissions:
@@ -48,8 +38,8 @@ jobs:
         run: |
           set -o pipefail
           build() { echo "apple=true" >> "$GITHUB_OUTPUT"; exit 0; }
-          # Pushes and manual runs are already filtered to the Apple apps (see `on`). Anything
-          # in doubt builds: a missing commit, or git failing.
+          # Manual runs always build, and so does anything in doubt: a missing commit, or git
+          # failing.
           if [ "$EVENT" != pull_request ]; then
             build
           fi
@@ -77,10 +67,13 @@ jobs:
     name: ${{ matrix.name }}
     needs: changes
     # Xcode 27 (macOS 27, GitHub's `xcode-27` image): the apps build against the iOS and tvOS
-    # 27 SDKs, and the packages' SwiftUI tests run on the host.
+    # 27 SDKs, and the packages' SwiftUI tests run on the host. The package tests are a job of
+    # their own, so they run alongside the two app builds.
     runs-on: ${{ needs.changes.outputs.apple == 'false' && 'ubuntu-latest' || 'xcode-27' }}
     env:
       APPLE_CHANGED: ${{ needs.changes.outputs.apple }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
     timeout-minutes: 50
     strategy:
       fail-fast: false
@@ -94,6 +87,8 @@ jobs:
             id: tvos
             sdk: appletvsimulator
             destination: generic/platform=tvOS Simulator
+          - name: Swift packages
+            id: packages
 
     steps:
       - name: Check out repository
@@ -107,16 +102,29 @@ jobs:
           xcodebuild -version
 
       - name: Install XcodeGen
-        if: env.APPLE_CHANGED != 'false'
+        if: env.APPLE_CHANGED != 'false' && matrix.id != 'packages'
         run: brew install xcodegen
 
       - name: Generate Xcode project
-        if: env.APPLE_CHANGED != 'false'
+        if: env.APPLE_CHANGED != 'false' && matrix.id != 'packages'
         working-directory: apps/apple
         run: xcodegen generate
 
+      # Package downloads (AetherEngine, FFmpegBuild, …) survive between runs: SwiftPM's shared
+      # repository cache for `swift test`, and Xcode's cloned packages for the app build. Both
+      # still fetch from the remote and resolve as usual; the cache only saves re-cloning.
+      - name: Restore Swift package downloads
+        if: env.APPLE_CHANGED != 'false'
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            apps/apple/.build/DerivedData/SourcePackages
+          key: apple-spm-${{ matrix.id }}-${{ hashFiles('apps/apple/project.yml', 'apps/apple/Packages/*/Package.swift') }}
+          restore-keys: apple-spm-${{ matrix.id }}-
+
       - name: Run Swift package tests
-        if: env.APPLE_CHANGED != 'false' && (matrix.id == 'ios')
+        if: env.APPLE_CHANGED != 'false' && matrix.id == 'packages'
         working-directory: apps/apple
         run: |
           swift test --package-path Packages/StrataKit
@@ -124,7 +132,7 @@ jobs:
           swift test --package-path Packages/StrataPlayerUI
 
       - name: Build ${{ matrix.name }}
-        if: env.APPLE_CHANGED != 'false'
+        if: env.APPLE_CHANGED != 'false' && matrix.id != 'packages'
         uses: Apple-Actions/xcodebuild@v1
         with:
           working-directory: apps/apple
@@ -133,13 +141,16 @@ jobs:
           configuration: Debug
           sdk: ${{ matrix.sdk }}
           destination: ${{ matrix.destination }}
+          # arm64 only: the app already excludes x86_64 for the simulators (project.yml), but a
+          # generic destination still built every Swift package for x86_64 too, which nothing used.
           build-settings: |
             CODE_SIGNING_ALLOWED=NO
             CODE_SIGNING_REQUIRED=NO
+            ARCHS=arm64
           disable-automatic-package-resolution: false
 
       - name: Upload build log
-        if: env.APPLE_CHANGED != 'false' && (failure() || cancelled())
+        if: env.APPLE_CHANGED != 'false' && matrix.id != 'packages' && (failure() || cancelled())
         uses: actions/upload-artifact@v7
         with:
           name: apple-${{ matrix.id }}-logs
