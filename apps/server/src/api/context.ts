@@ -14,7 +14,8 @@ import type { Services } from "../services";
 export interface RequestSession {
   /** Better Auth's session token (the bearer token). */
   token: string;
-  user: { id: string; username: string | null; name: string; email: string; image: string | null; isServerAdmin: boolean };
+  /** `emailVerified`: whether its owner has confirmed the address (an invitee may not have yet; the app asks). */
+  user: { id: string; username: string | null; name: string; email: string; emailVerified: boolean; image: string | null; isServerAdmin: boolean };
   organizationId: string | null;
   /** "owner" | "admin" | "member" in the active household, once `requireHousehold` ran. */
   role: string | null;
@@ -58,7 +59,7 @@ export const requireAuth: MiddlewareHandler<Env> = createMiddleware<Env>(async (
   }
   c.set("session", {
     token: s.token,
-    user: { id: u.id, username: u.username ?? null, name: u.name, email: u.email, image: u.image ?? null, isServerAdmin: isSystemAdmin(c.var.services.profile, u) && !viewerOnly },
+    user: { id: u.id, username: u.username ?? null, name: u.name, email: u.email, emailVerified: !!u.emailVerified, image: u.image ?? null, isServerAdmin: isSystemAdmin(c.var.services.profile, u) && !viewerOnly },
     organizationId: s.activeOrganizationId ?? null,
     role: null,
     viewerOnly,

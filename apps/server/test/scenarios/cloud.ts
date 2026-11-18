@@ -39,6 +39,39 @@ try {
   // A made-up invitation still opens nothing.
   expect((await signUp("cat@example.com", "cat", "not-an-invitation")).status).toBe(403);
 
+  // Usernames are unique within a household, not across the server.
+  const signIn = (username: string, password = "a-good-password") =>
+    server.request("/api/auth/sign-in/username", { method: "POST", ip: `203.0.113.${++ip}`, json: { username, password } });
+  const zed = await server.request("/api/auth/sign-up/email", { method: "POST", ip: `203.0.113.${++ip}`, json: { email: "zed@example.com", password: "zeds-password", name: "Zed", username: "Ann" } });
+  expect(zed.status).toBe(200); // another household's "ann"
+  const zedToken = zed.headers.get("set-auth-token")!;
+  // The password says which "ann".
+  expect((await json(await server.request("/api/me", { token: (await signIn("ann")).headers.get("set-auth-token")! }))).user.email).toBe("ann@example.com");
+  expect((await json(await server.request("/api/me", { token: (await signIn("ANN", "zeds-password")).headers.get("set-auth-token")! }))).user.email).toBe("zed@example.com");
+  expect((await signIn("ann", "nobodys-password")).status).toBe(401);
+  // Same name and same password: neither, by name; the email still says which.
+  await signUp("dup1@example.com", "dup");
+  await signUp("dup2@example.com", "dup");
+  const ambiguous = await signIn("dup");
+  expect(ambiguous.status).toBe(401);
+  expect((await json(ambiguous)).code).toBe("AMBIGUOUS_USERNAME");
+  expect((await server.request("/api/auth/sign-in/email", { method: "POST", ip: `203.0.113.${++ip}`, json: { email: "dup2@example.com", password: "a-good-password" } })).status).toBe(200);
+  // Within a household, a name is one person's: joining by invitation…
+  const clash = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token: annToken, json: { email: "amy@example.com", role: "member" } }));
+  const taken = await signUp("amy@example.com", "Ann", clash.id);
+  expect(taken.status).toBe(400);
+  expect((await json(taken)).code).toBe("USERNAME_IS_ALREADY_TAKEN");
+  expect((await signUp("amy@example.com", "amy", clash.id)).status).toBe(200);
+  // …an account from another household taking up an invitation…
+  const zedInvite = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token: annToken, json: { email: "zed@example.com", role: "member" } }));
+  expect((await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: zedToken, json: { invitationId: zedInvite.id } })).status).toBe(409);
+  expect((await server.request("/api/auth/update-user", { method: "POST", token: zedToken, json: { username: "zed" } })).status).toBe(200);
+  expect((await server.request("/api/auth/organization/accept-invitation", { method: "POST", token: zedToken, json: { invitationId: zedInvite.id } })).status).toBe(200);
+  // …or a new name.
+  expect((await server.request("/api/auth/update-user", { method: "POST", token: benToken, json: { username: "ann" } })).status).toBe(400);
+  expect((await server.request("/api/auth/update-user", { method: "POST", token: benToken, json: { username: "dup" } })).status).toBe(200);
+  expect((await server.request("/api/auth/update-user", { method: "POST", token: benToken, json: { username: "ben" } })).status).toBe(200);
+
   // A picture from elsewhere (Google's, say) isn't kept: profile pictures are the server's own.
   const dee = await server.request("/api/auth/sign-up/email", { method: "POST", ip: "203.0.113.200", json: { email: "dee@example.com", password: "a-good-password", name: "dee", username: "dee", image: "https://example.com/me.png" } });
   expect((await json(await server.request("/api/me", { token: dee.headers.get("set-auth-token")! }))).user.image).toBeNull();

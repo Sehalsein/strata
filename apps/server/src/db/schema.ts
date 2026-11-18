@@ -28,7 +28,8 @@ export const user = pgTable("user", {
   image: text("image"),
   createdAt: at("created_at").notNull(),
   updatedAt: at("updated_at").notNull(),
-  username: text("username").unique(),
+  /** Unique within each household, not across the server (auth/householdUsername.ts). */
+  username: text("username"),
   displayUsername: text("display_username"),
   /** "admin" runs the server (its keys and households); everyone else is "user". */
   role: text("role"),
@@ -37,7 +38,9 @@ export const user = pgTable("user", {
   banExpires: at("ban_expires"),
   /** Signed in with a temporary password from an admin: a new one is needed first. */
   mustChangePassword: boolean("must_change_password").notNull().default(false),
-});
+  /** Made from an invitation's link: may sign in before confirming its email (still unconfirmed until it does). */
+  joinedByInvitation: boolean("joined_by_invitation").notNull().default(false),
+}, (t) => [index("user_username").on(t.username)]);
 
 export const session = pgTable(
   "session",
