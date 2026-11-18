@@ -96,12 +96,20 @@ public enum MediaProbe {
     public static func probe(url: URL, timeout: TimeInterval = 20) async throws -> MediaInfo {
         let cancellation = ProbeCancellation()
         let limits = ProbeLimits(maxInputBytes: 16 << 20, timeBudget: timeout)
+        // Anime MKVs often carry tens of MiB of subtitle fonts ahead of the first frame. The
+        // probe only wants tracks and duration, so pass over them, or they eat the byte budget
+        // ("Probe input byte limit reached"). Playback still loads them for styled subtitles.
+        let options: LoadOptions = {
+            var options = LoadOptions()
+            options.skipsContainerAttachments = true
+            return options
+        }()
         return try await withTaskCancellationHandler {
             // The probe blocks on the network: it runs on its own thread, off Swift's pool.
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<MediaInfo, Error>) in
                 Thread.detachNewThread {
                     continuation.resume(with: Result {
-                        let probe = try AetherEngine.probe(url: url, limits: limits, cancellation: cancellation)
+                        let probe = try AetherEngine.probe(url: url, options: options, limits: limits, cancellation: cancellation)
                         return summarize(probe, path: url.path)
                     })
                 }
