@@ -46,8 +46,11 @@ jobs:
 
   swift:
     name: Analyze (swift)
-    # Like apple-ci: Xcode 27 and its iOS and tvOS 27 SDKs.
-    runs-on: xcode-27
+    # macOS 26 and Xcode 26, while every other Apple build uses Xcode 27: on macOS 27, CodeQL's
+    # build tracer can't start the system's sandbox-exec or the Swift compiler's macro plugin
+    # server ("Bad CPU type in executable"). CodeQL reads the source, so the SDK doesn't change
+    # what it finds. Move this to `xcode-27` once a CodeQL release supports macOS 27.
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
@@ -59,9 +62,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Select Xcode 27
+      - name: Select Xcode 26
         run: |
-          sudo xcode-select --switch /Applications/Xcode_27.2.app/Contents/Developer
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
           xcodebuild -version
 
       - name: Install XcodeGen
@@ -70,17 +73,6 @@ jobs:
       - name: Generate Xcode project
         working-directory: apps/apple
         run: xcodegen generate
-
-      # On macOS 27, CodeQL's build tracer can't start /usr/bin/sandbox-exec ("Bad CPU type in
-      # executable"), which SwiftPM runs package manifests in. So the packages are resolved before
-      # CodeQL starts watching, and the watched build neither resolves them again nor sandboxes
-      # manifests. The code compiled, and so analyzed, is the same.
-      - name: Resolve Swift packages
-        working-directory: apps/apple
-        run: |
-          xcodebuild -resolvePackageDependencies -project Strata.xcodeproj -scheme Strata \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData"
-          defaults write com.apple.dt.Xcode IDEPackageSupportDisableManifestSandbox -bool YES
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
@@ -99,7 +91,7 @@ jobs:
             xcodebuild build \
               -project Strata.xcodeproj -scheme Strata -configuration Debug \
               -sdk "${platform%%|*}" -destination "generic/platform=${platform#*|}" \
-              -derivedDataPath "$RUNNER_TEMP/DerivedData" -disableAutomaticPackageResolution \
+              -derivedDataPath "$RUNNER_TEMP/DerivedData" \
               CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO COMPILER_INDEX_STORE_ENABLE=NO ARCHS=arm64
           done
 
