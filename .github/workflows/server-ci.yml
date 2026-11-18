@@ -60,10 +60,7 @@ jobs:
 
       # Each file in its own Bun process: one process for the whole suite piles up dozens
       # of in-memory PGlite databases, and on this runner Bun then segfaults or PGlite
-      # fails to start one. The files run side by side (they use port 0 and their own temp
-      # dirs), and each one's output is printed whole, in order, afterwards. One file per two
-      # cores: a Bun process with PGlite keeps about 1.5 cores busy, and packed tighter, slow
-      # tests start hitting their 5 s timeouts.
+      # fails to start one.
       - name: Test
         working-directory: apps/server
         run: |
@@ -71,35 +68,21 @@ jobs:
           files=$(find test src -name '*.test.ts' | sort) || exit 1
           # Finding no tests (a moved folder, say) fails, rather than passing on nothing.
           [ -n "$files" ] || { echo "::error::no test files found"; exit 1; }
-          logs="$RUNNER_TEMP/test-logs"
-          mkdir -p "$logs"
-          export logs
-          run_file() {
-            local log="$logs/${1//\//_}"
-            if bun test "./$1" > "$log.out" 2>&1; then echo pass > "$log.status"; return 0; fi
-            # PGlite's WebAssembly sometimes crashes on these runners (never locally): the
-            # database itself dies, not a test. That, and only that, gets one more try.
-            if grep -qE "RuntimeError: (Aborted\(\)|Out of bounds memory access)" "$log.out"; then
-              echo "----- PGlite crashed; running the file again -----" >> "$log.out"
-              if bun test "./$1" >> "$log.out" 2>&1; then echo retried > "$log.status"; else echo retry-failed > "$log.status"; fi
-              return 0
-            fi
-            echo fail > "$log.status"
-          }
-          export -f run_file
-          jobs=$(( $(nproc) / 2 )); [ "$jobs" -ge 1 ] || jobs=1
-          printf '%s\n' $files | xargs -P "$jobs" -I{} bash -c 'run_file "$1"' _ {}
           failed=0
+          out=$(mktemp)
           for f in $files; do
-            log="$logs/${f//\//_}"
             echo "::group::$f"
-            cat "$log.out" 2>/dev/null
+            if ! bun test "./$f" 2>&1 | tee "$out"; then
+              # PGlite's WebAssembly sometimes crashes on these runners (never locally): the
+              # database itself dies, not a test. That, and only that, gets one more try.
+              if grep -qE "RuntimeError: (Aborted\(\)|Out of bounds memory access)" "$out"; then
+                echo "::warning file=apps/server/$f::PGlite crashed; running the file again"
+                bun test "./$f" || { failed=1; echo "::error file=apps/server/$f::tests failed"; }
+              else
+                failed=1; echo "::error file=apps/server/$f::tests failed"
+              fi
+            fi
             echo "::endgroup::"
-            case "$(cat "$log.status" 2>/dev/null)" in
-              pass) ;;
-              retried) echo "::warning file=apps/server/$f::PGlite crashed; passed on the second run" ;;
-              *) failed=1; echo "::error file=apps/server/$f::tests failed" ;;
-            esac
           done
           echo "Ran $(wc -w <<< "$files") test files"
           exit $failed
