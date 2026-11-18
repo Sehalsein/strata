@@ -1,15 +1,11 @@
 name: CodeQL
 
 # Code scanning (CodeQL's advanced setup; GitHub's default setup must be off, or GitHub refuses
-# these results). Workflows, TypeScript and Ruby are quick and run on every change. Swift needs
-# a macOS runner and full Xcode builds (about 20 minutes), so it runs only when the Apple apps
-# (apps/apple) or the Mac launcher (apps/macos) change, and every week.
+# these results). Weekly and on demand only, not on pull requests or merges: Swift alone needs a
+# macOS runner and full Xcode builds of the app for iOS and tvOS, and those runners are better
+# spent on the builds a merge waits for. Workflows, TypeScript and Ruby run alongside it.
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   schedule:
     - cron: "23 4 * * 1"
   workflow_dispatch:
@@ -19,7 +15,7 @@ permissions:
 
 concurrency:
   group: codeql-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
   analyze:
@@ -48,57 +44,14 @@ jobs:
         with:
           category: /language:${{ matrix.language }}
 
-  changes:
-    name: Swift changed?
-    runs-on: ubuntu-latest
-    outputs:
-      swift: ${{ steps.diff.outputs.swift }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Look for Swift changes
-        id: diff
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -o pipefail
-          analyze() { echo "swift=true" >> "$GITHUB_OUTPUT"; exit 0; }
-          # The weekly scan and manual runs always analyze Swift, and so does anything in doubt:
-          # a change we can't diff (a first push, a force push), or git failing.
-          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
-            analyze
-          fi
-          if ! git cat-file -e "$BASE^{commit}" 2>/dev/null || ! git cat-file -e "$HEAD^{commit}" 2>/dev/null; then
-            analyze
-          fi
-          range="$BASE...$HEAD"
-          [ "$EVENT" = push ] && range="$BASE..$HEAD"
-          # NUL-separated paths, which git never quotes or escapes, and a moved file counts at
-          # both its paths.
-          files="$RUNNER_TEMP/changed-files"
-          git diff -z --name-only --no-renames "$range" > "$files" || analyze
-          # grep reads the NUL-separated list itself (no pipeline to break), and only its clean
-          # "no match" (1) skips: a match (0) or an error (2) means analyze.
-          match=0
-          grep -qzE '^(apps/apple/|apps/macos/|\.github/workflows/codeql\.yml$)' "$files" || match=$?
-          if [ "$match" -ne 1 ]; then
-            analyze
-          fi
-          echo "swift=false" >> "$GITHUB_OUTPUT"
-          echo "No changes to apps/apple or apps/macos: skipping the Swift analysis."
-
   swift:
     name: Analyze (swift)
-    needs: changes
-    if: needs.changes.outputs.swift != 'false'
     # Like apple-ci: the packages target macOS 26 and need Xcode 26.
     runs-on: macos-26
     timeout-minutes: 60
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
     permissions:
       contents: read
       security-events: write
@@ -126,7 +79,8 @@ jobs:
 
       # Everything CodeQL should see is compiled while it watches: the app (with its packages
       # and widgets) for iOS and for tvOS, so code under `#if os(tvOS)` is analyzed too, and
-      # the Mac launcher.
+      # the Mac launcher. arm64 only: the app excludes x86_64 for the simulators, so the x86_64
+      # package builds a generic destination otherwise makes were the same source a second time.
       - name: Build the app
         working-directory: apps/apple
         run: |
@@ -135,7 +89,7 @@ jobs:
               -project Strata.xcodeproj -scheme Strata -configuration Debug \
               -sdk "${platform%%|*}" -destination "generic/platform=${platform#*|}" \
               -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO COMPILER_INDEX_STORE_ENABLE=NO
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO COMPILER_INDEX_STORE_ENABLE=NO ARCHS=arm64
           done
 
       - name: Build the Mac launcher

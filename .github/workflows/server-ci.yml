@@ -3,8 +3,8 @@ name: Server CI
 # Typecheck, test and build-check the server and its dashboard on every change to them.
 on:
   push:
-    # main, and the branches work happens on (a push there checks it before any PR exists).
-    branches: [main, strata-server, "fix/**", "feat/**", "codex/**", "test/**"]
+    # main only: work branches are checked by their PR (a push there too ran everything twice).
+    branches: [main]
     paths:
       - "apps/server/**"
       - "package.json"
@@ -38,16 +38,21 @@ jobs:
         with:
           bun-version: 1.2.20
 
-      # The tests generate small media fixtures with ffmpeg and probe them with ffprobe. Without
-      # both on PATH those tests skip themselves, so this step fails loudly if either is missing.
-      - name: Install ffmpeg
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
-          ffmpeg -hide_banner -version | head -1
-          ffprobe -hide_banner -version | head -1
-
       - name: Install
         run: bun install --frozen-lockfile
+
+      # The tests generate small media fixtures with ffmpeg and probe them with ffprobe. Without
+      # both on PATH those tests skip themselves, so this step fails loudly if either is missing.
+      # It's the pinned, checksummed build the server sets up for itself (src/platform/
+      # ffmpegInstall.ts): seconds to fetch, where apt-get took 20 s and sometimes 10 minutes.
+      - name: Install ffmpeg
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/ffmpeg"
+          bun -e 'import { installFfmpeg } from "./apps/server/src/platform/ffmpegInstall.ts"; if (!(await installFfmpeg(process.argv[1]))) process.exit(1);' "$dir"
+          echo "$dir/bin" >> "$GITHUB_PATH"
+          "$dir/bin/ffmpeg" -hide_banner -version | head -1
+          "$dir/bin/ffprobe" -hide_banner -version | head -1
 
       - name: Typecheck
         working-directory: apps/server
@@ -109,10 +114,51 @@ jobs:
         working-directory: apps/server
         run: bun scripts/build.ts --target bun-linux-x64 --skip-web
 
+  # Whether the code a first start's ffmpeg setup runs through changed: the download and
+  # unpacking (src/platform), its wiring at start-up (services, jobs, main, profile), and the
+  # build of the binary itself. Anything in doubt runs it.
+  ffmpeg-changes:
+    name: First-run code changed?
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Look for changes
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -o pipefail
+          run() { echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          if ! git cat-file -e "$BASE^{commit}" 2>/dev/null || ! git cat-file -e "$HEAD^{commit}" 2>/dev/null; then
+            run
+          fi
+          range="$BASE...$HEAD"
+          [ "$EVENT" = push ] && range="$BASE..$HEAD"
+          files="$RUNNER_TEMP/changed-files"
+          git diff -z --name-only --no-renames "$range" > "$files" || run
+          # Only grep's clean "no match" (1) skips: a match (0) or an error (2) runs it.
+          match=0
+          grep -qzE '^(apps/server/src/platform/|apps/server/src/(services|jobs|main|profile)\.ts$|apps/server/src/jobs/|apps/server/scripts/build\.ts$|apps/server/package\.json$|package\.json$|bun\.lock$|\.github/workflows/server-ci\.yml$)' "$files" || match=$?
+          if [ "$match" -ne 1 ]; then
+            run
+          fi
+          echo "changed=false" >> "$GITHUB_OUTPUT"
+          echo "No changes to the first-run ffmpeg setup: skipping that check."
+
   # A fresh install on a machine with no ffmpeg: the server sets up its own (pinned and
   # checksummed) on first start, and that ffmpeg works on this platform.
   first-run:
     name: First run sets up ffmpeg (${{ matrix.os }})
+    needs: ffmpeg-changes
+    if: needs.ffmpeg-changes.outputs.changed != 'false'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
