@@ -9,7 +9,12 @@
 //
 // Exits 1 only on a definite answer: an approved version at or above <marketing version>.
 // If App Store Connect can't be asked (network, auth), it warns and exits 0, so a hiccup
-// here never blocks a release. `ASC_RESPONSE_FILE` reads a saved response instead (tests).
+// here never blocks a release.
+//
+//   swift check-version-open.swift --fixture <response.json> <marketing version>
+//
+// reads a saved API response instead, for local tests. It's a flag rather than an environment
+// variable so only the reviewed command line can turn it on; the workflow never passes it.
 
 import CryptoKit
 import Foundation
@@ -21,11 +26,17 @@ func warnAndPass(_ message: String) -> Never {
     exit(0)
 }
 
-guard CommandLine.arguments.count == 2 else {
-    print("usage: check-version-open.swift <marketing version>")
+var args = Array(CommandLine.arguments.dropFirst())
+var fixture: String?
+if args.first == "--fixture", args.count >= 2 {
+    fixture = args[1]
+    args.removeFirst(2)
+}
+guard args.count == 1 else {
+    print("usage: check-version-open.swift [--fixture <response.json>] <marketing version>")
     exit(2)
 }
-let version = CommandLine.arguments[1]
+let version = args[0]
 
 /// "0.5.1" → [0, 5, 1]; compares by number, so 0.10.0 > 0.9.0.
 func parts(_ v: String) -> [Int] {
@@ -51,8 +62,8 @@ func base64url(_ data: Data) -> String {
 }
 
 func fetchVersions() async -> Data {
-    if let file = env["ASC_RESPONSE_FILE"] {
-        guard let data = FileManager.default.contents(atPath: file) else { warnAndPass("can't read \(file)") }
+    if let fixture {
+        guard let data = FileManager.default.contents(atPath: fixture) else { warnAndPass("can't read the fixture") }
         return data
     }
     guard let issuer = env["APPSTORE_ISSUER_ID"], !issuer.isEmpty,
@@ -72,7 +83,8 @@ func fetchVersions() async -> Data {
         let signature = try key.signature(for: Data(signingInput.utf8))
         token = signingInput + "." + base64url(signature.rawRepresentation)
     } catch {
-        warnAndPass("couldn't read the API private key (\(error))")
+        // No error detail: the only input here is the secret itself.
+        warnAndPass("couldn't read the App Store Connect API private key")
     }
 
     var url = URLComponents(string: "https://api.appstoreconnect.apple.com/v1/apps/\(appId)/appStoreVersions")!
