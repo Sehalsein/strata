@@ -105,6 +105,18 @@ jobs:
           echo "marketing_version=$version" >> "$GITHUB_OUTPUT"
           echo "build_number=$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
+      # Apple rejects a build of an approved version only after the upload, and the upload
+      # action then waits ~40 minutes before timing out. Ask first, before the build.
+      - name: Check the version is open for builds
+        working-directory: apps/apple
+        env:
+          MARKETING_VERSION: ${{ steps.version.outputs.marketing_version }}
+          APPSTORE_APP_ID: "6804102192"
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+        run: swift ci/check-version-open.swift "$MARKETING_VERSION"
+
       - name: Generate Xcode project
         working-directory: apps/apple
         run: xcodegen generate
