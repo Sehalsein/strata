@@ -60,12 +60,11 @@ struct MovieDetailView: View {
                           badges: movie.sources.first?.specLabels.prefix(3).map { $0 } ?? [],
                           ratings: movie.ratings.badges,
                           overview: movie.overview, featured: Metrics.isTV,
-                          credits: [HeroCredit(String(localized: "Starring", bundle: .module), movie.cast.prefix(3).map(\.name)), HeroCredit(String(localized: "Director", bundle: .module), movie.directors)].filter { !$0.names.isEmpty },
-                          progress: movie.progress.flatMap { $0.isResumable ? HeroProgress(fraction: $0.fraction, label: Formatting.remaining(ms: $0.remainingMs)) : nil }) {
+                          credits: [HeroCredit(String(localized: "Starring", bundle: .module), movie.cast.prefix(3).map(\.name)), HeroCredit(String(localized: "Director", bundle: .module), movie.directors)].filter { !$0.names.isEmpty }) {
                 // Plays when it's in the library or the server lists a source for it.
                 if let choice = playChoice(movie) {
-                    // A resume carries its progress in the button (the TV shows it in the hero).
-                    let resume = Metrics.isTV ? nil : movie.progress.flatMap { $0.isResumable ? $0 : nil }
+                    // A resume carries its progress in the button.
+                    let resume = movie.progress.flatMap { $0.isResumable ? $0 : nil }
                     PlayButton(choice.label, size: Metrics.heroControlSize,
                                progress: resume?.fraction, progressLabel: resume.flatMap { Formatting.remaining(ms: $0.remainingMs) }) {
                         services.play(choice, title: movie.title, artworkURL: movie.backdropUrl ?? movie.posterUrl, logoURL: movie.logoUrl)
