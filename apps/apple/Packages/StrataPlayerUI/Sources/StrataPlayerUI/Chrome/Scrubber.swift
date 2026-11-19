@@ -75,9 +75,10 @@ public struct Scrubber: View {
         VStack(alignment: .leading, spacing: Metrics.space2) {
             GeometryReader { geo in
                 let w = geo.size.width
+                // Every shape keeps the track's height, so nothing drawn here can stretch the bar.
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.25))
-                    Capsule().fill(fill).frame(width: max(trackHeight, w * fraction))
+                    Capsule().fill(.white.opacity(0.25)).frame(height: trackHeight)
+                    Capsule().fill(fill).frame(width: max(trackHeight, w * fraction), height: trackHeight)
                     ForEach(Array(chapters.enumerated()), id: \.offset) { _, chapter in
                         if duration > 0, chapter.start > 0, chapter.start < duration {
                             Rectangle().fill(.white.opacity(0.6))
@@ -91,14 +92,22 @@ public struct Scrubber: View {
                         .shadow(color: .black.opacity(0.3), radius: 4)
                         .offset(x: w * fraction - trackHeight * 1.3)
                         .opacity(isActive ? 1 : 0)
-                    if let scrubValue {
-                        preview(scrubValue)
-                            .fixedSize()
-                            .offset(x: min(max(0, w * fraction - 50), w - 100), y: -44)
-                    }
                     #endif
                 }
                 .frame(height: trackHeight)
+                #if os(tvOS)
+                // Above the bar, centred on the playhead and kept on screen. An overlay, so it
+                // can't size the bar: in the stack it stretched the track to its own height.
+                .overlay(alignment: .bottomLeading) {
+                    if let scrubValue {
+                        preview(scrubValue)
+                            .fixedSize()
+                            .alignmentGuide(.leading) { $0.width / 2 }
+                            .offset(x: min(max(Self.previewHalfWidth, w * fraction), w - Self.previewHalfWidth),
+                                    y: -(trackHeight + Metrics.space3))
+                    }
+                }
+                #endif
                 .frame(maxHeight: .infinity)
                 // Only the start and end of a drag animate (the bar's thickness); the
                 // playhead itself follows the finger without lag.
@@ -232,16 +241,18 @@ public struct Scrubber: View {
     private func preview(_ seconds: TimeInterval) -> some View {
         VStack(spacing: 2) {
             if let title = chapters.last(where: { $0.start <= seconds })?.title {
-                Text(title).font(.stFootnote).lineLimit(1)
+                Text(title).font(.stFootnote).lineLimit(1).frame(maxWidth: 2 * Self.previewHalfWidth - 2 * Metrics.space3)
             }
-            Text(Self.format(seconds)).font(.stTimecode)
+            Text(Self.format(seconds)).font(.stTimecode).lineLimit(1)
         }
         .foregroundStyle(Theme.onArtwork)
         .padding(.horizontal, Metrics.space3)
         .padding(.vertical, Metrics.space2)
         .glassEffect(.regular, in: .capsule)
-        .frame(width: 100)
     }
+
+    /// About half the preview's width, to keep it from running off either end.
+    private static let previewHalfWidth: CGFloat = 110
     #endif
 
     /// "1:02:03", or "4:05" under an hour, in the locale's digits and separators.
