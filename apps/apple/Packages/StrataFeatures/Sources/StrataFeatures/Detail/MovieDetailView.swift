@@ -64,7 +64,12 @@ struct MovieDetailView: View {
                           progress: movie.progress.flatMap { $0.isResumable ? HeroProgress(fraction: $0.fraction, label: Formatting.remaining(ms: $0.remainingMs)) : nil }) {
                 // Plays when it's in the library or the server lists a source for it.
                 if let choice = playChoice(movie) {
-                    PlayButton(choice.label, size: Metrics.heroControlSize) { services.play(choice, title: movie.title, artworkURL: movie.backdropUrl ?? movie.posterUrl, logoURL: movie.logoUrl) }
+                    // A resume carries its progress in the button (the TV shows it in the hero).
+                    let resume = Metrics.isTV ? nil : movie.progress.flatMap { $0.isResumable ? $0 : nil }
+                    PlayButton(choice.label, size: Metrics.heroControlSize,
+                               progress: resume?.fraction, progressLabel: resume.flatMap { Formatting.remaining(ms: $0.remainingMs) }) {
+                        services.play(choice, title: movie.title, artworkURL: movie.backdropUrl ?? movie.posterUrl, logoURL: movie.logoUrl)
+                    }
                         .glassEffectID("play", in: namespace)
                         #if os(tvOS)
                         .focused($heroFocus, equals: .play)
@@ -96,15 +101,6 @@ struct MovieDetailView: View {
 
             if let playOptions, playOptions.choice == nil {
                 AvailabilityLabel(.unavailable).padding(.horizontal, Metrics.gutter)
-            }
-
-            // On the TV, under the hero's buttons (see `heroProgress`).
-            if !Metrics.isTV, let progress = movie.progress, progress.isResumable {
-                HStack(spacing: Metrics.space3) {
-                    ProgressBar(progress.fraction).frame(maxWidth: 240)
-                    Text(Formatting.remaining(ms: progress.remainingMs) ?? "").font(.stFootnote).foregroundStyle(Theme.ink3)
-                }
-                .padding(.horizontal, Metrics.gutter)
             }
 
             CastRail(cast: movie.cast)

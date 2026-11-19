@@ -31,14 +31,23 @@ public struct PlayButton: View {
     /// Widens the button, like the TV app's hero (`.infinity` to fill the row).
     let maxWidth: CGFloat?
     let size: ControlSize
+    /// How far in a resume is (0...1), drawn as a thin bar under the label, as the TV
+    /// app's Resume button does, so the page needs no progress row of its own. tvOS
+    /// shows progress in its hero instead.
+    let progress: Double?
+    /// Beside the bar, e.g. "2h 52m left".
+    let progressLabel: String?
     let action: () -> Void
 
     /// No `title`: "Play".
-    public init(_ title: String? = nil, systemImage: String = "play.fill", maxWidth: CGFloat? = nil, size: ControlSize = Metrics.heroControlSize, action: @escaping () -> Void) {
+    public init(_ title: String? = nil, systemImage: String = "play.fill", maxWidth: CGFloat? = nil, size: ControlSize = Metrics.heroControlSize,
+                progress: Double? = nil, progressLabel: String? = nil, action: @escaping () -> Void) {
         self.title = title ?? String(localized: "Play", bundle: .module)
         self.systemImage = systemImage
         self.maxWidth = maxWidth
         self.size = size
+        self.progress = progress
+        self.progressLabel = progressLabel
         self.action = action
     }
 
@@ -60,13 +69,30 @@ public struct PlayButton: View {
         .controlSize(size)
         #else
         Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(Font.buttonLabel(size))
-                .foregroundStyle(Theme.onAccent)
-                .lineLimit(1)
-                .fixedSize()
-                .padding(.horizontal, Metrics.space2)
-                .frame(minWidth: maxWidth.flatMap { $0.isFinite ? $0 : nil }, maxWidth: maxWidth == .infinity ? .infinity : nil, minHeight: 30)
+            VStack(spacing: 4) {
+                Label(title, systemImage: systemImage)
+                    .font(Font.buttonLabel(size))
+                    .lineLimit(1)
+                    .fixedSize()
+                if progress != nil {
+                    // Holds the row's size: as wide as the label, or the time plus room
+                    // for a bar when the time is the wider of the two.
+                    Text(progressLabel ?? "").font(.stFootnote.weight(.medium).monospacedDigit()).padding(.leading, 36).hidden()
+                }
+            }
+            .fixedSize()
+            .overlay(alignment: .bottom) {
+                if let progress {
+                    // The bar takes whatever the time leaves.
+                    HStack(spacing: 6) {
+                        ResumeBar(fraction: progress)
+                        if let progressLabel { Text(progressLabel).font(.stFootnote.weight(.medium).monospacedDigit()).fixedSize() }
+                    }
+                }
+            }
+            .foregroundStyle(Theme.onAccent)
+            .padding(.horizontal, Metrics.space2)
+            .frame(minWidth: maxWidth.flatMap { $0.isFinite ? $0 : nil }, maxWidth: maxWidth == .infinity ? .infinity : nil, minHeight: 30)
         }
         .buttonStyle(.glassProminent)
         .tint(Theme.apricot)
@@ -74,6 +100,25 @@ public struct PlayButton: View {
         #endif
     }
 }
+
+#if !os(tvOS)
+/// The thin bar inside a Resume button, in the button's label colour.
+private struct ResumeBar: View {
+    let fraction: Double
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.onAccent.opacity(0.3))
+                Capsule().fill(Theme.onAccent)
+                    .frame(width: max(3, geo.size.width * min(max(fraction, 0), 1)))
+            }
+        }
+        .frame(height: 3)
+        .accessibilityHidden(true)
+    }
+}
+#endif
 
 /// Full-width primary action for forms (Continue, Sign In). Prominent Liquid Glass in
 /// the neutral accent when enabled; the label switches to `ink-3` when disabled so it stays legible.
