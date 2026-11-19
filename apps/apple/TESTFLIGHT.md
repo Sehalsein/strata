@@ -38,9 +38,11 @@ In App Store Connect:
 
 ## 2. GitHub configuration
 
-Open the repository's Settings -> Secrets and variables -> Actions.
+Open the repository's Settings -> Environments -> `testflight`. That environment only allows
+deployments from `main`, so only the upload from `main` can read its secrets.
 
-Add these as secrets (all six, so none of them shows up in the public workflow logs):
+Add these as environment secrets (all six, so none of them shows up in the public workflow logs),
+not repository secrets, which a workflow on any branch can read:
 
 | Secret | Value |
 |---|---|
@@ -62,17 +64,12 @@ Keep all key and certificate files outside the repository.
 ## 3. Upload builds
 
 Every merge to `main` that changes `apps/apple` uploads a build under `MARKETING_VERSION`
-from `project.yml`. Bump it to start a new App Store version: once a version is released,
-App Store Connect takes no more builds of it.
+from `project.yml`. That is the only way builds ship: there are no release tags. Bump
+`MARKETING_VERSION` to start a new App Store version: once a version is released, App Store
+Connect takes no more builds of it.
 
-To upload another commit or version, tag it. The version is taken from the tag:
-
-```sh
-git tag apple-v0.1.0
-git push origin apple-v0.1.0
-```
-
-Alternatively, open Actions -> Apple TestFlight -> Run workflow and optionally enter a marketing version. If omitted, the workflow reads `MARKETING_VERSION` from `project.yml`.
+To retry a failed upload, re-run the failed jobs, or open Actions -> Apple TestFlight -> Run
+workflow on `main`. Runs from any other branch are skipped.
 
 GitHub assigns build numbers as `<workflow run>.<attempt>`, so rerunning a failed upload gets a new App Store Connect build number. iOS/iPadOS and tvOS upload in parallel and appear as separate platform builds under the same app record.
 

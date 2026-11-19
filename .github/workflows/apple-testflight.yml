@@ -1,37 +1,36 @@
 name: Apple TestFlight
 
-# Every merge to main that changes the Apple apps uploads a TestFlight build. An
-# `apple-v<version>` tag push or a manual run (Actions → Apple TestFlight → Run workflow)
-# uploads one too. Builds are numbered by the run (run.attempt). The version is what the tag
-# names, the one given to a manual run, or MARKETING_VERSION from project.yml. Bump that for a
-# new App Store version; once one is released, App Store Connect takes no more builds of it.
-# Keep the push-to-main upload: merging an app change is how it ships.
+# Every merge to main that changes the Apple apps uploads a TestFlight build. That is the
+# only way builds ship: no tags, no inputs. Keep it that way: merging an app change is how it
+# ships.
+#
+# Signing credentials are secrets of the `testflight` environment, which only `main` may
+# deploy to (Settings → Environments). A workflow on any other branch, or a manual run from
+# one, can't read them. A manual run on main exists only to retry an upload.
+#
+# The version is MARKETING_VERSION from project.yml. Bump it to start a new App Store version:
+# once one is released, App Store Connect takes no more builds of it. Builds are numbered by
+# the run (run.attempt).
 on:
   push:
     branches: [main]
     paths:
       - "apps/apple/**"
       - ".github/workflows/apple-testflight.yml"
-    # Path filters don't apply to tag pushes, so every apple-v* tag still uploads.
-    tags:
-      - "apple-v*"
   workflow_dispatch:
-    inputs:
-      marketing_version:
-        description: Version to upload, for example 0.1.0 (defaults to project.yml)
-        required: false
-        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: apple-testflight-${{ github.ref }}
+  group: apple-testflight
   cancel-in-progress: false
 
 jobs:
   upload:
     name: Upload ${{ matrix.name }}
+    if: github.ref == 'refs/heads/main'
+    environment: testflight
     # Xcode 27: uploads are built against the iOS and tvOS 27 SDKs.
     runs-on: xcode-27
     timeout-minutes: 60
@@ -97,16 +96,8 @@ jobs:
       - name: Resolve version and build number
         id: version
         working-directory: apps/apple
-        env:
-          REQUESTED_VERSION: ${{ inputs.marketing_version }}
         run: |
-          version="$REQUESTED_VERSION"
-          if [[ -z "$version" && "$GITHUB_REF_TYPE" == "tag" ]]; then
-            version="${GITHUB_REF_NAME#apple-v}"
-          fi
-          if [[ -z "$version" ]]; then
-            version="$(awk -F'"' '/MARKETING_VERSION:/ {print $2; exit}' project.yml)"
-          fi
+          version="$(awk -F'"' '/MARKETING_VERSION:/ {print $2; exit}' project.yml)"
           if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
             echo "Invalid marketing version: $version" >&2
             exit 1
