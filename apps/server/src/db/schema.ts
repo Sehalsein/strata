@@ -38,8 +38,6 @@ export const user = pgTable("user", {
   banExpires: at("ban_expires"),
   /** Signed in with a temporary password from an admin: a new one is needed first. */
   mustChangePassword: boolean("must_change_password").notNull().default(false),
-  /** Made from an invitation's link: may sign in before confirming its email (still unconfirmed until it does). */
-  joinedByInvitation: boolean("joined_by_invitation").notNull().default(false),
 }, (t) => [index("user_username").on(t.username)]);
 
 export const session = pgTable(

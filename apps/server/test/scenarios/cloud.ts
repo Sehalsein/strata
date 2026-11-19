@@ -56,6 +56,14 @@ try {
   expect(ambiguous.status).toBe(401);
   expect((await json(ambiguous)).code).toBe("AMBIGUOUS_USERNAME");
   expect((await server.request("/api/auth/sign-in/email", { method: "POST", ip: `203.0.113.${++ip}`, json: { email: "dup2@example.com", password: "a-good-password" } })).status).toBe(200);
+  // Wrong guesses at a shared name count against every account with it, and another
+  // account's sign-in under that name can't clear them.
+  await server.request("/api/auth/sign-up/email", { method: "POST", ip: `203.0.113.${++ip}`, json: { email: "twin1@example.com", password: "twin-one-password", name: "t", username: "twin" } });
+  await server.request("/api/auth/sign-up/email", { method: "POST", ip: `203.0.113.${++ip}`, json: { email: "twin2@example.com", password: "twin-two-password", name: "t", username: "twin" } });
+  for (let i = 0; i < 50; i++) await signIn("twin", `guess-${i}`);
+  expect((await signIn("twin", "twin-two-password")).status).toBe(429);
+  expect((await signIn("twin", "twin-one-password")).status).toBe(429);
+
   // Within a household, a name is one person's: joining by invitation…
   const clash = await json(await server.request("/api/auth/organization/invite-member", { method: "POST", token: annToken, json: { email: "amy@example.com", role: "member" } }));
   const taken = await signUp("amy@example.com", "Ann", clash.id);

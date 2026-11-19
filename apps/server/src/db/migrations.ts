@@ -312,9 +312,8 @@ export const migrations: string[] = [
   );
   CREATE INDEX source_picks_show ON source_picks(user_id, organization_id, source, media_type, title_id, updated_at);
   `,
-  /* 10: usernames unique per household, not server-wide; accounts made from an invitation */ `
+  /* 10: usernames unique per household, not server-wide */ `
   ALTER TABLE "user" DROP CONSTRAINT IF EXISTS user_username_key;
   CREATE INDEX IF NOT EXISTS user_username ON "user"(username);
-  ALTER TABLE "user" ADD COLUMN IF NOT EXISTS joined_by_invitation BOOLEAN NOT NULL DEFAULT FALSE;
   `,
 ];

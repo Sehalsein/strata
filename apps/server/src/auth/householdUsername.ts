@@ -22,7 +22,7 @@ export interface HouseholdUsernameOptions {
   minLength: number;
   maxLength: number;
   /** Whether this account must confirm its email before it may sign in (and then sends a link). */
-  mustConfirmEmail: (user: { emailVerified: boolean; joinedByInvitation?: boolean | null }) => boolean;
+  mustConfirmEmail: (user: { emailVerified: boolean }) => boolean;
   sendConfirmation: (ctx: ConfirmationContext, email: string, callbackURL?: string) => Promise<void>;
   /** The caller's account, by their headers (bearer token or cookie). */
   callerOf: (headers: Headers | undefined) => Promise<{ id: string; username?: string | null } | null>;
@@ -188,7 +188,7 @@ export function householdUsername(options: HouseholdUsernameOptions) {
           if (opened.length !== 1) {
             throw new APIError("UNAUTHORIZED", opened.length ? { code: "AMBIGUOUS_USERNAME", message: "More than one account has that username and password. Sign in with your email instead." } : WRONG);
           }
-          const user = (await ctx.context.internalAdapter.findUserById(opened[0]!)) as (Record<string, unknown> & { id: string; email: string; emailVerified: boolean; joinedByInvitation?: boolean | null }) | null;
+          const user = (await ctx.context.internalAdapter.findUserById(opened[0]!)) as (Record<string, unknown> & { id: string; email: string; emailVerified: boolean }) | null;
           if (!user) throw new APIError("UNAUTHORIZED", WRONG);
           if (options.mustConfirmEmail(user)) {
             await options.sendConfirmation(ctx, user.email, ctx.body.callbackURL);

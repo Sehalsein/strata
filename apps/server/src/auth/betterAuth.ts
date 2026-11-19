@@ -1,7 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, createEmailVerificationToken } from "better-auth/api";
-import { setSessionCookie } from "better-auth/cookies";
 import { createAccessControl } from "better-auth/plugins/access";
 import { adminAc, defaultStatements } from "better-auth/plugins/admin/access";
 import { and, eq, gt, like, ne, or, sql } from "drizzle-orm";
@@ -237,12 +236,8 @@ export function createAuth(options: AuthOptions) {
   const { db, profile } = options;
   const methods = signInMethods({ profile: options.profile, port: options.port });
   const confirmEmail = profile.openSignUp && emailConfigured();
-  /**
-   * Cloud (with email set up): an account someone made for themself confirms its address
-   * before it signs in. One made from an invitation's link signs in straight away, its
-   * address still unconfirmed until its owner follows a confirmation link (the app asks).
-   */
-  const mustConfirmEmail = (u: { emailVerified?: boolean | null; joinedByInvitation?: boolean | null }) => confirmEmail && !u.emailVerified && !u.joinedByInvitation;
+  /** Cloud (with email set up): an account confirms its address before it signs in, invited or not. */
+  const mustConfirmEmail = (u: { emailVerified?: boolean | null }) => confirmEmail && !u.emailVerified;
   /** A fresh confirmation link for `email`'s account, as Better Auth's own sign-in sent it. */
   const sendConfirmation = async (ctx: ConfirmationContext, email: string, callbackURL?: string) => {
     const user = (await ctx.context.internalAdapter.findUserByEmail(email))?.user;
@@ -280,32 +275,42 @@ export function createAuth(options: AuthOptions) {
   // only itself out of it first. Counted per account whichever way it's named (username
   // or email); a success clears them.
   const throttle = new Throttle(db);
-  const loginKeys = async (ctx: HookContext): Promise<string[] | null> => {
+  // A username can be several people's (one per household): each of their accounts is
+  // counted, and only the one that signs in has its count cleared, so another account
+  // with the same name can't reset someone else's.
+  const loginKeys = async (ctx: HookContext): Promise<{ id: string; keys: [string, string] }[] | null> => {
     const b = (ctx.body ?? {}) as { username?: unknown; email?: unknown };
     const named = String(b.username ?? b.email ?? "").trim().toLowerCase();
     if (!named) return null;
-    const column = b.username !== undefined ? schema.user.username : schema.user.email;
-    // A username can be several people's (one per household): then it's counted by name.
-    const found = await db.select({ id: schema.user.id }).from(schema.user).where(eq(column, b.username !== undefined ? normalizeUsername(named) : named)).limit(2);
-    const who = found.length === 1 ? found[0]!.id : `name:${named}`;
+    const byUsername = b.username !== undefined;
+    const found = await db
+      .select({ id: schema.user.id })
+      .from(schema.user)
+      .where(eq(byUsername ? schema.user.username : schema.user.email, byUsername ? normalizeUsername(named) : named))
+      .limit(50);
     const address = ctx.headers?.get(CLIENT_ADDRESS_HEADER) ?? "unknown";
-    return [`login-user:${who}`, `login-user-address:${who}:${address}`];
+    const ids = found.length ? found.map((f) => f.id) : [`name:${named}`];
+    return ids.map((who) => ({ id: who, keys: [`login-user:${who}`, `login-user-address:${who}:${address}`] }));
   };
   const passwordSignIn: PathRule = {
     before: async (ctx) => {
-      const keys = await loginKeys(ctx);
-      if (!keys) return;
-      const wait = Math.max(...(await Promise.all(keys.map((k) => throttle.retryAfter(k)))));
+      const accounts = await loginKeys(ctx);
+      if (!accounts) return;
+      const wait = Math.max(...(await Promise.all(accounts.flatMap((a) => a.keys).map((k) => throttle.retryAfter(k)))));
       if (wait) throw new APIError("TOO_MANY_REQUESTS", { message: `Too many wrong passwords for this account. Try again in ${Math.ceil(wait / 60_000)} minutes.` });
     },
     after: async (ctx) => {
-      const keys = await loginKeys(ctx);
-      if (!keys) return;
-      const returned = ctx.context.returned as { statusCode?: number } | undefined;
-      if (returnedOk(ctx)) await Promise.all(keys.map((k) => throttle.reset(k)));
-      else if (returned?.statusCode === 401) {
-        await throttle.fail(keys[0]!, LOGIN_PER_USER);
-        await throttle.fail(keys[1]!, LOGIN_PER_USER_ADDRESS);
+      const accounts = await loginKeys(ctx);
+      if (!accounts) return;
+      const returned = ctx.context.returned as { statusCode?: number; user?: { id?: string } } | undefined;
+      if (returnedOk(ctx)) {
+        const signedIn = accounts.find((a) => a.id === returned?.user?.id);
+        if (signedIn) await Promise.all(signedIn.keys.map((k) => throttle.reset(k)));
+      } else if (returned?.statusCode === 401) {
+        for (const { keys } of accounts) {
+          await throttle.fail(keys[0], LOGIN_PER_USER);
+          await throttle.fail(keys[1], LOGIN_PER_USER_ADDRESS);
+        }
       }
     },
   };
@@ -381,26 +386,7 @@ export function createAuth(options: AuthOptions) {
       },
     },
     "/sign-in/username": passwordSignIn,
-    "/sign-in/email": {
-      before: async (ctx) => {
-        await passwordSignIn.before!(ctx);
-        // An account that must confirm its email first: the right password sends a fresh
-        // link instead of signing in (a wrong one is refused as usual, below).
-        const b = (ctx.body ?? {}) as { email?: unknown; password?: unknown; callbackURL?: unknown };
-        const email = String(b.email ?? "").trim().toLowerCase();
-        if (!confirmEmail || !email || typeof b.password !== "string") return;
-        const [u] = await db
-          .select({ id: schema.user.id, emailVerified: schema.user.emailVerified, joinedByInvitation: schema.user.joinedByInvitation })
-          .from(schema.user)
-          .where(eq(schema.user.email, email));
-        if (!u || !mustConfirmEmail(u)) return;
-        const hash = (await ctx.context.internalAdapter.findCredentialAccount(u.id))?.password;
-        if (!hash || !(await ctx.context.password.verify({ hash, password: b.password }))) return;
-        await sendConfirmation(ctx, email, typeof b.callbackURL === "string" ? b.callbackURL : undefined);
-        throw new APIError("FORBIDDEN", { code: "EMAIL_NOT_VERIFIED", message: "Email not verified" });
-      },
-      after: passwordSignIn.after,
-    },
+    "/sign-in/email": passwordSignIn,
     "/request-password-reset": needsEmail,
     "/forget-password": needsEmail,
     "/admin/set-user-password": {
@@ -440,20 +426,7 @@ export function createAuth(options: AuthOptions) {
           .limit(1);
         if (!pending) throw new APIError("FORBIDDEN", { message: "Signing up needs an invitation to a household. Ask its owner for one." });
       },
-      after: async (ctx) => {
-        await ownHousehold(ctx);
-        // Where new accounts confirm their email, sign-up doesn't sign in, except from an
-        // invitation: the link was the proof, so it signs in now (address still unconfirmed).
-        const returned = ctx.context.returned as { token?: string | null; user?: { id?: string } } | undefined;
-        if (!confirmEmail || !returnedOk(ctx) || returned?.token || !returned?.user?.id) return;
-        if (!(ctx.body as { invitationId?: unknown } | undefined)?.invitationId) return;
-        // (A generic answer for an email that already has an account names a made-up id.)
-        const user = await ctx.context.internalAdapter.findUserById(returned.user.id);
-        if (!user || !(user as { joinedByInvitation?: boolean }).joinedByInvitation) return;
-        const session = await ctx.context.internalAdapter.createSession(user.id);
-        await setSessionCookie(ctx, { session, user });
-        return ctx.json({ ...returned, token: session.token });
-      },
+      after: ownHousehold,
     },
     "/callback/:id": { after: ownHousehold },
     // Choosing a new password replaces a temporary one from an admin.
@@ -552,17 +525,7 @@ export function createAuth(options: AuthOptions) {
             // An invitation's link is passed on by hand, so it doesn't prove an admin's address.
             const invited = !profile.openSignUp && ctx?.path === "/sign-up/email" && !!(ctx.body as { invitationId?: unknown } | undefined)?.invitationId;
             const emailVerified = invited || !!user.emailVerified;
-            // (The sign-up hook checked the invitation matches the email.)
-            const joinedByInvitation = ctx?.path === "/sign-up/email" && !!(ctx.body as { invitationId?: unknown } | undefined)?.invitationId;
-            return {
-              data: {
-                ...user,
-                image,
-                joinedByInvitation,
-                ...(invited ? { emailVerified: true } : {}),
-                ...(isSystemAdmin(profile, { email: user.email, emailVerified }) ? { role: "admin" } : {}),
-              },
-            };
+            return { data: { ...user, image, ...(invited ? { emailVerified: true } : {}), ...(isSystemAdmin(profile, { email: user.email, emailVerified }) ? { role: "admin" } : {}) } };
           },
         },
         delete: {
@@ -644,11 +607,9 @@ export function createAuth(options: AuthOptions) {
     },
     emailAndPassword: {
       enabled: true,
-      // Cloud (with email set up): a new account confirms its address before it can sign in,
-      // unless it came from an invitation (`mustConfirmEmail`, enforced by the sign-in
-      // paths here). Signing up doesn't sign in there: the sign-up hook does for invitees.
-      requireEmailVerification: false,
-      autoSignIn: !confirmEmail,
+      // Cloud (with email set up): a new account confirms its address before it can sign in.
+      // (Sign-in by username is householdUsername's, which asks `mustConfirmEmail` the same.)
+      requireEmailVerification: confirmEmail,
       // Home servers: open only to someone with a pending invitation (see `hooks`); the
       // first account comes from setup (routes/auth.ts). Cloud: open to anyone.
       disableSignUp: false,
@@ -683,23 +644,17 @@ export function createAuth(options: AuthOptions) {
     // before confirming sends a fresh link.
     emailVerification: {
       sendOnSignUp: confirmEmail,
+      sendOnSignIn: confirmEmail,
       autoSignInAfterVerification: true,
       expiresIn: DAY_S,
-      sendVerificationEmail: async ({ user, url }, request) => {
+      sendVerificationEmail: async ({ user, url }) => {
         if (user.emailVerified) return; // invited: nothing to confirm
-        const invited = !!(user as { joinedByInvitation?: boolean }).joinedByInvitation;
-        // Someone who joined from an invitation is asked in the app, not mailed on sign-up.
-        if (invited && request && new URL(request.url).pathname.endsWith("/sign-up/email")) return;
         await sendEmail({
           to: user.email,
           subject: "Confirm your email for Strata",
           ...simpleEmail({
             greeting: `Hi ${user.name},`,
-            lines: [
-              invited
-                ? "Confirm this is your email address for your Strata account. The link works for a day."
-                : "Welcome to Strata. Confirm this is your email address to finish making your account. The link works for a day.",
-            ],
+            lines: ["Welcome to Strata. Confirm this is your email address to finish making your account. The link works for a day."],
             button: { label: "Confirm my email", url },
             footer: "If you didn't make a Strata account, ignore this email: nothing happens without the link.",
           }),
@@ -722,8 +677,6 @@ export function createAuth(options: AuthOptions) {
         // Set when an admin resets the password to a temporary one (api/routes/auth.ts);
         // cleared by choosing a new one.
         mustChangePassword: { type: "boolean", required: false, defaultValue: false, input: false },
-        // Made from an invitation's link (databaseHooks.user.create): signs in unconfirmed.
-        joinedByInvitation: { type: "boolean", required: false, defaultValue: false, input: false },
       },
       changeEmail: { enabled: false },
       // Accounts are deleted by a household's admins (Members, Better Auth's admin
@@ -763,10 +716,9 @@ export function createAuth(options: AuthOptions) {
         // Invitations last a week; the dashboard shows their link (no mail is sent), and
         // its id is what proves the invitee (see the sign-up hook), not a verified email.
         invitationExpiresIn: 7 * DAY_S,
-        // Taking one up needs its id (the link), not a confirmed email: the link is the proof.
-        // (Listing one's invitations by email still needs a confirmed address, Better Auth's
-        // rule, so an unconfirmed account can't find invitations sent to that address.)
-        requireEmailVerificationOnInvitation: false,
+        // Where addresses are confirmed by mail (the cloud), only a confirmed one can take up
+        // an invitation: otherwise whoever registered someone's address first gets theirs.
+        requireEmailVerificationOnInvitation: confirmEmail,
         sendInvitationEmail: async () => {},
         // Households are made by the server admin (or setup); in the cloud, also one by each
         // new account (its own, see the sign-up `after` hook).
