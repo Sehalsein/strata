@@ -113,6 +113,7 @@ struct MainShell: View {
     #if os(tvOS)
     /// The account's picture (or initial) for the sidebar, as the TV app shows its user.
     @State private var profileIcon: UIImage?
+    @State private var showTVSettings = false
     #endif
 
     /// Whether the iPad sidebar (with My List, Downloads and the profile) is showing. Not
@@ -159,7 +160,10 @@ struct MainShell: View {
             // Like the TV app's sidebar: the account first, then Search, the pages, and
             // the library. The account has switching accounts, households and sign-out.
             Tab(value: AppTab.profile) {
-                SettingsView(embedded: true)
+                // "Who's watching?", one press from anywhere (Menu, then the account); a
+                // pick goes back to Home as the new profile. Settings is under the faces.
+                WhoIsWatchingView(onSettings: { showTVSettings = true }, onPicked: { tab = .home })
+                    .pickerSheet(isPresented: $showTVSettings) { SettingsView() }
             } label: {
                 Label {
                     Text(services.store.active?.name ?? "Profile")

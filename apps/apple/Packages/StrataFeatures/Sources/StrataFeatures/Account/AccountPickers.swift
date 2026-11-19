@@ -9,16 +9,26 @@ struct WhoIsWatchingView: View {
     @Environment(\.dismiss) private var dismiss
     /// Shown over the app rather than in its place.
     var isSheet = false
+    /// The TV sidebar's account page: the current profile ringed, and Settings under the
+    /// faces (it opens what used to be this page).
+    var onSettings: (() -> Void)?
     /// After a profile is picked.
     var onPicked: () -> Void = {}
 
     @State private var addAccount = false
+    /// The home server's members not on this device yet: they join without a password,
+    /// as on first sign-in. Empty off the home network (the server says no).
+    @State private var members: [HomeJoinChoices.Member] = []
+    @State private var joining: String?
     /// tvOS focus starts on the active profile (or the first), not on "Add Profile".
     @FocusState private var focused: String?
 
     private var store: ServerStore { services.store }
     /// Server names only matter when the profiles span more than one.
     private var showsServers: Bool { Set(store.signIns.map(\.serverID)).count > 1 }
+    /// Ring the profile in use when switching from it (not when choosing at launch).
+    private var marksCurrent: Bool { isSheet || onSettings != nil }
+    private var server: SavedServer? { store.active.flatMap(store.server(for:)) }
 
     var body: some View {
         VStack(spacing: Metrics.isTV ? Metrics.space12 : Metrics.space8) {
@@ -34,7 +44,7 @@ struct WhoIsWatchingView: View {
                     } label: {
                         AvatarTile(name: signIn.name, seed: signIn.id, imageURL: store.imageURL(for: signIn),
                                    detail: showsServers ? store.server(for: signIn)?.name : nil,
-                                   isKids: signIn.isKids, isCurrent: isSheet && signIn.id == store.activeID)
+                                   isKids: signIn.isKids, isCurrent: marksCurrent && signIn.id == store.activeID)
                     }
                     .profileTileStyle()
                     .focused($focused, equals: signIn.id)
@@ -47,6 +57,17 @@ struct WhoIsWatchingView: View {
                     }
                     #endif
                 }
+                ForEach(members) { member in
+                    Button {
+                        Task { await join(member) }
+                    } label: {
+                        AvatarTile(name: member.name, seed: server.map { SavedSignIn.id(server: $0.id, user: member.id) } ?? member.id,
+                                   imageURL: memberImage(member), isKids: member.isKids, isBusy: joining == member.id)
+                    }
+                    .profileTileStyle()
+                    .focused($focused, equals: member.id)
+                    .disabled(joining != nil)
+                }
                 Button {
                     addAccount = true
                 } label: {
@@ -54,6 +75,12 @@ struct WhoIsWatchingView: View {
                 }
                 .profileTileStyle()
                 .focused($focused, equals: "add")
+            }
+            if let onSettings {
+                Button(action: onSettings) {
+                    Label(String(localized: "Settings", bundle: .module), systemImage: "gearshape")
+                }
+                .focused($focused, equals: "settings")
             }
         }
         #if os(tvOS)
@@ -67,16 +94,43 @@ struct WhoIsWatchingView: View {
             }
         }
         .onAppear { focused = store.activeID ?? store.signIns.first?.id ?? "add" }
+        .task(id: "\(store.active?.serverID ?? "")|\(store.signIns.count)") { await loadMembers() }
         .pickerSheet(isPresented: $addAccount) {
             ConnectView(isAdding: true) { if isSheet { dismiss() } }
         }
     }
 
     private func pick(_ signIn: SavedSignIn) {
-        store.switchTo(signIn.id)
-        services.refreshClient()
+        if signIn.id != store.activeID {
+            store.switchTo(signIn.id)
+            services.refreshClient()
+        }
         onPicked()
         if isSheet { dismiss() }
+    }
+
+    private func memberImage(_ member: HomeJoinChoices.Member) -> URL? {
+        guard let server, let path = member.image else { return nil }
+        return URL(string: path, relativeTo: server.url)?.absoluteURL
+    }
+
+    private func loadMembers() async {
+        guard let server else { members = []; return }
+        let onDevice = Set(store.signIns.map(\.id))
+        let choices = try? await store.homeJoinChoices(url: server.url)
+        members = choices?.members.filter { !onDevice.contains(SavedSignIn.id(server: server.id, user: $0.id)) } ?? []
+    }
+
+    private func join(_ member: HomeJoinChoices.Member) async {
+        guard let server else { return }
+        joining = member.id
+        defer { joining = nil }
+        guard let probed = try? await store.probeServer(server.url.absoluteString) else { return }
+        if await store.join(url: probed.url, info: probed.info, userId: member.id) {
+            services.refreshClient()
+            onPicked()
+            if isSheet { dismiss() }
+        }
     }
 }
 
