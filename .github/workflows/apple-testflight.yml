@@ -1,12 +1,18 @@
 name: Apple TestFlight
 
-# Uploads a TestFlight build when an `apple-v<version>` tag is pushed, or when run by hand
-# (Actions → Apple TestFlight → Run workflow), numbered by the run (run.attempt). The version is
-# what the tag names, the one given to a manual run, or MARKETING_VERSION from project.yml. Bump
-# that for a new App Store version; once one is released, App Store Connect takes no more
-# builds of it. Merges to main no longer upload on their own.
+# Every merge to main that changes the Apple apps uploads a TestFlight build. An
+# `apple-v<version>` tag push or a manual run (Actions → Apple TestFlight → Run workflow)
+# uploads one too. Builds are numbered by the run (run.attempt). The version is what the tag
+# names, the one given to a manual run, or MARKETING_VERSION from project.yml. Bump that for a
+# new App Store version; once one is released, App Store Connect takes no more builds of it.
+# Keep the push-to-main upload: merging an app change is how it ships.
 on:
   push:
+    branches: [main]
+    paths:
+      - "apps/apple/**"
+      - ".github/workflows/apple-testflight.yml"
+    # Path filters don't apply to tag pushes, so every apple-v* tag still uploads.
     tags:
       - "apple-v*"
   workflow_dispatch:
