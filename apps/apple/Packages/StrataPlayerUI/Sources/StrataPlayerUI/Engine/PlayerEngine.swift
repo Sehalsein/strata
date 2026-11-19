@@ -164,13 +164,48 @@ public final class PlayerEngine {
     }
 
     /// `.resizeAspect` (default) letterboxes; `.resizeAspectFill` crops to fill. Persisted.
+    /// Setting it (the Fit/Fill button, double-tap, pinch) also leaves any aspect ratio crop.
     public var videoGravity: AVLayerVideoGravity {
         didSet {
-            aether.videoGravity = videoGravity
+            aspectRatio = nil
+            aether.videoGravity = effectiveVideoGravity
             UserDefaults.standard.set(videoGravity.rawValue, forKey: Self.videoGravityKey)
         }
     }
     private static let videoGravityKey = "strata.videoGravity"
+
+    /// A shape to crop the picture to, fitted on screen: 2.39 takes the bars off a scope film
+    /// encoded 16:9, 4:3 shows an Academy picture without stretching. For this title only,
+    /// since films differ (cleared when the next one loads).
+    public private(set) var aspectRatio: AspectRatio? {
+        didSet { aether.videoGravity = effectiveVideoGravity }
+    }
+
+    /// What the layer does with the picture: a crop fills its box, which has the crop's shape.
+    public var effectiveVideoGravity: AVLayerVideoGravity { aspectRatio != nil ? .resizeAspectFill : videoGravity }
+
+    /// Default (fit), Zoomed (fill) or a crop, as the player's aspect menu offers them.
+    public var pictureMode: PictureMode {
+        get {
+            if let aspectRatio { return .crop(aspectRatio) }
+            return videoGravity == .resizeAspectFill ? .zoomed : .default
+        }
+        set {
+            switch newValue {
+            case .default: videoGravity = .resizeAspect
+            case .zoomed: videoGravity = .resizeAspectFill
+            case .crop(let ratio): aspectRatio = ratio
+            }
+        }
+    }
+
+    /// Where the video's box sits in a view of `size`: all of it, or the largest rectangle of
+    /// the crop's shape, centred.
+    public func videoBox(in size: CGSize) -> CGRect {
+        guard let r = aspectRatio?.ratio, size.width > 0, size.height > 0 else { return CGRect(origin: .zero, size: size) }
+        let w = min(size.width, size.height * r), h = w / r
+        return CGRect(x: (size.width - w) / 2, y: (size.height - h) / 2, width: w, height: h)
+    }
 
     /// The playback engine underneath; the player view draws it (`AetherPlayerSurface`).
     public let aether: AetherEngine
@@ -251,7 +286,7 @@ public final class PlayerEngine {
         } else {
             videoGravity = .resizeAspect
         }
-        aether.videoGravity = videoGravity
+        aether.videoGravity = effectiveVideoGravity
         aether.backgroundPlaybackEnabled = true
         aether.deactivatesAudioSessionOnStop = true
         observeEngine()
@@ -790,8 +825,9 @@ public final class PlayerEngine {
         rate = cycle.first(where: { $0 > rate }) ?? 1.0
     }
 
+    /// Fit ↔ fill; from a crop, back to fit.
     public func toggleVideoGravity() {
-        videoGravity = (videoGravity == .resizeAspect) ? .resizeAspectFill : .resizeAspect
+        videoGravity = (videoGravity == .resizeAspect && aspectRatio == nil) ? .resizeAspectFill : .resizeAspect
     }
 
     public func setVideoGravity(_ gravity: AVLayerVideoGravity) {
@@ -1142,6 +1178,7 @@ public final class PlayerEngine {
         chapters = []
         nextEpisode = nil
         videoSize = nil
+        aspectRatio = nil
         lastReportedMs = nil
         lastReportAt = .distantPast
         didStartPlayback = false

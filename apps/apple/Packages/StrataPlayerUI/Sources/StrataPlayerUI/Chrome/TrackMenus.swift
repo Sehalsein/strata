@@ -113,6 +113,39 @@ public struct SubtitleMenu: View {
 }
 
 /// Playback speed picker.
+/// Default, Zoomed, or the picture cropped to a film shape.
+public struct AspectMenu: View {
+    let engine: PlayerEngine
+    public init(engine: PlayerEngine) { self.engine = engine }
+
+    public var body: some View {
+        Menu {
+            Picker(String(localized: "Picture", bundle: .module), selection: Binding(
+                get: { engine.pictureMode },
+                set: { engine.pictureMode = $0 }
+            )) {
+                Text("Default", bundle: .module).tag(PictureMode.default)
+                Text("Zoomed", bundle: .module).tag(PictureMode.zoomed)
+            }
+            .pickerStyle(.inline)
+            Picker(String(localized: "Aspect Ratio", bundle: .module), selection: Binding(
+                get: { engine.pictureMode },
+                set: { engine.pictureMode = $0 }
+            )) {
+                ForEach(AspectRatio.allCases) { ratio in
+                    Text(verbatim: "\(ratio.title)  \(ratio.name)").tag(PictureMode.crop(ratio))
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            PlayerIcon(systemImage: "aspectratio", size: .regular)
+        }
+        .buttonStyle(.strataGlass)
+        .buttonBorderShape(.circle)
+        .accessibilityLabel(Text("Aspect Ratio", bundle: .module))
+    }
+}
+
 public struct SpeedMenu: View {
     @Bindable var engine: PlayerEngine
     public init(engine: PlayerEngine) { self.engine = engine }

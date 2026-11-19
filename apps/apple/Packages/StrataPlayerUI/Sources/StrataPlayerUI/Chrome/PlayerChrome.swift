@@ -73,6 +73,7 @@ public struct PlayerChrome: View {
                             SubtitleMenu(engine: engine)
                             AudioMenu(engine: engine)
                             SpeedMenu(engine: engine)
+                            AspectMenu(engine: engine)
                         }
                     }
                 }
@@ -185,7 +186,8 @@ public struct PlayerChrome: View {
         }
     }
 
-    private var isFilled: Bool { engine.videoGravity == .resizeAspectFill }
+    /// Zoomed or cropped: the button then goes back to the whole picture.
+    private var isFilled: Bool { engine.pictureMode != .default }
 
     private var isWaiting: Bool { engine.isBuffering || engine.status == .loading }
     #endif
@@ -201,6 +203,7 @@ public struct PlayerChrome: View {
                         AudioMenu(engine: engine)
                         SubtitleMenu(engine: engine)
                         SpeedMenu(engine: engine)
+                        AspectMenu(engine: engine)
                     }
                 }
             }
