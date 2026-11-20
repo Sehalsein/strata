@@ -148,7 +148,7 @@ describe("setup and auth", () => {
 
   test("profile pictures come from the server's own set, in groups", async () => {
     const { groups } = await json(await server.request("/api/avatars"));
-    expect(groups.map((g: any) => g.title)).toEqual(["Animals", "Creatures", "Adventurers", "Snacks & Plants"]);
+    expect(groups.map((g: any) => g.title)).toEqual(["Animals", "Creatures", "Adventurers", "Moods", "Archetypes", "Snacks & Plants"]);
     const fox = groups[0].avatars.find((a: any) => a.id === "fox");
     expect(fox.url).toBe("/api/avatars/fox.png");
     const png = await server.request(fox.url);

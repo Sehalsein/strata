@@ -3,6 +3,9 @@
 // server to serve (apps can't draw SVG from the network). The apps show them in a circle,
 // so each character sits centred on a full-bleed background.
 
+import { archetypes } from "./archetypes";
+import { moods } from "./moods";
+
 const INK = "#1d1b2b";
 
 /** A round, friendly eye: dark with a highlight. */
@@ -22,7 +25,7 @@ export interface Character {
   body: string;
 }
 
-export const characters: Character[] = [
+const drawn: Character[] = [
   {
     id: "fox",
     name: "Fox",
@@ -405,11 +408,15 @@ export const characters: Character[] = [
   },
 ];
 
+export const characters: Character[] = [...drawn, ...moods, ...archetypes];
+
 /** How the pickers group them, in this order. */
 export const groups: { title: string; ids: string[] }[] = [
   { title: "Animals", ids: ["fox", "cat", "pup", "bunny", "bear", "panda", "koala", "lion", "owl", "penguin", "frog", "whale", "octopus"] },
   { title: "Creatures", ids: ["monster", "alien", "ghost", "robot", "dino", "dragon"] },
   { title: "Adventurers", ids: ["pirate", "ninja", "wizard", "hero", "vampire", "astronaut"] },
+  { title: "Moods", ids: ["joy", "chill", "teary", "sleepy", "smitten", "shook", "grumpy", "giggle"] },
+  { title: "Archetypes", ids: ["painter", "chef", "explorer", "rocker", "scientist", "racer", "gamer", "diver"] },
   { title: "Snacks & Plants", ids: ["popcorn", "toast", "avocado", "mushroom", "cactus"] },
 ];
 
