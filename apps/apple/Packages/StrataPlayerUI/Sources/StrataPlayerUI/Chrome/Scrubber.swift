@@ -6,7 +6,9 @@ import UIKit
 #endif
 
 /// Seek bar in media time: buffered and played ranges, chapter ticks, and a
-/// time/chapter preview while scrubbing. Touch drags on iPhone/iPad; on tvOS
+/// time/chapter readout while scrubbing. On iPhone/iPad it drags like the system
+/// player's bar: no knob, no bubble, the drag moves the playhead relative to where it
+/// was (a touch doesn't jump), and the bar only thickens a little; on tvOS
 /// it's focusable and scrubs with the remote (a swipe on the touch surface moves in
 /// proportion, left/right clicks by 10 seconds, select commits).
 public struct Scrubber: View {
@@ -22,6 +24,14 @@ public struct Scrubber: View {
     let onSelect: (() -> Void)?
 
     @State private var scrubValue: TimeInterval?
+    /// The time just committed, shown until playback reports it: the seek runs after the
+    /// drag ends, and until it lands the position (and its ticks) still says where it was,
+    /// which would snap the bar back and then forward again.
+    @State private var committed: TimeInterval?
+    #if !os(tvOS)
+    /// Where the playhead was when the current drag started.
+    @State private var dragBase: TimeInterval?
+    #endif
     #if os(tvOS)
     @FocusState private var focused: Bool
     /// Where a swipe on the touch surface started from.
@@ -44,7 +54,7 @@ public struct Scrubber: View {
         self.onScrub = onScrub
     }
 
-    private var shown: TimeInterval { scrubValue ?? position }
+    private var shown: TimeInterval { scrubValue ?? committed ?? position }
     private var fraction: Double { duration > 0 ? min(max(shown / duration, 0), 1) : 0 }
     private var isActive: Bool {
         #if os(tvOS)
@@ -57,16 +67,18 @@ public struct Scrubber: View {
     #if os(tvOS)
     private let trackHeight: CGFloat = 7
     #else
-    private let trackHeight: CGFloat = 6
+    /// Thin at rest and only a little thicker under a finger, as the system bar does.
+    private var trackHeight: CGFloat { scrubValue != nil ? 9 : 6 }
     #endif
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Metrics.space2) {
             GeometryReader { geo in
                 let w = geo.size.width
+                // Every shape keeps the track's height, so nothing drawn here can stretch the bar.
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.25))
-                    Capsule().fill(fill).frame(width: max(trackHeight, w * fraction))
+                    Capsule().fill(.white.opacity(0.25)).frame(height: trackHeight)
+                    Capsule().fill(fill).frame(width: max(trackHeight, w * fraction), height: trackHeight)
                     ForEach(Array(chapters.enumerated()), id: \.offset) { _, chapter in
                         if duration > 0, chapter.start > 0, chapter.start < duration {
                             Rectangle().fill(.white.opacity(0.6))
@@ -74,19 +86,32 @@ public struct Scrubber: View {
                                 .offset(x: w * chapter.start / duration - 1)
                         }
                     }
+                    #if os(tvOS)
                     Circle().fill(Theme.onArtwork)
                         .frame(width: trackHeight * 2.6, height: trackHeight * 2.6)
                         .shadow(color: .black.opacity(0.3), radius: 4)
                         .offset(x: w * fraction - trackHeight * 1.3)
                         .opacity(isActive ? 1 : 0)
+                    #endif
+                }
+                .frame(height: trackHeight)
+                #if os(tvOS)
+                // Above the bar, centred on the playhead and kept on screen. An overlay, so it
+                // can't size the bar: in the stack it stretched the track to its own height.
+                .overlay(alignment: .bottomLeading) {
                     if let scrubValue {
                         preview(scrubValue)
                             .fixedSize()
-                            .offset(x: min(max(0, w * fraction - 50), w - 100), y: -44)
+                            .alignmentGuide(.leading) { $0.width / 2 }
+                            .offset(x: min(max(Self.previewHalfWidth, w * fraction), w - Self.previewHalfWidth),
+                                    y: -(trackHeight + Metrics.space3))
                     }
                 }
-                .frame(height: trackHeight)
+                #endif
                 .frame(maxHeight: .infinity)
+                // Only the start and end of a drag animate (the bar's thickness); the
+                // playhead itself follows the finger without lag.
+                .animation(.snappy(duration: 0.2), value: scrubValue != nil)
                 .contentShape(Rectangle())
                 #if os(tvOS)
                 .background(RemotePan(isEnabled: focused && duration > 0) { travel in swiped(travel, width: w) })
@@ -95,10 +120,15 @@ public struct Scrubber: View {
                     DragGesture(minimumDistance: 0)
                         .onChanged { g in
                             guard duration > 0 else { return }
-                            scrubValue = Double(max(0, min(w, g.location.x)) / max(w, 1)) * duration
+                            let base = dragBase ?? position
+                            dragBase = base
+                            let moved = Double(g.translation.width / max(w, 1)) * duration
+                            scrubValue = min(duration, max(0, base + moved))
                         }
-                        .onEnded { _ in
-                            if let scrubValue { onScrub(scrubValue) }
+                        .onEnded { g in
+                            // A touch that didn't move leaves playback where it was.
+                            if let scrubValue, abs(g.translation.width) > 1 { commit(scrubValue) }
+                            dragBase = nil
                             scrubValue = nil
                         }
                 )
@@ -119,13 +149,24 @@ public struct Scrubber: View {
                 }
             }
             .onTapGesture {
-                if let scrubValue { onScrub(scrubValue) } else { onSelect?() }
+                if let scrubValue { commit(scrubValue) } else { onSelect?() }
                 scrubValue = nil
             }
             .onChange(of: focused) { _, isFocused in if !isFocused { scrubValue = nil; swipeBase = nil } }
             #endif
 
             .onChange(of: scrubValue != nil) { _, scrubbing in onScrubbing(scrubbing) }
+            // Playback has reached the committed time (a seek can land on a keyframe a few
+            // seconds off): follow it again.
+            .onChange(of: position) { _, now in
+                if let committed, abs(now - committed) < 5 { self.committed = nil }
+            }
+            // A seek that never reports (refused, or the stream restarted elsewhere) lets go.
+            .task(id: committed) {
+                guard committed != nil else { return }
+                try? await Task.sleep(for: .seconds(4))
+                if !Task.isCancelled { committed = nil }
+            }
 
             HStack(spacing: Metrics.space2) {
                 Text(Self.format(shown))
@@ -135,6 +176,13 @@ public struct Scrubber: View {
                         .accessibilityHidden(true)
                 }
                 Spacer()
+                #if !os(tvOS)
+                // The chapter under the playhead, between the times, while dragging.
+                if let scrubValue, let title = chapters.last(where: { $0.start <= scrubValue })?.title {
+                    Text(title).lineLimit(1)
+                    Spacer()
+                }
+                #endif
                 // Time left, with a minus sign as Apple's players show it.
                 Text(verbatim: "\u{2212}\(Self.format(max(0, duration - shown)))")
             }
@@ -147,6 +195,12 @@ public struct Scrubber: View {
         .accessibilityAdjustableAction { direction in
             onScrub(direction == .increment ? min(duration, position + 10) : max(0, position - 10))
         }
+    }
+
+    /// Seeks there, holding the bar on that time until playback gets there too.
+    private func commit(_ value: TimeInterval) {
+        committed = value
+        onScrub(value)
     }
 
     #if os(tvOS)
@@ -183,19 +237,23 @@ public struct Scrubber: View {
         #endif
     }
 
+    #if os(tvOS)
     private func preview(_ seconds: TimeInterval) -> some View {
         VStack(spacing: 2) {
             if let title = chapters.last(where: { $0.start <= seconds })?.title {
-                Text(title).font(.stFootnote).lineLimit(1)
+                Text(title).font(.stFootnote).lineLimit(1).frame(maxWidth: 2 * Self.previewHalfWidth - 2 * Metrics.space3)
             }
-            Text(Self.format(seconds)).font(.stTimecode)
+            Text(Self.format(seconds)).font(.stTimecode).lineLimit(1)
         }
         .foregroundStyle(Theme.onArtwork)
         .padding(.horizontal, Metrics.space3)
         .padding(.vertical, Metrics.space2)
         .glassEffect(.regular, in: .capsule)
-        .frame(width: 100)
     }
+
+    /// About half the preview's width, to keep it from running off either end.
+    private static let previewHalfWidth: CGFloat = 110
+    #endif
 
     /// "1:02:03", or "4:05" under an hour, in the locale's digits and separators.
     public static func format(_ t: TimeInterval) -> String {

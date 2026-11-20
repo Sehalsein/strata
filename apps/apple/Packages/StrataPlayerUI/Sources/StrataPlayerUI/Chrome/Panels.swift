@@ -56,14 +56,16 @@ public struct SubtitleOverlay: View {
     private static let raisedInset: CGFloat = 180
     #endif
 
-    /// Where the video sits on screen, as the player layer fits or fills it.
+    /// Where the video sits on screen, as the player layer fits or fills it (in the aspect
+    /// crop's box when there is one).
     private func videoFrame(in size: CGSize) -> CGRect {
-        guard let video = engine.videoSize, size.width > 0, size.height > 0 else { return CGRect(origin: .zero, size: size) }
-        let fit = min(size.width / video.width, size.height / video.height)
-        let fill = max(size.width / video.width, size.height / video.height)
-        let scale = engine.videoGravity == .resizeAspectFill ? fill : fit
+        let box = engine.videoBox(in: size)
+        guard let video = engine.videoSize, box.width > 0, box.height > 0 else { return box }
+        let fit = min(box.width / video.width, box.height / video.height)
+        let fill = max(box.width / video.width, box.height / video.height)
+        let scale = engine.effectiveVideoGravity == .resizeAspectFill ? fill : fit
         let w = video.width * scale, h = video.height * scale
-        return CGRect(x: (size.width - w) / 2, y: (size.height - h) / 2, width: w, height: h)
+        return CGRect(x: box.midX - w / 2, y: box.midY - h / 2, width: w, height: h)
     }
 
     private var lines: some View {

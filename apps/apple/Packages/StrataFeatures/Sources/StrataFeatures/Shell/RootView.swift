@@ -110,6 +110,11 @@ struct MainShell: View {
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
+    #if os(tvOS)
+    /// The account's picture (or initial) for the sidebar, as the TV app shows its user.
+    @State private var profileIcon: UIImage?
+    @State private var showTVSettings = false
+    #endif
 
     /// Whether the iPad sidebar (with My List, Downloads and the profile) is showing. Not
     /// in a narrow window (Split View, Slide Over), where it collapses to the tab bar.
@@ -155,9 +160,20 @@ struct MainShell: View {
             // Like the TV app's sidebar: the account first, then Search, the pages, and
             // the library. The account has switching accounts, households and sign-out.
             Tab(value: AppTab.profile) {
-                SettingsView(embedded: true)
+                // "Who's watching?", one press from anywhere (Menu, then the account); a
+                // pick goes back to Home as the new profile. Settings is under the faces.
+                WhoIsWatchingView(onSettings: { showTVSettings = true }, onPicked: { tab = .home })
+                    .pickerSheet(isPresented: $showTVSettings) { SettingsView() }
             } label: {
-                Label(services.store.active?.name ?? "Profile", systemImage: "person.crop.circle")
+                Label {
+                    Text(services.store.active?.name ?? "Profile")
+                } icon: {
+                    if let profileIcon {
+                        Image(uiImage: profileIcon).renderingMode(.original)
+                    } else {
+                        Image(systemName: "person.crop.circle")
+                    }
+                }
             }
             Tab(value: AppTab.search, role: .search) {
                 SearchTab()
@@ -220,6 +236,12 @@ struct MainShell: View {
         // sidebar (left from a page's first column): there the system took Menu as
         // leaving the app. With nothing pushed, Menu keeps its usual job.
         .onExitCommand(perform: paths[tab].isEmpty ? nil : { paths[tab].removeLast() })
+        // Again when the account or its picture changes (switching accounts, Edit Profile).
+        .task(id: "\(services.store.activeID ?? "")|\(services.store.active?.image ?? "")|\(services.store.active?.name ?? "")") {
+            guard let active = services.store.active else { profileIcon = nil; return }
+            profileIcon = await ProfileAvatar.image(name: active.name, seed: active.id, size: 38,
+                                                    imageURL: services.store.imageURL(for: active))
+        }
         #endif
         .environment(paths)
         #if os(iOS)

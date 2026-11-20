@@ -16,9 +16,17 @@ public struct VideoSurface: View {
     }
 
     public var body: some View {
-        AetherPlayerSurface(engine: engine.aether)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onChange(of: engine.status) { _, status in
+        GeometryReader { geo in
+            // The whole view, or the aspect crop's box: the layer fills that box and the
+            // rest is clipped away.
+            let box = engine.videoBox(in: geo.size)
+            AetherPlayerSurface(engine: engine.aether)
+                .frame(width: box.width, height: box.height)
+                .clipped()
+                .position(x: box.midX, y: box.midY)
+        }
+        .animation(.snappy(duration: 0.3), value: engine.aspectRatio)
+        .onChange(of: engine.status) { _, status in
                 guard status == .playing || status == .paused, let layer = engine.nativePlayerLayer else { return }
                 onLayer?(layer)
             }

@@ -31,47 +31,118 @@ public struct PlayButton: View {
     /// Widens the button, like the TV app's hero (`.infinity` to fill the row).
     let maxWidth: CGFloat?
     let size: ControlSize
+    /// How far in a resume is (0...1), drawn as a thin bar with the time left beside it,
+    /// inside the button (under the label on iPhone and iPad, after it on the TV), so the
+    /// page needs no progress row of its own.
+    let progress: Double?
+    /// Beside the bar, e.g. "2h 52m left".
+    let progressLabel: String?
     let action: () -> Void
 
     /// No `title`: "Play".
-    public init(_ title: String? = nil, systemImage: String = "play.fill", maxWidth: CGFloat? = nil, size: ControlSize = Metrics.heroControlSize, action: @escaping () -> Void) {
+    public init(_ title: String? = nil, systemImage: String = "play.fill", maxWidth: CGFloat? = nil, size: ControlSize = Metrics.heroControlSize,
+                progress: Double? = nil, progressLabel: String? = nil, action: @escaping () -> Void) {
         self.title = title ?? String(localized: "Play", bundle: .module)
         self.systemImage = systemImage
         self.maxWidth = maxWidth
         self.size = size
+        self.progress = progress
+        self.progressLabel = progressLabel
         self.action = action
     }
 
     public var body: some View {
         #if os(tvOS)
-        // On the TV, translucent glass like the buttons beside it; focus turns it white.
-        Button(action: action) {
+        // On the TV, translucent glass like the buttons beside it; focus turns it white,
+        // and the label (bar included, it's drawn in the label's colour) turns dark with it.
+        Button(action: action) { content }
+            .buttonStyle(.strataGlass)
+            .tint(Theme.ink)
+            .controlSize(size)
+        #else
+        Button(action: action) { content.foregroundStyle(Theme.onAccent) }
+            .buttonStyle(.glassProminent)
+            .tint(Theme.apricot)
+            .controlSize(size)
+        #endif
+    }
+
+    #if os(tvOS)
+    /// One line on the TV, as tall as the buttons beside it: the label, then the bar and
+    /// the time left after it.
+    private var content: some View {
+        HStack(spacing: Metrics.space3) {
+            Label(title, systemImage: systemImage)
+                .font(Font.buttonLabel(size))
+            if let progress {
+                ResumeBar(fraction: progress, height: Self.barHeight)
+                    .frame(width: Self.barWidth)
+                if let progressLabel {
+                    Text(progressLabel).font(Self.timeFont)
+                }
+            }
+        }
+        .lineLimit(1)
+        .fixedSize()
+        .padding(.horizontal, Metrics.space2)
+        .frame(minWidth: maxWidth.flatMap { $0.isFinite ? $0 : nil }, maxWidth: maxWidth == .infinity ? .infinity : nil, minHeight: 30)
+    }
+
+    private static let timeFont = Font.system(size: 26, weight: .semibold).monospacedDigit()
+    private static let barHeight: CGFloat = 6
+    private static let barWidth: CGFloat = 120
+    #else
+    private var content: some View {
+        VStack(spacing: Self.rowSpacing) {
             Label(title, systemImage: systemImage)
                 .font(Font.buttonLabel(size))
                 // One line: a longer label ("Resume S1 · E1") widens the button rather
                 // than wrapping inside the width it was given.
                 .lineLimit(1)
                 .fixedSize()
-                .padding(.horizontal, Metrics.space2)
-                .frame(minWidth: maxWidth.flatMap { $0.isFinite ? $0 : nil }, maxWidth: maxWidth == .infinity ? .infinity : nil, minHeight: 30)
+            if progress != nil {
+                // Holds the row's size: as wide as the label, or the time plus room for a
+                // bar when the time is the wider of the two.
+                Text(progressLabel ?? "").font(Self.timeFont).padding(.leading, Self.minBarWidth).hidden()
+            }
         }
-        .buttonStyle(.strataGlass)
-        .tint(Theme.ink)
-        .controlSize(size)
-        #else
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(Font.buttonLabel(size))
-                .foregroundStyle(Theme.onAccent)
-                .lineLimit(1)
-                .fixedSize()
-                .padding(.horizontal, Metrics.space2)
-                .frame(minWidth: maxWidth.flatMap { $0.isFinite ? $0 : nil }, maxWidth: maxWidth == .infinity ? .infinity : nil, minHeight: 30)
+        .fixedSize()
+        .overlay(alignment: .bottom) {
+            if let progress {
+                // The bar takes whatever the time leaves.
+                HStack(spacing: Self.rowSpacing + 2) {
+                    ResumeBar(fraction: progress, height: Self.barHeight)
+                    if let progressLabel { Text(progressLabel).font(Self.timeFont).fixedSize() }
+                }
+            }
         }
-        .buttonStyle(.glassProminent)
-        .tint(Theme.apricot)
-        .controlSize(size)
-        #endif
+        .padding(.horizontal, Metrics.space2)
+        .frame(minWidth: maxWidth.flatMap { $0.isFinite ? $0 : nil }, maxWidth: maxWidth == .infinity ? .infinity : nil, minHeight: 30)
+    }
+
+    private static let timeFont = Font.stFootnote.weight(.medium).monospacedDigit()
+    private static let barHeight: CGFloat = 3
+    private static let minBarWidth: CGFloat = 36
+    private static let rowSpacing: CGFloat = 4
+    #endif
+}
+
+/// The thin bar inside a Resume button, in the label's colour (so on the TV it follows
+/// focus, light on glass and dark on white).
+private struct ResumeBar: View {
+    let fraction: Double
+    let height: CGFloat
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.primary.opacity(0.3))
+                Capsule().fill(.primary)
+                    .frame(width: max(height, geo.size.width * min(max(fraction, 0), 1)))
+            }
+        }
+        .frame(height: height)
+        .accessibilityHidden(true)
     }
 }
 
@@ -278,6 +349,35 @@ public struct ProfileAvatar: View {
             .accessibilityLabel(name)
     }
 }
+
+#if canImport(UIKit)
+public extension ProfileAvatar {
+    /// The same disc as an image, for places that take only an image: a sidebar tab's
+    /// label on the TV draws its icon from an `Image`, not a view. The picture comes
+    /// through the shared image cache; without one (or while it fails) it's the initial.
+    @MainActor
+    static func image(name: String, seed: String, size: CGFloat, imageURL: URL?, scale: CGFloat = 2) async -> UIImage? {
+        var picture: UIImage?
+        if let imageURL { picture = await ImagePipeline.shared.image(imageURL, maxPixel: Int(size * scale), priority: .userInitiated) }
+        let disc = Circle()
+            .fill(Theme.avatarFills[StrataPlaceholder.index(for: seed, count: Theme.avatarFills.count)])
+            .overlay {
+                if let picture {
+                    Image(uiImage: picture).resizable().scaledToFill()
+                } else {
+                    Text(name.prefix(1).uppercased())
+                        .font(.system(size: size * 0.42, weight: .bold))
+                        .foregroundStyle(Theme.onAccent)
+                }
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        let renderer = ImageRenderer(content: disc)
+        renderer.scale = scale
+        return renderer.uiImage?.withRenderingMode(.alwaysOriginal)
+    }
+}
+#endif
 
 /// The app's mark: three bands that stack into a play triangle, each one the system's
 /// Liquid Glass tinted with the logo's sand, orange and rust, like the app icon (the one
